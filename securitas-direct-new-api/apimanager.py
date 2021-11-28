@@ -9,8 +9,8 @@ import dataTypes
 from datetime import datetime
 from time import time
 import requests
-from typing import Any, List
-from dataTypes import instalation, CheckAlarmStatus
+from typing import Any, List, Tuple
+from dataTypes import instalation, CheckAlarmStatus, ArmType, ArmStatus, DisarmPanelStatus
 
 from http.client import HTTPConnection, NotConnected  # py3
 
@@ -125,9 +125,9 @@ class ApiManager:
     def checkAlarm(self, instalation: instalation) -> str:
         content = {
             "operationName": "CheckAlarm",
-            "variables": {"numinst": instalation.number, "panel": instalation.panel},
-            "query": "query CheckAlarm($numinst: String!, $panel: String!) {\\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\\n    res\\n    msg\\n    referenceId\\n  }\\n}\\n"
-        }
+            "variables": {"numinst": str(instalation.number), "panel": instalation.panel},
+            "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n"
+        }        
         response = self.executeRequest(content)
         result_json = json.loads(response.text)
         if hasattr(result_json, "errors"):
@@ -141,13 +141,13 @@ class ApiManager:
         content = {
             "operationName": "CheckAlarmStatus",
             "variables": {
-                "numinst": instalation.number,
+                "numinst": str(instalation.number),
                 "panel": instalation.panel,
                 "referenceId": referenceId,
                 "idService": "11",
                 "counter": 2
             },
-             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\\n    res\\n    msg\\n    status\\n    numinst\\n    protomResponse\\n    protomResponseDate\\n  }\\n}\\n"
+             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n"
         }
         response = self.executeRequest(content)
         result_json = json.loads(response.text)
@@ -164,3 +164,79 @@ class ApiManager:
                 raw_data["numinst"],
                 raw_data["protomResponse"],
                 raw_data["protomResponseDate"])
+
+    def armAlarmTotal(self, instalation: instalation) -> Tuple[bool, str]:
+        content = {
+            "operationName": "xSArmPanel",
+            "variables": {
+                "request": "ARM1",
+                "numinst": str(instalation.number),
+                "panel": instalation.panel,
+                "currentStatus" : "D"
+            },
+            "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $pin: String, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, pin: $pin, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n"
+        }
+        response = self.executeRequest(content)
+        result_json = json.loads(response.text)
+        if hasattr(result_json, "errors"):
+            error_message = result_json["errors"][0]["message"]
+            print(error_message)
+            return None
+        else:
+            if result_json["data"]["xSArmPanel"]["res"] == "OK":
+                return (True, result_json["data"]["xSArmPanel"]["referenceId"])
+            else:
+                return (False, result_json["data"]["xSArmPanel"]["msg"])
+
+    def checkArmStatus(self, instalation: instalation, referenceId: str, armType: ArmType) -> ArmStatus:
+        content = {
+            "operationName": "ArmStatus",
+            "variables": {
+                "request" : "ARM" + str(armType),
+                "numinst": str(instalation.number),
+                "panel": instalation.panel,
+                "currentStatus" : "D",
+                "referenceId": referenceId,
+                "counter": 1
+            },
+            "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n"
+        }
+        response = self.executeRequest(content)
+        result_json = json.loads(response.text)
+        if hasattr(result_json, "errors"):
+            error_message = result_json["errors"][0]["message"]
+            print(error_message)
+            return None
+        else:
+            raw_data = result_json["data"]["xSArmStatus"]
+            return ArmStatus(
+                raw_data["res"],
+                raw_data["msg"],
+                int(raw_data["status"]),
+                raw_data["numinst"],
+                raw_data["protomResponse"],
+                raw_data["protomResponseDate"],
+                raw_data["requestId"],
+                raw_data["error"])
+    def disarmAlarm(self, instalation: instalation) -> Tuple[bool, str]:
+        content = {
+            "operationName": "xSDisarmPanel",
+            "variables": {
+                "request": "DARM1",
+                "numinst": str(instalation.number),
+                "panel": instalation.panel,
+                "currentStatus" : "T"
+            },
+            "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!, $pin: String) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel, pin: $pin) {\n    res\n    msg\n    referenceId\n  }\n}\n"
+        }
+        response = self.executeRequest(content)
+        result_json = json.loads(response.text)
+        if hasattr(result_json, "errors"):
+            error_message = result_json["errors"][0]["message"]
+            print(error_message)
+            return None
+        else:
+            if result_json["data"]["xSDisarmPanel"]["res"] == "OK":
+                return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
+            else:
+                return (False, result_json["data"]["xSDisarmPanel"]["msg"])

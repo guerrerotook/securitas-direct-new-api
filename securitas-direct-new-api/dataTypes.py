@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import Enum
 
 @dataclass
 class instalation:
@@ -24,3 +25,17 @@ class CheckAlarmStatus:
     instalationNumer: int
     protomResponse: str
     protomResponseData: str
+
+@dataclass
+class ArmStatus:
+    operationStatus: str
+    message : str
+    status : int
+    instalationNumer: int
+    protomResponse: str
+    protomResponseData: str
+    requestId : str
+    error : str
+
+class ArmType(Enum):
+    TOTAL = 1
