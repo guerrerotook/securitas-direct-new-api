@@ -1,0 +1,13 @@
+{
+    "domain": "securitas_direct",
+    "name": "Securitas Direct",
+    "documentation": "https://github.com/guerrerotook/securitas-direct-new-api",
+    "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
+    "requirements": [],
+    "dependencies": [],
+    "codeowners": [
+        "@guerrerotook"
+    ],
+    "config_flow": false,
+    "iot_class": "cloud_polling"
+}

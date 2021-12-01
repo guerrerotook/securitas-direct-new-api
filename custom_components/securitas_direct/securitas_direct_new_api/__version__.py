@@ -1,3 +1,5 @@
+"""Version."""
+
 __title__ = "securitas-direct-new-apisecuritas-direct-new-api"
 __description__ = "This is the new API for securitas direct customers."
 __url__ = "https://github.com/guerrerotook/securitas-direct-new-api"
