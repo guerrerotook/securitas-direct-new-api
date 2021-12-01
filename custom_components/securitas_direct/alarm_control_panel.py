@@ -211,7 +211,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def update(self):
         """Update the status of the alarm based on the configuration."""
-        alarmStatus: CheckAlarmStatus = hub.update_overview(self.Installation)
+        alarmStatus: CheckAlarmStatus = hub.update_overview(
+            self.Installation, no_throttle=True
+        )
         self.update_status_alarm(alarmStatus)
 
     def alarm_disarm(self, code=None):
