@@ -78,10 +78,11 @@ class ApiManager:
     def _checkErrros(self, value: str) -> bool:
         if value is not None:
             response = json.loads(value)
-            if hasattr(response, "errors"):
+            if "errors" in response:
                 for errorItem in response["errors"]:
-                    if hasattr(errorItem, "message"):
+                    if "message" in errorItem:
                         if errorItem["message"] == "Invalid token: Expired":
+                            self.authentication_token = None
                             _LOGGER.info("Login is expired. Login again.")
                             return self.login()[0]
                         else:
