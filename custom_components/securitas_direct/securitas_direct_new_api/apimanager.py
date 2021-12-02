@@ -46,7 +46,10 @@ class ApiManager:
             API_URL, headers=headers, json=content, cookies=self.jar
         )
         _LOGGER.debug(response.text)
-        self._checkErrros(response.text)
+        errorLogin: bool = self._checkErrros(response.text)
+        if errorLogin:
+            return self._executeRequest(content)
+
         return response
 
     def _createRequestSession(self) -> requests.Session:
@@ -72,13 +75,27 @@ class ApiManager:
             + str(current.microsecond)
         )
 
-    def _checkErrros(self, value: str):
+    def _checkErrros(self, value: str) -> bool:
         if value is not None:
             response = json.loads(value)
             if hasattr(response, "errors"):
                 for errorItem in response["errors"]:
                     if hasattr(errorItem, "message"):
-                        _LOGGER.error(errorItem["message"])
+                        if errorItem["message"] == "Invalid token: Expired":
+                            _LOGGER.info("Login is expired. Login again.")
+                            return self.login()[0]
+                        else:
+                            _LOGGER.error(errorItem["message"])
+        return False
+
+    def logout(self):
+        """Logout."""
+        content = {
+            "operationName": "Logout",
+            "variables": {},
+            "query": "mutation Logout {\n  xSLogout\n}\n",
+        }
+        self._executeRequest(content)
 
     def login(self) -> Tuple[bool, str]:
         """Login."""
