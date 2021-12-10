@@ -11,7 +11,6 @@ from urllib3 import Retry
 
 from .dataTypes import ArmStatus, ArmType, CheckAlarmStatus, DisarmStatus, Installation
 
-API_URL = "https://customers.securitasdirect.es/owa-api/graphql"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -24,6 +23,7 @@ class ApiManager:
         self.password = password
         self.country = country
         self.language = language
+        self.api_url = "https://customers.securitasdirect." + self.language + "/owa-api/graphql"
         self.session = None
         self.authentication_token = None
         self.jar = requests.cookies.RequestsCookieJar()
@@ -43,7 +43,7 @@ class ApiManager:
 
         _LOGGER.debug(content)
         response: Response = self._createRequestSession().post(
-            API_URL, headers=headers, json=content, cookies=self.jar
+            self.api_url, headers=headers, json=content, cookies=self.jar
         )
         _LOGGER.debug(response.text)
         errorLogin: bool = self._checkErrros(response.text)
