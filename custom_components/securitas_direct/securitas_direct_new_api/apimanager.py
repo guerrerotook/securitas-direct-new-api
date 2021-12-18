@@ -10,6 +10,7 @@ from requests.models import Response
 from urllib3 import Retry
 
 from .dataTypes import ArmStatus, ArmType, CheckAlarmStatus, DisarmStatus, Installation
+from .domains import ApiDomains
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ class ApiManager:
         self.password = password
         self.country = country
         self.language = language
-        self.api_url = "https://customers.securitasdirect." + self.language + "/owa-api/graphql"
+        self.api_url = ApiDomains().get_url(language=language)
         self.session = None
         self.authentication_token = None
         self.jar = requests.cookies.RequestsCookieJar()

@@ -34,7 +34,7 @@ from .securitas_direct_new_api.dataTypes import (
 # from securitas import SecuritasAPIClient
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=300)
+SCAN_INTERVAL = timedelta(seconds=1200)
 
 # some reported by @furetto72@Italy
 SECURITAS_STATUS = {
