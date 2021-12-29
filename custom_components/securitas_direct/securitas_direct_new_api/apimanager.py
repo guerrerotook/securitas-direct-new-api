@@ -115,7 +115,7 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
+        if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
             return (False, error_message)
         else:
@@ -130,11 +130,7 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            print(error_message)
-            return []
-        else:
+        try:
             result: List[Installation] = []
             raw_Installations = result_json["data"]["xSInstallations"]["installations"]
             for item in raw_Installations:
@@ -153,7 +149,9 @@ class ApiManager:
                     item["phone"],
                 )
                 result.append(InstallationItem)
-            return result
+        except (KeyError, TypeError):
+            result = []
+        return result
 
     def checkAlarm(self, Installation: Installation) -> str:
         """Check status of the alarm."""
@@ -167,11 +165,10 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            return error_message
-        else:
+        try:
             return result_json["data"]["xSCheckAlarm"]["referenceId"]
+        except (KeyError, TypeError):
+            return None
 
     def checkAlarmStatus(
         self, Installation: Installation, referenceId: str
@@ -190,10 +187,7 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            return error_message
-        else:
+        try:
             raw_data = result_json["data"]["xSCheckAlarmStatus"]
             return CheckAlarmStatus(
                 raw_data["res"],
@@ -203,6 +197,8 @@ class ApiManager:
                 raw_data["protomResponse"],
                 raw_data["protomResponseDate"],
             )
+        except (KeyError, TypeError):
+            return None
 
     def armAlarm(
         self, Installation: Installation, mode: str, currentStatus: str
@@ -220,14 +216,13 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            return error_message
-        else:
+        try:
             if result_json["data"]["xSArmPanel"]["res"] == "OK":
                 return (True, result_json["data"]["xSArmPanel"]["referenceId"])
             else:
                 return (False, result_json["data"]["xSArmPanel"]["msg"])
+        except (KeyError, TypeError):
+            return (False, "Unknown error.")
 
     def checkArmStatus(
         self,
@@ -252,10 +247,7 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            return error_message
-        else:
+        try:
             raw_data = result_json["data"]["xSArmStatus"]
             return ArmStatus(
                 raw_data["res"],
@@ -267,6 +259,8 @@ class ApiManager:
                 raw_data["requestId"],
                 raw_data["error"],
             )
+        except (KeyError, TypeError):
+            return None
 
     def disarmAlarm(
         self, Installation: Installation, currentStatus: str
@@ -284,14 +278,13 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            return error_message
-        else:
+        try:
             if result_json["data"]["xSDisarmPanel"]["res"] == "OK":
                 return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
             else:
                 return (False, result_json["data"]["xSDisarmPanel"]["msg"])
+        except (KeyError, TypeError):
+            return (False, "Disarm error.")
 
     def checkDisarmStatus(
         self,
@@ -316,10 +309,7 @@ class ApiManager:
         }
         response = self._executeRequest(content)
         result_json = json.loads(response.text)
-        if hasattr(result_json, "errors"):
-            error_message = result_json["errors"][0]["message"]
-            return error_message
-        else:
+        try:
             raw_data = result_json["data"]["xSDisarmStatus"]
             return DisarmStatus(
                 raw_data["error"],
@@ -331,3 +321,5 @@ class ApiManager:
                 raw_data["res"],
                 raw_data["status"],
             )
+        except (KeyError, TypeError):
+            return None

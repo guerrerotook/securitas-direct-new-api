@@ -112,11 +112,17 @@ class SecuritasHub:
         # self.overview = self.session.checkAlarm(Installation)
 
         referenceId: str = self.session.checkAlarm(Installation)
+        if not referenceId:
+            return None
         sleep(1)
         alarmStatus: CheckAlarmStatus = self.session.checkAlarmStatus(
             Installation, referenceId
         )
+        if not alarmStatus:
+            return None
         while alarmStatus.operationStatus == "WAIT":
             sleep(1)
             alarmStatus = self.session.checkAlarmStatus(Installation, referenceId)
+            if not alarmStatus:
+                return None
         return alarmStatus
