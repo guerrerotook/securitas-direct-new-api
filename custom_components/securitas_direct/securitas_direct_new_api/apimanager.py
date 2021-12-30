@@ -164,7 +164,9 @@ class ApiManager:
                     item["phone"],
                 )
                 result.append(InstallationItem)
-            return result
+        except (KeyError, TypeError):
+            result = []
+        return result
 
     def check_alarm(self, installation: Installation) -> str:
         """Check status of the alarm."""
@@ -183,6 +185,8 @@ class ApiManager:
             return error_message
         else:
             return result_json["data"]["xSCheckAlarm"]["referenceId"]
+        except (KeyError, TypeError):
+            return None
 
     def get_all_services(self, installation: Installation) -> List[Service]:
         """Get the list of all services available to the user."""
@@ -317,6 +321,8 @@ class ApiManager:
                 raw_data["protomResponse"],
                 raw_data["protomResponseDate"],
             )
+        except (KeyError, TypeError):
+            return None
 
     def arm_alarm(
         self, installation: Installation, mode: str, currentStatus: str
@@ -342,6 +348,8 @@ class ApiManager:
                 return (True, result_json["data"]["xSArmPanel"]["referenceId"])
             else:
                 return (False, result_json["data"]["xSArmPanel"]["msg"])
+        except (KeyError, TypeError):
+            return (False, "Unknown error.")
 
     def check_arm_status(
         self,
@@ -381,6 +389,8 @@ class ApiManager:
                 raw_data["requestId"],
                 raw_data["error"],
             )
+        except (KeyError, TypeError):
+            return None
 
     def disarm_alarm(
         self, installation: Installation, currentStatus: str
@@ -406,6 +416,8 @@ class ApiManager:
                 return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
             else:
                 return (False, result_json["data"]["xSDisarmPanel"]["msg"])
+        except (KeyError, TypeError):
+            return (False, "Disarm error.")
 
     def check_disarm_status(
         self,
@@ -445,3 +457,5 @@ class ApiManager:
                 raw_data["res"],
                 raw_data["status"],
             )
+        except (KeyError, TypeError):
+            return None
