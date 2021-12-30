@@ -10,3 +10,8 @@ securitas_direct:
   code: !secret securitas_direct_code
   country: ES
 ```
+
+## Features
+
+- List all your installations and add a panel into Home Assistant.
+- Support Sentinel and add two sensor for each Sentinel in each installation you have. The sensor are temperature and humidity.
