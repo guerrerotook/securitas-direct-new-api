@@ -51,7 +51,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the Securitas platform."""
     alarms = []
     if int(hub.config.get(CONF_ALARM, 1)):
-        for item in hub.Installations:
+        for item in hub.installations:
             current_state: CheckAlarmStatus = hub.update_overview(
                 item, no_throttle=True
             )
@@ -75,19 +75,19 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     """Representation of a Securitas alarm status."""
 
     def __init__(
-        self, Installation: Installation, state: CheckAlarmStatus, digits: int
+        self, installation: Installation, state: CheckAlarmStatus, digits: int
     ) -> None:
         """Initialize the Securitas alarm panel."""
         self._state: str = STATE_ALARM_DISARMED
         self._last_status: str = STATE_ALARM_DISARMED
         self._digits: int = digits
         self._changed_by = None
-        self._device = Installation.address
-        self.entity_id = f"securitas_direct.{Installation.number}"
-        self._attr_unique_id = f"securitas_direct.{Installation.number}"
+        self._device = installation.address
+        self.entity_id = f"securitas_direct.{installation.number}"
+        self._attr_unique_id = f"securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message = ""
-        self.Installation = Installation
+        self.installation = installation
         self.update_status_alarm(state)
 
     def __force_state(self, state):
@@ -97,59 +97,59 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def get_arm_state(self):
         """Get alarm state."""
-        referenceId: str = hub.session.checkAlarm(self.Installation)
+        referenceId: str = hub.session.check_alarm(self.installation)
         sleep(1)
-        alarmStatus: CheckAlarmStatus = hub.session.checkAlarmStatus(
-            self.Installation, referenceId
+        alarm_status: CheckAlarmStatus = hub.session.check_alarm_status(
+            self.installation, referenceId
         )
-        while alarmStatus.status == "WAIT":
+        while alarm_status.status == "WAIT":
             sleep(1)
-            alarmStatus: CheckAlarmStatus = hub.session.checkAlarmStatus(
-                self.Installation, referenceId
+            alarm_status: CheckAlarmStatus = hub.session.check_alarm_status(
+                self.installation, referenceId
             )
 
     def set_arm_state(self, state, attempts=3):
         """Send set arm state command."""
         if state == "DARM1":
-            response = hub.session.disarmAlarm(
-                self.Installation, self._getProtoStatus()
+            response = hub.session.disarm_alarm(
+                self.installation, self._getProtoStatus()
             )
             if response[0]:
                 # check arming status
                 sleep(1)
                 count = 1
-                armStatus: ArmStatus = hub.session.checkDisarmStatus(
-                    self.Installation,
+                arm_status: ArmStatus = hub.session.check_disarm_status(
+                    self.installation,
                     response[1],
                     ArmType.TOTAL,
                     count,
                     self._getProtoStatus(),
                 )
-                while armStatus.status == "WAIT":
+                while arm_status.status == "WAIT":
                     count = count + 1
                     sleep(1)
-                    armStatus = hub.session.checkDisarmStatus(
-                        self.Installation, response[1], ArmType.TOTAL, count
+                    arm_status = hub.session.check_disarm_status(
+                        self.installation, response[1], ArmType.TOTAL, count
                     )
                 self._state = STATE_ALARM_DISARMED
             else:
                 _LOGGER.error(response[1])
         else:
-            response = hub.session.armAlarm(
-                self.Installation, state, self._getProtoStatus()
+            response = hub.session.arm_alarm(
+                self.installation, state, self._getProtoStatus()
             )
             if response[0]:
                 # check arming status
                 sleep(1)
                 count = 1
-                armStatus: ArmStatus = hub.session.checkArmStatus(
-                    self.Installation, response[1], state, count, self._getProtoStatus()
+                arm_status: ArmStatus = hub.session.check_arm_status(
+                    self.installation, response[1], state, count, self._getProtoStatus()
                 )
-                while armStatus.status == "WAIT":
+                while arm_status.status == "WAIT":
                     count = count + 1
                     sleep(1)
-                    armStatus = hub.session.checkArmStatus(
-                        self.Installation, response[1], ArmType.TOTAL, count
+                    arm_status = hub.session.check_arm_status(
+                        self.installation, response[1], ArmType.TOTAL, count
                     )
                 self._state = STATE_ALARM_ARMED_AWAY
             else:
@@ -160,7 +160,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     @property
     def name(self):
         """Return the name of the device."""
-        return self.Installation.alias
+        return self.installation.alias
 
     @property
     def state(self):
@@ -198,7 +198,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Update alarm status, from last alarm setting register or EST."""
         if status is not None:
             self._message = status.message
-            self._time = datetime.datetime.fromisoformat(status.protomResponseData)
+            # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
+
             if status.protomResponse == "D":
                 # disarmed
                 self._state = STATE_ALARM_DISARMED
@@ -212,7 +213,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def update(self):
         """Update the status of the alarm based on the configuration."""
         alarmStatus: CheckAlarmStatus = hub.update_overview(
-            self.Installation, no_throttle=True
+            self.installation, no_throttle=True
         )
         self.update_status_alarm(alarmStatus)
 
