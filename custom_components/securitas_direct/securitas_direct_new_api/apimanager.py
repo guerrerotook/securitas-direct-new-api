@@ -163,9 +163,7 @@ class ApiManager:
                     item["email"],
                     item["phone"],
                 )
-                result.append(InstallationItem)
-        except (KeyError, TypeError):
-            result = []
+                result.append(InstallationItem)        
         return result
 
     def check_alarm(self, installation: Installation) -> str:
@@ -184,9 +182,7 @@ class ApiManager:
             error_message = result_json["errors"][0]["message"]
             return error_message
         else:
-            return result_json["data"]["xSCheckAlarm"]["referenceId"]
-        except (KeyError, TypeError):
-            return None
+            return result_json["data"]["xSCheckAlarm"]["referenceId"]       
 
     def get_all_services(self, installation: Installation) -> List[Service]:
         """Get the list of all services available to the user."""
@@ -321,8 +317,6 @@ class ApiManager:
                 raw_data["protomResponse"],
                 raw_data["protomResponseDate"],
             )
-        except (KeyError, TypeError):
-            return None
 
     def arm_alarm(
         self, installation: Installation, mode: str, currentStatus: str
@@ -347,9 +341,7 @@ class ApiManager:
             if result_json["data"]["xSArmPanel"]["res"] == "OK":
                 return (True, result_json["data"]["xSArmPanel"]["referenceId"])
             else:
-                return (False, result_json["data"]["xSArmPanel"]["msg"])
-        except (KeyError, TypeError):
-            return (False, "Unknown error.")
+                return (False, result_json["data"]["xSArmPanel"]["msg"])        
 
     def check_arm_status(
         self,
@@ -388,9 +380,7 @@ class ApiManager:
                 raw_data["protomResponseDate"],
                 raw_data["requestId"],
                 raw_data["error"],
-            )
-        except (KeyError, TypeError):
-            return None
+            )        
 
     def disarm_alarm(
         self, installation: Installation, currentStatus: str
@@ -415,9 +405,7 @@ class ApiManager:
             if result_json["data"]["xSDisarmPanel"]["res"] == "OK":
                 return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
             else:
-                return (False, result_json["data"]["xSDisarmPanel"]["msg"])
-        except (KeyError, TypeError):
-            return (False, "Disarm error.")
+                return (False, result_json["data"]["xSDisarmPanel"]["msg"])       
 
     def check_disarm_status(
         self,
@@ -457,5 +445,3 @@ class ApiManager:
                 raw_data["res"],
                 raw_data["status"],
             )
-        except (KeyError, TypeError):
-            return None
