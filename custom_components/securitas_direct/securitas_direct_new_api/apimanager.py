@@ -10,6 +10,7 @@ from requests.models import Response
 from urllib3 import Retry
 
 from .dataTypes import (
+    AirQuality,
     ArmStatus,
     ArmType,
     Attribute,
@@ -163,8 +164,8 @@ class ApiManager:
                     item["email"],
                     item["phone"],
                 )
-                result.append(InstallationItem)        
-        return result
+                result.append(InstallationItem)
+            return result
 
     def check_alarm(self, installation: Installation) -> str:
         """Check status of the alarm."""
@@ -182,7 +183,7 @@ class ApiManager:
             error_message = result_json["errors"][0]["message"]
             return error_message
         else:
-            return result_json["data"]["xSCheckAlarm"]["referenceId"]       
+            return result_json["data"]["xSCheckAlarm"]["referenceId"]
 
     def get_all_services(self, installation: Installation) -> List[Service]:
         """Get the list of all services available to the user."""
@@ -271,6 +272,30 @@ class ApiManager:
                 int(raw_data["temperature"]),
             )
 
+    def get_air_quality_data(
+        self, installation: Installation, service: Service
+    ) -> AirQuality:
+        """Get sentinel status."""
+        content = {
+            "operationName": "AirQualityGraph",
+            "variables": {
+                "numinst": str(installation.number),
+                "zone": str(service.attributes.attributes[0].value),
+            },
+            "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}\n",
+        }
+        response = self._execute_request(content)
+        result_json = json.loads(response.text)
+        if "errors" in result_json:
+            error_message = result_json["errors"][0]["message"]
+            return error_message
+        else:
+            raw_data = result_json["data"]["xSAirQ"]["graphData"]["status"]
+            return AirQuality(
+                int(raw_data["current"]),
+                raw_data["currentMsg"],
+            )
+
     def check_general_status(self, installation: Installation) -> SStatus:
         """Check current status of the alarm."""
         content = {
@@ -341,7 +366,7 @@ class ApiManager:
             if result_json["data"]["xSArmPanel"]["res"] == "OK":
                 return (True, result_json["data"]["xSArmPanel"]["referenceId"])
             else:
-                return (False, result_json["data"]["xSArmPanel"]["msg"])        
+                return (False, result_json["data"]["xSArmPanel"]["msg"])
 
     def check_arm_status(
         self,
@@ -380,7 +405,7 @@ class ApiManager:
                 raw_data["protomResponseDate"],
                 raw_data["requestId"],
                 raw_data["error"],
-            )        
+            )
 
     def disarm_alarm(
         self, installation: Installation, currentStatus: str
@@ -405,7 +430,7 @@ class ApiManager:
             if result_json["data"]["xSDisarmPanel"]["res"] == "OK":
                 return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
             else:
-                return (False, result_json["data"]["xSDisarmPanel"]["msg"])       
+                return (False, result_json["data"]["xSDisarmPanel"]["msg"])
 
     def check_disarm_status(
         self,

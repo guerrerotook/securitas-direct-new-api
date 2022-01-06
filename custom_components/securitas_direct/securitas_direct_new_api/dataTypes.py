@@ -131,3 +131,11 @@ class Sentinel:
     air_quality: str
     humidity: int
     temperature: int
+
+
+@dataclass
+class AirQuality:
+    """Air Quality."""
+
+    value: int
+    message: str
