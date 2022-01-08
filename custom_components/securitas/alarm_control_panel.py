@@ -98,22 +98,22 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def get_arm_state(self):
         """Get alarm state."""
-        referenceId: str = hub.session.check_alarm(self.installation)
+        reference_id: str = hub.session.check_alarm(self.installation)
         sleep(1)
         alarm_status: CheckAlarmStatus = hub.session.check_alarm_status(
-            self.installation, referenceId
+            self.installation, reference_id
         )
         while alarm_status.status == "WAIT":
             sleep(1)
             alarm_status: CheckAlarmStatus = hub.session.check_alarm_status(
-                self.installation, referenceId
+                self.installation, reference_id
             )
 
     def set_arm_state(self, state, attempts=3):
         """Send set arm state command."""
         if state == "DARM1":
             response = hub.session.disarm_alarm(
-                self.installation, self._getProtoStatus()
+                self.installation, self._get_proto_status()
             )
             if response[0]:
                 # check arming status
@@ -124,33 +124,45 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     response[1],
                     ArmType.TOTAL,
                     count,
-                    self._getProtoStatus(),
+                    self._get_proto_status(),
                 )
                 while arm_status.status == "WAIT":
                     count = count + 1
                     sleep(1)
                     arm_status = hub.session.check_disarm_status(
-                        self.installation, response[1], ArmType.TOTAL, count
+                        self.installation,
+                        response[1],
+                        ArmType.TOTAL,
+                        count,
+                        self._get_proto_status(),
                     )
                 self._state = STATE_ALARM_DISARMED
             else:
                 _LOGGER.error(response[1])
         else:
             response = hub.session.arm_alarm(
-                self.installation, state, self._getProtoStatus()
+                self.installation, state, self._get_proto_status()
             )
             if response[0]:
                 # check arming status
                 sleep(1)
                 count = 1
                 arm_status: ArmStatus = hub.session.check_arm_status(
-                    self.installation, response[1], state, count, self._getProtoStatus()
+                    self.installation,
+                    response[1],
+                    state,
+                    count,
+                    self._get_proto_status(),
                 )
                 while arm_status.status == "WAIT":
                     count = count + 1
                     sleep(1)
                     arm_status = hub.session.check_arm_status(
-                        self.installation, response[1], ArmType.TOTAL, count
+                        self.installation,
+                        response[1],
+                        ArmType.TOTAL,
+                        count,
+                        self._get_proto_status(),
                     )
                 self._state = STATE_ALARM_ARMED_AWAY
             else:
@@ -183,7 +195,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Return the last change triggered by."""
         return self._changed_by
 
-    def _getProtoStatus(self) -> str:
+    def _get_proto_status(self) -> str:
+        """Get the string that represent the alarm status."""
         if self._last_status == STATE_ALARM_DISARMED:
             return "D"
         elif self._last_status == STATE_ALARM_ARMED_AWAY:
@@ -192,6 +205,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             return "Q"
         elif self._last_status == STATE_ALARM_ARMED_HOME:
             return "P"
+        elif self._last_status == STATE_ALARM_ARMED_CUSTOM_BYPASS:
+            return "E"
         else:
             return "D"
 
