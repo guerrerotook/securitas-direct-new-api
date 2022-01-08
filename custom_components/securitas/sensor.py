@@ -1,7 +1,7 @@
 """Securitas direct sentinel sensor."""
 from datetime import timedelta
 
-from homeassistant.components.securitas_direct.securitas_direct_new_api.dataTypes import (
+from .securitas_direct_new_api.dataTypes import (
     AirQuality,
     Sentinel,
     Service,
