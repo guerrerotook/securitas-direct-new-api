@@ -27,7 +27,7 @@ CONF_ALARM = "alarm"
 CONF_CODE_DIGITS = "code_digits"
 CONF_COUNTRY = "country"
 
-DOMAIN = "securitas_direct"
+DOMAIN = "securitas"
 
 MIN_SCAN_INTERVAL = timedelta(seconds=20)
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=40)
