@@ -8,6 +8,7 @@ from time import sleep
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.components.alarm_control_panel.const import (
     SUPPORT_ALARM_ARM_AWAY,
+    SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
     SUPPORT_ALARM_ARM_HOME,
     SUPPORT_ALARM_ARM_NIGHT,
 )
@@ -209,6 +210,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = STATE_ALARM_ARMED_NIGHT
             elif status.protomResponse == "P":
                 self._state = STATE_ALARM_ARMED_HOME
+            elif status.protomResponse == "E":
+                self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
     def update(self):
         """Update the status of the alarm based on the configuration."""
@@ -241,7 +244,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
         self.__force_state(STATE_ALARM_ARMING)
-        self.set_arm_state("PERI")
+        self.set_arm_state("PERI1")
 
     @property
     def supported_features(self) -> int:
@@ -251,4 +254,5 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             | SUPPORT_ALARM_ARM_AWAY
             | SUPPORT_ALARM_ARM_NIGHT
             | SUPPORT_ALARM_ARM_HOME
+            | SUPPORT_ALARM_ARM_CUSTOM_BYPASS
         )
