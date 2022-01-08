@@ -225,7 +225,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = STATE_ALARM_ARMED_NIGHT
             elif status.protomResponse == "P":
                 self._state = STATE_ALARM_ARMED_HOME
-            elif status.protomResponse == "E":
+            elif (
+                status.protomResponse == "E"
+                or status.protomResponse == "B"
+                or status.protomResponse == "C"
+            ):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
     def update(self):
