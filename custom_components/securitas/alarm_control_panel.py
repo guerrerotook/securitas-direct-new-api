@@ -63,15 +63,6 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
             )
     add_entities(alarms)
 
-
-def set_arm_state(state, code=None):
-    """Send set arm state command."""
-    # hub.session.api_call(state)
-    _LOGGER.error("Securitas: esternal set arm state %s", state)
-    # sleep(2)
-    # hub.update_overview(no_throttle=True)
-
-
 class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     """Representation of a Securitas alarm status."""
 
@@ -226,9 +217,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             elif status.protomResponse == "P":
                 self._state = STATE_ALARM_ARMED_HOME
             elif (
-                status.protomResponse == "E"
-                or status.protomResponse == "B"
-                or status.protomResponse == "C"
+                status.protomResponse == "E" # PERI
+                or status.protomResponse == "B" # PERI + ARMED_HOME
+                or status.protomResponse == "C" # PERI + ARMED_NIGHT
+                or status.protomResponse == "A" # PERI + ARMED_AWAY
             ):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
