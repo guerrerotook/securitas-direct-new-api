@@ -132,7 +132,10 @@ class SecuritasHub:
         alarm_status: CheckAlarmStatus = self.session.check_alarm_status(
             installation, reference_id
         )
-        while alarm_status.operationStatus == "WAIT":
-            sleep(1)
-            alarm_status = self.session.check_alarm_status(installation, reference_id)
+        if hasattr(alarm_status, "operationStatus"):
+            while alarm_status.operationStatus == "WAIT":
+                sleep(1)
+                alarm_status = self.session.check_alarm_status(
+                    installation, reference_id
+                )
         return alarm_status
