@@ -24,7 +24,9 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     STATE_ALARM_TRIGGERED,
 )
 
-from . import CONF_ALARM, CONF_CODE_DIGITS, HUB as hub
+from homeassistant.helpers.entity import DeviceInfo
+
+from . import CONF_ALARM, CONF_CODE_DIGITS, DOMAIN, HUB as hub
 from .securitas_direct_new_api.dataTypes import (
     ArmStatus,
     ArmType,
@@ -63,6 +65,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
             )
     add_entities(alarms)
 
+
 class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     """Representation of a Securitas alarm status."""
 
@@ -80,6 +83,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._time: datetime.datetime = datetime.datetime.now()
         self._message = ""
         self.installation = installation
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            manufacturer="Securitas Direct",
+            model=installation.panel,
+            name=installation.alias,
+            hw_version=installation.type,
+        )
         self.update_status_alarm(state)
 
     def __force_state(self, state):
@@ -217,10 +227,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             elif status.protomResponse == "P":
                 self._state = STATE_ALARM_ARMED_HOME
             elif (
-                status.protomResponse == "E" # PERI
-                or status.protomResponse == "B" # PERI + ARMED_HOME
-                or status.protomResponse == "C" # PERI + ARMED_NIGHT
-                or status.protomResponse == "A" # PERI + ARMED_AWAY
+                status.protomResponse == "E"  # PERI
+                or status.protomResponse == "B"  # PERI + ARMED_HOME
+                or status.protomResponse == "C"  # PERI + ARMED_NIGHT
+                or status.protomResponse == "A"  # PERI + ARMED_AWAY
             ):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 

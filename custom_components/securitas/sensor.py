@@ -1,6 +1,8 @@
 """Securitas direct sentinel sensor."""
 from datetime import timedelta
 
+from homeassistant.helpers.entity import DeviceInfo
+
 from .securitas_direct_new_api.dataTypes import (
     AirQuality,
     Sentinel,
@@ -9,7 +11,7 @@ from .securitas_direct_new_api.dataTypes import (
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import PERCENTAGE, TEMP_CELSIUS
 
-from . import CONF_ALARM, HUB as hub
+from . import CONF_ALARM, DOMAIN, HUB as hub
 
 SCAN_INTERVAL = timedelta(minutes=30)
 
@@ -42,6 +44,12 @@ class SentinelTemperature(SensorEntity):
         self._attr_name = "Temperature " + sentinel.alias.lower().capitalize()
         self._sentinel: Sentinel = sentinel
         self._service: Service = service
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            manufacturer="Temperature Sensor",
+            model=service.id_service,
+            name=service.description,
+        )
 
     def update(self):
         """Update the status of the alarm based on the configuration."""

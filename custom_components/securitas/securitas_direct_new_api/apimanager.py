@@ -148,9 +148,9 @@ class ApiManager:
             return []
         else:
             result: List[Installation] = []
-            raw_Installations = result_json["data"]["xSInstallations"]["installations"]
-            for item in raw_Installations:
-                InstallationItem: Installation = Installation(
+            raw_installations = result_json["data"]["xSInstallations"]["installations"]
+            for item in raw_installations:
+                installation_item: Installation = Installation(
                     int(item["numinst"]),
                     item["alias"],
                     item["panel"],
@@ -164,7 +164,7 @@ class ApiManager:
                     item["email"],
                     item["phone"],
                 )
-                result.append(InstallationItem)
+                result.append(installation_item)
             return result
 
     def check_alarm(self, installation: Installation) -> str:
