@@ -25,14 +25,18 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
 )
 
 from homeassistant.helpers.entity import DeviceInfo
-
-from . import CONF_ALARM, CONF_CODE_DIGITS, DOMAIN, HUB as hub
+from homeassistant.const import CONF_PASSWORD
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from . import CONF_CODE_DIGITS, DOMAIN, HUB as hub
 from .securitas_direct_new_api.dataTypes import (
     ArmStatus,
     ArmType,
     CheckAlarmStatus,
     Installation,
 )
+from . import DOMAIN, SecuritasHub
 
 # from securitas import SecuritasAPIClient
 
@@ -50,20 +54,21 @@ SECURITAS_STATUS = {
 }
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
-    """Set up the Securitas platform."""
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up MELCloud device sensors based on config_entry."""
+    client: SecuritasHub = entry.data[CONF_PASSWORD]
     alarms = []
-    if int(hub.config.get(CONF_ALARM, 1)):
-        for item in hub.installations:
-            current_state: CheckAlarmStatus = hub.update_overview(
-                item, no_throttle=True
+
+    for item in hub.installations:
+        current_state: CheckAlarmStatus = client.update_overview(item, no_throttle=True)
+        alarms.append(
+            SecuritasAlarm(
+                item, state=current_state, digits=client.config.get(CONF_CODE_DIGITS)
             )
-            alarms.append(
-                SecuritasAlarm(
-                    item, state=current_state, digits=hub.config.get(CONF_CODE_DIGITS)
-                )
-            )
-    add_entities(alarms)
+        )
+    async_add_entities(alarms, True)
 
 
 class SecuritasAlarm(alarm.AlarmControlPanelEntity):
