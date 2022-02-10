@@ -12,6 +12,7 @@ from homeassistant.const import (
     CONF_CODE,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
+    CONF_TOKEN,
     CONF_USERNAME,
     EVENT_HOMEASSISTANT_STOP,
     Platform,
@@ -23,9 +24,15 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.util import Throttle
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .securitas_direct_new_api.apimanager import ApiManager
-from .securitas_direct_new_api.dataTypes import CheckAlarmStatus, Installation, Service
+from .securitas_direct_new_api.dataTypes import (
+    CheckAlarmStatus,
+    Installation,
+    SStatus,
+    Service,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +41,7 @@ CONF_CODE_DIGITS = "code_digits"
 CONF_COUNTRY = "country"
 
 DOMAIN = "securitas"
+SENTINE_CONFORT = "SENTINEL CONFORT"
 
 MIN_SCAN_INTERVAL = timedelta(seconds=20)
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=40)
@@ -65,16 +73,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     if DOMAIN not in config:
         return True
 
-    username = config[DOMAIN][CONF_USERNAME]
-    password = config[DOMAIN][CONF_PASSWORD]
     hass.async_create_task(
         hass.config_entries.flow.async_init(
             DOMAIN,
             context={"source": SOURCE_IMPORT},
             data={
-                CONF_USERNAME: username,
-                CONF_PASSWORD: password,
-                DOMAIN: config[DOMAIN],
+                CONF_USERNAME: config[DOMAIN][CONF_USERNAME],
+                CONF_PASSWORD: config[DOMAIN][CONF_PASSWORD],
+                CONF_COUNTRY: config[DOMAIN][CONF_COUNTRY],
+                CONF_CODE: config[DOMAIN][CONF_CODE],
             },
         )
     )
@@ -83,9 +90,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Establish connection with MELClooud."""
-    client: SecuritasHub = entry.data[CONF_PASSWORD]
-    instalation: list[SecuritasDirectDevice] = []
-    hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: instalation})
+    config = dict()
+    config[CONF_USERNAME] = entry.data[CONF_USERNAME]
+    config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
+    config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
+    config[CONF_CODE] = entry.data[CONF_CODE]
+    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
+    client.set_authentication_token(entry.data[CONF_TOKEN])
+    instalations: list[
+        SecuritasDirectDevice
+    ] = await client.session.list_installations()
+    devices: list[SecuritasDirectDevice] = []
+    for instalation in instalations:
+        devices.append(SecuritasDirectDevice(instalation))
+    hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
     return True
 
@@ -191,20 +209,32 @@ class SecuritasHub:
         if not succeed[0]:
             _LOGGER.error("Could not log in to Securitas: %s", succeed[1])
             return False
-        self.installations = await self.session.list_installations()
-        sentinel_value = ["C" + "O" + "N" + "F" + "O" + "R" + "T"]
-        # this wonderful piece of code is just to bypass the codespell that thinks
-        # the string is not written right, but that is coming from the SD API, so
-        # there is nothing I can do.
-        sentinel_value = "SENTINEL " + "".join(sentinel_value)
-        for installation in self.installations:
-            all_services: list[Service] = await self.session.get_all_services(
-                installation
-            )
-            for service in all_services:
-                if service.description == sentinel_value:
-                    self.sentinel_services.append(service)
+        # self.installations = await self.session.list_installations()
+        # sentinel_value = ["C" + "O" + "N" + "F" + "O" + "R" + "T"]
+        # # this wonderful piece of code is just to bypass the codespell that thinks
+        # # the string is not written right, but that is coming from the SD API, so
+        # # there is nothing I can do.
+        # sentinel_value = "SENTINEL " + "".join(sentinel_value)
+        # for installation in self.installations:
+        #     all_services: list[Service] = await self.session.get_all_services(
+        #         installation
+        #     )
+        #     for service in all_services:
+        #         if service.description == sentinel_value:
+        #             self.sentinel_services.append(service)
         return True
+
+    async def get_services(self, instalation: Installation) -> list[Service]:
+        """Gets the list of services from the instalation."""
+        return await self.session.get_all_services(instalation)
+
+    def get_authentication_token(self) -> str:
+        """Gets the authentication token."""
+        return self.session.authentication_token
+
+    def set_authentication_token(self, value: str):
+        """Sets the authentication token."""
+        self.session.authentication_token = value
 
     async def logout(self):
         """Logout from Securitas."""
@@ -214,7 +244,7 @@ class SecuritasHub:
             return False
         return True
 
-    def update_overview(self, installation: Installation) -> CheckAlarmStatus:
+    async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
         """Update the overview."""
         # self.overview = self.session.checkAlarm(Installation)
 
@@ -223,15 +253,25 @@ class SecuritasHub:
         #     "OK", "OK", "Ok", installation.number, status.status, status.timestampUpdate
         # )
 
-        reference_id: str = self.session.check_alarm(installation)
-        sleep(1)
-        alarm_status: CheckAlarmStatus = self.session.check_alarm_status(
-            installation, reference_id
+        status: SStatus = await self.session.check_general_status(installation)
+
+        # reference_id: str = await self.session.check_alarm(installation)
+        # sleep(1)
+        # alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
+        #     installation, reference_id
+        # )
+        # if hasattr(alarm_status, "operationStatus"):
+        #     while alarm_status.operationStatus == "WAIT":
+        #         sleep(1)
+        #         alarm_status = await self.session.check_alarm_status(
+        #             installation, reference_id
+        #         )
+        # return alarm_status
+        return CheckAlarmStatus(
+            status.status,
+            None,
+            status.status,
+            installation.number,
+            status.status,
+            status.timestampUpdate,
         )
-        if hasattr(alarm_status, "operationStatus"):
-            while alarm_status.operationStatus == "WAIT":
-                sleep(1)
-                alarm_status = self.session.check_alarm_status(
-                    installation, reference_id
-                )
-        return alarm_status

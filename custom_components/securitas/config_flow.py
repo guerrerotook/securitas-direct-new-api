@@ -6,11 +6,11 @@ from homeassistant.components.securitas.securitas_direct_new_api.dataTypes impor
     Installation,
 )
 
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_CODE, CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from . import DOMAIN, SecuritasHub, HUB
+from . import CONF_COUNTRY, DOMAIN, SecuritasHub
 
 
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -18,25 +18,44 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def _create_entry(self, instalation: Installation):
+    async def _create_entry(
+        self, username: str, token: str, password: str, country: str, code: str
+    ):
         """Register new entry."""
-        await self.async_set_unique_id(instalation.alias)
-        self._abort_if_unique_id_configured(instalation)
-        return self.async_create_entry(title=instalation.alias, data=instalation)
+        await self.async_set_unique_id(username)
+        self._abort_if_unique_id_configured({CONF_TOKEN: token})
+        return self.async_create_entry(
+            title=username,
+            data={
+                CONF_USERNAME: username,
+                CONF_TOKEN: token,
+                CONF_PASSWORD: password,
+                CONF_COUNTRY: country,
+                CONF_CODE: code,
+            },
+        )
 
-    async def _create_client(self, config):
+    async def _create_client(
+        self, username: str, password: str, country: str, code: str
+    ):
         """Create client."""
-        if config is None:
+        if password is None and password is None:
             raise ValueError(
                 "Invalid internal state. Called without either password or token"
             )
 
+        config = dict()
+        config[CONF_USERNAME] = username
+        config[CONF_PASSWORD] = password
+        config[CONF_COUNTRY] = country
+        config[CONF_CODE] = code
         securitas = SecuritasHub(config, async_get_clientsession(self.hass))
         succeed: bool = await securitas.login()
         if not succeed:
             raise Exception("error login")
-
-        HUB = securitas
+        return await self._create_entry(
+            username, securitas.get_authentication_token(), password, country, code
+        )
 
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
@@ -47,8 +66,18 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     {vol.Required(CONF_USERNAME): str, vol.Required(CONF_PASSWORD): str}
                 ),
             )
-        return await self._create_client(user_input[DOMAIN])
+        return await self._create_client(
+            user_input[CONF_USERNAME],
+            user_input[CONF_PASSWORD],
+            user_input[CONF_COUNTRY],
+            user_input[CONF_CODE],
+        )
 
     async def async_step_import(self, user_input):
         """Import a config entry."""
-        return await self._create_client(user_input[DOMAIN])
+        return await self._create_client(
+            user_input[CONF_USERNAME],
+            user_input[CONF_PASSWORD],
+            user_input[CONF_COUNTRY],
+            user_input[CONF_CODE],
+        )

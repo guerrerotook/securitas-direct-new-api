@@ -1,5 +1,6 @@
 """Securitas direct sentinel sensor."""
 from datetime import timedelta
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -9,12 +10,19 @@ from .securitas_direct_new_api.dataTypes import (
     Service,
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import CONF_PASSWORD, PERCENTAGE, TEMP_CELSIUS
+from homeassistant.const import (
+    CONF_CODE,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    CONF_USERNAME,
+    PERCENTAGE,
+    TEMP_CELSIUS,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import DOMAIN, SecuritasHub
+from . import CONF_COUNTRY, DOMAIN, SENTINE_CONFORT, SecuritasDirectDevice, SecuritasHub
 
 SCAN_INTERVAL = timedelta(minutes=30)
 
@@ -23,10 +31,25 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up MELCloud device sensors based on config_entry."""
-    client: SecuritasHub = entry.data[CONF_PASSWORD]
+    config = dict()
+    config[CONF_USERNAME] = entry.data[CONF_USERNAME]
+    config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
+    config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
+    config[CONF_CODE] = entry.data[CONF_CODE]
+    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
+    client.set_authentication_token(entry.data[CONF_TOKEN])
     sensors = []
+    securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
+        entry.entry_id
+    )
+    sentinel_services: list[Service] = []
+    for device in securitas_devices:
+        services: list[Service] = await client.get_services(device.instalation)
+        for service in services:
+            if service.description == SENTINE_CONFORT:
+                sentinel_services.append(service)
 
-    for item in client.sentinel_services:
+    for item in sentinel_services:
         sentinel_data: Sentinel = await client.session.get_sentinel_data(
             item.installation, item
         )
@@ -60,7 +83,7 @@ class SentinelTemperature(SensorEntity):
             name=service.description,
         )
 
-    async def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
         sentinel_data: Sentinel = await self._client.session.get_sentinel_data(
             self._service.installation, self._service
@@ -87,7 +110,7 @@ class SentinelHumidity(SensorEntity):
         self._service: Service = service
         self._client: SecuritasHub = client
 
-    async def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
         sentinel_data: Sentinel = await self._client.session.get_sentinel_data(
             self._service.installation, self._service
@@ -118,7 +141,7 @@ class SentinelAirQuality(SensorEntity):
         self._service: Service = service
         self._client: SecuritasHub = client
 
-    async def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
         air_quality: Sentinel = await self._client.session.get_air_quality_data(
             self._service.installation, self._service

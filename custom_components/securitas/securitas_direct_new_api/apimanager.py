@@ -40,8 +40,7 @@ class ApiManager:
         self.country = country
         self.language = language
         self.api_url = ApiDomains().get_url(language=language)
-        self.session = None
-        self.authentication_token = None
+        self.authentication_token: str = None
         self.http_client = http_client
 
     async def _execute_request(self, content) -> ClientResponse:

@@ -14,6 +14,8 @@ from homeassistant.components.alarm_control_panel.const import (
 )
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     CONF_CODE,
+    CONF_TOKEN,
+    CONF_USERNAME,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
@@ -29,14 +31,20 @@ from homeassistant.const import CONF_PASSWORD
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from . import CONF_CODE_DIGITS, DOMAIN, HUB as hub
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from . import (
+    CONF_CODE_DIGITS,
+    CONF_COUNTRY,
+    DOMAIN,
+    SecuritasDirectDevice,
+    SecuritasHub,
+)
 from .securitas_direct_new_api.dataTypes import (
     ArmStatus,
     ArmType,
     CheckAlarmStatus,
     Installation,
 )
-from . import DOMAIN, SecuritasHub
 
 # from securitas import SecuritasAPIClient
 
@@ -58,14 +66,27 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up MELCloud device sensors based on config_entry."""
-    client: SecuritasHub = entry.data[CONF_PASSWORD]
+    config = dict()
+    config[CONF_USERNAME] = entry.data[CONF_USERNAME]
+    config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
+    config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
+    config[CONF_CODE] = entry.data[CONF_CODE]
+    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
+    client.set_authentication_token(entry.data[CONF_TOKEN])
     alarms = []
-
-    for item in hub.installations:
-        current_state: CheckAlarmStatus = client.update_overview(item, no_throttle=True)
+    securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
+        entry.entry_id
+    )
+    for devices in securitas_devices:
+        current_state: CheckAlarmStatus = await client.update_overview(
+            devices.instalation
+        )
         alarms.append(
             SecuritasAlarm(
-                item, state=current_state, digits=client.config.get(CONF_CODE_DIGITS)
+                devices.instalation,
+                state=current_state,
+                digits=client.config.get(CONF_CODE_DIGITS),
+                client=client,
             )
         )
     async_add_entities(alarms, True)
@@ -75,7 +96,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     """Representation of a Securitas alarm status."""
 
     def __init__(
-        self, installation: Installation, state: CheckAlarmStatus, digits: int
+        self,
+        installation: Installation,
+        state: CheckAlarmStatus,
+        digits: int,
+        client: SecuritasHub,
     ) -> None:
         """Initialize the Securitas alarm panel."""
         self._state: str = STATE_ALARM_DISARMED
@@ -88,6 +113,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._time: datetime.datetime = datetime.datetime.now()
         self._message = ""
         self.installation = installation
+        self.client: SecuritasHub = client
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
@@ -102,30 +128,32 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._state = state
         self.hass.states.set(self.entity_id, state)
 
-    def get_arm_state(self):
+    async def get_arm_state(self):
         """Get alarm state."""
-        reference_id: str = hub.session.check_alarm(self.installation)
+        reference_id: str = self.client.session.check_alarm(self.installation)
         sleep(1)
-        alarm_status: CheckAlarmStatus = hub.session.check_alarm_status(
+        alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
             self.installation, reference_id
         )
         while alarm_status.status == "WAIT":
             sleep(1)
-            alarm_status: CheckAlarmStatus = hub.session.check_alarm_status(
-                self.installation, reference_id
+            alarm_status: CheckAlarmStatus = (
+                await self.client.session.check_alarm_status(
+                    self.installation, reference_id
+                )
             )
 
-    def set_arm_state(self, state, attempts=3):
+    async def set_arm_state(self, state, attempts=3):
         """Send set arm state command."""
         if state == "DARM1":
-            response = hub.session.disarm_alarm(
+            response = await self.client.session.disarm_alarm(
                 self.installation, self._get_proto_status()
             )
             if response[0]:
                 # check arming status
                 sleep(1)
                 count = 1
-                arm_status: ArmStatus = hub.session.check_disarm_status(
+                arm_status: ArmStatus = await self.client.session.check_disarm_status(
                     self.installation,
                     response[1],
                     ArmType.TOTAL,
@@ -135,7 +163,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 while arm_status.status == "WAIT":
                     count = count + 1
                     sleep(1)
-                    arm_status = hub.session.check_disarm_status(
+                    arm_status = await self.client.session.check_disarm_status(
                         self.installation,
                         response[1],
                         ArmType.TOTAL,
@@ -146,14 +174,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             else:
                 _LOGGER.error(response[1])
         else:
-            response = hub.session.arm_alarm(
+            response = await self.client.session.arm_alarm(
                 self.installation, state, self._get_proto_status()
             )
             if response[0]:
                 # check arming status
                 sleep(1)
                 count = 1
-                arm_status: ArmStatus = hub.session.check_arm_status(
+                arm_status: ArmStatus = await self.client.session.check_arm_status(
                     self.installation,
                     response[1],
                     state,
@@ -163,7 +191,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 while arm_status.status == "WAIT":
                     count = count + 1
                     sleep(1)
-                    arm_status = hub.session.check_arm_status(
+                    arm_status = await self.client.session.check_arm_status(
                         self.installation,
                         response[1],
                         ArmType.TOTAL,
@@ -239,16 +267,19 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             ):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
-    def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
-        alarmStatus: CheckAlarmStatus = hub.update_overview(
-            self.installation, no_throttle=True
+        alarm_status: CheckAlarmStatus = await self.client.update_overview(
+            self.installation
         )
-        self.update_status_alarm(alarmStatus)
+        self.update_status_alarm(alarm_status)
 
     def alarm_disarm(self, code=None):
         """Send disarm command."""
-        if hub.config.get(CONF_CODE, "") == "" or hub.config.get(CONF_CODE, "") == code:
+        if (
+            self.client.config.get(CONF_CODE, "") == ""
+            or self.client.config.get(CONF_CODE, "") == code
+        ):
             self.__force_state(STATE_ALARM_DISARMING)
             self.set_arm_state("DARM1")
 
