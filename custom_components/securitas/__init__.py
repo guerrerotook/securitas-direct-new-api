@@ -1,8 +1,7 @@
 """Support for Securitas Direct alarms."""
 from datetime import timedelta
-import http
+from gettext import install
 import logging
-import threading
 from time import sleep
 from aiohttp import ClientSession
 
@@ -21,7 +20,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.util import Throttle
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -39,6 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 CONF_ALARM = "alarm"
 CONF_CODE_DIGITS = "code_digits"
 CONF_COUNTRY = "country"
+CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 
 DOMAIN = "securitas"
 SENTINE_CONFORT = "SENTINEL CONFORT"
@@ -58,6 +57,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_ALARM, default=True): cv.boolean,
                 vol.Optional(CONF_CODE_DIGITS, default=4): cv.positive_int,
                 vol.Optional(CONF_CODE, default=""): cv.string,
+                vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): cv.boolean,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): (
                     vol.All(cv.time_period, vol.Clamp(min=MIN_SCAN_INTERVAL))
                 ),
@@ -82,19 +82,27 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 CONF_PASSWORD: config[DOMAIN][CONF_PASSWORD],
                 CONF_COUNTRY: config[DOMAIN][CONF_COUNTRY],
                 CONF_CODE: config[DOMAIN][CONF_CODE],
+                CONF_CHECK_ALARM_PANEL: config[DOMAIN][CONF_CHECK_ALARM_PANEL],
             },
         )
     )
+
+    # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: HUB.logout())
+    # # for Installation in HUB.Installations:
+    # #    HUB.update_overview(Installation)
+    # for component in ("alarm_control_panel", "sensor"):
+    #     discovery.load_platform(hass, component, DOMAIN, {}, config)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Establish connection with MELClooud."""
+    """Establish connection with MELCloud."""
     config = dict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data[CONF_CODE]
+    config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
     client.set_authentication_token(entry.data[CONF_TOKEN])
     instalations: list[
@@ -105,6 +113,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         devices.append(SecuritasDirectDevice(instalation))
     hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
     return True
 
 
@@ -151,22 +160,22 @@ class SecuritasDirectDevice:
         return True
 
     @property
-    def device_id(self):
+    def device_id(self) -> str:
         """Return device ID."""
         return self.instalation.number
 
     @property
-    def address(self):
+    def address(self) -> str:
         """Return the address of the instalation."""
         return self.instalation.address
 
     @property
-    def city(self):
+    def city(self) -> str:
         """Return the city of the instalation."""
         return self.instalation.city
 
     @property
-    def postal_code(self):
+    def postal_code(self) -> str:
         """Return the postalCode of the instalation."""
         return self.instalation.postalCode
 
@@ -190,14 +199,14 @@ class SecuritasHub:
         self.overview: CheckAlarmStatus = {}
         self.config = domain_config
         self.sentinel_services: list[Service] = []
-        self._lock = threading.Lock()
-        country = domain_config[CONF_COUNTRY].upper()
-        lang = country.lower() if country != "UK" else "en"
-        self.session = ApiManager(
+        self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
+        self.country: str = domain_config[CONF_COUNTRY].upper()
+        self.lang: str = self.country.lower() if self.country != "UK" else "en"
+        self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
-            country=country,
-            language=lang,
+            country=self.country,
+            language=self.lang,
             http_client=http_client,
         )
         self.installations: list[Installation] = []
@@ -209,19 +218,6 @@ class SecuritasHub:
         if not succeed[0]:
             _LOGGER.error("Could not log in to Securitas: %s", succeed[1])
             return False
-        # self.installations = await self.session.list_installations()
-        # sentinel_value = ["C" + "O" + "N" + "F" + "O" + "R" + "T"]
-        # # this wonderful piece of code is just to bypass the codespell that thinks
-        # # the string is not written right, but that is coming from the SD API, so
-        # # there is nothing I can do.
-        # sentinel_value = "SENTINEL " + "".join(sentinel_value)
-        # for installation in self.installations:
-        #     all_services: list[Service] = await self.session.get_all_services(
-        #         installation
-        #     )
-        #     for service in all_services:
-        #         if service.description == sentinel_value:
-        #             self.sentinel_services.append(service)
         return True
 
     async def get_services(self, instalation: Installation) -> list[Service]:
@@ -246,32 +242,26 @@ class SecuritasHub:
 
     async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
         """Update the overview."""
-        # self.overview = self.session.checkAlarm(Installation)
+        if self.check_alarm is True:
+            status: SStatus = await self.session.check_general_status(installation)
+            return CheckAlarmStatus(
+                status.status,
+                None,
+                status.status,
+                installation.number,
+                status.status,
+                status.timestampUpdate,
+            )
 
-        # status: SStatus = self.session.check_general_status(installation)
-        # return CheckAlarmStatus(
-        #     "OK", "OK", "Ok", installation.number, status.status, status.timestampUpdate
-        # )
-
-        status: SStatus = await self.session.check_general_status(installation)
-
-        # reference_id: str = await self.session.check_alarm(installation)
-        # sleep(1)
-        # alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
-        #     installation, reference_id
-        # )
-        # if hasattr(alarm_status, "operationStatus"):
-        #     while alarm_status.operationStatus == "WAIT":
-        #         sleep(1)
-        #         alarm_status = await self.session.check_alarm_status(
-        #             installation, reference_id
-        #         )
-        # return alarm_status
-        return CheckAlarmStatus(
-            status.status,
-            None,
-            status.status,
-            installation.number,
-            status.status,
-            status.timestampUpdate,
+        reference_id: str = await self.session.check_alarm(installation)
+        sleep(1)
+        alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
+            installation, reference_id
         )
+        if hasattr(alarm_status, "operationStatus"):
+            while alarm_status.operationStatus == "WAIT":
+                sleep(1)
+                alarm_status = await self.session.check_alarm_status(
+                    installation, reference_id
+                )
+        return alarm_status

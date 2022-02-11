@@ -33,6 +33,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from . import (
+    CONF_CHECK_ALARM_PANEL,
     CONF_CODE_DIGITS,
     CONF_COUNTRY,
     DOMAIN,
@@ -71,6 +72,7 @@ async def async_setup_entry(
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data[CONF_CODE]
+    config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
     client.set_authentication_token(entry.data[CONF_TOKEN])
     alarms = []
