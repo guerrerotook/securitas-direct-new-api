@@ -242,7 +242,7 @@ class SecuritasHub:
 
     async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
         """Update the overview."""
-        if self.check_alarm is True:
+        if self.check_alarm is not True:
             status: SStatus = await self.session.check_general_status(installation)
             return CheckAlarmStatus(
                 status.status,
