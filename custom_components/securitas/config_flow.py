@@ -42,7 +42,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_COUNTRY: country,
                 CONF_CODE: code,
                 CONF_CHECK_ALARM_PANEL: check_alarm,
-                CONF_SCAN_INTERVAL: scan_interval,
             }
         )
         return self.async_create_entry(
@@ -54,7 +53,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_COUNTRY: country,
                 CONF_CODE: code,
                 CONF_CHECK_ALARM_PANEL: check_alarm,
-                CONF_SCAN_INTERVAL: scan_interval,
             },
         )
 

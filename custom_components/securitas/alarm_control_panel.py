@@ -74,7 +74,6 @@ async def async_setup_entry(
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data[CONF_CODE]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    config[CONF_SCAN_INTERVAL] = entry.data[CONF_SCAN_INTERVAL]
     client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
     client.set_authentication_token(entry.data[CONF_TOKEN])
     alarms = []
@@ -253,8 +252,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Update alarm status, from last alarm setting register or EST."""
         if status is not None:
             self._message = status.message
-            self.extra_state_attributes["message"] = status.message
-            self.extra_state_attributes["operation_status"] = status.operationStatus
             # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
 
             if status.protomResponse == "D":
