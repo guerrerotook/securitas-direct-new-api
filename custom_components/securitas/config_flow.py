@@ -1,9 +1,16 @@
 """Config flow for the MELCloud platform."""
 from __future__ import annotations
+from datetime import timedelta
 
 import voluptuous as vol
 
-from homeassistant.const import CONF_CODE, CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
+from homeassistant.const import (
+    CONF_CODE,
+    CONF_PASSWORD,
+    CONF_SCAN_INTERVAL,
+    CONF_TOKEN,
+    CONF_USERNAME,
+)
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -23,6 +30,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         country: str,
         code: str,
         check_alarm: bool,
+        scan_interval: timedelta,
     ):
         """Register new entry."""
         await self.async_set_unique_id(username)
@@ -34,6 +42,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_COUNTRY: country,
                 CONF_CODE: code,
                 CONF_CHECK_ALARM_PANEL: check_alarm,
+                CONF_SCAN_INTERVAL: scan_interval,
             }
         )
         return self.async_create_entry(
@@ -45,11 +54,18 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_COUNTRY: country,
                 CONF_CODE: code,
                 CONF_CHECK_ALARM_PANEL: check_alarm,
+                CONF_SCAN_INTERVAL: scan_interval,
             },
         )
 
     async def _create_client(
-        self, username: str, password: str, country: str, code: str, check_alarm: bool
+        self,
+        username: str,
+        password: str,
+        country: str,
+        code: str,
+        check_alarm: bool,
+        scan_interval: timedelta,
     ):
         """Create client."""
         if password is None and password is None:
@@ -63,6 +79,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         config[CONF_COUNTRY] = country
         config[CONF_CODE] = code
         config[CONF_CHECK_ALARM_PANEL] = check_alarm
+        config[CONF_SCAN_INTERVAL] = scan_interval
         securitas = SecuritasHub(config, async_get_clientsession(self.hass))
         succeed: bool = await securitas.login()
         if not succeed:
@@ -74,6 +91,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             country,
             code,
             check_alarm,
+            scan_interval,
         )
 
     async def async_step_user(self, user_input=None):
@@ -91,6 +109,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_COUNTRY],
             user_input[CONF_CODE],
             user_input[CONF_CHECK_ALARM_PANEL],
+            user_input[CONF_SCAN_INTERVAL],
         )
 
     async def async_step_import(self, user_input):
@@ -101,4 +120,5 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_COUNTRY],
             user_input[CONF_CODE],
             user_input[CONF_CHECK_ALARM_PANEL],
+            user_input[CONF_SCAN_INTERVAL],
         )

@@ -72,7 +72,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Establish connection with MELCloud."""
     if DOMAIN not in config:
         return True
-
     hass.async_create_task(
         hass.config_entries.flow.async_init(
             DOMAIN,
@@ -83,6 +82,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 CONF_COUNTRY: config[DOMAIN][CONF_COUNTRY],
                 CONF_CODE: config[DOMAIN][CONF_CODE],
                 CONF_CHECK_ALARM_PANEL: config[DOMAIN][CONF_CHECK_ALARM_PANEL],
+                CONF_SCAN_INTERVAL: config[DOMAIN][CONF_SCAN_INTERVAL],
             },
         )
     )
