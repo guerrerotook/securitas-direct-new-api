@@ -16,7 +16,7 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP,
     Platform,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
@@ -71,6 +71,17 @@ CONFIG_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
+ATTR_INSTALATION_ID = "instalation_id"
+SERVICE_REFRESH_INSTALATION = "refresh_alarm_status"
+
+REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
+    {
+        vol.Required(
+            ATTR_INSTALATION_ID, description="Instalation number"
+        ): cv.positive_int
+    }
+)
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Establish connection with MELCloud."""
@@ -118,7 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for instalation in instalations:
         devices.append(SecuritasDirectDevice(instalation))
     hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
-
+    await hass.async_add_executor_job(setup_hass_services, hass)
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
     # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
     return True
@@ -133,6 +144,26 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
     return unload_ok
+
+
+def setup_hass_services(hass: HomeAssistant) -> None:
+    """Home Assistant services."""
+
+    async def async_change_setting(call: ServiceCall) -> None:
+        """Change an Abode system setting."""
+        instalation_id: int = call.data[ATTR_INSTALATION_ID]
+
+        client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
+        for instalation in client.installations:
+            if instalation.number == instalation_id:
+                await client.update_overview(instalation)
+
+    hass.services.register(
+        DOMAIN,
+        SERVICE_REFRESH_INSTALATION,
+        async_change_setting,
+        schema=REFRESH_ALARM_STATUS_SCHEMA,
+    )
 
 
 # def setup(hass: HomeAssistant, config):
