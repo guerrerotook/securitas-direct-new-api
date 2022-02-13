@@ -78,7 +78,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         config[CONF_CODE] = code
         config[CONF_CHECK_ALARM_PANEL] = check_alarm
         config[CONF_SCAN_INTERVAL] = scan_interval
-        securitas = SecuritasHub(config, async_get_clientsession(self.hass))
+        securitas = SecuritasHub(config, async_get_clientsession(self.hass), self.hass)
         succeed: bool = await securitas.login()
         if not succeed:
             raise Exception("error login")

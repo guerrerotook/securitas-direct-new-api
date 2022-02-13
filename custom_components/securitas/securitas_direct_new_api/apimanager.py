@@ -4,6 +4,7 @@ import json
 import logging
 
 from aiohttp import ClientSession, ClientResponse
+from numpy import number
 
 from .dataTypes import (
     AirQuality,
@@ -306,7 +307,7 @@ class ApiManager:
         return SStatus(raw_data["status"], raw_data["timestampUpdate"])
 
     async def check_alarm_status(
-        self, installation: Installation, reference_id: str
+        self, installation: Installation, reference_id: str, count: int
     ) -> CheckAlarmStatus:
         """Check status of the operation check alarm."""
         content = {
@@ -316,7 +317,7 @@ class ApiManager:
                 "panel": installation.panel,
                 "referenceId": reference_id,
                 "idService": "11",
-                "counter": 2,
+                "counter": count,
             },
             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
         }
@@ -429,7 +430,7 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        armType: ArmType,
+        arm_type: ArmType,
         counter: int,
         current_status: str,
     ) -> DisarmStatus:
@@ -437,7 +438,7 @@ class ApiManager:
         content = {
             "operationName": "DisarmStatus",
             "variables": {
-                "request": "DARM" + str(armType.value),
+                "request": "DARM" + str(arm_type.value),
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,

@@ -38,14 +38,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up MELCloud device sensors based on config_entry."""
-    config = dict()
-    config[CONF_USERNAME] = entry.data[CONF_USERNAME]
-    config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
-    config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
-    config[CONF_CODE] = entry.data[CONF_CODE]
-    config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
-    client.set_authentication_token(entry.data[CONF_TOKEN])
+    client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     sensors = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
         entry.entry_id

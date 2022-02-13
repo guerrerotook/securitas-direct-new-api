@@ -48,34 +48,15 @@ from .securitas_direct_new_api.dataTypes import (
     Installation,
 )
 
-# from securitas import SecuritasAPIClient
-
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=1200)
-
-# some reported by @furetto72@Italy
-SECURITAS_STATUS = {
-    STATE_ALARM_DISARMED: ["0", ("1", "32")],
-    STATE_ALARM_ARMED_HOME: ["P", ("311", "202")],
-    STATE_ALARM_ARMED_NIGHT: [("Q", "C"), ("46",)],
-    STATE_ALARM_ARMED_AWAY: [("1", "A"), ("2", "31")],
-    STATE_ALARM_ARMED_CUSTOM_BYPASS: ["3", ("204",)],
-    STATE_ALARM_TRIGGERED: ["???", ("13", "24")],
-}
+SCAN_INTERVAL = timedelta(seconds=60)
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up MELCloud device sensors based on config_entry."""
-    config = dict()
-    config[CONF_USERNAME] = entry.data[CONF_USERNAME]
-    config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
-    config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
-    config[CONF_CODE] = entry.data[CONF_CODE]
-    config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
-    client.set_authentication_token(entry.data[CONF_TOKEN])
+    client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     alarms = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
         entry.entry_id
@@ -111,11 +92,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._digits: int = digits
         self._changed_by = None
         self._device = installation.address
-        self.entity_id = f"securitas_direct.{installation.number}"
+        self._entity_id = f"securitas_direct.{installation.number}"
         self._attr_unique_id = f"securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message = ""
         self.installation = installation
+        self._attr_extra_state_attributes = {}
         self.client: SecuritasHub = client
 
         self._attr_device_info = DeviceInfo(
@@ -127,23 +109,26 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         )
         self.update_status_alarm(state)
 
-    def __force_state(self, state):
+    def __force_state(self, state: str):
         self._last_status = self._state
         self._state = state
-        self.hass.states.set(self.entity_id, state)
+        self.async_schedule_update_ha_state()
+        # self.hass.states.set(self.entity_id, state)
 
     async def get_arm_state(self):
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
+        count: int = 1
         sleep(1)
         alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
-            self.installation, reference_id
+            self.installation, reference_id, count
         )
         while alarm_status.status == "WAIT":
-            sleep(1)
+            sleep(2)
+            count = count + 1
             alarm_status: CheckAlarmStatus = (
                 await self.client.session.check_alarm_status(
-                    self.installation, reference_id
+                    self.installation, reference_id, count
                 )
             )
 
@@ -174,7 +159,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         count,
                         self._get_proto_status(),
                     )
-                self._state = STATE_ALARM_DISARMED
+                self._attr_extra_state_attributes["message"] = arm_status.message
+                self._attr_extra_state_attributes[
+                    "response_data"
+                ] = arm_status.protomResponseData
+                self._state = state
             else:
                 _LOGGER.error(response[1])
         else:
@@ -202,7 +191,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         count,
                         self._get_proto_status(),
                     )
-                self._state = STATE_ALARM_ARMED_AWAY
+                self._attr_extra_state_attributes["message"] = arm_status.message
+                self._attr_extra_state_attributes[
+                    "response_data"
+                ] = arm_status.protomResponseData
+                self._state = state
             else:
                 _LOGGER.error(response[1])
         self.schedule_update_ha_state()
@@ -252,6 +245,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Update alarm status, from last alarm setting register or EST."""
         if status is not None:
             self._message = status.message
+            self._attr_extra_state_attributes["message"] = status.message
+            self._attr_extra_state_attributes[
+                "response_data"
+            ] = status.protomResponseData
             # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
 
             if status.protomResponse == "D":
@@ -278,34 +275,34 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         )
         self.update_status_alarm(alarm_status)
 
-    def alarm_disarm(self, code=None):
+    async def async_alarm_disarm(self, code=None):
         """Send disarm command."""
         if (
             self.client.config.get(CONF_CODE, "") == ""
             or self.client.config.get(CONF_CODE, "") == code
         ):
             self.__force_state(STATE_ALARM_DISARMING)
-            self.set_arm_state("DARM1")
+            await self.set_arm_state("DARM1")
 
-    def alarm_arm_home(self, code=None):
+    async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
         self.__force_state(STATE_ALARM_ARMING)
-        self.set_arm_state("ARMDAY1")
+        await self.set_arm_state("ARMDAY1")
 
-    def alarm_arm_away(self, code=None):
+    async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
         self.__force_state(STATE_ALARM_ARMING)
-        self.set_arm_state("ARM1")
+        await self.set_arm_state("ARM1")
 
-    def alarm_arm_night(self, code=None):
+    async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
         self.__force_state(STATE_ALARM_ARMING)
-        self.set_arm_state("ARMNIGHT1")
+        await self.set_arm_state("ARMNIGHT1")
 
-    def alarm_arm_custom_bypass(self, code=None):
+    async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
         self.__force_state(STATE_ALARM_ARMING)
-        self.set_arm_state("PERI1")
+        await self.set_arm_state("PERI1")
 
     @property
     def supported_features(self) -> int:

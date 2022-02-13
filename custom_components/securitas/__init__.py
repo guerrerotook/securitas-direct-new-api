@@ -51,8 +51,12 @@ CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema(
             {
-                vol.Required(CONF_PASSWORD): cv.string,
-                vol.Required(CONF_USERNAME): cv.string,
+                vol.Required(
+                    CONF_PASSWORD, msg="Password", description="Password"
+                ): cv.string,
+                vol.Required(
+                    CONF_USERNAME, msg="Username", description="Username"
+                ): cv.string,
                 vol.Optional(CONF_COUNTRY, default="ES"): cv.string,
                 vol.Optional(CONF_ALARM, default=True): cv.boolean,
                 vol.Optional(CONF_CODE_DIGITS, default=4): cv.positive_int,
@@ -103,8 +107,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data[CONF_CODE]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass))
+    client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass), hass)
     client.set_authentication_token(entry.data[CONF_TOKEN])
+    hass.data[DOMAIN] = {}
+    hass.data[DOMAIN][SecuritasHub.__name__] = client
     instalations: list[
         SecuritasDirectDevice
     ] = await client.session.list_installations()
@@ -112,6 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for instalation in instalations:
         devices.append(SecuritasDirectDevice(instalation))
     hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
+
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
     # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
     return True
@@ -194,7 +201,7 @@ class SecuritasDirectDevice:
 class SecuritasHub:
     """A Securitas hub wrapper class."""
 
-    def __init__(self, domain_config, http_client: ClientSession):
+    def __init__(self, domain_config, http_client: ClientSession, hass: HomeAssistant):
         """Initialize the Securitas hub."""
         self.overview: CheckAlarmStatus = {}
         self.config = domain_config
@@ -202,6 +209,7 @@ class SecuritasHub:
         self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
         self.country: str = domain_config[CONF_COUNTRY].upper()
         self.lang: str = self.country.lower() if self.country != "UK" else "en"
+        self.hass: HomeAssistant = hass
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
@@ -254,14 +262,16 @@ class SecuritasHub:
             )
 
         reference_id: str = await self.session.check_alarm(installation)
-        sleep(1)
+        await self.hass.async_add_executor_job(sleep(1))
+        count: int = 1
         alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
-            installation, reference_id
+            installation, reference_id, count
         )
         if hasattr(alarm_status, "operationStatus"):
             while alarm_status.operationStatus == "WAIT":
-                sleep(1)
+                await self.hass.async_add_executor_job(sleep(1))
+                count = count + 1
                 alarm_status = await self.session.check_alarm_status(
-                    installation, reference_id
+                    installation, reference_id, count
                 )
         return alarm_status
