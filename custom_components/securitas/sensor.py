@@ -1,5 +1,6 @@
 """Securitas direct sentinel sensor."""
 from datetime import timedelta
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -9,51 +10,90 @@ from .securitas_direct_new_api.dataTypes import (
     Service,
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import PERCENTAGE, TEMP_CELSIUS
+from homeassistant.const import (
+    CONF_CODE,
+    CONF_PASSWORD,
+    CONF_TOKEN,
+    CONF_USERNAME,
+    PERCENTAGE,
+    TEMP_CELSIUS,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import CONF_ALARM, DOMAIN, HUB as hub
+from . import (
+    CONF_CHECK_ALARM_PANEL,
+    CONF_COUNTRY,
+    DOMAIN,
+    SENTINE_CONFORT,
+    SecuritasDirectDevice,
+    SecuritasHub,
+)
 
 SCAN_INTERVAL = timedelta(minutes=30)
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
-    """Set up the Securitas platform."""
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up MELCloud device sensors based on config_entry."""
+    client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     sensors = []
-    if int(hub.config.get(CONF_ALARM, 1)):
-        for item in hub.sentinel_services:
-            sentinel_data: Sentinel = hub.session.get_sentinel_data(
-                item.installation, item
-            )
-            sensors.append(SentinelTemperature(sentinel_data, item))
-            sensors.append(SentinelHumidity(sentinel_data, item))
+    securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
+        entry.entry_id
+    )
+    for device in securitas_devices:
+        services: list[Service] = await client.get_services(device.instalation)
+        for service in services:
+            if service.description == SENTINE_CONFORT:
+                sentinel_data: Sentinel = await client.session.get_sentinel_data(
+                    service.installation, service
+                )
+                sensors.append(
+                    SentinelTemperature(sentinel_data, service, client, device)
+                )
+                sensors.append(SentinelHumidity(sentinel_data, service, client, device))
 
-            air_quality: AirQuality = hub.session.get_air_quality_data(
-                item.installation, item
-            )
-            sensors.append(SentinelAirQuality(air_quality, sentinel_data, item))
-    add_entities(sensors)
+                air_quality: AirQuality = await client.session.get_air_quality_data(
+                    service.installation, service
+                )
+                sensors.append(
+                    SentinelAirQuality(
+                        air_quality, sentinel_data, service, client, device
+                    )
+                )
+    async_add_entities(sensors, True)
 
 
 class SentinelTemperature(SensorEntity):
     """Sentinel temperature sensor."""
 
-    def __init__(self, sentinel: Sentinel, service: Service) -> None:
+    def __init__(
+        self,
+        sentinel: Sentinel,
+        service: Service,
+        client: SecuritasHub,
+        parent_device: SecuritasDirectDevice,
+    ) -> None:
         """Init the component."""
         self._update_sensor_data(sentinel)
         self._attr_unique_id = sentinel.alias + "_temperature_" + str(service.id)
         self._attr_name = "Temperature " + sentinel.alias.lower().capitalize()
         self._sentinel: Sentinel = sentinel
         self._service: Service = service
+        self._client: SecuritasHub = client
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Temperature Sensor",
             model=service.id_service,
             name=service.description,
+            via_device=parent_device,
         )
 
-    def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
-        sentinel_data: Sentinel = hub.session.get_sentinel_data(
+        sentinel_data: Sentinel = await self._client.session.get_sentinel_data(
             self._service.installation, self._service
         )
         self._update_sensor_data(sentinel_data)
@@ -67,17 +107,31 @@ class SentinelTemperature(SensorEntity):
 class SentinelHumidity(SensorEntity):
     """Sentinel Humidity sensor."""
 
-    def __init__(self, sentinel: Sentinel, service: Service) -> None:
+    def __init__(
+        self,
+        sentinel: Sentinel,
+        service: Service,
+        client: SecuritasHub,
+        parent_device: SecuritasDirectDevice,
+    ) -> None:
         """Init the component."""
         self._update_sensor_data(sentinel)
         self._attr_unique_id = sentinel.alias + "_humidity_" + str(service.id)
         self._attr_name = "Humidity " + sentinel.alias.lower().capitalize()
         self._sentinel: Sentinel = sentinel
         self._service: Service = service
+        self._client: SecuritasHub = client
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            manufacturer="Humidity Sensor",
+            model=service.id_service,
+            name=service.description,
+            via_device=parent_device,
+        )
 
-    def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
-        sentinel_data: Sentinel = hub.session.get_sentinel_data(
+        sentinel_data: Sentinel = await self._client.session.get_sentinel_data(
             self._service.installation, self._service
         )
         self._update_sensor_data(sentinel_data)
@@ -92,7 +146,12 @@ class SentinelAirQuality(SensorEntity):
     """Sentinel Humidity sensor."""
 
     def __init__(
-        self, air_quality: AirQuality, sentinel: Sentinel, service: Service
+        self,
+        air_quality: AirQuality,
+        sentinel: Sentinel,
+        service: Service,
+        client: SecuritasHub,
+        parent_device: SecuritasDirectDevice,
     ) -> None:
         """Init the component."""
         self._update_sensor_data(air_quality)
@@ -100,10 +159,18 @@ class SentinelAirQuality(SensorEntity):
         self._attr_name = "Air Quality " + sentinel.alias.lower().capitalize()
         self._air_quality: AirQuality = air_quality
         self._service: Service = service
+        self._client: SecuritasHub = client
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            manufacturer="Air Quality Sensor",
+            model=service.id_service,
+            name=service.description,
+            via_device=parent_device,
+        )
 
-    def update(self):
+    async def async_update(self):
         """Update the status of the alarm based on the configuration."""
-        air_quality: Sentinel = hub.session.get_air_quality_data(
+        air_quality: Sentinel = await self._client.session.get_air_quality_data(
             self._service.installation, self._service
         )
         self._update_sensor_data(air_quality)
