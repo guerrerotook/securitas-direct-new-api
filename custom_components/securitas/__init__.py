@@ -3,12 +3,15 @@ from datetime import timedelta
 from gettext import install
 import logging
 from time import sleep
+from typing import cast
 from aiohttp import ClientSession
 
 import voluptuous as vol
 
 from homeassistant.const import (
     CONF_CODE,
+    CONF_DESCRIPTION,
+    CONF_NAME,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
@@ -21,8 +24,11 @@ from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.helpers.service import async_set_service_schema
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.loader import async_get_integration
+from homeassistant.util.yaml.loader import load_yaml
 
 from .securitas_direct_new_api.apimanager import ApiManager
 from .securitas_direct_new_api.dataTypes import (
@@ -129,7 +135,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for instalation in instalations:
         devices.append(SecuritasDirectDevice(instalation))
     hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
-    await hass.async_add_executor_job(setup_hass_services, hass)
+    await setup_hass_services(hass)
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
     # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
     return True
@@ -146,7 +152,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     return unload_ok
 
 
-def setup_hass_services(hass: HomeAssistant) -> None:
+async def setup_hass_services(hass: HomeAssistant) -> None:
     """Home Assistant services."""
 
     async def async_change_setting(call: ServiceCall) -> None:
@@ -164,6 +170,18 @@ def setup_hass_services(hass: HomeAssistant) -> None:
         async_change_setting,
         schema=REFRESH_ALARM_STATUS_SCHEMA,
     )
+
+    integration = await async_get_integration(hass, DOMAIN)
+    services_yaml = integration.file_path / "services.yaml"
+    services_dict = cast(
+        dict, await hass.async_add_executor_job(load_yaml, str(services_yaml))
+    )
+
+    service_desc = {
+        CONF_NAME: f"Send a notification via ",
+        CONF_DESCRIPTION: f"Sends a notification message using the integration.",
+    }
+    async_set_service_schema(hass, DOMAIN, SERVICE_REFRESH_INSTALATION, services_dict)
 
 
 # def setup(hass: HomeAssistant, config):
