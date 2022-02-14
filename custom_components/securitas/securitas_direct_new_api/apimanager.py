@@ -93,7 +93,9 @@ class ApiManager:
                         if error_item["message"] == "Invalid token: Expired":
                             self.authentication_token = None
                             _LOGGER.info("Login is expired. Login again")
-                            return await self.login()[0]
+                            succeed: tuple[bool, str] = await self.login()
+                            _LOGGER.debug("Re-loging result " + succeed[0])
+                            return succeed[0]
                         else:
                             _LOGGER.error(error_item["message"])
         return False
