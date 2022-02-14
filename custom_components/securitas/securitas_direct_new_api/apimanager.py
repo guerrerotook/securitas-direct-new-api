@@ -64,7 +64,7 @@ class ApiManager:
             ClientResponse
             response_text: str = await response.text()
         _LOGGER.debug(response_text)
-        error_login: bool = self._check_errros(response_text)
+        error_login: bool = await self._check_errros(response_text)
         if error_login:
             return self._execute_request(content)
 
@@ -84,7 +84,7 @@ class ApiManager:
             + str(current.microsecond)
         )
 
-    def _check_errros(self, value: str) -> bool:
+    async def _check_errros(self, value: str) -> bool:
         if value is not None:
             response = json.loads(value)
             if "errors" in response:
@@ -93,7 +93,7 @@ class ApiManager:
                         if error_item["message"] == "Invalid token: Expired":
                             self.authentication_token = None
                             _LOGGER.info("Login is expired. Login again")
-                            return self.login()[0]
+                            return await self.login()[0]
                         else:
                             _LOGGER.error(error_item["message"])
         return False
