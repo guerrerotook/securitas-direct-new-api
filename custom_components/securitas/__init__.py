@@ -1,9 +1,8 @@
 """Support for Securitas Direct alarms."""
 from datetime import timedelta
-from gettext import install
 import logging
-from time import sleep
 from aiohttp import ClientSession
+import asyncio
 
 import voluptuous as vol
 
@@ -13,11 +12,9 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
     CONF_USERNAME,
-    EVENT_HOMEASSISTANT_STOP,
     Platform,
 )
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import discovery
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
@@ -166,23 +163,6 @@ def setup_hass_services(hass: HomeAssistant) -> None:
     )
 
 
-# def setup(hass: HomeAssistant, config):
-#     """Set up the Securitas component."""
-#     global HUB
-#     HUB = SecuritasHub(config[DOMAIN])
-#     HUB.update_overview = Throttle(config[DOMAIN][CONF_SCAN_INTERVAL])(
-#         HUB.update_overview
-#     )
-#     if not HUB.login():
-#         return False
-#     hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: HUB.logout())
-#     # for Installation in HUB.Installations:
-#     #    HUB.update_overview(Installation)
-#     for component in ("alarm_control_panel", "sensor"):
-#         discovery.load_platform(hass, component, DOMAIN, {}, config)
-#     return True
-
-
 class SecuritasDirectDevice:
     """MELCloud Device instance."""
 
@@ -279,9 +259,11 @@ class SecuritasHub:
             return False
         return True
 
-    async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
+    async def update_overview(
+        self, installation: Installation, force_update: bool = False
+    ) -> CheckAlarmStatus:
         """Update the overview."""
-        if self.check_alarm is not True:
+        if force_update is not True and self.check_alarm is not True:
             status: SStatus = await self.session.check_general_status(installation)
             return CheckAlarmStatus(
                 status.status,
@@ -293,14 +275,14 @@ class SecuritasHub:
             )
 
         reference_id: str = await self.session.check_alarm(installation)
-        await self.hass.async_add_executor_job(sleep(1))
+        await asyncio.sleep(1)
         count: int = 1
         alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
             installation, reference_id, count
         )
-        if hasattr(alarm_status, "operationStatus"):
-            while alarm_status.operationStatus == "WAIT":
-                await self.hass.async_add_executor_job(sleep(1))
+        if hasattr(alarm_status, "operation_status"):
+            while alarm_status.operation_status == "WAIT":
+                await asyncio.sleep(1)
                 count = count + 1
                 alarm_status = await self.session.check_alarm_status(
                     installation, reference_id, count

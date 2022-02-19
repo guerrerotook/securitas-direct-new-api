@@ -1,9 +1,9 @@
 """Support for Securitas Direct (AKA Verisure EU) alarm control panels."""
 
+import asyncio
 import datetime
 from datetime import timedelta
 import logging
-from time import sleep
 
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.components.alarm_control_panel.const import (
@@ -14,9 +14,6 @@ from homeassistant.components.alarm_control_panel.const import (
 )
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     CONF_CODE,
-    CONF_SCAN_INTERVAL,
-    CONF_TOKEN,
-    CONF_USERNAME,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
@@ -24,19 +21,14 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     STATE_ALARM_ARMING,
     STATE_ALARM_DISARMED,
     STATE_ALARM_DISARMING,
-    STATE_ALARM_TRIGGERED,
 )
 
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.const import CONF_PASSWORD
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from . import (
-    CONF_CHECK_ALARM_PANEL,
     CONF_CODE_DIGITS,
-    CONF_COUNTRY,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -71,6 +63,7 @@ async def async_setup_entry(
                 state=current_state,
                 digits=client.config.get(CONF_CODE_DIGITS),
                 client=client,
+                hass=hass,
             )
         )
     async_add_entities(alarms, True)
@@ -85,6 +78,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         state: CheckAlarmStatus,
         digits: int,
         client: SecuritasHub,
+        hass: HomeAssistant,
     ) -> None:
         """Initialize the Securitas alarm panel."""
         self._state: str = STATE_ALARM_DISARMED
@@ -99,6 +93,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.installation = installation
         self._attr_extra_state_attributes = {}
         self.client: SecuritasHub = client
+        self._force_update: bool = False
+        self.hass: HomeAssistant = hass
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
@@ -119,12 +115,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
         count: int = 1
-        sleep(1)
+        await asyncio.sleep(1)
         alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
             self.installation, reference_id, count
         )
         while alarm_status.status == "WAIT":
-            sleep(2)
+            await asyncio.sleep(1)
             count = count + 1
             alarm_status: CheckAlarmStatus = (
                 await self.client.session.check_alarm_status(
@@ -140,7 +136,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
             if response[0]:
                 # check arming status
-                sleep(1)
+                await asyncio.sleep(1)
                 count = 1
                 arm_status: ArmStatus = await self.client.session.check_disarm_status(
                     self.installation,
@@ -149,9 +145,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     count,
                     self._get_proto_status(),
                 )
-                while arm_status.status == "WAIT":
+                while arm_status.operation_status == "WAIT":
                     count = count + 1
-                    sleep(1)
+                    await asyncio.sleep(1)
                     arm_status = await self.client.session.check_disarm_status(
                         self.installation,
                         response[1],
@@ -164,6 +160,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     "response_data"
                 ] = arm_status.protomResponseData
                 self._state = state
+                self._force_update = True
             else:
                 _LOGGER.error(response[1])
         else:
@@ -172,7 +169,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
             if response[0]:
                 # check arming status
-                sleep(1)
+                await asyncio.sleep(1)
                 count = 1
                 arm_status: ArmStatus = await self.client.session.check_arm_status(
                     self.installation,
@@ -181,13 +178,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     count,
                     self._get_proto_status(),
                 )
-                while arm_status.status == "WAIT":
+                while arm_status.operation_status == "WAIT":
                     count = count + 1
-                    sleep(1)
+                    await asyncio.sleep(1)
                     arm_status = await self.client.session.check_arm_status(
                         self.installation,
                         response[1],
-                        ArmType.TOTAL,
+                        state,
                         count,
                         self._get_proto_status(),
                     )
@@ -196,6 +193,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     "response_data"
                 ] = arm_status.protomResponseData
                 self._state = state
+                self._force_update = True
             else:
                 _LOGGER.error(response[1])
         self.schedule_update_ha_state()
@@ -243,7 +241,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def update_status_alarm(self, status: CheckAlarmStatus = None):
         """Update alarm status, from last alarm setting register or EST."""
-        if status is not None:
+        if status is not None and hasattr(status, "message"):
             self._message = status.message
             self._attr_extra_state_attributes["message"] = status.message
             self._attr_extra_state_attributes[
@@ -271,8 +269,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def async_update(self):
         """Update the status of the alarm based on the configuration."""
         alarm_status: CheckAlarmStatus = await self.client.update_overview(
-            self.installation
+            self.installation, self._force_update
         )
+        self._force_update = False
         self.update_status_alarm(alarm_status)
 
     async def async_alarm_disarm(self, code=None):
