@@ -130,6 +130,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def set_arm_state(self, state, attempts=3):
         """Send set arm state command."""
+        arm_status: ArmStatus = {}
         if state == "DARM1":
             response = await self.client.session.disarm_alarm(
                 self.installation, self._get_proto_status()
@@ -138,7 +139,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 # check arming status
                 await asyncio.sleep(1)
                 count = 1
-                arm_status: ArmStatus = await self.client.session.check_disarm_status(
+                arm_status = await self.client.session.check_disarm_status(
                     self.installation,
                     response[1],
                     ArmType.TOTAL,
@@ -159,7 +160,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._attr_extra_state_attributes[
                     "response_data"
                 ] = arm_status.protomResponseData
-                self._state = state
                 self._force_update = True
             else:
                 _LOGGER.error(response[1])
@@ -171,7 +171,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 # check arming status
                 await asyncio.sleep(1)
                 count = 1
-                arm_status: ArmStatus = await self.client.session.check_arm_status(
+                arm_status = await self.client.session.check_arm_status(
                     self.installation,
                     response[1],
                     state,
@@ -192,11 +192,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._attr_extra_state_attributes[
                     "response_data"
                 ] = arm_status.protomResponseData
-                self._state = state
                 self._force_update = True
             else:
                 _LOGGER.error(response[1])
-        self.schedule_update_ha_state()
+        self.update_status_alarm(
+            CheckAlarmStatus(
+                arm_status.operation_status,
+                arm_status.message,
+                arm_status.status,
+                arm_status.InstallationNumer,
+                arm_status.protomResponse,
+                arm_status.protomResponseData,
+            )
+        )
+        # self.schedule_update_ha_state()
         # hub.update_overview(no_throttle=True)
 
     @property
@@ -268,11 +277,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_update(self):
         """Update the status of the alarm based on the configuration."""
-        alarm_status: CheckAlarmStatus = await self.client.update_overview(
-            self.installation, self._force_update
-        )
-        self._force_update = False
-        self.update_status_alarm(alarm_status)
+        if not self._force_update:
+            alarm_status: CheckAlarmStatus = await self.client.update_overview(
+                self.installation, self._force_update
+            )
+            self.update_status_alarm(alarm_status)
+        else:
+            self._force_update = False
 
     async def async_alarm_disarm(self, code=None):
         """Send disarm command."""

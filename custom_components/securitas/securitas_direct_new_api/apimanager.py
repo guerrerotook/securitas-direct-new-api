@@ -66,7 +66,7 @@ class ApiManager:
         _LOGGER.debug(response_text)
         error_login: bool = await self._check_errros(response_text)
         if error_login:
-            return self._execute_request(content)
+            return await self._execute_request(content)
 
         return response
 
