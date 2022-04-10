@@ -252,7 +252,7 @@ class ApiManager:
                 "numinst": str(installation.number),
                 "zone": str(service.attributes.attributes[0].value),
             },
-            "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    zone\n    alias\n    zonePrevious\n    aliasPrevious\n    zoneNext\n    aliasNext\n    moreDdis\n    status {\n      airQuality\n      airQualityMsg\n      humidity\n      temperature\n    }\n    forecast {\n      city\n      currentTemp\n      currentHum\n      description\n      forecastImg\n      day1 {\n        forecastImg\n        maxTemp\n        minTemp\n        value\n      }\n      day2 {\n        forecastImg\n        maxTemp\n        minTemp\n        value\n      }\n      day3 {\n        forecastImg\n        maxTemp\n        minTemp\n        value\n      }\n      day4 {\n        forecastImg\n        maxTemp\n        minTemp\n        value\n      }\n      day5 {\n        forecastImg\n        maxTemp\n        minTemp\n        value\n      }\n    }\n  }\n}\n",
+            "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
         }
         response: ClientResponse = await self._execute_request(content)
         result_json = json.loads(await response.text())
@@ -260,12 +260,12 @@ class ApiManager:
             error_message = result_json["errors"][0]["message"]
             return error_message
 
-        raw_data = result_json["data"]["xSAllConfort"][0]["status"]
+        raw_data = result_json["data"]["xSAllConfort"][0]["ddi"]
         return Sentinel(
-            result_json["data"]["xSAllConfort"][0]["alias"],
-            raw_data["airQualityMsg"],
-            int(raw_data["humidity"]),
-            int(raw_data["temperature"]),
+            raw_data["alias"],
+            raw_data["status"]["airQualityMsg"],
+            int(raw_data["status"]["humidity"]),
+            int(raw_data["status"]["temperature"]),
         )
 
     async def get_air_quality_data(
