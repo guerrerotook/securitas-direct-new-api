@@ -45,7 +45,13 @@ class ApiManager:
         self.http_client = http_client
 
     async def _execute_request(self, content) -> ClientResponse:
-        headers = None
+
+        app: str = json.dumps({"appVersion": "n/a", "origin": "web"})
+        headers = {
+            "app": app,
+            "User-Agent": "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.124 Safari/537.36 Edg/102.0.1245.41",
+        }
+
         if self.authentication_token is not None:
             authorization_value = {
                 "user": self.username,
@@ -55,7 +61,7 @@ class ApiManager:
                 "callby": "OWP_10",
                 "hash": self.authentication_token,
             }
-            headers = {"auth": json.dumps(authorization_value)}
+            headers["auth"] = json.dumps(authorization_value)
 
         _LOGGER.debug(content)
         async with self.http_client.post(
@@ -112,7 +118,7 @@ class ApiManager:
     async def login(self) -> tuple[bool, str]:
         """Login."""
         content = {
-            "operationName": "LoginToken",
+            "operationName": "mkLoginToken",
             "variables": {
                 "id": self._generate_id(),
                 "country": self.country,
@@ -121,7 +127,7 @@ class ApiManager:
                 "user": self.username,
                 "password": self.password,
             },
-            "query": "mutation LoginToken($user: String!, $password: String!, $id: String!, $country: String!, $lang: String!, $callby: String!) {\n  xSLoginToken(user: $user, password: $password, id: $id, country: $country, lang: $lang, callby: $callby) {\n    res\n    msg\n    hash\n    lang\n    legals\n    mainUser\n    changePassword\n  }\n}\n",
+            "query": "mutation mkLoginToken($user: String!, $password: String!, $id: String!, $country: String!, $lang: String!, $callby: String!) {\n  xSLoginToken(user: $user, password: $password, id: $id, country: $country, lang: $lang, callby: $callby) {\n    res\n    msg\n    hash\n    lang\n    legals\n    mainUser\n    changePassword\n    needDeviceAuthorization\n  }\n}\n",
         }
         response: ClientResponse = await self._execute_request(content)
         result_json = json.loads(await response.text())
@@ -135,8 +141,8 @@ class ApiManager:
     async def list_installations(self) -> list[Installation]:
         """list securitas direct installations."""
         content = {
-            "operationName": "Installationlist",
-            "query": "query Installationlist {\n  xSInstallations {\n    installations {\n      numinst\n      alias\n      panel\n      type\n      name\n      surname\n      address\n      city\n      postcode\n      province\n      email\n      phone\n    }\n  }\n}\n",
+            "operationName": "mkInstallationList",
+            "query": "query mkInstallationList {\n  xSInstallations {\n    installations {\n      numinst\n      alias\n      panel\n      type\n      name\n      surname\n      address\n      city\n      postcode\n      province\n      email\n      phone\n    }\n  }\n}\n",
         }
         response: ClientResponse = await self._execute_request(content)
         result_json = json.loads(await response.text())
@@ -260,12 +266,12 @@ class ApiManager:
             error_message = result_json["errors"][0]["message"]
             return error_message
 
-        raw_data = result_json["data"]["xSAllConfort"][0]["ddi"]
+        raw_data = result_json["data"]["xSAllConfort"][0]["ddi"]["status"]
         return Sentinel(
-            raw_data["alias"],
-            raw_data["status"]["airQualityMsg"],
-            int(raw_data["status"]["humidity"]),
-            int(raw_data["status"]["temperature"]),
+            result_json["data"]["xSAllConfort"][0]["ddi"]["alias"],
+            raw_data["airQualityMsg"],
+            int(raw_data["humidity"]),
+            int(raw_data["temperature"]),
         )
 
     async def get_air_quality_data(
@@ -278,7 +284,7 @@ class ApiManager:
                 "numinst": str(installation.number),
                 "zone": str(service.attributes.attributes[0].value),
             },
-            "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}\n",
+            "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
         }
         response: ClientResponse = await self._execute_request(content)
         result_json = json.loads(await response.text())
