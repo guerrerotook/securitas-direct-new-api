@@ -1,10 +1,6 @@
 {
     "name": "Securitas Direct Alarm",
     "content_in_root": false,
-    "domains": [
-      "sensor",
-      "alarm_control_panel"
-    ],
     "iot_class": "cloud_poll",
     "homeassistant": "2021.9.0"
 }
