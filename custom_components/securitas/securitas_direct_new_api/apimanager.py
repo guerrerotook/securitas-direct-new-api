@@ -2,6 +2,7 @@
 from datetime import datetime
 import json
 import logging
+from uuid import uuid4
 
 from aiohttp import ClientSession, ClientResponse
 from numpy import number
@@ -15,6 +16,7 @@ from .dataTypes import (
     CheckAlarmStatus,
     DisarmStatus,
     Installation,
+    OtpPhone,
     Sentinel,
     Service,
     SStatus,
@@ -42,6 +44,8 @@ class ApiManager:
         self.language = language
         self.api_url = ApiDomains().get_url(language=language)
         self.authentication_token: str = None
+        self.authentication_otp_challenge: bool = False
+        self.authentication_otp_challenge_value: tuple[str, int] = None
         self.http_client = http_client
 
     async def _execute_request(self, content) -> ClientResponse:
@@ -62,6 +66,25 @@ class ApiManager:
                 "hash": self.authentication_token,
             }
             headers["auth"] = json.dumps(authorization_value)
+
+        if self.authentication_otp_challenge:
+            authorization_value = {
+                "user": self.username,
+                "id": self._generate_id(),
+                "country": self.country,
+                "lang": self.language,
+                "callby": "OWP_10",
+                "hash": None,
+            }
+            headers["auth"] = json.dumps(authorization_value)
+
+        if self.authentication_otp_challenge_value is not None:
+            authorization_value = {
+                "token": self.authentication_otp_challenge_value[1],
+                "type": "OTP",
+                "otpHash": self.authentication_otp_challenge_value[0],
+            }
+            headers["security"] = json.dumps(authorization_value)
 
         _LOGGER.debug(content)
         async with self.http_client.post(
@@ -115,6 +138,50 @@ class ApiManager:
         }
         await self._execute_request(content)
 
+    async def validate_device(
+        self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
+    ) -> tuple[str, list[OtpPhone]]:
+        """Validate the device."""
+        content = {
+            "operationName": "mkValidateDevice",
+            "variables": {},
+            "query": "mutation mkValidateDevice($idDevice: String, $idDeviceIndigitall: String, $uuid: String, $deviceName: String, $deviceBrand: String, $deviceOsVersion: String, $deviceVersion: String) {\n  xSValidateDevice(idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, uuid: $uuid, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, deviceVersion: $deviceVersion) {\n    res\n    msg\n    hash\n    refreshToken\n    legals\n  }\n}\n",
+        }
+        self.authentication_otp_challenge = True
+        if otp_succeed:
+            self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
+        response: ClientResponse = await self._execute_request(content)
+        result_json = json.loads(await response.text())
+        if "errors" in result_json:
+            data = result_json["errors"][0]["data"]
+            otp_hash = data["auth-otp-hash"]
+            phones: list[OtpPhone] = []
+            for item in data["auth-phones"]:
+                phones.append(OtpPhone(item["id"], item["phone"]))
+            return (otp_hash, phones)
+        else:
+            self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
+
+    async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
+        """Send the OTP device challange."""
+        content = {
+            "operationName": "mkSendOTP",
+            "variables": {
+                "recordId": device_id,
+                "otpHash": auth_otp_hash,
+            },
+            "query": "mutation mkSendOTP($recordId: Int!, $otpHash: String!) {\n  xSSendOtp(recordId: $recordId, otpHash: $otpHash) {\n    res\n    msg\n  }\n}\n",
+        }
+        self.authentication_otp_challenge = True
+        response: ClientResponse = await self._execute_request(content)
+        result_json = json.loads(await response.text())
+        if "errors" in result_json:
+            error_message = result_json["errors"][0]["message"]
+            print(error_message)
+            return []
+
+        return result_json["data"]["xSSendOtp"]["res"]
+
     async def login(self) -> tuple[bool, str]:
         """Login."""
         content = {
@@ -134,6 +201,9 @@ class ApiManager:
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
             return (False, error_message)
+
+        if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
+            return (False, "2FA")
 
         self.authentication_token = result_json["data"]["xSLoginToken"]["hash"]
         return (True, "None")

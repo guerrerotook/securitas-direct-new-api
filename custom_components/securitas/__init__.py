@@ -8,6 +8,7 @@ import voluptuous as vol
 
 from homeassistant.const import (
     CONF_CODE,
+    CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
@@ -25,6 +26,7 @@ from .securitas_direct_new_api.apimanager import ApiManager
 from .securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
     Installation,
+    OtpPhone,
     SStatus,
     Service,
 )
@@ -115,21 +117,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data[CONF_CODE]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
+    config[CONF_SCAN_INTERVAL] = 60
     client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass), hass)
-    client.set_authentication_token(entry.data[CONF_TOKEN])
-    hass.data[DOMAIN] = {}
-    hass.data[DOMAIN][SecuritasHub.__name__] = client
-    instalations: list[
-        SecuritasDirectDevice
-    ] = await client.session.list_installations()
-    devices: list[SecuritasDirectDevice] = []
-    for instalation in instalations:
-        devices.append(SecuritasDirectDevice(instalation))
-    hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
-    await hass.async_add_executor_job(setup_hass_services, hass)
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
-    # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
-    return True
+    result = await client.login()
+    if result == "2FA":
+        msg = (
+            "Securitas Direct need a 2FA SMS code." "Please login again with your phone"
+        )
+        _notify_error(hass, "2fa_error", "Securitas Direct", msg)
+        config[CONF_ERROR] = "2FA"
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_IMPORT}, data=config
+            )
+        )
+        return False
+    else:
+        hass.data[DOMAIN] = {}
+        hass.data[DOMAIN][SecuritasHub.__name__] = client
+        instalations: list[
+            SecuritasDirectDevice
+        ] = await client.session.list_installations()
+        devices: list[SecuritasDirectDevice] = []
+        for instalation in instalations:
+            devices.append(SecuritasDirectDevice(instalation))
+        hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
+        await hass.async_add_executor_job(setup_hass_services, hass)
+        hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+        # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
+        return True
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -160,6 +176,21 @@ def setup_hass_services(hass: HomeAssistant) -> None:
         SERVICE_REFRESH_INSTALATION,
         async_change_setting,
         schema=REFRESH_ALARM_STATUS_SCHEMA,
+    )
+
+
+def _notify_error(hass, notification_id, title, message) -> None:
+    """Notify user with persistent notification"""
+    hass.async_create_task(
+        hass.services.async_call(
+            domain="persistent_notification",
+            service="create",
+            service_data={
+                "title": title,
+                "message": message,
+                "notification_id": f"{DOMAIN}.{notification_id}",
+            },
+        )
     )
 
 
@@ -233,11 +264,30 @@ class SecuritasHub:
     async def login(self):
         """Login to Securitas."""
         succeed: tuple[bool, str] = await self.session.login()
+        if not succeed[0] and succeed[1] == "2FA":
+            # 2fa for securitas
+            _LOGGER.info("2FA needed for the device")
+            return succeed[1]
+
         _LOGGER.debug("Log in Securitas: %s", succeed[0])
         if not succeed[0]:
             _LOGGER.error("Could not log in to Securitas: %s", succeed[1])
             return False
         return True
+
+    async def validate_device(self) -> tuple[str, list[OtpPhone]]:
+        """Validate the current device."""
+        return await self.session.validate_device(False, None, None)
+
+    async def send_sms_code(
+        self, auth_otp_hash: str, sms_code: str
+    ) -> tuple[str, list[OtpPhone]]:
+        """Validate the current device."""
+        return await self.session.validate_device(True, auth_otp_hash, sms_code)
+
+    async def sent_opt(self, challange: str, phone_index: int):
+        """Calls for the SMS challange."""
+        return await self.session.send_otp(phone_index, challange)
 
     async def get_services(self, instalation: Installation) -> list[Service]:
         """Gets the list of services from the instalation."""

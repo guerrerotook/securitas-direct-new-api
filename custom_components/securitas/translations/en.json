@@ -1,0 +1,22 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Username",
+                    "password": "Password"
+                },
+                "description": "Login into securitas direct.",
+                "title": "Login"
+            },
+            "2fa": {
+                "data": {
+                    "username": "Username",
+                    "password": "Password"
+                },
+                "description": "Please select the Phone to send the 2FA code",
+                "title": "Securitas Direct 2FA"
+            }
+        }
+    }
+}
