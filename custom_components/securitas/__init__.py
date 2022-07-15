@@ -110,7 +110,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Establish connection with MELCloud."""
+    """Establish connection with Securitas Direct."""
     config = dict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
@@ -282,8 +282,12 @@ class SecuritasHub:
     async def send_sms_code(
         self, auth_otp_hash: str, sms_code: str
     ) -> tuple[str, list[OtpPhone]]:
-        """Validate the current device."""
+        """Send the SMS."""
         return await self.session.validate_device(True, auth_otp_hash, sms_code)
+
+    async def refresh_token(self) -> tuple[str, list[OtpPhone]]:
+        """Refresh the token."""
+        return await self.session.refresh_token()
 
     async def sent_opt(self, challange: str, phone_index: int):
         """Calls for the SMS challange."""

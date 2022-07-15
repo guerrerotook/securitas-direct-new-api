@@ -47,6 +47,7 @@ class ApiManager:
         self.authentication_otp_challenge: bool = False
         self.authentication_otp_challenge_value: tuple[str, int] = None
         self.http_client = http_client
+        self.refresh_token_value: str = None
 
     async def _execute_request(self, content) -> ClientResponse:
 
@@ -160,7 +161,33 @@ class ApiManager:
                 phones.append(OtpPhone(item["id"], item["phone"]))
             return (otp_hash, phones)
         else:
+            self.refresh_token_value = result_json["data"]["xSValidateDevice"][
+                "refreshToken"
+            ]
             self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
+
+    async def refresh_token(self) -> bool:
+        """Send the OTP device challange."""
+        content = {
+            "operationName": "RefreshLogin",
+            "variables": {
+                "refreshToken": self.refresh_token_value,
+                "id": uuid4(),
+                "country": self.country,
+                "lang": self.language,
+                "callby": "OWP_10",
+            },
+            "query": "mutation RefreshLogin($refreshToken: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) {\n  xSRefreshLogin(refreshToken: $refreshToken, id: $id, country: $country, lang: $lang, callby: $callby, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) {\n    __typename\n    res\n    msg\n    hash\n    refreshToken\n    legals\n    changePassword\n    needDeviceAuthorization\n    mainUser\n  }\n}",
+        }
+        self.authentication_otp_challenge = True
+        response: ClientResponse = await self._execute_request(content)
+        result_json = json.loads(await response.text())
+        if "errors" in result_json:
+            error_message = result_json["errors"][0]["message"]
+            print(error_message)
+            return []
+
+        return result_json["data"]["xSSendOtp"]["res"]
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
         """Send the OTP device challange."""

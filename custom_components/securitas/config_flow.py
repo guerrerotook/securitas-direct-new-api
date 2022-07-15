@@ -120,6 +120,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_otp_challange(self, user_input=None):
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
+        await self.securitas.refresh_token()
+        succeed = await self._create_client(
+            self.config[CONF_USERNAME],
+            self.config[CONF_PASSWORD],
+            self.config[CONF_COUNTRY],
+            user_input[CONF_CODE],
+            user_input[CONF_CHECK_ALARM_PANEL],
+            user_input[CONF_SCAN_INTERVAL],
+        )
+
         return await self._create_entry(
             self.config[CONF_USERNAME],
             self.securitas.get_authentication_token(),
