@@ -48,13 +48,23 @@ class ApiManager:
         self.authentication_otp_challenge_value: tuple[str, int] = None
         self.http_client = http_client
         self.refresh_token_value: str = None
+        # device specific configuration for the API
+        self.device_brand = "samsung"
+        self.device_name = "SM-S901U"  # Samsung Galaxy S22
+        self.device_os_version = 12
+        self.device_resolution = ""
+        self.device_type = ""
+        self.device_version = "10.61.0"
 
-    async def _execute_request(self, content) -> ClientResponse:
+    async def _execute_request(self, content, operation: str) -> ClientResponse:
 
-        app: str = json.dumps({"appVersion": "n/a", "origin": "web"})
+        app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
         headers = {
             "app": app,
             "User-Agent": "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.124 Safari/537.36 Edg/102.0.1245.41",
+            "X-APOLLO-OPERATION-ID": "",
+            "X-APOLLO-OPERATION-NAME": operation,
+            "extension": '{"mode":"full"}',
         }
 
         if self.authentication_token is not None:
