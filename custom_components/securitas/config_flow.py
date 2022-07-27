@@ -16,10 +16,12 @@ from homeassistant.helpers.selector import selector
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE,
+    CONF_DEVICE_ID,
     CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
+    CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
 from homeassistant.data_entry_flow import FlowResult
@@ -29,7 +31,13 @@ from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
-from . import CONF_CHECK_ALARM_PANEL, CONF_COUNTRY, DOMAIN, SecuritasHub
+from . import (
+    CONF_CHECK_ALARM_PANEL,
+    CONF_COUNTRY,
+    CONF_DEVICE_INDIGITALL,
+    DOMAIN,
+    SecuritasHub,
+)
 
 
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -85,6 +93,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         code: str,
         check_alarm: bool,
         scan_interval: timedelta,
+        device_id: str,
+        uuid: str,
+        id_device_indigitall: str,
     ):
         """Create client."""
         if password is None and password is None:
@@ -98,6 +109,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_CODE] = code
         self.config[CONF_CHECK_ALARM_PANEL] = check_alarm
         self.config[CONF_SCAN_INTERVAL] = scan_interval
+        self.config[CONF_DEVICE_ID] = device_id
+        self.config[CONF_UNIQUE_ID] = uuid
+        self.config[CONF_DEVICE_INDIGITALL] = id_device_indigitall
         self.securitas = SecuritasHub(
             self.config, async_get_clientsession(self.hass), self.hass
         )
@@ -128,6 +142,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_CODE],
             user_input[CONF_CHECK_ALARM_PANEL],
             user_input[CONF_SCAN_INTERVAL],
+            user_input[CONF_DEVICE_ID],
+            user_input[CONF_UNIQUE_ID],
+            user_input[CONF_DEVICE_INDIGITALL],
         )
 
         return await self._create_entry(
@@ -138,6 +155,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.config[CONF_CODE],
             self.config[CONF_CHECK_ALARM_PANEL],
             self.config[CONF_SCAN_INTERVAL],
+            self.config[CONF_DEVICE_ID],
+            self.config[CONF_UNIQUE_ID],
+            self.config[CONF_DEVICE_INDIGITALL],
         )
 
     async def async_step_user(self, user_input=None):
@@ -159,6 +179,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data[CONF_CODE],
                 initial_data[CONF_CHECK_ALARM_PANEL],
                 initial_data[CONF_SCAN_INTERVAL],
+                initial_data[CONF_DEVICE_ID],
+                initial_data[CONF_UNIQUE_ID],
+                initial_data[CONF_DEVICE_INDIGITALL],
             )
             self.opt_challange: tuple[
                 str, list[OtpPhone]
@@ -179,6 +202,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_CODE],
             user_input[CONF_CHECK_ALARM_PANEL],
             user_input[CONF_SCAN_INTERVAL],
+            user_input[CONF_DEVICE_ID],
+            user_input[CONF_UNIQUE_ID],
+            user_input[CONF_DEVICE_INDIGITALL],
         )
 
         return await self._create_entry(
@@ -212,4 +238,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_CODE],
             user_input[CONF_CHECK_ALARM_PANEL],
             user_input[CONF_SCAN_INTERVAL],
+            user_input[CONF_DEVICE_ID],
+            user_input[CONF_UNIQUE_ID],
+            user_input[CONF_DEVICE_INDIGITALL],
         )

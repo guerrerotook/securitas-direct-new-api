@@ -1,6 +1,9 @@
 """Support for Securitas Direct alarms."""
+from collections import OrderedDict
 from datetime import timedelta
 import logging
+import secrets
+from uuid import uuid4
 from aiohttp import ClientSession
 import asyncio
 
@@ -8,10 +11,12 @@ import voluptuous as vol
 
 from homeassistant.const import (
     CONF_CODE,
+    CONF_DEVICE_ID,
     CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
+    CONF_UNIQUE_ID,
     CONF_USERNAME,
     Platform,
 )
@@ -37,6 +42,7 @@ CONF_ALARM = "alarm"
 CONF_CODE_DIGITS = "code_digits"
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
+CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 
 DOMAIN = "securitas"
 SENTINE_CONFORT = "SENTINEL CONFORT"
@@ -82,30 +88,60 @@ REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
 )
 
 
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+def generate_uuid() -> str:
+    """Create a device id."""
+    return str(uuid4()).replace("-", "")[0:16]
+
+
+def generate_device_id(lang: str) -> str:
+    """Create a device identifier for the API."""
+    return (
+        secrets.token_urlsafe(22)
+        + ":"
+        + secrets.token_urlsafe(26)
+        + "_"
+        + secrets.token_urlsafe(53)
+        + "-"
+        + lang
+        + "_"
+        + secrets.token_urlsafe(27)
+        + "_"
+        + secrets.token_urlsafe(28)
+    )
+
+
+async def async_setup(hass: HomeAssistant, configType: ConfigType) -> bool:
     """Establish connection with MELCloud."""
-    if DOMAIN not in config:
+    if DOMAIN not in configType:
         return True
+
+    config: OrderedDict = configType[DOMAIN]
+    if not CONF_DEVICE_ID in config:
+        config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
+
+    if not CONF_UNIQUE_ID in config:
+        config[CONF_UNIQUE_ID] = generate_uuid()
+
+    if not CONF_DEVICE_INDIGITALL in config:
+        config[CONF_DEVICE_INDIGITALL] = str(uuid4())
+
     hass.async_create_task(
         hass.config_entries.flow.async_init(
             DOMAIN,
             context={"source": SOURCE_IMPORT},
             data={
-                CONF_USERNAME: config[DOMAIN][CONF_USERNAME],
-                CONF_PASSWORD: config[DOMAIN][CONF_PASSWORD],
-                CONF_COUNTRY: config[DOMAIN][CONF_COUNTRY],
-                CONF_CODE: config[DOMAIN][CONF_CODE],
-                CONF_CHECK_ALARM_PANEL: config[DOMAIN][CONF_CHECK_ALARM_PANEL],
-                CONF_SCAN_INTERVAL: config[DOMAIN][CONF_SCAN_INTERVAL],
+                CONF_USERNAME: config[CONF_USERNAME],
+                CONF_PASSWORD: config[CONF_PASSWORD],
+                CONF_COUNTRY: config[CONF_COUNTRY],
+                CONF_CODE: config[CONF_CODE],
+                CONF_CHECK_ALARM_PANEL: config[CONF_CHECK_ALARM_PANEL],
+                CONF_SCAN_INTERVAL: config[CONF_SCAN_INTERVAL],
+                CONF_DEVICE_ID: config[CONF_DEVICE_ID],
+                CONF_UNIQUE_ID: config[CONF_UNIQUE_ID],
+                CONF_DEVICE_INDIGITALL: config[CONF_DEVICE_INDIGITALL],
             },
         )
     )
-
-    # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: HUB.logout())
-    # # for Installation in HUB.Installations:
-    # #    HUB.update_overview(Installation)
-    # for component in ("alarm_control_panel", "sensor"):
-    #     discovery.load_platform(hass, component, DOMAIN, {}, config)
     return True
 
 
@@ -243,7 +279,12 @@ class SecuritasDirectDevice:
 class SecuritasHub:
     """A Securitas hub wrapper class."""
 
-    def __init__(self, domain_config, http_client: ClientSession, hass: HomeAssistant):
+    def __init__(
+        self,
+        domain_config: OrderedDict,
+        http_client: ClientSession,
+        hass: HomeAssistant,
+    ):
         """Initialize the Securitas hub."""
         self.overview: CheckAlarmStatus = {}
         self.config = domain_config
@@ -255,9 +296,12 @@ class SecuritasHub:
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
-            country=self.country,
-            language=self.lang,
-            http_client=http_client,
+            self.country,
+            self.lang,
+            http_client,
+            domain_config[CONF_DEVICE_ID],
+            domain_config[CONF_UNIQUE_ID],
+            domain_config[CONF_DEVICE_INDIGITALL],
         )
         self.installations: list[Installation] = []
 
