@@ -60,6 +60,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         code: str,
         check_alarm: bool,
         scan_interval: timedelta,
+        device_id: str,
+        uuid: str,
+        id_device_indigitall: str,
     ):
         """Register new entry."""
         await self.async_set_unique_id(username)
@@ -71,6 +74,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_COUNTRY: country,
                 CONF_CODE: code,
                 CONF_CHECK_ALARM_PANEL: check_alarm,
+                CONF_DEVICE_ID: device_id,
+                CONF_UNIQUE_ID: uuid,
+                CONF_DEVICE_INDIGITALL: id_device_indigitall,
             }
         )
         return self.async_create_entry(
@@ -82,10 +88,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_COUNTRY: country,
                 CONF_CODE: code,
                 CONF_CHECK_ALARM_PANEL: check_alarm,
+                CONF_DEVICE_ID: device_id,
+                CONF_UNIQUE_ID: uuid,
+                CONF_DEVICE_INDIGITALL: id_device_indigitall,
             },
         )
 
-    async def _create_client(
+    def _create_client(
         self,
         username: str,
         password: str,
@@ -96,7 +105,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
-    ):
+    ) -> SecuritasHub:
         """Create client."""
         if password is None and password is None:
             raise ValueError(
@@ -115,11 +124,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.securitas = SecuritasHub(
             self.config, async_get_clientsession(self.hass), self.hass
         )
-        succeed: bool = await self.securitas.login()
-        if succeed == "2FA":
-            return None
-        else:
-            return self.securitas
+
+        return self.securitas
 
     async def async_step_phone_list(self, user_input=None):
         phone_index: int = -1
@@ -133,21 +139,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_otp_challange(self, user_input=None):
+        """Last step of the OTP challange."""
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
-        await self.securitas.refresh_token()
-        succeed = await self._create_client(
-            self.config[CONF_USERNAME],
-            self.config[CONF_PASSWORD],
-            self.config[CONF_COUNTRY],
-            user_input[CONF_CODE],
-            user_input[CONF_CHECK_ALARM_PANEL],
-            user_input[CONF_SCAN_INTERVAL],
-            user_input[CONF_DEVICE_ID],
-            user_input[CONF_UNIQUE_ID],
-            user_input[CONF_DEVICE_INDIGITALL],
-        )
+        #        await self.securitas.validate_device()
+        result = await self.securitas.login()
+        # await self.securitas.refresh_token()
 
-        return await self._create_entry(
+        await self._create_entry(
             self.config[CONF_USERNAME],
             self.securitas.get_authentication_token(),
             self.config[CONF_PASSWORD],
@@ -160,6 +158,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.config[CONF_DEVICE_INDIGITALL],
         )
 
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_USERNAME): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+        )
+
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
         if user_input is None and self.init_data is None:
@@ -170,9 +178,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
             )
 
-        initial_data: dict = self.init_data
-        if initial_data.get(CONF_ERROR) and initial_data[CONF_ERROR] == "2FA":
-            await self._create_client(
+        initial_data: OrderedDict = self.init_data
+        if self.securitas is None:
+            self.securitas = self._create_client(
                 initial_data[CONF_USERNAME],
                 initial_data[CONF_PASSWORD],
                 initial_data[CONF_COUNTRY],
@@ -183,38 +191,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data[CONF_UNIQUE_ID],
                 initial_data[CONF_DEVICE_INDIGITALL],
             )
-            self.opt_challange: tuple[
-                str, list[OtpPhone]
-            ] = await self.securitas.validate_device()
-            phones: list[str] = []
-            for phone_item in self.opt_challange[1]:
-                phones.append(phone_item.phone)
-            data_schema = {}
-            data_schema["phones"] = selector({"select": {"options": phones}})
-            return self.async_show_form(
-                step_id="phone_list", data_schema=vol.Schema(data_schema)
-            )
-
-        succeed = await self._create_client(
-            user_input[CONF_USERNAME],
-            user_input[CONF_PASSWORD],
-            user_input[CONF_COUNTRY],
-            user_input[CONF_CODE],
-            user_input[CONF_CHECK_ALARM_PANEL],
-            user_input[CONF_SCAN_INTERVAL],
-            user_input[CONF_DEVICE_ID],
-            user_input[CONF_UNIQUE_ID],
-            user_input[CONF_DEVICE_INDIGITALL],
-        )
-
-        return await self._create_entry(
-            self.config[CONF_USERNAME],
-            self.securitas.get_authentication_token(),
-            self.config[CONF_PASSWORD],
-            self.config[CONF_COUNTRY],
-            self.config[CONF_CODE],
-            self.config[CONF_CHECK_ALARM_PANEL],
-            self.config[CONF_SCAN_INTERVAL],
+        self.opt_challange: tuple[
+            str, list[OtpPhone]
+        ] = await self.securitas.validate_device()
+        phones: list[str] = []
+        for phone_item in self.opt_challange[1]:
+            phones.append(phone_item.phone)
+        data_schema = {}
+        data_schema["phones"] = selector({"select": {"options": phones}})
+        return self.async_show_form(
+            step_id="phone_list", data_schema=vol.Schema(data_schema)
         )
 
     async def async_step_import(self, user_input: dict):
@@ -231,7 +217,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                         }
                     ),
                 )
-        return await self._create_client(
+        result = self._create_client(
             user_input[CONF_USERNAME],
             user_input[CONF_PASSWORD],
             user_input[CONF_COUNTRY],
@@ -242,3 +228,17 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_UNIQUE_ID],
             user_input[CONF_DEVICE_INDIGITALL],
         )
+
+        succeed = await result.login()
+        if succeed == "2FA":
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required(CONF_USERNAME): str,
+                        vol.Required(CONF_PASSWORD): str,
+                    }
+                ),
+            )
+        else:
+            return result

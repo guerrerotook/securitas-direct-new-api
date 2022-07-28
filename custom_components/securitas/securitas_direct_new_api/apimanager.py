@@ -93,7 +93,8 @@ class ApiManager:
                 "country": self.country,
                 "lang": self.language,
                 "callby": "OWP_10",
-                "hash": None,
+                "hash": "",
+                "refreshToken": "",
             }
             headers["auth"] = json.dumps(authorization_value)
 
@@ -106,6 +107,7 @@ class ApiManager:
             headers["security"] = json.dumps(authorization_value)
 
         _LOGGER.debug(content)
+        _LOGGER.debug(headers)
         async with self.http_client.post(
             self.api_url, headers=headers, json=content
         ) as response:

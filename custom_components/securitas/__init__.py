@@ -110,12 +110,7 @@ def generate_device_id(lang: str) -> str:
     )
 
 
-async def async_setup(hass: HomeAssistant, configType: ConfigType) -> bool:
-    """Establish connection with MELCloud."""
-    if DOMAIN not in configType:
-        return True
-
-    config: OrderedDict = configType[DOMAIN]
+def add_device_information(config: OrderedDict) -> OrderedDict:
     if not CONF_DEVICE_ID in config:
         config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
 
@@ -125,6 +120,16 @@ async def async_setup(hass: HomeAssistant, configType: ConfigType) -> bool:
     if not CONF_DEVICE_INDIGITALL in config:
         config[CONF_DEVICE_INDIGITALL] = str(uuid4())
 
+    return config
+
+
+async def async_setup(hass: HomeAssistant, config_type: ConfigType) -> bool:
+    """Establish connection with MELCloud."""
+    if DOMAIN not in config_type:
+        return True
+
+    config: OrderedDict = config_type[DOMAIN]
+    config = add_device_information(config)
     hass.async_create_task(
         hass.config_entries.flow.async_init(
             DOMAIN,
@@ -147,13 +152,14 @@ async def async_setup(hass: HomeAssistant, configType: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Establish connection with Securitas Direct."""
-    config = dict()
+    config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data[CONF_CODE]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     config[CONF_SCAN_INTERVAL] = 60
+    config = add_device_information(config)
     client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass), hass)
     result = await client.login()
     if result == "2FA":
