@@ -159,7 +159,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_CODE] = entry.data[CONF_CODE]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     config[CONF_SCAN_INTERVAL] = 60
-    config = add_device_information(config)
+    config[CONF_DEVICE_ID] = entry.data[CONF_DEVICE_ID]
+    config[CONF_UNIQUE_ID] = entry.data[CONF_UNIQUE_ID]
+    config[CONF_DEVICE_INDIGITALL] = entry.data[CONF_DEVICE_INDIGITALL]
     client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass), hass)
     result = await client.login()
     if result == "2FA":

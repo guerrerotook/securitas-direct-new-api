@@ -24,7 +24,7 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.data_entry_flow import FlowResult
+from . import SecuritasDirectDevice
 
 CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
@@ -36,6 +36,7 @@ from . import (
     CONF_COUNTRY,
     CONF_DEVICE_INDIGITALL,
     DOMAIN,
+    PLATFORMS,
     SecuritasHub,
 )
 
@@ -66,19 +67,23 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ):
         """Register new entry."""
         await self.async_set_unique_id(username)
-        self._abort_if_unique_id_configured(
-            {
-                CONF_USERNAME: username,
-                CONF_TOKEN: token,
-                CONF_PASSWORD: password,
-                CONF_COUNTRY: country,
-                CONF_CODE: code,
-                CONF_CHECK_ALARM_PANEL: check_alarm,
-                CONF_DEVICE_ID: device_id,
-                CONF_UNIQUE_ID: uuid,
-                CONF_DEVICE_INDIGITALL: id_device_indigitall,
-            }
-        )
+        try:
+            self._abort_if_unique_id_configured(
+                {
+                    CONF_USERNAME: username,
+                    CONF_TOKEN: token,
+                    CONF_PASSWORD: password,
+                    CONF_COUNTRY: country,
+                    CONF_CODE: code,
+                    CONF_CHECK_ALARM_PANEL: check_alarm,
+                    CONF_DEVICE_ID: device_id,
+                    CONF_UNIQUE_ID: uuid,
+                    CONF_DEVICE_INDIGITALL: id_device_indigitall,
+                }
+            )
+        except Exception:
+            return True
+
         return self.async_create_entry(
             title=username,
             data={
@@ -128,6 +133,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         return self.securitas
 
     async def async_step_phone_list(self, user_input=None):
+        """Show the list of phones for the OTP challange."""
         phone_index: int = -1
         for phone_item in self.opt_challange[1]:
             if phone_item.phone == user_input["phones"]:
@@ -141,10 +147,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_otp_challange(self, user_input=None):
         """Last step of the OTP challange."""
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
-        #        await self.securitas.validate_device()
-        result = await self.securitas.login()
-        # await self.securitas.refresh_token()
-
+        await self.securitas.login()
         await self._create_entry(
             self.config[CONF_USERNAME],
             self.securitas.get_authentication_token(),
@@ -158,15 +161,21 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.config[CONF_DEVICE_INDIGITALL],
         )
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_USERNAME): str,
-                    vol.Required(CONF_PASSWORD): str,
-                }
-            ),
+        config_entry: config_entries.ConfigEntry = (
+            self.hass.config_entries.async_get_entry(self.unique_id)
         )
+        self.hass.data[DOMAIN] = {}
+        self.hass.data[DOMAIN][SecuritasHub.__name__] = self.securitas
+        instalations: list[
+            SecuritasDirectDevice
+        ] = await self.securitas.session.list_installations()
+        devices: list[SecuritasDirectDevice] = []
+        for instalation in instalations:
+            devices.append(SecuritasDirectDevice(instalation))
+        self.hass.data.setdefault(DOMAIN, {}).update({config_entry.entry_id: devices})
+        # await self.hass.async_add_executor_job(setup_hass_services, self.hass)
+        self.hass.config_entries.async_setup_platforms(config_entry, PLATFORMS)
+        return True
 
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""

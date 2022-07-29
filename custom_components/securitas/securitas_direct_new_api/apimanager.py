@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import logging
 import secrets
+from typing import Union
 from uuid import uuid4
 
 from aiohttp import ClientSession, ClientResponse
@@ -161,7 +162,7 @@ class ApiManager:
 
     async def validate_device(
         self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
-    ) -> tuple[str, list[OtpPhone]]:
+    ) -> Union[tuple[str, list[OtpPhone]], bool]:
         """Validate the device."""
         content = {
             "operationName": "mkValidateDevice",
@@ -184,6 +185,8 @@ class ApiManager:
             content, "mkValidateDevice"
         )
         result_json = json.loads(await response.text())
+        self.authentication_otp_challenge = False
+        self.authentication_otp_challenge_value = None
         if "errors" in result_json:
             data = result_json["errors"][0]["data"]
             otp_hash = data["auth-otp-hash"]
@@ -192,10 +195,11 @@ class ApiManager:
                 phones.append(OtpPhone(item["id"], item["phone"]))
             return (otp_hash, phones)
         else:
-            self.refresh_token_value = result_json["data"]["xSValidateDevice"][
-                "refreshToken"
-            ]
-            self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
+            # self.refresh_token_value = result_json["data"]["xSValidateDevice"][
+            #     "refreshToken"
+            # ]
+            # self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
+            return True
 
     async def refresh_token(self) -> bool:
         """Send the OTP device challange."""
@@ -217,7 +221,7 @@ class ApiManager:
             error_message = result_json["errors"][0]["message"]
             print(error_message)
             return []
-
+        self.authentication_otp_challenge = False
         return result_json["data"]["xSSendOtp"]["res"]
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
@@ -237,7 +241,7 @@ class ApiManager:
             error_message = result_json["errors"][0]["message"]
             print(error_message)
             return []
-
+        self.authentication_otp_challenge = False
         return result_json["data"]["xSSendOtp"]["res"]
 
     async def login(self) -> tuple[bool, str]:
