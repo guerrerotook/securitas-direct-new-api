@@ -106,14 +106,24 @@ class ApiManager:
                 "otpHash": self.authentication_otp_challenge_value[0],
             }
             headers["security"] = json.dumps(authorization_value)
-
+        _LOGGER.debug(
+            "Making request with device_id "
+            + self.device_id
+            + ", uuid "
+            + self.uuid
+            + " and idDeviceIndigitall "
+            + self.id_device_indigitall
+        )
+        _LOGGER.debug("--------------Content---------------")
         _LOGGER.debug(content)
+        _LOGGER.debug("--------------Headers---------------")
         _LOGGER.debug(headers)
         async with self.http_client.post(
             self.api_url, headers=headers, json=content
         ) as response:
             ClientResponse
             response_text: str = await response.text()
+            _LOGGER.debug("--------------Response--------------")
         _LOGGER.debug(response_text)
         error_login: bool = await self._check_errros(response_text)
         if error_login:
@@ -198,7 +208,7 @@ class ApiManager:
             # self.refresh_token_value = result_json["data"]["xSValidateDevice"][
             #     "refreshToken"
             # ]
-            # self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
+            self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
             return True
 
     async def refresh_token(self) -> bool:
@@ -249,12 +259,12 @@ class ApiManager:
         content = {
             "operationName": "mkLoginToken",
             "variables": {
+                "user": self.username,
+                "password": self.password,
                 "id": self._generate_id(),
                 "country": self.country,
                 "callby": "OWP_10",
                 "lang": self.language,
-                "user": self.username,
-                "password": self.password,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
                 "deviceType": self.device_type,

@@ -147,8 +147,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_otp_challange(self, user_input=None):
         """Last step of the OTP challange."""
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
-        await self.securitas.login()
-        await self._create_entry(
+        # await self.securitas.login()
+        result = await self._create_entry(
             self.config[CONF_USERNAME],
             self.securitas.get_authentication_token(),
             self.config[CONF_PASSWORD],
@@ -172,10 +172,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         devices: list[SecuritasDirectDevice] = []
         for instalation in instalations:
             devices.append(SecuritasDirectDevice(instalation))
-        self.hass.data.setdefault(DOMAIN, {}).update({config_entry.entry_id: devices})
+        # self.hass.data.setdefault(DOMAIN, {}).update({config_entry.entry_id: devices})
         # await self.hass.async_add_executor_job(setup_hass_services, self.hass)
-        self.hass.config_entries.async_setup_platforms(config_entry, PLATFORMS)
-        return True
+        # self.hass.config_entries.async_setup_platforms(self.config, PLATFORMS)
+        return result
 
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
