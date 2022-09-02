@@ -82,7 +82,7 @@ class ApiManager:
                 "id": self._generate_id(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWP_10",
+                "callby": "OWA_10",
                 "hash": self.authentication_token,
             }
             headers["auth"] = json.dumps(authorization_value)
@@ -93,7 +93,7 @@ class ApiManager:
                 "id": self._generate_id(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWP_10",
+                "callby": "OWA_10",
                 "hash": "",
                 "refreshToken": "",
             }
@@ -134,7 +134,7 @@ class ApiManager:
     def _generate_id(self) -> str:
         current: datetime = datetime.now()
         return (
-            "OWP_______________"
+            "OWA_______________"
             + self.username
             + "_______________"
             + str(current.year)
@@ -220,7 +220,7 @@ class ApiManager:
                 "id": uuid4(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWP_10",
+                "callby": "OWA_10",
             },
             "query": "mutation RefreshLogin($refreshToken: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) {\n  xSRefreshLogin(refreshToken: $refreshToken, id: $id, country: $country, lang: $lang, callby: $callby, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) {\n    __typename\n    res\n    msg\n    hash\n    refreshToken\n    legals\n    changePassword\n    needDeviceAuthorization\n    mainUser\n  }\n}",
         }
@@ -263,7 +263,7 @@ class ApiManager:
                 "password": self.password,
                 "id": self._generate_id(),
                 "country": self.country,
-                "callby": "OWP_10",
+                "callby": "OWA_10",
                 "lang": self.language,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
