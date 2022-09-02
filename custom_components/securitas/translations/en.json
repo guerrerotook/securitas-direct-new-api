@@ -4,16 +4,18 @@
             "user": {
                 "data": {
                     "username": "Username",
-                    "password": "Password"
+                    "password": "Password",
+                    "country": "Country Code",
+                    "alarm": "Alarm",
+                    "code_digits": "Code Digits",
+                    "code": "Code",
+                    "check_alarm_panel": "Check alarm panel",
+                    "scan_interval": "Scan interval"
                 },
                 "description": "Login into securitas direct.",
                 "title": "Login"
             },
-            "2fa": {
-                "data": {
-                    "username": "Username",
-                    "password": "Password"
-                },
+            "phone_list": {
                 "description": "Please select the Phone to send the 2FA code",
                 "title": "Securitas Direct 2FA"
             }
