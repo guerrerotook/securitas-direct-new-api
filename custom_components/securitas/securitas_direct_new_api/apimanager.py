@@ -113,10 +113,10 @@ class ApiManager:
             + " and idDeviceIndigitall "
             + self.id_device_indigitall
         )
-        _LOGGER.debug("--------------Content---------------")
-        _LOGGER.debug(content)
-        _LOGGER.debug("--------------Headers---------------")
-        _LOGGER.debug(headers)
+        # _LOGGER.debug("--------------Content---------------")
+        # _LOGGER.debug(content)
+        # _LOGGER.debug("--------------Headers---------------")
+        # _LOGGER.debug(headers)
         async with self.http_client.post(
             self.api_url, headers=headers, json=content
         ) as response:
