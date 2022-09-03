@@ -7,7 +7,6 @@ from typing import Union
 from uuid import uuid4
 
 from aiohttp import ClientSession, ClientResponse
-from numpy import number
 
 from .dataTypes import (
     AirQuality,

@@ -3,11 +3,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from datetime import timedelta
 import logging
-from sqlalchemy import true
 
 import voluptuous as vol
-from homeassistant.components.http.view import HomeAssistantView
-from homeassistant.helpers.entity import generate_entity_id
 from .securitas_direct_new_api.dataTypes import (
     OtpPhone,
 )
@@ -16,7 +13,6 @@ from homeassistant.helpers.selector import selector
 
 from homeassistant.const import (
     CONF_CODE,
-    CONF_DEVICE,
     CONF_DEVICE_ID,
     CONF_ERROR,
     CONF_PASSWORD,
@@ -25,7 +21,7 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from . import CONFIG_SCHEMA, SecuritasDirectDevice, generate_uuid
+from . import CONFIG_SCHEMA, PLATFORMS, SecuritasDirectDevice, generate_uuid
 
 CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
@@ -37,7 +33,6 @@ from . import (
     CONF_COUNTRY,
     CONF_DEVICE_INDIGITALL,
     DOMAIN,
-    PLATFORMS,
     SecuritasHub,
 )
 
@@ -148,7 +143,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_otp_challange(self, user_input=None):
         """Last step of the OTP challange."""
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
-        # await self.securitas.login()
+        await self.securitas.login()
         result = await self._create_entry(
             self.config[CONF_USERNAME],
             self.securitas.get_authentication_token(),
@@ -175,7 +170,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             devices.append(SecuritasDirectDevice(instalation))
         # self.hass.data.setdefault(DOMAIN, {}).update({config_entry.entry_id: devices})
         # await self.hass.async_add_executor_job(setup_hass_services, self.hass)
-        # self.hass.config_entries.async_setup_platforms(self.config, PLATFORMS)
+        self.hass.config_entries.async_setup_platforms(self.config, PLATFORMS)
         return result
 
     async def async_step_user(self, user_input=None):

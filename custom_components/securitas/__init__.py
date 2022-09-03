@@ -39,7 +39,6 @@ from .securitas_direct_new_api.dataTypes import (
 _LOGGER = logging.getLogger(__name__)
 
 CONF_ALARM = "alarm"
-CONF_CODE_DIGITS = "code_digits"
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
@@ -64,8 +63,7 @@ CONFIG_SCHEMA = vol.Schema(
                 ): str,
                 vol.Optional(CONF_COUNTRY, default="ES"): str,
                 vol.Optional(CONF_ALARM, default=True): bool,
-                vol.Optional(CONF_CODE_DIGITS, default=4): int,
-                vol.Optional(CONF_CODE, default=""): str,
+                vol.Optional(CONF_CODE, default=4): int,
                 vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
             }
