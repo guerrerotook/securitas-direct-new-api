@@ -47,8 +47,8 @@ CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 DOMAIN = "securitas"
 SENTINE_CONFORT = "SENTINEL CONFORT"
 
-MIN_SCAN_INTERVAL = timedelta(seconds=20)
-DEFAULT_SCAN_INTERVAL = timedelta(seconds=40)
+MIN_SCAN_INTERVAL = 20
+DEFAULT_SCAN_INTERVAL = 40
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
 HUB = None
 
@@ -57,19 +57,17 @@ CONFIG_SCHEMA = vol.Schema(
         DOMAIN: vol.Schema(
             {
                 vol.Required(
-                    CONF_PASSWORD, msg="Password", description="Password"
-                ): cv.string,
+                    CONF_USERNAME,
+                ): str,
                 vol.Required(
-                    CONF_USERNAME, msg="Username", description="Username"
-                ): cv.string,
-                vol.Optional(CONF_COUNTRY, default="ES"): cv.string,
-                vol.Optional(CONF_ALARM, default=True): cv.boolean,
-                vol.Optional(CONF_CODE_DIGITS, default=4): cv.positive_int,
-                vol.Optional(CONF_CODE, default=""): cv.string,
-                vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): cv.boolean,
-                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): (
-                    vol.All(cv.time_period, vol.Clamp(min=MIN_SCAN_INTERVAL))
-                ),
+                    CONF_PASSWORD,
+                ): str,
+                vol.Optional(CONF_COUNTRY, default="ES"): str,
+                vol.Optional(CONF_ALARM, default=True): bool,
+                vol.Optional(CONF_CODE_DIGITS, default=4): int,
+                vol.Optional(CONF_CODE, default=""): str,
+                vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): bool,
+                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
             }
         )
     },

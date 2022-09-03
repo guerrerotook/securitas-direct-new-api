@@ -7,7 +7,8 @@ from sqlalchemy import true
 
 import voluptuous as vol
 from homeassistant.components.http.view import HomeAssistantView
-from homeassistant.components.securitas.securitas_direct_new_api.dataTypes import (
+from homeassistant.helpers.entity import generate_entity_id
+from .securitas_direct_new_api.dataTypes import (
     OtpPhone,
 )
 
@@ -24,7 +25,7 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from . import SecuritasDirectDevice
+from . import CONFIG_SCHEMA, SecuritasDirectDevice, generate_uuid
 
 CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
@@ -182,13 +183,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is None and self.init_data is None:
             return self.async_show_form(
                 step_id="user",
-                data_schema=vol.Schema(
-                    {vol.Required(CONF_USERNAME): str, vol.Required(CONF_PASSWORD): str}
-                ),
+                data_schema=CONFIG_SCHEMA.schema[DOMAIN],
             )
 
-        initial_data: OrderedDict = self.init_data
+        initial_data: OrderedDict = user_input
         if self.securitas is None:
+            uuid = generate_uuid()
             self.securitas = self._create_client(
                 initial_data[CONF_USERNAME],
                 initial_data[CONF_PASSWORD],
@@ -196,9 +196,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data[CONF_CODE],
                 initial_data[CONF_CHECK_ALARM_PANEL],
                 initial_data[CONF_SCAN_INTERVAL],
-                initial_data[CONF_DEVICE_ID],
-                initial_data[CONF_UNIQUE_ID],
-                initial_data[CONF_DEVICE_INDIGITALL],
+                initial_data.get(CONF_DEVICE_ID, uuid),
+                initial_data.get(CONF_UNIQUE_ID, uuid),
+                initial_data.get(CONF_DEVICE_INDIGITALL, ""),
             )
         self.opt_challange: tuple[
             str, list[OtpPhone]
