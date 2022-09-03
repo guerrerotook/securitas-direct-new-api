@@ -139,3 +139,11 @@ class AirQuality:
 
     value: int
     message: str
+
+
+@dataclass
+class OtpPhone:
+    """Otp Phone item."""
+
+    id: int
+    phone: str
