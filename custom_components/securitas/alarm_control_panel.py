@@ -28,7 +28,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import (
-    CONF_CODE_DIGITS,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -62,7 +61,7 @@ async def async_setup_entry(
             SecuritasAlarm(
                 devices.instalation,
                 state=current_state,
-                digits=client.config.get(CONF_CODE_DIGITS),
+                digits=client.config.get(CONF_CODE),
                 client=client,
                 hass=hass,
             )
