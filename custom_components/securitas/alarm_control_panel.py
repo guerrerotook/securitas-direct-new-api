@@ -127,6 +127,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
             )
 
+    def _notify_error(self, notification_id, title: str, message: str) -> None:
+        """Notify user with persistent notification"""
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                domain="persistent_notification",
+                service="create",
+                service_data={
+                    "title": title,
+                    "message": message,
+                    "notification_id": f"{DOMAIN}.{notification_id}",
+                },
+            )
+        )
+
     async def set_arm_state(self, state, attempts=3):
         """Send set arm state command."""
         if state == "DARM1":
@@ -188,6 +202,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     count,
                     self._get_proto_status(),
                 )
+                if isinstance(arm_status, str):
+                    self._notify_error("arming_error", "Error arming", arm_status)
                 while arm_status.operation_status == "WAIT":
                     count = count + 1
                     await asyncio.sleep(1)

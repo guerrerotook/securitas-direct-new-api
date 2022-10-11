@@ -533,7 +533,7 @@ class ApiManager:
         mode: str,
         counter: int,
         current_status: str,
-    ) -> ArmStatus:
+    ) -> Union[ArmStatus, str]:
         """Check progress of the alarm."""
         content = {
             "operationName": "ArmStatus",
@@ -552,6 +552,9 @@ class ApiManager:
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
             return error_message
+
+        if result_json["data"]["xSArmStatus"]["res"] == "ERROR":
+            return result_json["data"]["xSArmStatus"]["msg"]
 
         raw_data = result_json["data"]["xSArmStatus"]
         return ArmStatus(
