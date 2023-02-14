@@ -183,7 +183,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 devices.append(SecuritasDirectDevice(instalation))
             hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
             await hass.async_add_executor_job(setup_hass_services, hass)
-            hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+            hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
             return True
     else:
