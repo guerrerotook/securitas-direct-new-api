@@ -12,6 +12,7 @@ class ApiDomains:
             "es": "https://customers.securitasdirect.es/owa-api/graphql",
             "gb": "https://customers.verisure.co.uk/owa-api/graphql",
             "br": "https://customers.verisure.com.br/owa-api/graphql",
+            "fr": "https://customers.securitasdirect.fr/owa-api/graphql",
         }
 
     def get_url(self, language: str) -> str:
