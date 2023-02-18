@@ -8,6 +8,7 @@ from aiohttp import ClientSession
 import asyncio
 
 import voluptuous as vol
+from homeassistant import config_entries
 
 from homeassistant.const import (
     CONF_CODE,
@@ -42,6 +43,7 @@ CONF_ALARM = "alarm"
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
+CONF_ENTRY_ID = "entry_id"
 
 DOMAIN = "securitas"
 SENTINE_CONFORT = "SENTINEL CONFORT"
@@ -137,6 +139,7 @@ async def async_setup(hass: HomeAssistant, config_type: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Establish connection with Securitas Direct."""
     need_sign_in: bool = False
+
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
@@ -144,6 +147,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_CODE] = entry.data[CONF_CODE]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     config[CONF_SCAN_INTERVAL] = 60
+    config[CONF_ENTRY_ID] = entry.entry_id
     if CONF_DEVICE_ID in entry.data:
         config[CONF_DEVICE_ID] = entry.data[CONF_DEVICE_ID]
     else:
@@ -175,6 +179,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             hass.data[DOMAIN] = {}
             hass.data[DOMAIN][SecuritasHub.__name__] = client
+            hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
             instalations: list[
                 SecuritasDirectDevice
             ] = await client.session.list_installations()
@@ -183,7 +188,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 devices.append(SecuritasDirectDevice(instalation))
             hass.data.setdefault(DOMAIN, {}).update({entry.entry_id: devices})
             await hass.async_add_executor_job(setup_hass_services, hass)
-            hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
             return True
     else:
