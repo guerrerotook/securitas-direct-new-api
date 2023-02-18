@@ -170,7 +170,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             devices.append(SecuritasDirectDevice(instalation))
         # self.hass.data.setdefault(DOMAIN, {}).update({config_entry.entry_id: devices})
         # await self.hass.async_add_executor_job(setup_hass_services, self.hass)
-        self.hass.config_entries.async_forward_entry_setups(self.config, PLATFORMS)
+        self.hass.config_entries.async_setup_platforms(self.config, PLATFORMS)
         return result
 
     async def async_step_user(self, user_input=None):
