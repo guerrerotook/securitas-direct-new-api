@@ -25,6 +25,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import (
     CONF_CHECK_ALARM_PANEL,
     CONF_COUNTRY,
+    CONF_INSTALATION_KEY,
     DOMAIN,
     SENTINE_CONFORT,
     SecuritasDirectDevice,
@@ -41,7 +42,7 @@ async def async_setup_entry(
     client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     sensors = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
-        entry.entry_id
+        CONF_INSTALATION_KEY
     )
     for device in securitas_devices:
         services: list[Service] = await client.get_services(device.instalation)

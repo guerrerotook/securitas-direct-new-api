@@ -5,6 +5,8 @@ from datetime import timedelta
 import logging
 
 import voluptuous as vol
+
+from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from .securitas_direct_new_api.dataTypes import (
     OtpPhone,
 )
@@ -33,6 +35,8 @@ CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+VERSION = 1
+
 _LOGGER = logging.getLogger(__name__)
 from . import (
     CONF_CHECK_ALARM_PANEL,
@@ -55,51 +59,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.opt_challange: tuple[str, list[OtpPhone]] = None
 
     async def _create_entry(
-        self,
-        username: str,
-        token: str,
-        password: str,
-        country: str,
-        code: str,
-        check_alarm: bool,
-        scan_interval: timedelta,
-        device_id: str,
-        uuid: str,
-        id_device_indigitall: str,
-    ):
+        self, username: str, data: OrderedDict
+    ) -> config_entries.ConfigEntry:
         """Register new entry."""
-        await self.async_set_unique_id(username)
-        try:
-            self._abort_if_unique_id_configured(
-                {
-                    CONF_USERNAME: username,
-                    CONF_TOKEN: token,
-                    CONF_PASSWORD: password,
-                    CONF_COUNTRY: country,
-                    CONF_CODE: code,
-                    CONF_CHECK_ALARM_PANEL: check_alarm,
-                    CONF_DEVICE_ID: device_id,
-                    CONF_UNIQUE_ID: uuid,
-                    CONF_DEVICE_INDIGITALL: id_device_indigitall,
-                }
-            )
-        except Exception:
-            return True
 
-        return self.async_create_entry(
-            title=username,
-            data={
-                CONF_USERNAME: username,
-                CONF_TOKEN: token,
-                CONF_PASSWORD: password,
-                CONF_COUNTRY: country,
-                CONF_CODE: code,
-                CONF_CHECK_ALARM_PANEL: check_alarm,
-                CONF_DEVICE_ID: device_id,
-                CONF_UNIQUE_ID: uuid,
-                CONF_DEVICE_INDIGITALL: id_device_indigitall,
-            },
-        )
+        await self.async_set_unique_id(username)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=username, data=data)
 
     def _create_client(
         self,
@@ -152,22 +118,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Last step of the OTP challange."""
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
         await self.securitas.login()
-        result = await self._create_entry(
-            self.config[CONF_USERNAME],
-            self.securitas.get_authentication_token(),
-            self.config[CONF_PASSWORD],
-            self.config[CONF_COUNTRY],
-            self.config[CONF_CODE],
-            self.config[CONF_CHECK_ALARM_PANEL],
-            self.config[CONF_SCAN_INTERVAL],
-            self.config[CONF_DEVICE_ID],
-            self.config[CONF_UNIQUE_ID],
-            self.config[CONF_DEVICE_INDIGITALL],
-        )
+        self.config[CONF_TOKEN] = self.securitas.get_authentication_token()
+        result = await self._create_entry(self.config[CONF_USERNAME], self.config)
 
-        config_entry: config_entries.ConfigEntry = (
-            self.hass.config_entries.async_get_entry(self.config[CONF_ENTRY_ID])
-        )
         self.hass.data[DOMAIN] = {}
         self.hass.data[DOMAIN][SecuritasHub.__name__] = self.securitas
         instalations: list[
@@ -176,10 +129,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         devices: list[SecuritasDirectDevice] = []
         for instalation in instalations:
             devices.append(SecuritasDirectDevice(instalation))
-        config_entry.data = self.config
-        await self.hass.config_entries.async_forward_entry_setups(
-            config_entry.data, PLATFORMS
-        )
+
+        # await self.hass.config_entries.async_add(
+        #     config_entries.ConfigEntry(
+        #         VERSION,
+        #         DOMAIN,
+        #         self.config[CONF_USERNAME],
+        #         self.config,
+        #         source="Code",
+        #     )
+        # )
         return result
 
     async def async_step_user(self, user_input=None):
