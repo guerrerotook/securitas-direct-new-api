@@ -130,15 +130,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         for instalation in instalations:
             devices.append(SecuritasDirectDevice(instalation))
 
-        # await self.hass.config_entries.async_add(
-        #     config_entries.ConfigEntry(
-        #         VERSION,
-        #         DOMAIN,
-        #         self.config[CONF_USERNAME],
-        #         self.config,
-        #         source="Code",
-        #     )
-        # )
         return result
 
     async def async_step_user(self, user_input=None):
