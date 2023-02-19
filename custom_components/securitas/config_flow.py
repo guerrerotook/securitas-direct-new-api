@@ -5,6 +5,8 @@ from datetime import timedelta
 import logging
 
 import voluptuous as vol
+
+from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from .securitas_direct_new_api.dataTypes import (
     OtpPhone,
 )
@@ -21,11 +23,19 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from . import CONFIG_SCHEMA, PLATFORMS, SecuritasDirectDevice, generate_uuid
+from . import (
+    CONF_ENTRY_ID,
+    CONFIG_SCHEMA,
+    PLATFORMS,
+    SecuritasDirectDevice,
+    generate_uuid,
+)
 
 CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
 from . import (
@@ -49,51 +59,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.opt_challange: tuple[str, list[OtpPhone]] = None
 
     async def _create_entry(
-        self,
-        username: str,
-        token: str,
-        password: str,
-        country: str,
-        code: str,
-        check_alarm: bool,
-        scan_interval: timedelta,
-        device_id: str,
-        uuid: str,
-        id_device_indigitall: str,
-    ):
+        self, username: str, data: OrderedDict
+    ) -> config_entries.ConfigEntry:
         """Register new entry."""
-        await self.async_set_unique_id(username)
-        try:
-            self._abort_if_unique_id_configured(
-                {
-                    CONF_USERNAME: username,
-                    CONF_TOKEN: token,
-                    CONF_PASSWORD: password,
-                    CONF_COUNTRY: country,
-                    CONF_CODE: code,
-                    CONF_CHECK_ALARM_PANEL: check_alarm,
-                    CONF_DEVICE_ID: device_id,
-                    CONF_UNIQUE_ID: uuid,
-                    CONF_DEVICE_INDIGITALL: id_device_indigitall,
-                }
-            )
-        except Exception:
-            return True
 
-        return self.async_create_entry(
-            title=username,
-            data={
-                CONF_USERNAME: username,
-                CONF_TOKEN: token,
-                CONF_PASSWORD: password,
-                CONF_COUNTRY: country,
-                CONF_CODE: code,
-                CONF_CHECK_ALARM_PANEL: check_alarm,
-                CONF_DEVICE_ID: device_id,
-                CONF_UNIQUE_ID: uuid,
-                CONF_DEVICE_INDIGITALL: id_device_indigitall,
-            },
-        )
+        await self.async_set_unique_id(username)
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=username, data=data)
 
     def _create_client(
         self,
@@ -106,6 +78,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
+        entry_id: str,
     ) -> SecuritasHub:
         """Create client."""
         if password is None and password is None:
@@ -122,6 +95,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_DEVICE_ID] = device_id
         self.config[CONF_UNIQUE_ID] = uuid
         self.config[CONF_DEVICE_INDIGITALL] = id_device_indigitall
+        self.config[CONF_ENTRY_ID] = entry_id
         self.securitas = SecuritasHub(
             self.config, async_get_clientsession(self.hass), self.hass
         )
@@ -144,22 +118,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Last step of the OTP challange."""
         await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
         await self.securitas.login()
-        result = await self._create_entry(
-            self.config[CONF_USERNAME],
-            self.securitas.get_authentication_token(),
-            self.config[CONF_PASSWORD],
-            self.config[CONF_COUNTRY],
-            self.config[CONF_CODE],
-            self.config[CONF_CHECK_ALARM_PANEL],
-            self.config[CONF_SCAN_INTERVAL],
-            self.config[CONF_DEVICE_ID],
-            self.config[CONF_UNIQUE_ID],
-            self.config[CONF_DEVICE_INDIGITALL],
-        )
+        self.config[CONF_TOKEN] = self.securitas.get_authentication_token()
+        result = await self._create_entry(self.config[CONF_USERNAME], self.config)
 
-        config_entry: config_entries.ConfigEntry = (
-            self.hass.config_entries.async_get_entry(self.unique_id)
-        )
         self.hass.data[DOMAIN] = {}
         self.hass.data[DOMAIN][SecuritasHub.__name__] = self.securitas
         instalations: list[
@@ -168,9 +129,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         devices: list[SecuritasDirectDevice] = []
         for instalation in instalations:
             devices.append(SecuritasDirectDevice(instalation))
-        # self.hass.data.setdefault(DOMAIN, {}).update({config_entry.entry_id: devices})
-        # await self.hass.async_add_executor_job(setup_hass_services, self.hass)
-        self.hass.config_entries.async_setup_platforms(self.config, PLATFORMS)
+
         return result
 
     async def async_step_user(self, user_input=None):
@@ -182,6 +141,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         initial_data: OrderedDict = user_input
+
+        if initial_data is None and self.init_data is not None:
+            initial_data = self.init_data
+
         if self.securitas is None:
             uuid = generate_uuid()
             self.securitas = self._create_client(
@@ -194,6 +157,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data.get(CONF_DEVICE_ID, uuid),
                 initial_data.get(CONF_UNIQUE_ID, uuid),
                 initial_data.get(CONF_DEVICE_INDIGITALL, ""),
+                initial_data[CONF_ENTRY_ID],
             )
         self.opt_challange: tuple[
             str, list[OtpPhone]
@@ -231,6 +195,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_DEVICE_ID],
             user_input[CONF_UNIQUE_ID],
             user_input[CONF_DEVICE_INDIGITALL],
+            user_input.get(CONF_ENTRY_ID, ""),
         )
 
         succeed = await result.login()

@@ -28,6 +28,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import (
+    CONF_INSTALATION_KEY,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -51,7 +52,7 @@ async def async_setup_entry(
     client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     alarms = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
-        entry.entry_id
+        CONF_INSTALATION_KEY
     )
     for devices in securitas_devices:
         current_state: CheckAlarmStatus = await client.update_overview(
