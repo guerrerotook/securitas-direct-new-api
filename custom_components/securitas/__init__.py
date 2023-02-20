@@ -146,7 +146,7 @@ async def async_setup(hass: HomeAssistant, config_type: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Establish connection with Securitas Direct."""
     need_sign_in: bool = False
-
+    await setup_hass_services(hass)
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
@@ -167,7 +167,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config[CONF_DEVICE_INDIGITALL] = entry.data[CONF_DEVICE_INDIGITALL]
     else:
         need_sign_in = True
-
     hass.data[DOMAIN] = {}
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:
@@ -197,7 +196,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALATION_KEY] = devices
-            await hass.async_add_executor_job(setup_hass_services, hass)
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
             return True
@@ -235,7 +233,7 @@ async def setup_hass_services(hass: HomeAssistant) -> None:
             if instalation.number == instalation_id:
                 await client.update_overview(instalation)
 
-    hass.services.register(
+    hass.services.async_register(
         DOMAIN,
         SERVICE_REFRESH_INSTALATION,
         async_change_setting,
@@ -243,7 +241,7 @@ async def setup_hass_services(hass: HomeAssistant) -> None:
     )
 
     integration = await async_get_integration(hass, DOMAIN)
-    services_yaml = integration.file_path / "services.yaml"
+    services_yaml = str(integration.file_path / "services.yaml")
     services_dict = cast(
         dict, await hass.async_add_executor_job(load_yaml, str(services_yaml))
     )

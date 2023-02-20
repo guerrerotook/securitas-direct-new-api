@@ -1,11 +1,9 @@
-check_alarm_panel:
-  name: Check alarm panel
+refresh_alarm_status:
+  name: Refresh the status of the alarm.
   description: Make a request to check the status of the alarm.
   fields:
     instalation_id:
       name: Instalation Id
       description: The instalation id of the alarm.
       required: true
-      example: Look for that information in the component.
-      selector:
-        text:
+      example: Instalation id.
