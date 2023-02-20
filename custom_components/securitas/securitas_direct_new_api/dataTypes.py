@@ -26,7 +26,7 @@ class Installation:
 class CheckAlarmStatus:
     """Define an Securitas Direct Alarm Check Status Operation."""
 
-    operationStatus: str
+    operation_status: str
     message: str
     status: str
     InstallationNumer: int
@@ -38,7 +38,7 @@ class CheckAlarmStatus:
 class ArmStatus:
     """Define a Securitas Direct Arm Alarm Status Operation."""
 
-    operationStatus: str
+    operation_status: str
     message: str
     status: int
     InstallationNumer: int
@@ -58,7 +58,7 @@ class DisarmStatus:
     protomResponse: str
     protomResponseData: str
     requestId: str
-    operationStatus: str
+    operation_status: str
     status: str
 
 
@@ -139,3 +139,11 @@ class AirQuality:
 
     value: int
     message: str
+
+
+@dataclass
+class OtpPhone:
+    """Otp Phone item."""
+
+    id: int
+    phone: str
