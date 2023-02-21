@@ -48,7 +48,7 @@ SCAN_INTERVAL = timedelta(seconds=1200)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up MELCloud device sensors based on config_entry."""
+    """Set up Securitas Direct based on config_entry."""
     client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     alarms = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
@@ -109,7 +109,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._last_status = self._state
         self._state = state
         self.async_schedule_update_ha_state()
-        # self.hass.states.set(self.entity_id, state)
 
     async def get_arm_state(self):
         """Get alarm state."""
@@ -204,31 +203,33 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     self._get_proto_status(),
                 )
                 if isinstance(arm_status, str):
+                    _LOGGER.error("Error %s arming", arm_status)
                     self._notify_error("arming_error", "Error arming", arm_status)
-                while arm_status.operation_status == "WAIT":
-                    count = count + 1
-                    await asyncio.sleep(1)
-                    arm_status = await self.client.session.check_arm_status(
-                        self.installation,
-                        response[1],
-                        state,
-                        count,
-                        self._get_proto_status(),
+                else:
+                    while arm_status.operation_status == "WAIT":
+                        count = count + 1
+                        await asyncio.sleep(1)
+                        arm_status = await self.client.session.check_arm_status(
+                            self.installation,
+                            response[1],
+                            state,
+                            count,
+                            self._get_proto_status(),
+                        )
+                    self._attr_extra_state_attributes["message"] = arm_status.message
+                    self._attr_extra_state_attributes[
+                        "response_data"
+                    ] = arm_status.protomResponseData
+                    self.update_status_alarm(
+                        CheckAlarmStatus(
+                            arm_status.operation_status,
+                            arm_status.message,
+                            arm_status.status,
+                            arm_status.InstallationNumer,
+                            arm_status.protomResponse,
+                            arm_status.protomResponseData,
+                        )
                     )
-                self._attr_extra_state_attributes["message"] = arm_status.message
-                self._attr_extra_state_attributes[
-                    "response_data"
-                ] = arm_status.protomResponseData
-                self.update_status_alarm(
-                    CheckAlarmStatus(
-                        arm_status.operation_status,
-                        arm_status.message,
-                        arm_status.status,
-                        arm_status.InstallationNumer,
-                        arm_status.protomResponse,
-                        arm_status.protomResponseData,
-                    )
-                )
             else:
                 _LOGGER.error(response[1])
 

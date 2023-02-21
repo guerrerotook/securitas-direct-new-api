@@ -1,6 +1,5 @@
 """Securitas direct sentinel sensor."""
 from datetime import timedelta
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from homeassistant.helpers.entity import DeviceInfo
 
@@ -11,10 +10,6 @@ from .securitas_direct_new_api.dataTypes import (
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import (
-    CONF_CODE,
-    CONF_PASSWORD,
-    CONF_TOKEN,
-    CONF_USERNAME,
     PERCENTAGE,
     TEMP_CELSIUS,
 )
@@ -23,8 +18,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import (
-    CONF_CHECK_ALARM_PANEL,
-    CONF_COUNTRY,
     CONF_INSTALATION_KEY,
     DOMAIN,
     SENTINE_CONFORT,

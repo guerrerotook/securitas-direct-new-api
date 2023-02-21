@@ -98,6 +98,7 @@ def generate_device_id(lang: str) -> str:
 
 
 def add_device_information(config: OrderedDict) -> OrderedDict:
+    """Add device information to the configuration."""
     if not CONF_DEVICE_ID in config:
         config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
 
@@ -255,7 +256,7 @@ def _notify_error(
 
 
 class SecuritasDirectDevice:
-    """MELCloud Device instance."""
+    """Securitas direct device instance."""
 
     def __init__(self, instalation: Installation) -> None:
         """Construct a device wrapper."""
@@ -308,7 +309,7 @@ class SecuritasHub:
         domain_config: OrderedDict,
         http_client: ClientSession,
         hass: HomeAssistant,
-    ):
+    ) -> None:
         """Initialize the Securitas hub."""
         self.overview: CheckAlarmStatus = {}
         self.config = domain_config
