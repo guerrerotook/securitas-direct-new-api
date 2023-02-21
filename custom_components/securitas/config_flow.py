@@ -157,7 +157,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data.get(CONF_DEVICE_ID, uuid),
                 initial_data.get(CONF_UNIQUE_ID, uuid),
                 initial_data.get(CONF_DEVICE_INDIGITALL, ""),
-                initial_data[CONF_ENTRY_ID],
+                initial_data.get(CONF_ENTRY_ID, ""),
             )
         self.opt_challange: tuple[
             str, list[OtpPhone]
