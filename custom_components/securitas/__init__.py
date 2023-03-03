@@ -65,8 +65,7 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_PASSWORD,
                 ): str,
                 vol.Optional(CONF_COUNTRY, default="ES"): str,
-                vol.Optional(CONF_ALARM, default=True): bool,
-                vol.Optional(CONF_CODE, default=4): str,
+                vol.Optional(CONF_CODE): str,
                 vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
             }
@@ -126,7 +125,7 @@ async def async_setup(hass: HomeAssistant, config_type: ConfigEntry) -> bool:
                 CONF_USERNAME: config[CONF_USERNAME],
                 CONF_PASSWORD: config[CONF_PASSWORD],
                 CONF_COUNTRY: config[CONF_COUNTRY],
-                CONF_CODE: config[CONF_CODE],
+                CONF_CODE: config.get(CONF_CODE, None),
                 CONF_CHECK_ALARM_PANEL: config[CONF_CHECK_ALARM_PANEL],
                 CONF_SCAN_INTERVAL: config[CONF_SCAN_INTERVAL],
                 CONF_DEVICE_ID: config[CONF_DEVICE_ID],
@@ -146,7 +145,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
-    config[CONF_CODE] = entry.data[CONF_CODE]
+    config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     config[CONF_SCAN_INTERVAL] = 60
     config[CONF_ENTRY_ID] = entry.entry_id

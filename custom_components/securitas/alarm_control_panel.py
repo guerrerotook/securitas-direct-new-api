@@ -311,9 +311,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if isinstance(code, str):
             code = int(code)
-        if self.client.config.get(CONF_CODE, "") == "" or str(
-            self.client.config.get(CONF_CODE, "")
-        ) == str(code):
+        if (
+            self.client.config.get(CONF_CODE, "") == ""
+            or str(self.client.config.get(CONF_CODE, "")) == str(code)
+            or self.client.config.get(CONF_CODE, None) is None
+        ):
             self.__force_state(STATE_ALARM_DISARMING)
             await self.set_arm_state("DARM1")
 
