@@ -4,7 +4,7 @@
 class ApiDomains:
     """Define the domain list for each language."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Define default constructor."""
         self.domains = {
             "default": "https://customers.securitasdirect.{language}/owa-api/graphql",
