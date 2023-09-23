@@ -2,6 +2,7 @@
 from datetime import timedelta
 from collections.abc import Mapping
 from typing import Any
+from .constants import SentinelName
 from homeassistant.helpers.entity import DeviceInfo
 
 from .securitas_direct_new_api.dataTypes import (
@@ -12,7 +13,7 @@ from .securitas_direct_new_api.dataTypes import (
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import (
     PERCENTAGE,
-    TEMP_CELSIUS,
+    UnitOfTemperature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -21,7 +22,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import (
     CONF_INSTALATION_KEY,
     DOMAIN,
-    SENTINE_CONFORT,
     SecuritasDirectDevice,
     SecuritasHub,
 )
@@ -43,10 +43,13 @@ async def async_setup_entry(
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
         CONF_INSTALATION_KEY
     )
+
+    sentinel_name: SentinelName = SentinelName()
+    sentinel_confort_name = sentinel_name.get_sentinel_name(client.lang)
     for device in securitas_devices:
         services: list[Service] = await client.get_services(device.instalation)
         for service in services:
-            if service.description == SENTINE_CONFORT:
+            if service.description == sentinel_confort_name:
                 sentinel_data: Sentinel = await client.session.get_sentinel_data(
                     service.installation, service
                 )
@@ -101,7 +104,7 @@ class SentinelTemperature(SensorEntity):
     def _update_sensor_data(self, sentinel: Sentinel):
         self._attr_device_class = SensorDeviceClass.TEMPERATURE
         self._attr_native_value = sentinel.temperature
-        self._attr_native_unit_of_measurement = TEMP_CELSIUS
+        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
 
 class SentinelHumidity(SensorEntity):
