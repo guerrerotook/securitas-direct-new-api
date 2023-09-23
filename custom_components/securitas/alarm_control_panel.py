@@ -160,30 +160,35 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         self._get_proto_status(),
                     )
                 )
-                while disarm_status.operation_status == "WAIT":
-                    count = count + 1
-                    await asyncio.sleep(1)
-                    disarm_status = await self.client.session.check_disarm_status(
-                        self.installation,
-                        response[1],
-                        ArmType.TOTAL,
-                        count,
-                        self._get_proto_status(),
+                try:
+                    while disarm_status.operation_status == "WAIT":
+                        count = count + 1
+                        await asyncio.sleep(1)
+                        disarm_status = await self.client.session.check_disarm_status(
+                            self.installation,
+                            response[1],
+                            ArmType.TOTAL,
+                            count,
+                            self._get_proto_status(),
+                        )
+                    self._attr_extra_state_attributes["message"] = disarm_status.message
+                    self._attr_extra_state_attributes[
+                        "response_data"
+                    ] = disarm_status.protomResponseData
+                    self.update_status_alarm(
+                        CheckAlarmStatus(
+                            disarm_status.operation_status,
+                            disarm_status.message,
+                            disarm_status.status,
+                            self.installation.number,
+                            disarm_status.protomResponse,
+                            disarm_status.protomResponseData,
+                        )
                     )
-                self._attr_extra_state_attributes["message"] = disarm_status.message
-                self._attr_extra_state_attributes[
-                    "response_data"
-                ] = disarm_status.protomResponseData
-                self.update_status_alarm(
-                    CheckAlarmStatus(
-                        disarm_status.operation_status,
-                        disarm_status.message,
-                        disarm_status.status,
-                        self.installation.number,
-                        disarm_status.protomResponse,
-                        disarm_status.protomResponseData,
-                    )
-                )
+                 except Exception as e:
+                        _LOGGER.error("Error calling the check status when arming")
+                        _LOGGER.error(arm_status)
+                        _LOGGER.error(e)
 
             else:
                 _LOGGER.error(response[1])
@@ -206,30 +211,37 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     _LOGGER.error("Error %s arming", arm_status)
                     self._notify_error("arming_error", "Error arming", arm_status)
                 else:
-                    while arm_status.operation_status == "WAIT":
-                        count = count + 1
-                        await asyncio.sleep(1)
-                        arm_status = await self.client.session.check_arm_status(
-                            self.installation,
-                            response[1],
-                            state,
-                            count,
-                            self._get_proto_status(),
+                    try:
+                        while arm_status.operation_status == "WAIT":
+                            count = count + 1
+                            await asyncio.sleep(1)
+                            arm_status = await self.client.session.check_arm_status(
+                                self.installation,
+                                response[1],
+                                state,
+                                count,
+                                self._get_proto_status(),
+                            )
+                        self._attr_extra_state_attributes[
+                            "message"
+                        ] = arm_status.message
+                        self._attr_extra_state_attributes[
+                            "response_data"
+                        ] = arm_status.protomResponseData
+                        self.update_status_alarm(
+                            CheckAlarmStatus(
+                                arm_status.operation_status,
+                                arm_status.message,
+                                arm_status.status,
+                                arm_status.InstallationNumer,
+                                arm_status.protomResponse,
+                                arm_status.protomResponseData,
+                            )
                         )
-                    self._attr_extra_state_attributes["message"] = arm_status.message
-                    self._attr_extra_state_attributes[
-                        "response_data"
-                    ] = arm_status.protomResponseData
-                    self.update_status_alarm(
-                        CheckAlarmStatus(
-                            arm_status.operation_status,
-                            arm_status.message,
-                            arm_status.status,
-                            arm_status.InstallationNumer,
-                            arm_status.protomResponse,
-                            arm_status.protomResponseData,
-                        )
-                    )
+                    except Exception as e:
+                        _LOGGER.error("Error calling the check status when arming")
+                        _LOGGER.error(arm_status)
+                        _LOGGER.error(e)
             else:
                 _LOGGER.error(response[1])
 
