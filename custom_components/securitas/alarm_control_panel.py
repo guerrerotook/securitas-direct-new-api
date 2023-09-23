@@ -185,7 +185,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                             disarm_status.protomResponseData,
                         )
                     )
-                 except Exception as e:
+                except Exception as e:
                         _LOGGER.error("Error calling the check status when arming")
                         _LOGGER.error(arm_status)
                         _LOGGER.error(e)
