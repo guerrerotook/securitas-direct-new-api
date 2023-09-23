@@ -1,7 +1,8 @@
 """Securitas direct sentinel sensor."""
 from datetime import timedelta
+from collections.abc import Mapping
+from typing import Any
 from .constants import SentinelName
-
 from homeassistant.helpers.entity import DeviceInfo
 
 from .securitas_direct_new_api.dataTypes import (
@@ -26,6 +27,11 @@ from . import (
 )
 
 SCAN_INTERVAL = timedelta(minutes=30)
+
+_AIR_QUALITY_INDEX_SENSOR_ATTRIBUTES_MAP = {
+    "value": "value",
+    "message": "message",
+}
 
 
 async def async_setup_entry(
@@ -173,5 +179,17 @@ class SentinelAirQuality(SensorEntity):
         self._update_sensor_data(air_quality)
 
     def _update_sensor_data(self, air_quality: AirQuality):
-        self._attr_device_class = SensorDeviceClass.AQI
-        self._attr_native_value = air_quality.value
+        self._attr_native_value = air_quality.message
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any]:
+        """Return the state attributes."""
+        sensor_attributes: dict[str, Any] = {}
+        sensor_attributes["message"] = self._air_quality.message
+        sensor_attributes["value"] = self._air_quality.value
+
+        return {
+            _AIR_QUALITY_INDEX_SENSOR_ATTRIBUTES_MAP[key]: value
+            for key, value in sensor_attributes.items()
+            if key in _AIR_QUALITY_INDEX_SENSOR_ATTRIBUTES_MAP
+        }
