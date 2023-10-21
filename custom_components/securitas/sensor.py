@@ -49,7 +49,7 @@ async def async_setup_entry(
     for device in securitas_devices:
         services: list[Service] = await client.get_services(device.instalation)
         for service in services:
-            if service.description == sentinel_confort_name:
+            if service.request == sentinel_confort_name:
                 sentinel_data: Sentinel = await client.session.get_sentinel_data(
                     service.installation, service
                 )

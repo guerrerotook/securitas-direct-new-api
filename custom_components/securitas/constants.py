@@ -7,10 +7,10 @@ class SentinelName:
     def __init__(self) -> None:
         """Define default constructor."""
         self.sentinel_name = {
-            "default": "SENTINEL CONFORT",
-            "es": "SENTINEL CONFORT",
-            "br": "SENTINEL COMFORTO",
-            "pt": "SENTINEL COMFORTO",
+            "default": "CONFORT",
+            "es": "CONFORT",
+            "br": "COMFORTO",
+            "pt": "COMFORTO",
         }
 
     def get_sentinel_name(self, language: str) -> str:
