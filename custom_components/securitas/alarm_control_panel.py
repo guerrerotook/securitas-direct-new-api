@@ -321,23 +321,51 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
-        self.__force_state(STATE_ALARM_ARMING)
-        await self.set_arm_state("ARMDAY1")
+        if isinstance(code, str):
+            code = int(code)
+        if (
+            self.client.config.get(CONF_CODE, "") == ""
+            or str(self.client.config.get(CONF_CODE, "")) == str(code)
+            or self.client.config.get(CONF_CODE, None) is None
+        ):
+            self.__force_state(STATE_ALARM_ARMING)
+            await self.set_arm_state("ARMDAY1")
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
-        self.__force_state(STATE_ALARM_ARMING)
-        await self.set_arm_state("ARM1")
+        if isinstance(code, str):
+            code = int(code)
+        if (
+            self.client.config.get(CONF_CODE, "") == ""
+            or str(self.client.config.get(CONF_CODE, "")) == str(code)
+            or self.client.config.get(CONF_CODE, None) is None
+        ):
+            self.__force_state(STATE_ALARM_ARMING)
+            await self.set_arm_state("ARM1")
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
-        self.__force_state(STATE_ALARM_ARMING)
-        await self.set_arm_state("ARMNIGHT1")
+        if isinstance(code, str):
+            code = int(code)
+        if (
+            self.client.config.get(CONF_CODE, "") == ""
+            or str(self.client.config.get(CONF_CODE, "")) == str(code)
+            or self.client.config.get(CONF_CODE, None) is None
+        ):
+            self.__force_state(STATE_ALARM_ARMING)
+            await self.set_arm_state("ARMNIGHT1")
 
     async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
-        self.__force_state(STATE_ALARM_ARMING)
-        await self.set_arm_state("PERI1")
+        if isinstance(code, str):
+            code = int(code)
+        if (
+            self.client.config.get(CONF_CODE, "") == ""
+            or str(self.client.config.get(CONF_CODE, "")) == str(code)
+            or self.client.config.get(CONF_CODE, None) is None
+        ):
+            self.__force_state(STATE_ALARM_ARMING)
+            await self.set_arm_state("PERI1")
 
     @property
     def supported_features(self) -> int:
