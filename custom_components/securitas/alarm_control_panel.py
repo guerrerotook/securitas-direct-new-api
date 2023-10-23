@@ -202,9 +202,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     count,
                     self._get_proto_status(),
                 )
-                if isinstance(arm_status, str):
-                    _LOGGER.error("Error %s arming", arm_status)
-                    self._notify_error("arming_error", "Error arming", arm_status)
+                if arm_status.operation_status == "ERROR":
+                    _LOGGER.error("Error %s arming", arm_status.message)
+                    self._notify_error(
+                        "arming_error", "Error arming", arm_status.message
+                    )
                 else:
                     while arm_status.operation_status == "WAIT":
                         count = count + 1

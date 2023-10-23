@@ -65,7 +65,6 @@ class ApiManager:
         self.apollo_operation_id: str = secrets.token_hex(64)
 
     async def _execute_request(self, content, operation: str) -> ClientResponse:
-
         app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
         headers = {
             "app": app,
@@ -552,9 +551,6 @@ class ApiManager:
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
             return error_message
-
-        if result_json["data"]["xSArmStatus"]["res"] == "ERROR":
-            return result_json["data"]["xSArmStatus"]["msg"]
 
         raw_data = result_json["data"]["xSArmStatus"]
         return ArmStatus(
