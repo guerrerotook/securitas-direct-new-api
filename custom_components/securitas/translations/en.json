@@ -1,23 +1,20 @@
 {
     "config": {
+        "abort": {
+            "already_configured": "Service is already configured"
+        },
         "step": {
-            "user": {
+            "user": {}
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
                 "data": {
-                    "username": "Username",
-                    "password": "Password",
-                    "country": "Country Code",
-                    "alarm": "Alarm",
-                    "code_digits": "Code Digits",
-                    "code": "Code",
-                    "check_alarm_panel": "Check alarm panel",
-                    "scan_interval": "Scan interval"
-                },
-                "description": "Login into securitas direct.",
-                "title": "Login"
-            },
-            "phone_list": {
-                "description": "Please select the Phone to send the 2FA code",
-                "title": "Securitas Direct 2FA"
+                    "code": "Pin pad code.",
+                    "enable_code": "Enable or disable the local pin code.",
+                    "scan_interval": "Scan internval to query the last status in the Server"
+                }
             }
         }
     }

@@ -45,6 +45,7 @@ CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_INSTALATION_KEY = "instalation"
+CONF_ENABLE_CODE = "enable_code"
 
 DOMAIN = "securitas"
 

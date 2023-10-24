@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections import OrderedDict
 from datetime import timedelta
 import logging
+from typing import Any
 
 import voluptuous as vol
+from homeassistant.core import callback
 
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from .securitas_direct_new_api.dataTypes import (
@@ -25,6 +27,7 @@ from homeassistant.const import (
 )
 from . import (
     CONF_ENTRY_ID,
+    CONF_ENABLE_CODE,
     CONFIG_SCHEMA,
     PLATFORMS,
     SecuritasDirectDevice,
@@ -132,6 +135,14 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return result
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> SecuritasOptionsFlowHandler:
+        """Get the options flow for this handler."""
+        return SecuritasOptionsFlowHandler(config_entry)
+
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
         if user_input is None and self.init_data is None:
@@ -211,3 +222,45 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
         else:
             return result
+
+
+class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle PVPC options."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Fill options with entry data
+        scan_interval: int = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, self.config_entry.data[CONF_SCAN_INTERVAL]
+        )
+
+        code: str = self.config_entry.options.get(
+            CONF_CODE, self.config_entry.data[CONF_CODE]
+        )
+
+        enable_code_default_value: bool = True
+
+        if CONF_ENABLE_CODE is self.config_entry.data:
+            enable_code_default_value = self.config_entry.data[CONF_ENABLE_CODE]
+
+        code_enabled: bool = self.config_entry.options.get(
+            CONF_ENABLE_CODE, enable_code_default_value
+        )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SCAN_INTERVAL, default=scan_interval): int,
+                vol.Optional(CONF_CODE, default=code): str,
+                vol.Optional(CONF_ENABLE_CODE, default=code_enabled): bool,
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

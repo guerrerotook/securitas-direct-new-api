@@ -1,0 +1,21 @@
+{
+    "config": {
+        "step": {
+            "user": {}
+        },
+        "abort": {
+            "already_configured": "[%key:common::config_flow::abort::already_configured_service%]"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "scan_interval": "Scan internval to query the last status in the Server",
+                    "code": "Pin pad code.",
+                    "enable_code": "Enable or disable the local pin code."
+                }
+            }
+        }
+    }
+}
