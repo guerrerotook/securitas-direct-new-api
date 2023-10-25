@@ -14,6 +14,7 @@ from homeassistant.components.alarm_control_panel.const import (
 )
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     CONF_CODE,
+    CONF_SCAN_INTERVAL,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
@@ -28,6 +29,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from . import (
+    CONF_DELAY_CHECK_OPERATION,
+    CONF_ENABLE_CODE,
     CONF_INSTALATION_KEY,
     DOMAIN,
     SecuritasDirectDevice,
@@ -110,6 +113,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._state = state
         self.async_schedule_update_ha_state()
 
+    def get_delay_configuration(self) -> int:
+        return self.client.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1)
+
     async def get_arm_state(self):
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
@@ -119,7 +125,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.installation, reference_id, count
         )
         while alarm_status.status == "WAIT":
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.get_delay_configuration())
             count = count + 1
             alarm_status: CheckAlarmStatus = (
                 await self.client.session.check_alarm_status(
@@ -149,7 +155,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
             if response[0]:
                 # check arming status
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.get_delay_configuration())
                 count = 1
                 disarm_status: DisarmStatus = (
                     await self.client.session.check_disarm_status(
@@ -162,7 +168,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
                 while disarm_status.operation_status == "WAIT":
                     count = count + 1
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(self.get_delay_configuration())
                     disarm_status = await self.client.session.check_disarm_status(
                         self.installation,
                         response[1],
@@ -193,7 +199,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
             if response[0]:
                 # check arming status
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.get_delay_configuration())
                 count = 1
                 arm_status: ArmStatus = await self.client.session.check_arm_status(
                     self.installation,
@@ -210,7 +216,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 else:
                     while arm_status.operation_status == "WAIT":
                         count = count + 1
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(self.get_delay_configuration())
                         arm_status = await self.client.session.check_arm_status(
                             self.installation,
                             response[1],
@@ -309,8 +315,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         )
         self.update_status_alarm(alarm_status)
 
-    async def async_alarm_disarm(self, code=None):
-        """Send disarm command."""
+    def check_code(self, code=None) -> bool:
+        result: bool = False
         if isinstance(code, str):
             code = int(code)
         if (
@@ -318,54 +324,40 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             or str(self.client.config.get(CONF_CODE, "")) == str(code)
             or self.client.config.get(CONF_CODE, None) is None
         ):
+            result = True
+
+        if not self.client.config_entry.data[CONF_ENABLE_CODE]:
+            result = True
+
+        return result
+
+    async def async_alarm_disarm(self, code=None):
+        """Send disarm command."""
+        if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
             await self.set_arm_state("DARM1")
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
-        if isinstance(code, str):
-            code = int(code)
-        if (
-            self.client.config.get(CONF_CODE, "") == ""
-            or str(self.client.config.get(CONF_CODE, "")) == str(code)
-            or self.client.config.get(CONF_CODE, None) is None
-        ):
+        if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
             await self.set_arm_state("ARMDAY1")
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
-        if isinstance(code, str):
-            code = int(code)
-        if (
-            self.client.config.get(CONF_CODE, "") == ""
-            or str(self.client.config.get(CONF_CODE, "")) == str(code)
-            or self.client.config.get(CONF_CODE, None) is None
-        ):
+        if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
             await self.set_arm_state("ARM1")
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
-        if isinstance(code, str):
-            code = int(code)
-        if (
-            self.client.config.get(CONF_CODE, "") == ""
-            or str(self.client.config.get(CONF_CODE, "")) == str(code)
-            or self.client.config.get(CONF_CODE, None) is None
-        ):
+        if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
             await self.set_arm_state("ARMNIGHT1")
 
     async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
-        if isinstance(code, str):
-            code = int(code)
-        if (
-            self.client.config.get(CONF_CODE, "") == ""
-            or str(self.client.config.get(CONF_CODE, "")) == str(code)
-            or self.client.config.get(CONF_CODE, None) is None
-        ):
+        if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
             await self.set_arm_state("PERI1")
 

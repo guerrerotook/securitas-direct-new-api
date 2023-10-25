@@ -26,6 +26,7 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from . import (
+    CONF_DELAY_CHECK_OPERATION,
     CONF_ENTRY_ID,
     CONF_ENABLE_CODE,
     CONFIG_SCHEMA,
@@ -247,20 +248,28 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_CODE, self.config_entry.data[CONF_CODE]
         )
 
-        enable_code_default_value: bool = True
-
-        if CONF_ENABLE_CODE is self.config_entry.data:
-            enable_code_default_value = self.config_entry.data[CONF_ENABLE_CODE]
-
         code_enabled: bool = self.config_entry.options.get(
-            CONF_ENABLE_CODE, enable_code_default_value
+            CONF_ENABLE_CODE, self.config_entry.data.get(CONF_ENABLE_CODE, True)
+        )
+
+        delay_check_operation: bool = self.config_entry.options.get(
+            CONF_DELAY_CHECK_OPERATION,
+            self.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1),
+        )
+
+        check_alarm_panel: bool = self.config_entry.options.get(
+            CONF_CHECK_ALARM_PANEL, self.config_entry.data[CONF_CHECK_ALARM_PANEL]
         )
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_SCAN_INTERVAL, default=scan_interval): int,
+                vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
                 vol.Optional(CONF_CODE, default=code): str,
                 vol.Optional(CONF_ENABLE_CODE, default=code_enabled): bool,
+                vol.Optional(CONF_CHECK_ALARM_PANEL, default=check_alarm_panel): bool,
+                vol.Optional(
+                    CONF_DELAY_CHECK_OPERATION, default=delay_check_operation
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=15.0)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
