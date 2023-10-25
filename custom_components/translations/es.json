@@ -1,0 +1,24 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Usuario",
+                    "password": "Contraseña",
+                    "country": "Código de país",
+                    "alarm": "Alarma",
+                    "code_digits": "Código de dígitos",
+                    "code": "Código",
+                    "check_alarm_panel": "Comprueba el panel",
+                    "scan_interval": "Intervalo de actualización"
+                },
+                "description": "Iniciar sesión en Securitas Direct",
+                "title": "Iniciar sesión"
+            },
+            "phone_list": {
+                "description": "Por favor, selecciona un teléfono para recibir el código 2FA",
+                "title": "Factor de doble autenticación"
+            }
+        }
+    }
+}
