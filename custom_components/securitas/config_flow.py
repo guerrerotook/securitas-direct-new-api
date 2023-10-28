@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections import OrderedDict
 from datetime import timedelta
 import logging
+from typing import Any
 
 import voluptuous as vol
+from homeassistant.core import callback
 
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from .securitas_direct_new_api.dataTypes import (
@@ -24,7 +26,9 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from . import (
+    CONF_DELAY_CHECK_OPERATION,
     CONF_ENTRY_ID,
+    CONF_ENABLE_CODE,
     CONFIG_SCHEMA,
     PLATFORMS,
     SecuritasDirectDevice,
@@ -132,6 +136,14 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return result
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> SecuritasOptionsFlowHandler:
+        """Get the options flow for this handler."""
+        return SecuritasOptionsFlowHandler(config_entry)
+
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
         if user_input is None and self.init_data is None:
@@ -211,3 +223,56 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
         else:
             return result
+
+
+class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle PVPC options."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Fill options with entry data
+        scan_interval: int = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, 60)
+        )
+
+        code: str = self.config_entry.options.get(
+            CONF_CODE, self.config_entry.data[CONF_CODE]
+        )
+
+        if isinstance(code, int):
+            code = str(code)
+
+        code_enabled: bool = self.config_entry.options.get(
+            CONF_ENABLE_CODE, self.config_entry.data.get(CONF_ENABLE_CODE, True)
+        )
+
+        delay_check_operation: bool = self.config_entry.options.get(
+            CONF_DELAY_CHECK_OPERATION,
+            self.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1),
+        )
+
+        check_alarm_panel: bool = self.config_entry.options.get(
+            CONF_CHECK_ALARM_PANEL, self.config_entry.data[CONF_CHECK_ALARM_PANEL]
+        )
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
+                vol.Optional(CONF_CODE, default=code): str,
+                vol.Optional(CONF_ENABLE_CODE, default=code_enabled): bool,
+                vol.Optional(CONF_CHECK_ALARM_PANEL, default=check_alarm_panel): bool,
+                vol.Optional(
+                    CONF_DELAY_CHECK_OPERATION, default=delay_check_operation
+                ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=15.0)),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

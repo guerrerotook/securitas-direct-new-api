@@ -45,6 +45,8 @@ CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_INSTALATION_KEY = "instalation"
+CONF_ENABLE_CODE = "enable_code"
+CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
 
 DOMAIN = "securitas"
 
@@ -109,31 +111,30 @@ def add_device_information(config: OrderedDict) -> OrderedDict:
     return config
 
 
-async def async_setup(hass: HomeAssistant, config_type: ConfigEntry) -> bool:
-    """Establish connection with MELCloud."""
-    if DOMAIN not in config_type:
-        return True
-
-    config: OrderedDict = config_type[DOMAIN]
-    config = add_device_information(config)
-    hass.async_create_task(
-        hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={"source": SOURCE_IMPORT},
-            data={
-                CONF_USERNAME: config[CONF_USERNAME],
-                CONF_PASSWORD: config[CONF_PASSWORD],
-                CONF_COUNTRY: config[CONF_COUNTRY],
-                CONF_CODE: config.get(CONF_CODE, None),
-                CONF_CHECK_ALARM_PANEL: config[CONF_CHECK_ALARM_PANEL],
-                CONF_SCAN_INTERVAL: config[CONF_SCAN_INTERVAL],
-                CONF_DEVICE_ID: config[CONF_DEVICE_ID],
-                CONF_UNIQUE_ID: config[CONF_UNIQUE_ID],
-                CONF_DEVICE_INDIGITALL: config[CONF_DEVICE_INDIGITALL],
-            },
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update."""
+    if any(
+        entry.data.get(attrib) != entry.options.get(attrib)
+        for attrib in (
+            CONF_ENABLE_CODE,
+            CONF_CODE,
+            CONF_SCAN_INTERVAL,
+            CONF_CHECK_ALARM_PANEL,
         )
-    )
-    return True
+    ):
+        # update entry replacing data with new options
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, **entry.options}
+        )
+        await hass.config_entries.async_reload(entry.entry_id)
+
+
+def merge_configuration(items: OrderedDict, entry: ConfigEntry) -> OrderedDict:
+    if entry.data[CONF_CODE] != items[CONF_CODE]:
+        items[CONF_CODE] = entry.data[CONF_CODE]
+
+    if entry.data[CONF_SCAN_INTERVAL] != items[CONF_SCAN_INTERVAL]:
+        items[CONF_SCAN_INTERVAL] = entry.data[CONF_SCAN_INTERVAL]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -148,6 +149,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     config[CONF_SCAN_INTERVAL] = 60
     config[CONF_ENTRY_ID] = entry.entry_id
+    config = add_device_information(config)
+    # config = merge_configuration(config, entry)
     if CONF_DEVICE_ID in entry.data:
         config[CONF_DEVICE_ID] = entry.data[CONF_DEVICE_ID]
     else:
@@ -164,7 +167,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN] = {}
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:
-        client: SecuritasHub = SecuritasHub(config, async_get_clientsession(hass), hass)
+        client: SecuritasHub = SecuritasHub(
+            config, entry, async_get_clientsession(hass), hass
+        )
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
         result = await client.login()
         if result == "2FA":
             msg = (
@@ -305,12 +312,14 @@ class SecuritasHub:
     def __init__(
         self,
         domain_config: OrderedDict,
+        config_entry: ConfigEntry,
         http_client: ClientSession,
         hass: HomeAssistant,
     ) -> None:
         """Initialize the Securitas hub."""
         self.overview: CheckAlarmStatus = {}
         self.config = domain_config
+        self.config_entry: ConfigEntry = config_entry
         self.sentinel_services: list[Service] = []
         self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
         self.country: str = domain_config[CONF_COUNTRY].upper()
@@ -407,3 +416,7 @@ class SecuritasHub:
                     installation, reference_id, count
                 )
         return alarm_status
+
+    @property
+    def get_config_entry(self) -> ConfigEntry:
+        return self.config_entry

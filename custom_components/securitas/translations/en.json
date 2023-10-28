@@ -1,5 +1,8 @@
 {
     "config": {
+        "abort": {
+            "already_configured": "Service is already configured"
+        },
         "step": {
             "user": {
                 "data": {
@@ -18,6 +21,19 @@
             "phone_list": {
                 "description": "Please select the Phone to send the 2FA code",
                 "title": "Securitas Direct 2FA"
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "code": "Pin pad code.",
+                    "enable_code": "Enable or disable the local pin code.",
+                    "scan_interval": "Scan internval to query the last status in the Server",
+                    "check_alarm_panel": "Check the status of the panel in every request (NOT RECOMMENDED)",
+                    "delay_check_operation": "Delay in seconds to check the arming and dissarming operation"
+                }
             }
         }
     }
