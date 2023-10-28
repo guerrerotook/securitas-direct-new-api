@@ -241,12 +241,15 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         # Fill options with entry data
         scan_interval: int = self.config_entry.options.get(
-            CONF_SCAN_INTERVAL, self.config_entry.data[CONF_SCAN_INTERVAL]
+            CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, 60)
         )
 
         code: str = self.config_entry.options.get(
             CONF_CODE, self.config_entry.data[CONF_CODE]
         )
+
+        if isinstance(code, int):
+            code = str(code)
 
         code_enabled: bool = self.config_entry.options.get(
             CONF_ENABLE_CODE, self.config_entry.data.get(CONF_ENABLE_CODE, True)
