@@ -101,7 +101,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_DEVICE_INDIGITALL] = id_device_indigitall
         self.config[CONF_ENTRY_ID] = entry_id
         self.securitas = SecuritasHub(
-            self.config, async_get_clientsession(self.hass), self.hass
+            self.config, None, async_get_clientsession(self.hass), self.hass
         )
 
         return self.securitas
