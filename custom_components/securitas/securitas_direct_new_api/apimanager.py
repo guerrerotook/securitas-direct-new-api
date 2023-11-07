@@ -149,7 +149,7 @@ class ApiManager:
             if "errors" in response:
                 for error_item in response["errors"]:
                     if "message" in error_item:
-                        if error_item["message"] == "Invalid token: Expired":
+                        if error_item["message"] == "Invalid session. Please, try again later.":
                             self.authentication_token = None
                             _LOGGER.info("Login is expired. Login again")
                             succeed: tuple[bool, str] = await self.login()
