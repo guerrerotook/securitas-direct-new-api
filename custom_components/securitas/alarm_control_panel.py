@@ -326,7 +326,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         ):
             result = True
 
-        if not self.client.config_entry.data[CONF_ENABLE_CODE]:
+        if not self.client.config_entry.data.get(CONF_ENABLE_CODE, True):
             result = True
 
         return result
