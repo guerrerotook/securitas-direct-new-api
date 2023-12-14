@@ -11,6 +11,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from .securitas_direct_new_api.dataTypes import (
     OtpPhone,
+    Service,
 )
 
 from homeassistant.helpers.selector import selector
@@ -132,6 +133,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         ] = await self.securitas.session.list_installations()
         devices: list[SecuritasDirectDevice] = []
         for instalation in instalations:
+            services: list[Service] = await self.securitas.get_services(instalation)
             devices.append(SecuritasDirectDevice(instalation))
 
         return result

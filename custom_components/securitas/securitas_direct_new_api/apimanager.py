@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 import logging
 import secrets
-from typing import Union
+from typing import Optional, Union
 from uuid import uuid4
 
 from aiohttp import ClientSession, ClientResponse
@@ -61,10 +61,12 @@ class ApiManager:
         self.device_os_version = "12"
         self.device_resolution = ""
         self.device_type = ""
-        self.device_version = "10.61.0"
+        self.device_version = "10.102.0"
         self.apollo_operation_id: str = secrets.token_hex(64)
 
-    async def _execute_request(self, content, operation: str) -> ClientResponse:
+    async def _execute_request(
+        self, content, operation: str, instalation: Optional[Installation] = None
+    ) -> ClientResponse:
         app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
         headers = {
             "app": app,
@@ -73,6 +75,11 @@ class ApiManager:
             "X-APOLLO-OPERATION-NAME": operation,
             "extension": '{"mode":"full"}',
         }
+
+        if instalation is not None:
+            headers["numinst"] = str(instalation.number)
+            headers["panel"] = instalation.panel
+            headers["x-capabilities"] = instalation.capabilities
 
         if self.authentication_token is not None:
             authorization_value = {
@@ -149,7 +156,11 @@ class ApiManager:
             if "errors" in response:
                 for error_item in response["errors"]:
                     if "message" in error_item:
-                        if error_item["message"] == "Invalid session. Please, try again later." or error_item["message"] == "Invalid token: Expired":
+                        if (
+                            error_item["message"]
+                            == "Invalid session. Please, try again later."
+                            or error_item["message"] == "Invalid token: Expired"
+                        ):
                             self.authentication_token = None
                             _LOGGER.info("Login is expired. Login again")
                             succeed: tuple[bool, str] = await self.login()
@@ -288,7 +299,7 @@ class ApiManager:
         return (True, "None")
 
     async def list_installations(self) -> list[Installation]:
-        """list securitas direct installations."""
+        """List securitas direct installations."""
         content = {
             "operationName": "mkInstallationList",
             "query": "query mkInstallationList {\n  xSInstallations {\n    installations {\n      numinst\n      alias\n      panel\n      type\n      name\n      surname\n      address\n      city\n      postcode\n      province\n      email\n      phone\n    }\n  }\n}\n",
@@ -299,8 +310,7 @@ class ApiManager:
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            print(error_message)
-            return []
+            return error_message
 
         result: list[Installation] = []
         raw_installations = result_json["data"]["xSInstallations"]["installations"]
@@ -318,6 +328,7 @@ class ApiManager:
                 item["province"],
                 item["email"],
                 item["phone"],
+                "",
             )
             result.append(installation_item)
         return result
@@ -344,8 +355,8 @@ class ApiManager:
         """Get the list of all services available to the user."""
         content = {
             "operationName": "Srv",
-            "variables": {"numinst": str(installation.number)},
-            "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      id\n      alarm\n      due\n      tracker\n      numinst\n      parentNuminst\n      alias\n      panel\n      line\n      aliasInst\n      name\n      surname\n      address\n      city\n      postcode\n      province\n      email\n      phone\n      sim\n      instIbs\n      timebox\n      dtmf\n      oper\n      services {\n        id\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        totalDevice\n        request\n        multipleReq\n        numDevicesMr\n        secretWord\n        minWrapperVersion\n        description\n        loc\n        unprotectActive\n        unprotectDeviceStatus\n        devices {\n          id\n          code\n          numDevices\n          cost\n          type\n          name\n        }\n        camerasArlo {\n          id\n          model\n          connectedToInstallation\n          usedForAlarmVerification\n          offer\n          name\n          locationHint\n          batteryLevel\n          connectivity\n          createdDate\n          modifiedDate\n          latestThumbnailUri\n        }\n        attributes {\n          name\n          attributes {\n            name\n            value\n            active\n          }\n        }\n        listdiy {\n          type\n          idMant\n          state\n          idZone\n          canBeResent\n          guide\n          tutorial\n          name\n          alias\n          intime\n          steps {\n            pos\n            img\n            advice\n            text\n          }\n        }\n        listprompt {\n          idNot\n          text\n          type\n        }\n      }\n      configRepoUser {\n        hasCode\n        pinCodeConf {\n          pinCodeLength\n        }\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n    }\n  }\n}\n",
+            "variables": {"numinst": str(installation.number), "uuid": self.uuid},
+            "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      id\n      numinst\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        id\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        totalDevice\n        request\n        multipleReq\n        numDevicesMr\n        secretWord\n        minWrapperVersion\n        description\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        devices {\n          id\n          code\n          numDevices\n          cost\n          type\n          name\n        }\n        camerasArlo {\n          id\n          model\n          connectedToInstallation\n          usedForAlarmVerification\n          offer\n          name\n          locationHint\n          batteryLevel\n          connectivity\n          createdDate\n          modifiedDate\n          latestThumbnailUri\n        }\n        attributes {\n          name\n          attributes {\n            name\n            value\n            active\n          }\n        }\n        listdiy {\n          idMant\n          state\n        }\n        listprompt {\n          idNot\n          text\n          type\n          customParam\n          alias\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
         response: ClientResponse = await self._execute_request(content, "Srv")
         result_json = json.loads(await response.text())
@@ -355,6 +366,9 @@ class ApiManager:
 
         result: list[Service] = []
         raw_data = result_json["data"]["xSSrv"]["installation"]["services"]
+        installation.capabilities = result_json["data"]["xSSrv"]["installation"][
+            "capabilities"
+        ]
         # json_services = json.dumps(raw_data)
         # result = json.loads(json_services)
         for item in raw_data:
@@ -386,11 +400,6 @@ class ApiManager:
                     bool(item["secretWord"]),
                     item["minWrapperVersion"],
                     item["description"],
-                    item["loc"],
-                    bool(item["unprotectActive"]),
-                    item["unprotectDeviceStatus"],
-                    [],
-                    [],
                     root_attributes,
                     [],
                     [],
@@ -456,9 +465,11 @@ class ApiManager:
         content = {
             "operationName": "Status",
             "variables": {"numinst": str(installation.number)},
-            "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n  }\n}\n",
+            "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
         }
-        response: ClientResponse = await self._execute_request(content, "Status")
+        response: ClientResponse = await self._execute_request(
+            content, "Status", installation
+        )
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]

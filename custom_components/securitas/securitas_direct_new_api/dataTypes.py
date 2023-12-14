@@ -20,6 +20,7 @@ class Installation:
     province: str
     email: str
     phone: str
+    capabilities: str
 
 
 @dataclass
@@ -112,14 +113,9 @@ class Service:
     secret_word: bool
     min_wrapper_version: None
     description: str
-    loc: str
-    unprotect_active: bool
-    unprotect_device_status: None
-    devices: List[Any]
-    cameras_arlo: List[Any]
     attributes: Attributes
-    listdiy: List[Any]
-    listprompt: List[Any]
+    listdiy: list[Any]
+    listprompt: list[Any]
     installation: Installation
 
 

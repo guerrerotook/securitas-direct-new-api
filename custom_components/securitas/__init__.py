@@ -193,6 +193,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ] = await client.session.list_installations()
             devices: list[SecuritasDirectDevice] = []
             for instalation in instalations:
+                services: list[Service] = await client.get_services(instalation)
                 devices.append(SecuritasDirectDevice(instalation))
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
@@ -325,6 +326,7 @@ class SecuritasHub:
         self.country: str = domain_config[CONF_COUNTRY].upper()
         self.lang: str = self.country.lower() if self.country != "UK" else "en"
         self.hass: HomeAssistant = hass
+        self.services: dict[int, list[Service]] = {1: []}
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
@@ -393,6 +395,9 @@ class SecuritasHub:
         """Update the overview."""
         if self.check_alarm is not True:
             status: SStatus = await self.session.check_general_status(installation)
+            if isinstance(status, str):
+                _LOGGER.error(status)
+                return None
             return CheckAlarmStatus(
                 status.status,
                 None,
