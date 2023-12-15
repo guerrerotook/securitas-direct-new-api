@@ -1,40 +1,36 @@
 """Support for Securitas Direct alarms."""
+import asyncio
 from collections import OrderedDict
-from datetime import timedelta
 import logging
 import secrets
 from uuid import uuid4
+
 from aiohttp import ClientSession
-import asyncio
-
 import voluptuous as vol
-from homeassistant import config_entries
 
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
     CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
-    CONF_TOKEN,
     CONF_UNIQUE_ID,
     CONF_USERNAME,
     Platform,
 )
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
-from homeassistant.helpers.typing import ConfigType
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .securitas_direct_new_api.apimanager import ApiManager
 from .securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
     Installation,
     OtpPhone,
-    SStatus,
     Service,
+    SStatus,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -52,6 +48,10 @@ DOMAIN = "securitas"
 
 MIN_SCAN_INTERVAL = 20
 DEFAULT_SCAN_INTERVAL = 40
+DEFAULT_CHECK_ALARM_PANEL = True
+DEFAULT_CODE = ""
+DEFAULT_CODE_ENABLED = True
+
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
 HUB = None
 
@@ -66,8 +66,10 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_PASSWORD,
                 ): str,
                 vol.Optional(CONF_COUNTRY, default="ES"): str,
-                vol.Optional(CONF_CODE): str,
-                vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): bool,
+                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(
+                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
+                ): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
             }
         )
@@ -99,13 +101,13 @@ def generate_device_id(lang: str) -> str:
 
 def add_device_information(config: OrderedDict) -> OrderedDict:
     """Add device information to the configuration."""
-    if not CONF_DEVICE_ID in config:
+    if CONF_DEVICE_ID not in config:
         config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
 
-    if not CONF_UNIQUE_ID in config:
+    if CONF_UNIQUE_ID not in config:
         config[CONF_UNIQUE_ID] = generate_uuid()
 
-    if not CONF_DEVICE_INDIGITALL in config:
+    if CONF_DEVICE_INDIGITALL not in config:
         config[CONF_DEVICE_INDIGITALL] = str(uuid4())
 
     return config
@@ -247,7 +249,7 @@ def setup_hass_services(hass: HomeAssistant) -> None:
 def _notify_error(
     hass: HomeAssistant, notification_id, title: str, message: str
 ) -> None:
-    """Notify user with persistent notification"""
+    """Notify user with persistent notification."""
     hass.async_create_task(
         hass.services.async_call(
             domain="persistent_notification",

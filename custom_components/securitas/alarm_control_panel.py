@@ -12,9 +12,9 @@ from homeassistant.components.alarm_control_panel.const import (
     SUPPORT_ALARM_ARM_HOME,
     SUPPORT_ALARM_ARM_NIGHT,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     CONF_CODE,
-    CONF_SCAN_INTERVAL,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
@@ -23,11 +23,10 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     STATE_ALARM_DISARMED,
     STATE_ALARM_DISARMING,
 )
-
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
 from . import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_ENABLE_CODE,
@@ -134,7 +133,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
 
     def _notify_error(self, notification_id, title: str, message: str) -> None:
-        """Notify user with persistent notification"""
+        """Notify user with persistent notification."""
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
@@ -300,12 +299,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = STATE_ALARM_ARMED_NIGHT
             elif status.protomResponse == "P":
                 self._state = STATE_ALARM_ARMED_HOME
-            elif (
-                status.protomResponse == "E"  # PERI
-                or status.protomResponse == "B"  # PERI + ARMED_HOME
-                or status.protomResponse == "C"  # PERI + ARMED_NIGHT
-                or status.protomResponse == "A"  # PERI + ARMED_AWAY
-            ):
+            elif status.protomResponse in ("E", "B", "C", "A"):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
     async def async_update(self):
@@ -316,9 +310,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.update_status_alarm(alarm_status)
 
     def check_code(self, code=None) -> bool:
+        """Check that the code entered in the panel matches the code in the config."""
+
         result: bool = False
-        if isinstance(code, str):
-            code = int(code)
+
         if (
             self.client.config.get(CONF_CODE, "") == ""
             or str(self.client.config.get(CONF_CODE, "")) == str(code)

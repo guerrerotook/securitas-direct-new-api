@@ -1,20 +1,12 @@
 """Config flow for the MELCloud platform."""
 from __future__ import annotations
+
 from collections import OrderedDict
 from datetime import timedelta
 import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.core import callback
-
-from homeassistant.data_entry_flow import FlowResult, FlowResultType
-from .securitas_direct_new_api.dataTypes import (
-    OtpPhone,
-    Service,
-)
-
-from homeassistant.helpers.selector import selector
 
 from homeassistant.const import (
     CONF_CODE,
@@ -26,15 +18,28 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
+from homeassistant.core import callback
+from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.selector import selector
+
 from . import (
+    CONF_CHECK_ALARM_PANEL,
+    CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
-    CONF_ENTRY_ID,
+    CONF_DEVICE_INDIGITALL,
     CONF_ENABLE_CODE,
+    CONF_ENTRY_ID,
     CONFIG_SCHEMA,
-    PLATFORMS,
+    DEFAULT_CHECK_ALARM_PANEL,
+    DEFAULT_CODE,
+    DEFAULT_CODE_ENABLED,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
     SecuritasDirectDevice,
+    SecuritasHub,
     generate_uuid,
 )
+from .securitas_direct_new_api.dataTypes import OtpPhone, Service
 
 CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
@@ -43,13 +48,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
-from . import (
-    CONF_CHECK_ALARM_PANEL,
-    CONF_COUNTRY,
-    CONF_DEVICE_INDIGITALL,
-    DOMAIN,
-    SecuritasHub,
-)
 
 
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -61,7 +59,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self.config = OrderedDict()
         self.securitas: SecuritasHub = None
-        self.opt_challange: tuple[str, list[OtpPhone]] = None
+        self.opt_challenge: tuple[str, list[OtpPhone]] = None
 
     async def _create_entry(
         self, username: str, data: OrderedDict
@@ -86,7 +84,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         entry_id: str,
     ) -> SecuritasHub:
         """Create client."""
-        if password is None and password is None:
+        if password is None and code is None:
             raise ValueError(
                 "Invalid internal state. Called without either password or token"
             )
@@ -110,10 +108,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_phone_list(self, user_input=None):
         """Show the list of phones for the OTP challange."""
         phone_index: int = -1
-        for phone_item in self.opt_challange[1]:
+        for phone_item in self.opt_challenge[1]:
             if phone_item.phone == user_input["phones"]:
                 phone_index = phone_item.id
-        await self.securitas.sent_opt(self.opt_challange[0], phone_index)
+        await self.securitas.sent_opt(self.opt_challenge[0], phone_index)
         return self.async_show_form(
             step_id="otp_challange",
             data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
@@ -121,7 +119,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_otp_challange(self, user_input=None):
         """Last step of the OTP challange."""
-        await self.securitas.send_sms_code(self.opt_challange[0], user_input[CONF_CODE])
+        await self.securitas.send_sms_code(self.opt_challenge[0], user_input[CONF_CODE])
         await self.securitas.login()
         self.config[CONF_TOKEN] = self.securitas.get_authentication_token()
         result = await self._create_entry(self.config[CONF_USERNAME], self.config)
@@ -165,19 +163,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data[CONF_USERNAME],
                 initial_data[CONF_PASSWORD],
                 initial_data[CONF_COUNTRY],
-                initial_data[CONF_CODE],
-                initial_data[CONF_CHECK_ALARM_PANEL],
-                initial_data[CONF_SCAN_INTERVAL],
+                initial_data.get(CONF_CODE, DEFAULT_CODE),
+                initial_data.get(CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL),
+                initial_data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                 initial_data.get(CONF_DEVICE_ID, uuid),
                 initial_data.get(CONF_UNIQUE_ID, uuid),
                 initial_data.get(CONF_DEVICE_INDIGITALL, ""),
                 initial_data.get(CONF_ENTRY_ID, ""),
             )
-        self.opt_challange: tuple[
+        self.opt_challenge: tuple[
             str, list[OtpPhone]
         ] = await self.securitas.validate_device()
         phones: list[str] = []
-        for phone_item in self.opt_challange[1]:
+        for phone_item in self.opt_challenge[1]:
             phones.append(phone_item.phone)
         data_schema = {}
         data_schema["phones"] = selector({"select": {"options": phones}})
@@ -243,18 +241,20 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         # Fill options with entry data
         scan_interval: int = self.config_entry.options.get(
-            CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, 60)
+            CONF_SCAN_INTERVAL,
+            self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
 
         code: str = self.config_entry.options.get(
-            CONF_CODE, self.config_entry.data[CONF_CODE]
+            CONF_CODE, self.config_entry.data.get(CONF_CODE, DEFAULT_CODE)
         )
 
         if isinstance(code, int):
             code = str(code)
 
         code_enabled: bool = self.config_entry.options.get(
-            CONF_ENABLE_CODE, self.config_entry.data.get(CONF_ENABLE_CODE, True)
+            CONF_ENABLE_CODE,
+            self.config_entry.data.get(CONF_ENABLE_CODE, DEFAULT_CODE_ENABLED),
         )
 
         delay_check_operation: bool = self.config_entry.options.get(
@@ -263,7 +263,10 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         )
 
         check_alarm_panel: bool = self.config_entry.options.get(
-            CONF_CHECK_ALARM_PANEL, self.config_entry.data[CONF_CHECK_ALARM_PANEL]
+            CONF_CHECK_ALARM_PANEL,
+            self.config_entry.data.get(
+                CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL
+            ),
         )
 
         schema = vol.Schema(
