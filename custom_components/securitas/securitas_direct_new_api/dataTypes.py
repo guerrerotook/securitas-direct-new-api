@@ -39,28 +39,28 @@ class CheckAlarmStatus:
 class ArmStatus:
     """Define a Securitas Direct Arm Alarm Status Operation."""
 
-    operation_status: str
-    message: str
-    status: int
-    InstallationNumer: int
-    protomResponse: str
-    protomResponseData: str
-    requestId: str
-    error: str
+    operation_status: str = ""
+    message: str = ""
+    status: int = ""
+    InstallationNumer: int = ""
+    protomResponse: str = ""
+    protomResponseData: str = ""
+    requestId: str = ""
+    error: str = ""
 
 
 @dataclass
 class DisarmStatus:
     """Define a Securitas Direct Disarm Alarm Status Operation."""
 
-    error: str
-    message: str
-    numinst: str
-    protomResponse: str
-    protomResponseData: str
-    requestId: str
-    operation_status: str
-    status: str
+    error: str = ""
+    message: str = ""
+    numinst: str = ""
+    protomResponse: str = ""
+    protomResponseData: str = ""
+    requestId: str = ""
+    operation_status: str = ""
+    status: str = ""
 
 
 @dataclass

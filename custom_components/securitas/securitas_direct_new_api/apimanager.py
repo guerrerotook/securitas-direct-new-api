@@ -6,7 +6,7 @@ import secrets
 from typing import Optional, Union
 from uuid import uuid4
 
-from aiohttp import ClientSession, ClientResponse
+from aiohttp import ClientResponse, ClientSession
 
 from .dataTypes import (
     AirQuality,
@@ -499,7 +499,7 @@ class ApiManager:
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            return error_message
+            return error_message  # FIXME: returning a string will cause problems
 
         raw_data = result_json["data"]["xSCheckAlarmStatus"]
         return CheckAlarmStatus(
@@ -529,7 +529,7 @@ class ApiManager:
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            return error_message
+            return (False, error_message)
 
         if result_json["data"]["xSArmPanel"]["res"] == "OK":
             return (True, result_json["data"]["xSArmPanel"]["referenceId"])
@@ -561,7 +561,7 @@ class ApiManager:
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            return error_message
+            return ArmStatus(error=error_message)
 
         raw_data = result_json["data"]["xSArmStatus"]
         return ArmStatus(
@@ -593,7 +593,7 @@ class ApiManager:
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            return error_message
+            return (False, error_message)
 
         if result_json["data"]["xSDisarmPanel"]["res"] == "OK":
             return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
@@ -625,7 +625,7 @@ class ApiManager:
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            return error_message
+            return DisarmStatus(error=error_message)
 
         raw_data = result_json["data"]["xSDisarmStatus"]
         return DisarmStatus(

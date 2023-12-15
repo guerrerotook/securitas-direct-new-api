@@ -156,17 +156,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 # check arming status
                 await asyncio.sleep(self.get_delay_configuration())
                 count = 1
-                disarm_status: DisarmStatus = (
-                    await self.client.session.check_disarm_status(
-                        self.installation,
-                        response[1],
-                        ArmType.TOTAL,
-                        count,
-                        self._get_proto_status(),
-                    )
-                )
-                while disarm_status.operation_status == "WAIT":
-                    count = count + 1
+                disarm_status = DisarmStatus()
+                while (count == 1) or disarm_status.operation_status == "WAIT":
                     await asyncio.sleep(self.get_delay_configuration())
                     disarm_status = await self.client.session.check_disarm_status(
                         self.installation,
@@ -175,6 +166,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         count,
                         self._get_proto_status(),
                     )
+                    count = count + 1
                 self._attr_extra_state_attributes["message"] = disarm_status.message
                 self._attr_extra_state_attributes[
                     "response_data"
