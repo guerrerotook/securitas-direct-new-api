@@ -3,7 +3,9 @@
     "name": "Securitas Direct",
     "documentation": "https://github.com/guerrerotook/securitas-direct-new-api",
     "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
-    "requirements": [],
+    "requirements": [
+        "jwt==1.3.1"
+    ],
     "dependencies": [],
     "codeowners": [
         "@guerrerotook"
