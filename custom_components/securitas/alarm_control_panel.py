@@ -148,7 +148,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.async_write_ha_state()
 
     def _notify_error(self, notification_id, title: str, message: str) -> None:
-        """Notify user with persistent notification"""
+        """Notify user with persistent notification."""
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
