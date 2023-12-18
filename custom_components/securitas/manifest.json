@@ -3,9 +3,7 @@
     "name": "Securitas Direct",
     "documentation": "https://github.com/guerrerotook/securitas-direct-new-api",
     "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
-    "requirements": [
-        "PyJWT==2.8.0"
-    ],
+    "requirements": [],
     "dependencies": [],
     "codeowners": [
         "@guerrerotook"
