@@ -1,40 +1,38 @@
 """Support for Securitas Direct alarms."""
+import asyncio
 from collections import OrderedDict
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import secrets
 from uuid import uuid4
+
 from aiohttp import ClientSession
-import asyncio
-
+import jwt
 import voluptuous as vol
-from homeassistant import config_entries
 
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
     CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
-    CONF_TOKEN,
     CONF_UNIQUE_ID,
     CONF_USERNAME,
     Platform,
 )
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
-from homeassistant.helpers.typing import ConfigType
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .securitas_direct_new_api.apimanager import ApiManager
 from .securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
     Installation,
     OtpPhone,
-    SStatus,
     Service,
+    SStatus,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -393,6 +391,18 @@ class SecuritasHub:
 
     async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
         """Update the overview."""
+        # decode the capabilities token
+        token = jwt.decode(
+            installation.capabilities,
+            algorithms=["HS256"],
+            options={"verify_signature": False},
+        )
+        if "exp" in token:
+            expiration: datetime = datetime.fromtimestamp(token["exp"])
+            if datetime.now() + timedelta(minutes=1) > expiration:
+                # if the token is expired get a new one
+                await self.get_services(installation)
+
         if self.check_alarm is not True:
             status: SStatus = await self.session.check_general_status(installation)
             if isinstance(status, str):
