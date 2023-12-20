@@ -15,6 +15,7 @@ from homeassistant.components.alarm_control_panel.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     CONF_CODE,
+    CONF_SCAN_INTERVAL,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_CUSTOM_BYPASS,
     STATE_ALARM_ARMED_HOME,
@@ -100,8 +101,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_extra_state_attributes = {}
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
-        self._update_interval = timedelta(seconds=client.config.get(CONF_SCAN_INTERVAL, 1200))
-        self._update_unsub = async_track_time_interval(hass, self.async_update_status, self._update_interval)
+        self._update_interval = timedelta(
+            seconds=client.config.get(CONF_SCAN_INTERVAL, 1200)
+        )
+        self._update_unsub = async_track_time_interval(
+            hass, self.async_update_status, self._update_interval
+        )
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
