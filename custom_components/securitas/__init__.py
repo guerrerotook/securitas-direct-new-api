@@ -34,6 +34,7 @@ from .securitas_direct_new_api.dataTypes import (
     Service,
     SStatus,
 )
+from .securitas_direct_new_api.exceptions import Login2FAError, LoginError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -177,28 +178,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
         result = await client.login()
-        if result == "2FA":
-            msg = (
-                "Securitas Direct need a 2FA SMS code."
-                "Please login again with your phone"
-            )
-            _notify_error(hass, "2fa_error", "Securitas Direct", msg)
-            config[CONF_ERROR] = "2FA"
-            hass.async_create_task(
-                hass.config_entries.flow.async_init(
-                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
-                )
-            )
-            return False
-        else:
+        if result:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
-            instalations: list[
+            installations: list[
                 SecuritasDirectDevice
             ] = await client.session.list_installations()
             devices: list[SecuritasDirectDevice] = []
-            for instalation in instalations:
-                services: list[Service] = await client.get_services(instalation)
-                devices.append(SecuritasDirectDevice(instalation))
+            for installation in installations:
+                services: list[Service] = await client.get_services(installation)
+                devices.append(SecuritasDirectDevice(installation))
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALATION_KEY] = devices
@@ -345,16 +333,27 @@ class SecuritasHub:
 
     async def login(self):
         """Login to Securitas."""
-        succeed: tuple[bool, str] = await self.session.login()
-        if not succeed[0] and succeed[1] == "2FA":
-            # 2fa for securitas
+        try:
+            self.session.login()
+        except Login2FAError:
+            msg = (
+                "Securitas Direct need a 2FA SMS code."
+                "Please login again with your phone"
+            )
+            _notify_error(hass, "2fa_error", "Securitas Direct", msg)
+            config[CONF_ERROR] = "2FA"
+            hass.async_create_task(
+                hass.config_entries.flow.async_init(
+                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
+                )
+            )
             _LOGGER.info("2FA needed for the device")
-            return succeed[1]
-
-        _LOGGER.debug("Log in Securitas: %s", succeed[0])
-        if not succeed[0]:
-            _LOGGER.error("Could not log in to Securitas: %s", succeed[1])
             return False
+        except LoginError:
+            _LOGGER.error("Could not log in to Securitas")
+            return False
+
+        _LOGGER.debug("Log in to Securitas was successful")
         return True
 
     async def validate_device(self) -> tuple[str, list[OtpPhone]]:

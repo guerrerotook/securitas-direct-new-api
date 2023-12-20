@@ -23,6 +23,13 @@ from .dataTypes import (
     SStatus,
 )
 from .domains import ApiDomains
+from .exceptions import (
+    APIError,
+    AuthError,
+    Login2FAError,
+    LoginError,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -130,9 +137,14 @@ class ApiManager:
             response_text: str = await response.text()
             _LOGGER.debug("--------------Response--------------")
         _LOGGER.debug(response_text)
-        error_login: bool = await self._check_errros(response_text)
-        if error_login:
-            return await self._execute_request(content, operation)
+
+        login_error: bool = await self._check_errors(response_text)
+        if login_error:
+            _LOGGER.info("Login is expired. Login again")
+            succeed = await self.login()
+            _LOGGER.debug("Re-logging result " + str(succeed[0]))
+
+            await self._execute_request(content, operation)
 
         return response
 
@@ -150,7 +162,8 @@ class ApiManager:
             + str(current.microsecond)
         )
 
-    async def _check_errros(self, value: str) -> bool:
+    async def _check_errors(self, value: str) -> bool:
+        """Return true if there is an invalid token or session."""
         if value is not None:
             response = json.loads(value)
             if "errors" in response:
@@ -161,11 +174,7 @@ class ApiManager:
                             == "Invalid session. Please, try again later."
                             or error_item["message"] == "Invalid token: Expired"
                         ):
-                            self.authentication_token = None
-                            _LOGGER.info("Login is expired. Login again")
-                            succeed: tuple[bool, str] = await self.login()
-                            _LOGGER.debug("Re-loging result " + str(succeed[0]))
-                            return succeed[0]
+                            return True
                         else:
                             _LOGGER.error(error_item["message"])
         return False
@@ -263,8 +272,11 @@ class ApiManager:
         self.authentication_otp_challenge = False
         return result_json["data"]["xSSendOtp"]["res"]
 
-    async def login(self) -> tuple[bool, str]:
-        """Login."""
+    async def login(self) -> None:
+        """Send Login info and sets authentication token."""
+
+        self.authentication_token = None
+
         content = {
             "operationName": "mkLoginToken",
             "variables": {
@@ -286,17 +298,19 @@ class ApiManager:
             },
             "query": "mutation mkLoginToken($user: String!, $password: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) { xSLoginToken(user: $user, password: $password, country: $country, lang: $lang, callby: $callby, id: $id, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) { __typename res msg hash refreshToken legals changePassword needDeviceAuthorization mainUser } }",
         }
+
         response: ClientResponse = await self._execute_request(content, "mkLoginToken")
         result_json = json.loads(await response.text())
         if "errors" in result_json:
             error_message = result_json["errors"][0]["message"]
-            return (False, error_message)
+            # return (False, error_message)
+            raise LoginError(error_message)
 
         if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
-            return (False, "2FA")
+            raise Login2FAError
 
         self.authentication_token = result_json["data"]["xSLoginToken"]["hash"]
-        return (True, "None")
+        # return (True, "None")
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
