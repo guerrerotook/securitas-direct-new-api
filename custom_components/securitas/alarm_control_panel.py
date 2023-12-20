@@ -23,6 +23,9 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     STATE_ALARM_DISARMED,
     STATE_ALARM_DISARMING,
 )
+
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -97,6 +100,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_extra_state_attributes = {}
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
+        self._update_interval = timedelta(seconds=client.config.get(CONF_SCAN_INTERVAL, 1200))
+        self._update_unsub = async_track_time_interval(hass, self.async_update_status, self._update_interval)
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
@@ -131,6 +136,17 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     self.installation, reference_id, count
                 )
             )
+
+    async def async_will_remove_from_hass(self):
+        """When entity will be removed from Home Assistant."""
+        if self._update_unsub:
+            self._update_unsub()  # Unsubscribe from updates
+
+    async def async_update_status(self, now=None):
+        """Update the status of the alarm."""
+        alarm_status = await self.client.update_overview(self.installation)
+        self.update_status_alarm(alarm_status)
+        self.async_write_ha_state()
 
     def _notify_error(self, notification_id, title: str, message: str) -> None:
         """Notify user with persistent notification."""
