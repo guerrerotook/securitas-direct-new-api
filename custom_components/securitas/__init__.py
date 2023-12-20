@@ -334,7 +334,7 @@ class SecuritasHub:
     async def login(self):
         """Login to Securitas."""
         try:
-            self.session.login()
+            await self.session.login()
         except Login2FAError:
             msg = (
                 "Securitas Direct need a 2FA SMS code."
