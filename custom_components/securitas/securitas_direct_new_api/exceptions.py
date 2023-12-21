@@ -2,7 +2,7 @@
 
 
 class SecuritasDirectError(Exception):
-    """Base class for Airzone Cloud errors."""
+    """Base class for Securitas Direct errors."""
 
 
 class APIError(SecuritasDirectError):

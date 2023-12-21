@@ -119,12 +119,10 @@ class ApiManager:
             }
             headers["security"] = json.dumps(authorization_value)
         _LOGGER.debug(
-            "Making request with device_id "
-            + self.device_id
-            + ", uuid "
-            + self.uuid
-            + " and idDeviceIndigitall "
-            + self.id_device_indigitall
+            "Making request with device_id %s, uuid %s and idDeviceIndigitall %s",
+            self.device_id,
+            self.uuid,
+            self.id_device_indigitall,
         )
         # _LOGGER.debug("--------------Content---------------")
         # _LOGGER.debug(content)
@@ -133,20 +131,27 @@ class ApiManager:
         async with self.http_client.post(
             self.api_url, headers=headers, json=content
         ) as response:
-            ClientResponse
+            # ClientResponse
             response_text: str = await response.text()
             _LOGGER.debug("--------------Response--------------")
         _LOGGER.debug(response_text)
 
-        login_error: bool = await self._check_errors(response_text)
+        response_dict = json.loads(response_text)
+
+        login_error: bool = await self._check_errors(response_dict)
         if login_error:
             _LOGGER.info("Login is expired. Login again")
             succeed = await self.login()
-            _LOGGER.debug("Re-logging result " + str(succeed[0]))
+            _LOGGER.debug("Re-logging result %s", str(succeed[0]))
 
             await self._execute_request(content, operation)
 
-        return response
+        if "errors" in response_dict:
+            raise SecuritasDirectError(
+                response_dict["errors"][0]["message"], response_dict
+            )
+
+        return response_dict
 
     def _generate_id(self) -> str:
         current: datetime = datetime.now()
@@ -162,21 +167,20 @@ class ApiManager:
             + str(current.microsecond)
         )
 
-    async def _check_errors(self, value: str) -> bool:
+    async def _check_errors(self, response) -> bool:
         """Return true if there is an invalid token or session."""
-        if value is not None:
-            response = json.loads(value)
-            if "errors" in response:
-                for error_item in response["errors"]:
-                    if "message" in error_item:
-                        if (
-                            error_item["message"]
-                            == "Invalid session. Please, try again later."
-                            or error_item["message"] == "Invalid token: Expired"
-                        ):
-                            return True
-                        else:
-                            _LOGGER.error(error_item["message"])
+
+        if "errors" in response:
+            for error_item in response["errors"]:
+                if "message" in error_item:
+                    if (
+                        error_item["message"]
+                        == "Invalid session. Please, try again later."
+                        or error_item["message"] == "Invalid token: Expired"
+                    ):
+                        return True
+                    else:
+                        _LOGGER.error(error_item["message"])
         return False
 
     async def logout(self):
@@ -209,24 +213,18 @@ class ApiManager:
         self.authentication_otp_challenge = True
         if otp_succeed:
             self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
-        response: ClientResponse = await self._execute_request(
-            content, "mkValidateDevice"
-        )
-        result_json = json.loads(await response.text())
+        response = await self._execute_request(content, "mkValidateDevice")
         self.authentication_otp_challenge = False
         self.authentication_otp_challenge_value = None
-        if "errors" in result_json:
-            data = result_json["errors"][0]["data"]
+        if "errors" in response:
+            data = response["errors"][0]["data"]
             otp_hash = data["auth-otp-hash"]
             phones: list[OtpPhone] = []
             for item in data["auth-phones"]:
                 phones.append(OtpPhone(item["id"], item["phone"]))
             return (otp_hash, phones)
         else:
-            # self.refresh_token_value = result_json["data"]["xSValidateDevice"][
-            #     "refreshToken"
-            # ]
-            self.authentication_token = result_json["data"]["xSValidateDevice"]["hash"]
+            self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
             return True
 
     async def refresh_token(self) -> bool:
@@ -242,15 +240,15 @@ class ApiManager:
             },
             "query": "mutation RefreshLogin($refreshToken: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) {\n  xSRefreshLogin(refreshToken: $refreshToken, id: $id, country: $country, lang: $lang, callby: $callby, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) {\n    __typename\n    res\n    msg\n    hash\n    refreshToken\n    legals\n    changePassword\n    needDeviceAuthorization\n    mainUser\n  }\n}",
         }
-        self.authentication_otp_challenge = True
-        response: ClientResponse = await self._execute_request(content, "RefreshLogin")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            print(error_message)
-            return []
+        # self.authentication_otp_challenge = True
+        response = await self._execute_request(content, "RefreshLogin")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     print(error_message)
+        #     return []
         self.authentication_otp_challenge = False
-        return result_json["data"]["xSSendOtp"]["res"]
+        return response["data"]["xSSendOtp"]["res"]
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
         """Send the OTP device challange."""
@@ -262,15 +260,15 @@ class ApiManager:
             },
             "query": "mutation mkSendOTP($recordId: Int!, $otpHash: String!) {\n  xSSendOtp(recordId: $recordId, otpHash: $otpHash) {\n    res\n    msg\n  }\n}\n",
         }
-        self.authentication_otp_challenge = True
-        response: ClientResponse = await self._execute_request(content, "mkSendOTP")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            print(error_message)
-            return []
+        # self.authentication_otp_challenge = True
+        response = await self._execute_request(content, "mkSendOTP")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     print(error_message)
+        #     return []
         self.authentication_otp_challenge = False
-        return result_json["data"]["xSSendOtp"]["res"]
+        return response["data"]["xSSendOtp"]["res"]
 
     async def login(self) -> None:
         """Send Login info and sets authentication token."""
@@ -299,18 +297,16 @@ class ApiManager:
             "query": "mutation mkLoginToken($user: String!, $password: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) { xSLoginToken(user: $user, password: $password, country: $country, lang: $lang, callby: $callby, id: $id, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) { __typename res msg hash refreshToken legals changePassword needDeviceAuthorization mainUser } }",
         }
 
-        response: ClientResponse = await self._execute_request(content, "mkLoginToken")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            # return (False, error_message)
-            raise LoginError(error_message)
+        try:
+            response = await self._execute_request(content, "mkLoginToken")
+        except SecuritasDirectError as err:
+            (error_message, result_json) = err.args
+            if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
+                raise Login2FAError from err
 
-        if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
-            raise Login2FAError
+            raise LoginError(error_message) from err
 
-        self.authentication_token = result_json["data"]["xSLoginToken"]["hash"]
-        # return (True, "None")
+        self.authentication_token = response["data"]["xSLoginToken"]["hash"]
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
@@ -318,16 +314,14 @@ class ApiManager:
             "operationName": "mkInstallationList",
             "query": "query mkInstallationList {\n  xSInstallations {\n    installations {\n      numinst\n      alias\n      panel\n      type\n      name\n      surname\n      address\n      city\n      postcode\n      province\n      email\n      phone\n    }\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(
-            content, "mkInstallationList"
-        )
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message
+        response = await self._execute_request(content, "mkInstallationList")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return error_message
 
         result: list[Installation] = []
-        raw_installations = result_json["data"]["xSInstallations"]["installations"]
+        raw_installations = response["data"]["xSInstallations"]["installations"]
         for item in raw_installations:
             installation_item: Installation = Installation(
                 int(item["numinst"]),
@@ -357,13 +351,13 @@ class ApiManager:
             },
             "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(content, "CheckAlarm")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message
+        response = await self._execute_request(content, "CheckAlarm")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return error_message
 
-        return result_json["data"]["xSCheckAlarm"]["referenceId"]
+        return response["data"]["xSCheckAlarm"]["referenceId"]
 
     async def get_all_services(self, installation: Installation) -> list[Service]:
         """Get the list of all services available to the user."""
@@ -372,15 +366,15 @@ class ApiManager:
             "variables": {"numinst": str(installation.number), "uuid": self.uuid},
             "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      id\n      numinst\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        id\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        totalDevice\n        request\n        multipleReq\n        numDevicesMr\n        secretWord\n        minWrapperVersion\n        description\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        devices {\n          id\n          code\n          numDevices\n          cost\n          type\n          name\n        }\n        camerasArlo {\n          id\n          model\n          connectedToInstallation\n          usedForAlarmVerification\n          offer\n          name\n          locationHint\n          batteryLevel\n          connectivity\n          createdDate\n          modifiedDate\n          latestThumbnailUri\n        }\n        attributes {\n          name\n          attributes {\n            name\n            value\n            active\n          }\n        }\n        listdiy {\n          idMant\n          state\n        }\n        listprompt {\n          idNot\n          text\n          type\n          customParam\n          alias\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
-        response: ClientResponse = await self._execute_request(content, "Srv")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message
+        response = await self._execute_request(content, "Srv")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return error_message
 
         result: list[Service] = []
-        raw_data = result_json["data"]["xSSrv"]["installation"]["services"]
-        installation.capabilities = result_json["data"]["xSSrv"]["installation"][
+        raw_data = response["data"]["xSSrv"]["installation"]["services"]
+        installation.capabilities = response["data"]["xSSrv"]["installation"][
             "capabilities"
         ]
         # json_services = json.dumps(raw_data)
@@ -434,15 +428,15 @@ class ApiManager:
             },
             "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(content, "Sentinel")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message
+        response = await self._execute_request(content, "Sentinel")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return error_message
 
-        raw_data = result_json["data"]["xSAllConfort"][0]["ddi"]["status"]
+        raw_data = response["data"]["xSAllConfort"][0]["ddi"]["status"]
         return Sentinel(
-            result_json["data"]["xSAllConfort"][0]["ddi"]["alias"],
+            response["data"]["xSAllConfort"][0]["ddi"]["alias"],
             raw_data["airQualityMsg"],
             int(raw_data["humidity"]),
             int(raw_data["temperature"]),
@@ -460,15 +454,13 @@ class ApiManager:
             },
             "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
         }
-        response: ClientResponse = await self._execute_request(
-            content, "AirQualityGraph"
-        )
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message
+        response = await self._execute_request(content, "AirQualityGraph")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return error_message
 
-        raw_data = result_json["data"]["xSAirQ"]["graphData"]["status"]
+        raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
         return AirQuality(
             int(raw_data["current"]),
             raw_data["currentMsg"],
@@ -481,15 +473,9 @@ class ApiManager:
             "variables": {"numinst": str(installation.number)},
             "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
         }
-        response: ClientResponse = await self._execute_request(
-            content, "Status", installation
-        )
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message
+        response = await self._execute_request(content, "Status", installation)
 
-        raw_data = result_json["data"]["xSStatus"]
+        raw_data = response["data"]["xSStatus"]
         return SStatus(raw_data["status"], raw_data["timestampUpdate"])
 
     async def check_alarm_status(
@@ -507,15 +493,9 @@ class ApiManager:
             },
             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(
-            content, "CheckAlarmStatus"
-        )
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return error_message  # FIXME: returning a string will cause problems
+        response = await self._execute_request(content, "CheckAlarmStatus")
 
-        raw_data = result_json["data"]["xSCheckAlarmStatus"]
+        raw_data = response["data"]["xSCheckAlarmStatus"]
         return CheckAlarmStatus(
             raw_data["res"],
             raw_data["msg"],
@@ -539,16 +519,16 @@ class ApiManager:
             },
             "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(content, "xSArmPanel")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return (False, error_message)
+        response = await self._execute_request(content, "xSArmPanel")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return (False, error_message)
 
-        if result_json["data"]["xSArmPanel"]["res"] == "OK":
-            return (True, result_json["data"]["xSArmPanel"]["referenceId"])
+        if response["data"]["xSArmPanel"]["res"] == "OK":
+            return (True, response["data"]["xSArmPanel"]["referenceId"])
         else:
-            return (False, result_json["data"]["xSArmPanel"]["msg"])
+            return (False, response["data"]["xSArmPanel"]["msg"])
 
     async def check_arm_status(
         self,
@@ -571,13 +551,13 @@ class ApiManager:
             },
             "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(content, "ArmStatus")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return ArmStatus(error=error_message)
+        response = await self._execute_request(content, "ArmStatus")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return ArmStatus(error=error_message)
 
-        raw_data = result_json["data"]["xSArmStatus"]
+        raw_data = response["data"]["xSArmStatus"]
         return ArmStatus(
             raw_data["res"],
             raw_data["msg"],
@@ -603,16 +583,16 @@ class ApiManager:
             },
             "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(content, "xSDisarmPanel")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return (False, error_message)
+        response = await self._execute_request(content, "xSDisarmPanel")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return (False, error_message)
 
-        if result_json["data"]["xSDisarmPanel"]["res"] == "OK":
-            return (True, result_json["data"]["xSDisarmPanel"]["referenceId"])
+        if response["data"]["xSDisarmPanel"]["res"] == "OK":
+            return (True, response["data"]["xSDisarmPanel"]["referenceId"])
         else:
-            return (False, result_json["data"]["xSDisarmPanel"]["msg"])
+            return (False, response["data"]["xSDisarmPanel"]["msg"])
 
     async def check_disarm_status(
         self,
@@ -635,13 +615,13 @@ class ApiManager:
             },
             "query": "query DisarmStatus($numinst: String!, $panel: String!, $referenceId: String!, $counter: Int!, $request: DisarmCodeRequest) {\n  xSDisarmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
-        response: ClientResponse = await self._execute_request(content, "DisarmStatus")
-        result_json = json.loads(await response.text())
-        if "errors" in result_json:
-            error_message = result_json["errors"][0]["message"]
-            return DisarmStatus(error=error_message)
+        response = await self._execute_request(content, "DisarmStatus")
+        # result_json = json.loads(await response.text())
+        # if "errors" in result_json:
+        #     error_message = result_json["errors"][0]["message"]
+        #     return DisarmStatus(error=error_message)
 
-        raw_data = result_json["data"]["xSDisarmStatus"]
+        raw_data = response["data"]["xSDisarmStatus"]
         return DisarmStatus(
             raw_data["error"],
             raw_data["msg"],

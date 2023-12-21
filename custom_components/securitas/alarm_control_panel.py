@@ -24,12 +24,10 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     STATE_ALARM_DISARMED,
     STATE_ALARM_DISARMING,
 )
-
-from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 
 from . import (
     CONF_DELAY_CHECK_OPERATION,
@@ -46,6 +44,7 @@ from .securitas_direct_new_api.dataTypes import (
     DisarmStatus,
     Installation,
 )
+from .securitas_direct_new_api.exceptions import SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=1200)
@@ -125,7 +124,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def get_delay_configuration(self) -> int:
         return self.client.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1)
 
-    async def get_arm_state(self):
+    async def get_arm_state(self):  # FIXME: remove?
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
         count: int = 1
@@ -149,9 +148,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_update_status(self, now=None):
         """Update the status of the alarm."""
-        alarm_status = await self.client.update_overview(self.installation)
-        self.update_status_alarm(alarm_status)
-        self.async_write_ha_state()
+        try:
+            alarm_status = await self.client.update_overview(self.installation)
+        except SecuritasDirectError:
+            pass  # FIXME: convert to an HAError
+        else:
+            self.update_status_alarm(alarm_status)
+            self.async_write_ha_state()
 
     def _notify_error(self, notification_id, title: str, message: str) -> None:
         """Notify user with persistent notification."""
