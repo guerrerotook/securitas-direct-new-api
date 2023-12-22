@@ -124,7 +124,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def get_delay_configuration(self) -> int:
         return self.client.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1)
 
-    async def get_arm_state(self):  # FIXME: remove?
+    async def get_arm_state(self):
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
         count: int = 1
@@ -150,8 +150,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Update the status of the alarm."""
         try:
             alarm_status = await self.client.update_overview(self.installation)
-        except SecuritasDirectError:
-            pass  # FIXME: convert to an HAError
+        except SecuritasDirectError as err:
+            _LOGGER.error(err.args[0])
         else:
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()

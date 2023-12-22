@@ -72,7 +72,7 @@ class ApiManager:
         self.apollo_operation_id: str = secrets.token_hex(64)
 
     async def _execute_request(
-        self, content, operation: str, instalation: Optional[Installation] = None
+        self, content, operation: str, installation: Optional[Installation] = None
     ) -> ClientResponse:
         app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
         headers = {
@@ -82,11 +82,11 @@ class ApiManager:
             "X-APOLLO-OPERATION-NAME": operation,
             "extension": '{"mode":"full"}',
         }
-
-        if instalation is not None:
-            headers["numinst"] = str(instalation.number)
-            headers["panel"] = instalation.panel
-            headers["x-capabilities"] = instalation.capabilities
+        if installation is not None:
+            headers["numinst"] = str(installation.number)
+            headers["x-installationNumber"] = str(installation.number)
+            headers["panel"] = installation.panel
+            headers["x-capabilities"] = installation.capabilities
 
         if self.authentication_token is not None:
             authorization_value = {
@@ -301,12 +301,13 @@ class ApiManager:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
             (error_message, result_json) = err.args
-            if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
-                raise Login2FAError from err
+            if result_json["data"]["xSLoginToken"]:
+                if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
+                    raise Login2FAError from err
 
-            raise LoginError(error_message) from err
+            raise LoginError(error_message, result_json) from err
 
-        self.authentication_token = response["data"]["xSLoginToken"]["hash"]
+        self.authentication_token = response["data"]["xSLoginToken"].get("hash", None)
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
@@ -350,8 +351,13 @@ class ApiManager:
                 "panel": installation.panel,
             },
             "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
+            # "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
-        response = await self._execute_request(content, "CheckAlarm")
+        try:
+            response = await self._execute_request(content, "CheckAlarm", installation)
+        except SecuritasDirectError as err:
+            _LOGGER.error(err.args[0])
+            return self.uuid
         # result_json = json.loads(await response.text())
         # if "errors" in result_json:
         #     error_message = result_json["errors"][0]["message"]
@@ -429,10 +435,6 @@ class ApiManager:
             "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
         }
         response = await self._execute_request(content, "Sentinel")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return error_message
 
         raw_data = response["data"]["xSAllConfort"][0]["ddi"]["status"]
         return Sentinel(
@@ -455,10 +457,6 @@ class ApiManager:
             "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
         }
         response = await self._execute_request(content, "AirQualityGraph")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return error_message
 
         raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
         return AirQuality(
@@ -493,7 +491,9 @@ class ApiManager:
             },
             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
         }
-        response = await self._execute_request(content, "CheckAlarmStatus")
+        response = await self._execute_request(
+            content, "CheckAlarmStatus", installation
+        )
 
         raw_data = response["data"]["xSCheckAlarmStatus"]
         return CheckAlarmStatus(
@@ -520,10 +520,6 @@ class ApiManager:
             "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
         response = await self._execute_request(content, "xSArmPanel")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return (False, error_message)
 
         if response["data"]["xSArmPanel"]["res"] == "OK":
             return (True, response["data"]["xSArmPanel"]["referenceId"])
@@ -552,10 +548,6 @@ class ApiManager:
             "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
         response = await self._execute_request(content, "ArmStatus")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return ArmStatus(error=error_message)
 
         raw_data = response["data"]["xSArmStatus"]
         return ArmStatus(
@@ -584,13 +576,10 @@ class ApiManager:
             "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
         response = await self._execute_request(content, "xSDisarmPanel")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return (False, error_message)
 
         if response["data"]["xSDisarmPanel"]["res"] == "OK":
             return (True, response["data"]["xSDisarmPanel"]["referenceId"])
+
         else:
             return (False, response["data"]["xSDisarmPanel"]["msg"])
 
@@ -616,10 +605,6 @@ class ApiManager:
             "query": "query DisarmStatus($numinst: String!, $panel: String!, $referenceId: String!, $counter: Int!, $request: DisarmCodeRequest) {\n  xSDisarmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
         response = await self._execute_request(content, "DisarmStatus")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return DisarmStatus(error=error_message)
 
         raw_data = response["data"]["xSDisarmStatus"]
         return DisarmStatus(
