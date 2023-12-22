@@ -92,6 +92,7 @@ REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
 )
 
 
+# FIXME: next 3 functions. should it be in apimanager?
 def generate_uuid() -> str:
     """Create a device id."""
     return str(uuid4()).replace("-", "")[0:16]
