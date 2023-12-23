@@ -212,10 +212,13 @@ class ApiManager:
 
         if otp_succeed:
             self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
-        response = await self._execute_request(content, "mkValidateDevice")
-        self.authentication_otp_challenge_value = None
-        if "errors" in response:
-            data = response["errors"][0]["data"]
+        # FIXME: this seems to fail always, but we seem to want the response
+        response = {}
+        try:
+            response = await self._execute_request(content, "mkValidateDevice")
+            self.authentication_otp_challenge_value = None
+        except SecuritasDirectError as err:
+            data = err.args[1]["errors"][0]["data"]
             otp_hash = data["auth-otp-hash"]
             phones: list[OtpPhone] = []
             for item in data["auth-phones"]:
@@ -344,14 +347,11 @@ class ApiManager:
             },
             "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
-        try:
-            response = await self._execute_request(content, "CheckAlarm")
-        except SecuritasDirectError as err:
-            _LOGGER.error(err.args[0])
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return error_message
+
+        response = await self._execute_request(content, "CheckAlarm")
+
+        # except SecuritasDirectError as err:
+        #     _LOGGER.error(err.args)
 
         return response["data"]["xSCheckAlarm"]["referenceId"]
 
@@ -363,10 +363,6 @@ class ApiManager:
             "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      id\n      numinst\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        id\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        totalDevice\n        request\n        multipleReq\n        numDevicesMr\n        secretWord\n        minWrapperVersion\n        description\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        devices {\n          id\n          code\n          numDevices\n          cost\n          type\n          name\n        }\n        camerasArlo {\n          id\n          model\n          connectedToInstallation\n          usedForAlarmVerification\n          offer\n          name\n          locationHint\n          batteryLevel\n          connectivity\n          createdDate\n          modifiedDate\n          latestThumbnailUri\n        }\n        attributes {\n          name\n          attributes {\n            name\n            value\n            active\n          }\n        }\n        listdiy {\n          idMant\n          state\n        }\n        listprompt {\n          idNot\n          text\n          type\n          customParam\n          alias\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
         response = await self._execute_request(content, "Srv")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     return error_message
 
         result: list[Service] = []
         raw_data = response["data"]["xSSrv"]["installation"]["services"]
