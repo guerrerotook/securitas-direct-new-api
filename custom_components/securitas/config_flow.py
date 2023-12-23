@@ -7,6 +7,9 @@ import logging
 from typing import Any
 
 import voluptuous as vol
+from config.custom_components.securitas.securitas_direct_new_api.exceptions import (
+    Login2FAError,
+)
 
 from homeassistant.const import (
     CONF_CODE,
@@ -210,8 +213,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input.get(CONF_ENTRY_ID, ""),
         )
 
-        succeed = await result.login()
-        if succeed == "2FA":
+        try:
+            await result.login()
+        except Login2FAError:
             return self.async_show_form(
                 step_id="user",
                 data_schema=vol.Schema(
@@ -221,8 +225,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
             )
-        else:
-            return result
+
+        return result
 
 
 class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):

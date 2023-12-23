@@ -372,19 +372,19 @@ class SecuritasHub:
         return await self.session.refresh_token()
 
     async def sent_opt(self, challange: str, phone_index: int):
-        """Calls for the SMS challange."""
+        """Call for the SMS challange."""
         return await self.session.send_otp(phone_index, challange)
 
     async def get_services(self, instalation: Installation) -> list[Service]:
-        """Gets the list of services from the instalation."""
+        """Get the list of services from the instalation."""
         return await self.session.get_all_services(instalation)
 
     def get_authentication_token(self) -> str:
-        """Gets the authentication token."""
+        """Get the authentication token."""
         return self.session.authentication_token
 
     def set_authentication_token(self, value: str):
-        """Sets the authentication token."""
+        """Set the authentication token."""
         self.session.authentication_token = value
 
     async def logout(self):
@@ -425,17 +425,10 @@ class SecuritasHub:
 
         reference_id: str = await self.session.check_alarm(installation)
         await asyncio.sleep(1)
-        count: int = 1
         alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
-            installation, reference_id, count
+            installation, reference_id
         )
-        if hasattr(alarm_status, "operation_status"):
-            while alarm_status.operation_status == "WAIT":
-                await asyncio.sleep(1)
-                count = count + 1
-                alarm_status = await self.session.check_alarm_status(
-                    installation, reference_id, count
-                )
+
         return alarm_status
 
     @property
