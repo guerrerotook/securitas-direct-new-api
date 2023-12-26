@@ -24,13 +24,7 @@ from .dataTypes import (
     SStatus,
 )
 from .domains import ApiDomains
-from .exceptions import (
-    APIError,
-    AuthError,
-    Login2FAError,
-    LoginError,
-    SecuritasDirectError,
-)
+from .exceptions import Login2FAError, LoginError, SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,8 +46,8 @@ class ApiManager:
         """Create the object."""
         self.username = username
         self.password = password
-        self.country = country
-        self.language = language
+        self.country = country.upper()
+        self.language = language.lower()
         self.api_url = ApiDomains().get_url(language=language)
         self.authentication_token: str = None
         self.authentication_otp_challenge_value: tuple[str, int] = None
@@ -148,7 +142,7 @@ class ApiManager:
 
         if "errors" in response_dict:
             raise SecuritasDirectError(
-                response_dict["errors"][0]["message"], response_dict
+                response_dict["errors"][0]["message"], response_dict, headers, content
             )
 
         return response_dict
@@ -194,7 +188,7 @@ class ApiManager:
 
     async def validate_device(
         self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
-    ) -> Union[tuple[str, list[OtpPhone]], bool]:
+    ) -> tuple[str, list[OtpPhone]]:
         """Validate the device."""
         content = {
             "operationName": "mkValidateDevice",
@@ -212,12 +206,12 @@ class ApiManager:
 
         if otp_succeed:
             self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
-        # FIXME: this seems to fail always, but we seem to want the response
         response = {}
         try:
             response = await self._execute_request(content, "mkValidateDevice")
             self.authentication_otp_challenge_value = None
         except SecuritasDirectError as err:
+            # the API call fails but we want the phone data in the response
             data = err.args[1]["errors"][0]["data"]
             otp_hash = data["auth-otp-hash"]
             phones: list[OtpPhone] = []
@@ -226,15 +220,16 @@ class ApiManager:
             return (otp_hash, phones)
         else:
             self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
-            return True
+            return (None, None)
 
+    # FIXME needs testing
     async def refresh_token(self) -> bool:
         """Send a login refresh."""
         content = {
             "operationName": "RefreshLogin",
             "variables": {
                 "refreshToken": self.refresh_token_value,
-                "id": uuid4(),
+                "uuid": uuid4(),  # FIXME not self.uuid
                 "country": self.country,
                 "lang": self.language,
                 "callby": "OWA_10",
@@ -242,11 +237,7 @@ class ApiManager:
             "query": "mutation RefreshLogin($refreshToken: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) {\n  xSRefreshLogin(refreshToken: $refreshToken, id: $id, country: $country, lang: $lang, callby: $callby, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) {\n    __typename\n    res\n    msg\n    hash\n    refreshToken\n    legals\n    changePassword\n    needDeviceAuthorization\n    mainUser\n  }\n}",
         }
         response = await self._execute_request(content, "RefreshLogin")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     print(error_message)
-        #     return []
+
         return response["data"]["xSSendOtp"]["res"]
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
@@ -260,11 +251,7 @@ class ApiManager:
             "query": "mutation mkSendOTP($recordId: Int!, $otpHash: String!) {\n  xSSendOtp(recordId: $recordId, otpHash: $otpHash) {\n    res\n    msg\n  }\n}\n",
         }
         response = await self._execute_request(content, "mkSendOTP")
-        # result_json = json.loads(await response.text())
-        # if "errors" in result_json:
-        #     error_message = result_json["errors"][0]["message"]
-        #     print(error_message)
-        #     return []
+
         return response["data"]["xSSendOtp"]["res"]
 
     async def login(self) -> None:
@@ -292,21 +279,19 @@ class ApiManager:
             "query": "mutation mkLoginToken($user: String!, $password: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) { xSLoginToken(user: $user, password: $password, country: $country, lang: $lang, callby: $callby, id: $id, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) { __typename res msg hash refreshToken legals changePassword needDeviceAuthorization mainUser } }",
         }
 
+        response = {}
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
             (error_message, result_json) = err.args
             if result_json["data"]["xSLoginToken"]:
                 if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
-                    raise Login2FAError from err
+                    # needs a 2FA
+                    raise Login2FAError(err.args) from err
 
-            raise LoginError(error_message, result_json) from err
+            raise LoginError(err.args) from err
 
-        self.authentication_token = None
-        try:
-            self.authentication_token = response["data"]["xSLoginToken"]["hash"]
-        except KeyError:
-            _LOGGER("Response doesn't have auth token %s", response)
+        self.authentication_token = response["data"]["xSLoginToken"]["hash"]
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
@@ -462,7 +447,9 @@ class ApiManager:
         raw_data = response["data"]["xSStatus"]
         return SStatus(raw_data["status"], raw_data["timestampUpdate"])
 
-    async def check_alarm_status(self, installation: Installation, reference_id: str):
+    async def check_alarm_status(
+        self, installation: Installation, reference_id: str
+    ) -> CheckAlarmStatus:
         """Return the status of the alarm."""
 
         count = 1
