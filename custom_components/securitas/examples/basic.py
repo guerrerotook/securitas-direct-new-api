@@ -1,13 +1,11 @@
 """Basic example for securitas_direct_new_api."""
 
 import asyncio
-
-import aiohttp
 import secrets
+import sys
 from uuid import uuid4
 
-import json
-import sys
+import aiohttp
 
 sys.path.insert(0, "/workspaces/ha-core/config/custom_components/securitas/")
 
@@ -28,15 +26,18 @@ def generate_device_id(lang: str) -> str:
 async def main():
     """Basic Securitas Direct example."""
 
+    user = input("User: ")
+    password = input("Password: ")
+    country = "es"
     async with aiohttp.ClientSession() as aiohttp_session:
         uuid = generate_uuid()
         device_id = generate_device_id("es")
         id_device_indigitall = str(uuid4())
         client = ApiManager(
-            "09127527",
-            "TxHuich22.",
-            "ES",
-            "es",
+            user,
+            password,
+            country,
+            country,
             aiohttp_session,
             device_id,
             uuid,
@@ -46,17 +47,35 @@ async def main():
         try:
             await client.login()
 
+            # token = await client.refresh_token()
+            # print("Refresh token ***\n", token)
+            # return
+
             installations = await client.list_installations()
             print("*** Installations ***\n", installations)
 
             for installation in installations:
+                general_status = await client.check_general_status(installation)
+                print("*** General status ***\n", general_status)
+
                 reference_id = await client.check_alarm(installation)
                 print("*** Reference ID ***\n", reference_id)
+
+                alarm_status = await client.check_alarm_status(
+                    installation, reference_id
+                )
+                print("*** Alarm Status ***\n", alarm_status)
 
                 services = await client.get_all_services(installation)
                 print("*** Services ***\n", services)
 
-                status = await client.check_alarm_status(installation, reference_id, 1)
+                for service in services:
+                    sentinel_data = await client.get_sentinel_data(
+                        installation, service
+                    )
+                    print("***Sentinel data ***\n", sentinel_data)
+
+                status = await client.check_alarm_status(installation, reference_id)
                 print("*** Alarm status ***\n", status)
 
         except SecuritasDirectError as err:
