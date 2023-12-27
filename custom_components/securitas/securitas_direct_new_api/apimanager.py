@@ -78,7 +78,6 @@ class ApiManager:
         }
         if installation is not None:
             headers["numinst"] = str(installation.number)
-            headers["x-installationNumber"] = str(installation.number)
             headers["panel"] = installation.panel
             headers["x-capabilities"] = installation.capabilities
 
@@ -113,7 +112,8 @@ class ApiManager:
             }
             headers["security"] = json.dumps(authorization_value)
         _LOGGER.debug(
-            "Making request with device_id %s, uuid %s and idDeviceIndigitall %s",
+            "Making request %s with device_id %s, uuid %s and idDeviceIndigitall %s",
+            operation,
             self.device_id,
             self.uuid,
             self.id_device_indigitall,
@@ -135,8 +135,8 @@ class ApiManager:
         login_error: bool = await self._check_errors(response_dict)
         if login_error:
             _LOGGER.info("Login is expired. Login again")
-            succeed = await self.login()
-            _LOGGER.debug("Re-logging result %s", str(succeed[0]))
+            await self.login()
+            _LOGGER.debug("Re-logging done")
 
             await self._execute_request(content, operation)
 
@@ -229,7 +229,7 @@ class ApiManager:
             "operationName": "RefreshLogin",
             "variables": {
                 "refreshToken": self.refresh_token_value,
-                "uuid": uuid4(),  # FIXME not self.uuid
+                "uuid": self.uuid,  # uuid4(),
                 "country": self.country,
                 "lang": self.language,
                 "callby": "OWA_10",

@@ -27,12 +27,12 @@ class Installation:
 class CheckAlarmStatus:
     """Define an Securitas Direct Alarm Check Status Operation."""
 
-    operation_status: str
-    message: str
-    status: str
-    InstallationNumer: int
-    protomResponse: str
-    protomResponseData: str
+    operation_status: str = ""
+    message: str = ""
+    status: str = ""
+    InstallationNumer: int = 0
+    protomResponse: str = ""
+    protomResponseData: str = ""
 
 
 @dataclass
@@ -42,7 +42,7 @@ class ArmStatus:
     operation_status: str = ""
     message: str = ""
     status: int = ""
-    InstallationNumer: int = ""
+    InstallationNumer: int = 0
     protomResponse: str = ""
     protomResponseData: str = ""
     requestId: str = ""
