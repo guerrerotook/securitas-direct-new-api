@@ -7,10 +7,10 @@ import logging
 from typing import Any
 
 import voluptuous as vol
+
 from config.custom_components.securitas.securitas_direct_new_api.exceptions import (
     Login2FAError,
 )
-
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
