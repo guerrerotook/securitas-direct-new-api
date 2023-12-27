@@ -34,11 +34,15 @@ from .securitas_direct_new_api.dataTypes import (
     Service,
     SStatus,
 )
-from .securitas_direct_new_api.exceptions import Login2FAError, LoginError
+from .securitas_direct_new_api.exceptions import (
+    Login2FAError,
+    LoginError,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_ALARM = "alarm"
+CONF_ALARM = "alarm"  # FIXME unused
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
@@ -49,8 +53,8 @@ CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
 
 DOMAIN = "securitas"
 
-MIN_SCAN_INTERVAL = 20
-DEFAULT_SCAN_INTERVAL = 40
+MIN_SCAN_INTERVAL = 20  # FIXME: unused?
+DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CHECK_ALARM_PANEL = True
 DEFAULT_CODE = ""
 DEFAULT_CODE_ENABLED = True
@@ -153,7 +157,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    config[CONF_SCAN_INTERVAL] = 60
+    config[CONF_SCAN_INTERVAL] = 60  # FIXME: why number instead of const?
     config[CONF_ENTRY_ID] = entry.entry_id
     config = add_device_information(config)
     # config = merge_configuration(config, entry)
@@ -178,15 +182,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
-        result = await client.login()
-        if result:
+        try:
+            await client.login()
+        except Login2FAError as err:
+            msg = (
+                "Securitas Direct need a 2FA SMS code."
+                "Please login again with your phone"
+            )
+            _notify_error(hass, "2fa_error", "Securitas Direct", msg)
+            config[CONF_ERROR] = "2FA"
+            hass.async_create_task(
+                hass.config_entries.flow.async_init(
+                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
+                )
+            )
+            return False
+        except LoginError as err:
+            _LOGGER.error("Could not log in to Securitas")
+        else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             installations: list[
                 SecuritasDirectDevice
             ] = await client.session.list_installations()
             devices: list[SecuritasDirectDevice] = []
             for installation in installations:
-                services: list[Service] = await client.get_services(installation)
+                await client.get_services(installation)
                 devices.append(SecuritasDirectDevice(installation))
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
@@ -197,7 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return True
     else:
         config = add_device_information(entry.data.copy())
-        config[CONF_SCAN_INTERVAL] = 60
+        config[CONF_SCAN_INTERVAL] = 60  # FIXME: why number instead of const
         hass.async_create_task(
             hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": SOURCE_IMPORT}, data=config
@@ -334,28 +354,18 @@ class SecuritasHub:
 
     async def login(self):
         """Login to Securitas."""
-        try:
-            await self.session.login()
-        except Login2FAError:
-            msg = (
-                "Securitas Direct need a 2FA SMS code."
-                "Please login again with your phone"
-            )
-            _notify_error(hass, "2fa_error", "Securitas Direct", msg)
-            config[CONF_ERROR] = "2FA"
-            hass.async_create_task(
-                hass.config_entries.flow.async_init(
-                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
-                )
-            )
-            _LOGGER.info("2FA needed for the device")
-            return False
-        except LoginError:
-            _LOGGER.error("Could not log in to Securitas")
-            return False
+        # try:
+        await self.session.login()
+        # except Login2FAError:
 
-        _LOGGER.debug("Log in to Securitas was successful")
-        return True
+        #     _LOGGER.info("2FA needed for the device")
+        #     return False
+        # except LoginError:
+        #     _LOGGER.error("Could not log in to Securitas")
+        #     return False
+
+        # _LOGGER.debug("Log in to Securitas was successful")
+        # return True
 
     async def validate_device(self) -> tuple[str, list[OtpPhone]]:
         """Validate the current device."""
@@ -406,14 +416,18 @@ class SecuritasHub:
         if "exp" in token:
             expiration: datetime = datetime.fromtimestamp(token["exp"])
             if datetime.now() + timedelta(minutes=1) > expiration:
+                # if datetime.now() > expiration:  # FIXME: why 1 minute?
                 # if the token is expired get a new one
                 await self.get_services(installation)
 
         if self.check_alarm is not True:
-            status: SStatus = await self.session.check_general_status(installation)
-            if isinstance(status, str):
-                _LOGGER.error(status)
+            status = SStatus()
+            try:
+                status: SStatus = await self.session.check_general_status(installation)
+            except SecuritasDirectError as err:
+                _LOGGER.error(err.args)
                 return None
+
             return CheckAlarmStatus(
                 status.status,
                 None,
@@ -423,11 +437,16 @@ class SecuritasHub:
                 status.timestampUpdate,
             )
 
-        reference_id: str = await self.session.check_alarm(installation)
-        await asyncio.sleep(1)
-        alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
-            installation, reference_id
-        )
+        alarm_status = CheckAlarmStatus()
+        try:
+            reference_id: str = await self.session.check_alarm(installation)
+            await asyncio.sleep(1)
+            alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
+                installation, reference_id
+            )
+        except SecuritasDirectError as err:
+            _LOGGER.error(err.args)
+            return None
 
         return alarm_status
 

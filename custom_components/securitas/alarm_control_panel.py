@@ -47,7 +47,7 @@ from .securitas_direct_new_api.dataTypes import (
 from .securitas_direct_new_api.exceptions import SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=1200)
+SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
 
 
 async def async_setup_entry(
@@ -101,7 +101,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
         self._update_interval = timedelta(
-            seconds=client.config.get(CONF_SCAN_INTERVAL, 1200)
+            seconds=client.config.get(
+                CONF_SCAN_INTERVAL, 1200
+            )  # FIXME is this used? other than next line
         )
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
@@ -145,7 +147,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             alarm_status = await self.client.update_overview(self.installation)
         except SecuritasDirectError as err:
-            _LOGGER.error(err.args[0])
+            _LOGGER.info(err.args)
         else:
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
