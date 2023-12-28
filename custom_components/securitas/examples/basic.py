@@ -24,20 +24,21 @@ def generate_device_id(lang: str) -> str:
 
 
 async def main():
-    """Basic Securitas Direct example."""
+    """Run Basic Securitas Direct example."""
 
     user = input("User: ")
     password = input("Password: ")
     country = "es"
+    language = "es"
     async with aiohttp.ClientSession() as aiohttp_session:
         uuid = generate_uuid()
-        device_id = generate_device_id("es")
+        device_id = generate_device_id(language)
         id_device_indigitall = str(uuid4())
         client = ApiManager(
             user,
             password,
             country,
-            country,
+            language,
             aiohttp_session,
             device_id,
             uuid,
@@ -61,22 +62,16 @@ async def main():
                 reference_id = await client.check_alarm(installation)
                 print("*** Reference ID ***\n", reference_id)
 
-                alarm_status = await client.check_alarm_status(
-                    installation, reference_id
-                )
-                print("*** Alarm Status ***\n", alarm_status)
+                status = await client.check_alarm_status(installation, reference_id)
+                print("*** Alarm status ***\n", status)
 
                 services = await client.get_all_services(installation)
                 print("*** Services ***\n", services)
 
-                for service in services:
-                    sentinel_data = await client.get_sentinel_data(
-                        installation, service
-                    )
-                    print("***Sentinel data ***\n", sentinel_data)
-
-                status = await client.check_alarm_status(installation, reference_id)
-                print("*** Alarm status ***\n", status)
+                # for service in services:
+                #     sentinel_data = await client.get_sentinel_data(
+                #         installation, service
+                #     )
 
         except SecuritasDirectError as err:
             print(f"Error: {err.args}")

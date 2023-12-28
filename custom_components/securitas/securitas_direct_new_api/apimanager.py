@@ -1,6 +1,6 @@
 """Securitas Direct API implementation."""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import logging
 import secrets
@@ -8,6 +8,7 @@ from typing import Any, Optional, Union
 from uuid import uuid4
 
 from aiohttp import ClientResponse, ClientSession
+import jwt
 
 from .dataTypes import (
     AirQuality,
@@ -68,6 +69,8 @@ class ApiManager:
     async def _execute_request(
         self, content, operation: str, installation: Optional[Installation] = None
     ) -> ClientResponse:
+        """Send request to Securitas' API."""
+
         app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
         headers = {
             "app": app,
@@ -146,6 +149,23 @@ class ApiManager:
             )
 
         return response_dict
+
+    async def _check_capabilities_token(self, installation: Installation) -> None:
+        """Check the capabilities token and get a new one if needed."""
+        if installation.capabilities == "":
+            await self.get_all_services(installation)
+            return
+
+        token = jwt.decode(
+            installation.capabilities,
+            algorithms=["HS256"],
+            options={"verify_signature": False},
+        )
+        if "exp" in token:
+            expiration: datetime = datetime.fromtimestamp(token["exp"])
+            if datetime.now() + timedelta(minutes=1) > expiration:
+                # if the token is expired get a new one
+                await self.get_all_services(installation)
 
     def _generate_id(self) -> str:
         current: datetime = datetime.now()
@@ -332,11 +352,8 @@ class ApiManager:
             },
             "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
-
+        await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "CheckAlarm")
-
-        # except SecuritasDirectError as err:
-        #     _LOGGER.error(err.args)
 
         return response["data"]["xSCheckAlarm"]["referenceId"]
 
@@ -405,6 +422,7 @@ class ApiManager:
             },
             "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
         }
+        await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Sentinel")
 
         raw_data = response["data"]["xSAllConfort"][0]["ddi"]["status"]
@@ -427,6 +445,7 @@ class ApiManager:
             },
             "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
         }
+        await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "AirQualityGraph")
 
         raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
@@ -442,6 +461,7 @@ class ApiManager:
             "variables": {"numinst": str(installation.number)},
             "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
         }
+        await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Status", installation)
 
         raw_data = response["data"]["xSStatus"]
@@ -452,8 +472,10 @@ class ApiManager:
     ) -> CheckAlarmStatus:
         """Return the status of the alarm."""
 
+        await self._check_capabilities_token(installation)
         count = 1
         raw_data = {}
+
         while (count == 1) or (raw_data.get("res") == "WAIT"):
             await asyncio.sleep(1)
             raw_data = await self._check_alarm_status(installation, reference_id, count)
@@ -501,6 +523,7 @@ class ApiManager:
             },
             "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
+        await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel")
         response = response["data"]["xSArmPanel"]
         if response["res"] != "OK":
@@ -566,6 +589,7 @@ class ApiManager:
             },
             "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
+        await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel")
         response = response["data"]["xSDisarmPanel"]
         if response["res"] != "OK":

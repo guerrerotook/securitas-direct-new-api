@@ -1,13 +1,11 @@
 """Support for Securitas Direct alarms."""
 import asyncio
 from collections import OrderedDict
-from datetime import datetime, timedelta
 import logging
 import secrets
 from uuid import uuid4
 
 from aiohttp import ClientSession
-import jwt
 import voluptuous as vol
 
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
@@ -407,18 +405,6 @@ class SecuritasHub:
 
     async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
         """Update the overview."""
-        # decode the capabilities token
-        token = jwt.decode(
-            installation.capabilities,
-            algorithms=["HS256"],
-            options={"verify_signature": False},
-        )
-        if "exp" in token:
-            expiration: datetime = datetime.fromtimestamp(token["exp"])
-            if datetime.now() + timedelta(minutes=1) > expiration:
-                # if datetime.now() > expiration:  # FIXME: why 1 minute?
-                # if the token is expired get a new one
-                await self.get_services(installation)
 
         if self.check_alarm is not True:
             status = SStatus()
