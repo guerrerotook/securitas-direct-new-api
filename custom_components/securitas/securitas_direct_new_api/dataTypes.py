@@ -1,26 +1,26 @@
 """Public datatypes for the securitas direct API."""
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List
+from typing import Any
 
 
 @dataclass
 class Installation:
     """Define an Securitas Direct Installation."""
 
-    number: int
-    alias: str
-    panel: str
-    type: str
-    name: str
-    lastName: str
-    address: str
-    city: str
-    postalCode: int
-    province: str
-    email: str
-    phone: str
-    capabilities: str
+    number: int = 0
+    alias: str = ""
+    panel: str = ""
+    type: str = ""
+    name: str = ""
+    lastName: str = ""
+    address: str = ""
+    city: str = ""
+    postalCode: int = 0
+    province: str = ""
+    email: str = ""
+    phone: str = ""
+    capabilities: str = ""
 
 
 @dataclass
@@ -92,7 +92,7 @@ class Attributes:
     """Attribute collection."""
 
     name: str
-    attributes: List[Attribute]
+    attributes: list[Attribute]
 
 
 @dataclass

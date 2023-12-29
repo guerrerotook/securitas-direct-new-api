@@ -82,7 +82,6 @@ class ApiManager:
         if installation is not None:
             headers["numinst"] = str(installation.number)
             headers["panel"] = installation.panel
-            headers["x-capabilities"] = installation.capabilities
 
         if self.authentication_token is not None:
             authorization_value = {
@@ -114,6 +113,7 @@ class ApiManager:
                 "otpHash": self.authentication_otp_challenge_value[0],
             }
             headers["security"] = json.dumps(authorization_value)
+
         _LOGGER.debug(
             "Making request %s with device_id %s, uuid %s and idDeviceIndigitall %s",
             operation,
@@ -133,13 +133,16 @@ class ApiManager:
         _LOGGER.debug("--------------Response--------------")
         _LOGGER.debug(response_text)
 
-        response_dict = json.loads(response_text)
+        try:
+            response_dict = json.loads(response_text)
+        except json.JSONDecodeError as err:
+            raise SecuritasDirectError(err.msg, None, headers, content) from err
 
         login_error: bool = await self._check_errors(response_dict)
         if login_error:
             _LOGGER.info("Login is expired. Login again")
             await self.login()
-            _LOGGER.debug("Re-logging done")
+            _LOGGER.info("Re-logging done")
 
             await self._execute_request(content, operation)
 
