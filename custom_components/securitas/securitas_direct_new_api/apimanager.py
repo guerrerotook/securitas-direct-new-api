@@ -159,11 +159,18 @@ class ApiManager:
             await self.get_all_services(installation)
             return
 
-        token = jwt.decode(
-            installation.capabilities,
-            algorithms=["HS256"],
-            options={"verify_signature": False},
-        )
+        token = {}
+        try:
+            token = jwt.decode(
+                installation.capabilities,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
+            )
+        except jwt.exceptions.DecodeError as err:
+            raise SecuritasDirectError(
+                f"Failed to decode capabilities token {installation.capabilities}"
+            ) from err
+
         if "exp" in token:
             expiration: datetime = datetime.fromtimestamp(token["exp"])
             if datetime.now() + timedelta(minutes=1) > expiration:
