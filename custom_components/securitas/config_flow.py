@@ -8,7 +8,7 @@ from typing import Any
 
 import voluptuous as vol
 
-from config.custom_components.securitas.securitas_direct_new_api.exceptions import (
+from securitas_direct_new_api.exceptions import (
     Login2FAError,
 )
 from homeassistant.const import (
@@ -87,7 +87,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         entry_id: str,
     ) -> SecuritasHub:
         """Create client."""
-        if password is None and code is None:
+        if password is None:
             raise ValueError(
                 "Invalid internal state. Called without either password or token"
             )
