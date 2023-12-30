@@ -8,9 +8,6 @@ from typing import Any
 
 import voluptuous as vol
 
-from securitas_direct_new_api.exceptions import (
-    Login2FAError,
-)
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -43,6 +40,7 @@ from . import (
     generate_uuid,
 )
 from .securitas_direct_new_api.dataTypes import OtpPhone, Service
+from .securitas_direct_new_api.exceptions import Login2FAError
 
 CONF_OTPSECRET = "otp_secret"
 from homeassistant import config_entries
