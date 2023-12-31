@@ -1,7 +1,6 @@
 """Basic example for securitas_direct_new_api."""
 
 import asyncio
-import secrets
 import sys
 from uuid import uuid4
 
@@ -9,18 +8,12 @@ import aiohttp
 
 sys.path.insert(0, "/workspaces/ha-core/config/custom_components/securitas/")
 
-from securitas_direct_new_api.apimanager import ApiManager
+from securitas_direct_new_api.apimanager import (
+    ApiManager,
+    generate_device_id,
+    generate_uuid,
+)
 from securitas_direct_new_api.exceptions import SecuritasDirectError
-
-
-def generate_uuid() -> str:
-    """Create a device id."""
-    return str(uuid4())  # .replace("-", "")[0:16]
-
-
-def generate_device_id(lang: str) -> str:
-    """Create a device identifier for the API."""
-    return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
 
 
 async def main():
