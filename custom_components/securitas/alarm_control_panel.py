@@ -126,9 +126,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def get_delay_configuration(self) -> int:
         return self.client.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1)
 
-    async def get_arm_state(
-        self
-    ):  # FIXME: returns something now, but orig code didn't??
+    async def get_arm_state(self) -> CheckAlarmStatus:
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
         await asyncio.sleep(1)
@@ -166,39 +164,23 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
         )
 
-    async def set_arm_state(self, state, attempts=3):
+    async def set_arm_state(self, state, attempts=3) -> None:
         """Send set arm state command."""
-        if state == "DARM1":
-            disarm_status = await self.client.session.disarm_alarm(
-                self.installation, self._get_proto_status()
-            )
 
-            self.update_status_alarm(
-                CheckAlarmStatus(
-                    disarm_status.operation_status,
-                    disarm_status.message,
-                    disarm_status.status,
-                    self.installation.number,
-                    disarm_status.protomResponse,
-                    disarm_status.protomResponseData,
-                )
-            )
+        arm_status = await self.client.session.arm_alarm(
+            self.installation, state, self._get_proto_status()
+        )
 
-        else:
-            arm_status = await self.client.session.arm_alarm(
-                self.installation, state, self._get_proto_status()
+        self.update_status_alarm(
+            CheckAlarmStatus(
+                arm_status.operation_status,
+                arm_status.message,
+                arm_status.status,
+                arm_status.InstallationNumer,
+                arm_status.protomResponse,
+                arm_status.protomResponseData,
             )
-
-            self.update_status_alarm(
-                CheckAlarmStatus(
-                    arm_status.operation_status,
-                    arm_status.message,
-                    arm_status.status,
-                    arm_status.InstallationNumer,
-                    arm_status.protomResponse,
-                    arm_status.protomResponseData,
-                )
-            )
+        )
 
     @property
     def name(self):
@@ -289,7 +271,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
-            await self.set_arm_state("DARM1")
+            disarm_status = await self.client.session.disarm_alarm(
+                self.installation, self._get_proto_status()
+            )
+
+            self.update_status_alarm(
+                CheckAlarmStatus(
+                    disarm_status.operation_status,
+                    disarm_status.message,
+                    disarm_status.status,
+                    self.installation.number,
+                    disarm_status.protomResponse,
+                    disarm_status.protomResponseData,
+                )
+            )
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
@@ -301,7 +296,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARM1")
+            await self.set_arm_state("ARM1")  # ARM1PERI1
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
@@ -313,7 +308,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm perimeter command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("PERI1")
+            await self.set_arm_state("PERI1")  # DARMPERI is the corresponding darm
 
     @property
     def supported_features(self) -> int:
