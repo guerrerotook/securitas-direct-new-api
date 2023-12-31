@@ -39,7 +39,7 @@ from . import (
     SecuritasHub,
     generate_uuid,
 )
-from .securitas_direct_new_api.dataTypes import OtpPhone, Service
+from .securitas_direct_new_api.dataTypes import Installation, OtpPhone
 from .securitas_direct_new_api.exceptions import Login2FAError
 
 CONF_OTPSECRET = "otp_secret"
@@ -58,6 +58,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     def __init__(self) -> None:
+        """Initialize the flow handler."""
         self.config = OrderedDict()
         self.securitas: SecuritasHub = None
         self.opt_challenge: tuple[str, list[OtpPhone]] = None
@@ -84,7 +85,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         id_device_indigitall: str,
         entry_id: str,
     ) -> SecuritasHub:
-        """Create client."""
+        """Create client (SecuritasHub)."""
         if password is None:
             raise ValueError(
                 "Invalid internal state. Called without either password or token"
@@ -106,20 +107,20 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.securitas
 
-    async def async_step_phone_list(self, user_input=None):
-        """Show the list of phones for the OTP challange."""
+    async def async_step_phone_list(self, user_input=None) -> FlowResult:
+        """Show the list of phones for the OTP challenge."""
         phone_index: int = -1
         for phone_item in self.opt_challenge[1]:
             if phone_item.phone == user_input["phones"]:
                 phone_index = phone_item.id
         await self.securitas.sent_opt(self.opt_challenge[0], phone_index)
         return self.async_show_form(
-            step_id="otp_challange",
+            step_id="otp_challenge",
             data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
         )
 
-    async def async_step_otp_challange(self, user_input=None):
-        """Last step of the OTP challange."""
+    async def async_step_otp_challenge(self, user_input=None):
+        """Last step of the OTP challenge."""
         await self.securitas.send_sms_code(self.opt_challenge[0], user_input[CONF_CODE])
         await self.securitas.login()
         self.config[CONF_TOKEN] = self.securitas.get_authentication_token()
@@ -127,13 +128,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         self.hass.data[DOMAIN] = {}
         self.hass.data[DOMAIN][SecuritasHub.__name__] = self.securitas
-        instalations: list[
-            SecuritasDirectDevice
+        installations: list[
+            Installation
         ] = await self.securitas.session.list_installations()
         devices: list[SecuritasDirectDevice] = []
-        for instalation in instalations:
-            services: list[Service] = await self.securitas.get_services(instalation)
-            devices.append(SecuritasDirectDevice(instalation))
+        for installation in installations:
+            await self.securitas.get_services(installation)
+            devices.append(SecuritasDirectDevice(installation))
 
         return result
 

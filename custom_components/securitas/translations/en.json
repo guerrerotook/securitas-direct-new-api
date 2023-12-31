@@ -15,11 +15,15 @@
                     "check_alarm_panel": "Check alarm panel",
                     "scan_interval": "Scan interval"
                 },
-                "description": "Login into securitas direct.",
+                "description": "Login into Securitas Direct.",
                 "title": "Login"
             },
             "phone_list": {
-                "description": "Please select the Phone to send the 2FA code",
+                "description": "Please select the phone to send the 2FA code",
+                "title": "Securitas Direct 2FA"
+            },
+            "otp_challenge": {
+                "description": "Enter the code you received on your phone",
                 "title": "Securitas Direct 2FA"
             }
         }
@@ -30,7 +34,7 @@
                 "data": {
                     "code": "Pin pad code.",
                     "enable_code": "Enable or disable the local pin code.",
-                    "scan_interval": "Scan internval to query the last status in the Server",
+                    "scan_interval": "Scan interval to query the last status in the Server",
                     "check_alarm_panel": "Check the status of the panel in every request (NOT RECOMMENDED)",
                     "delay_check_operation": "Delay in seconds to check the arming and dissarming operation"
                 }
