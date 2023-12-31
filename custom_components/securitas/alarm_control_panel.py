@@ -37,13 +37,7 @@ from . import (
     SecuritasDirectDevice,
     SecuritasHub,
 )
-from .securitas_direct_new_api.dataTypes import (
-    ArmStatus,
-    ArmType,
-    CheckAlarmStatus,
-    DisarmStatus,
-    Installation,
-)
+from .securitas_direct_new_api.dataTypes import CheckAlarmStatus, Installation
 from .securitas_direct_new_api.exceptions import SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
@@ -296,7 +290,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARM1")  # ARM1PERI1
+            await self.set_arm_state("ARM1PERI1")  # ARM1
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
