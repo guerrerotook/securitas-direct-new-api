@@ -30,6 +30,16 @@ from .exceptions import Login2FAError, LoginError, SecuritasDirectError
 _LOGGER = logging.getLogger(__name__)
 
 
+def generate_uuid() -> str:
+    """Create a device id."""
+    return str(uuid4()).replace("-", "")[0:16]
+
+
+def generate_device_id(lang: str) -> str:
+    """Create a device identifier for the API."""
+    return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
+
+
 class ApiManager:
     """Securitas Direct API."""
 
@@ -592,7 +602,7 @@ class ApiManager:
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
-                "request": "DARM1",
+                "request": "DARM1DARMPERI",  # DARM1
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,

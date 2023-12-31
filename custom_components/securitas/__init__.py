@@ -2,7 +2,6 @@
 import asyncio
 from collections import OrderedDict
 import logging
-import secrets
 from uuid import uuid4
 
 from aiohttp import ClientSession
@@ -24,7 +23,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 
-from .securitas_direct_new_api.apimanager import ApiManager
+from .securitas_direct_new_api.apimanager import (
+    ApiManager,
+    generate_device_id,
+    generate_uuid,
+)
 from .securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
     Installation,
@@ -94,17 +97,6 @@ REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
 )
 
 
-# FIXME: next 3 functions. should it be in apimanager?
-def generate_uuid() -> str:
-    """Create a device id."""
-    return str(uuid4()).replace("-", "")[0:16]
-
-
-def generate_device_id(lang: str) -> str:
-    """Create a device identifier for the API."""
-    return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
-
-
 def add_device_information(config: OrderedDict) -> OrderedDict:
     """Add device information to the configuration."""
     if CONF_DEVICE_ID not in config:
@@ -155,7 +147,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    config[CONF_SCAN_INTERVAL] = 60  # FIXME: why number instead of const?
+    config[CONF_SCAN_INTERVAL] = 60
+    # FIXME: why 60? entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     config[CONF_ENTRY_ID] = entry.entry_id
     config = add_device_information(config)
     # config = merge_configuration(config, entry)
@@ -182,7 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
         try:
             await client.login()
-        except Login2FAError as err:
+        except Login2FAError:
             msg = (
                 "Securitas Direct need a 2FA SMS code."
                 "Please login again with your phone"
@@ -195,7 +188,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
             )
             return False
-        except LoginError as err:
+        except LoginError:
             _LOGGER.error("Could not log in to Securitas")
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
@@ -324,7 +317,7 @@ class SecuritasHub:
     def __init__(
         self,
         domain_config: OrderedDict,
-        config_entry: ConfigEntry,
+        config_entry: ConfigEntry,  # FIXME: this is never used
         http_client: ClientSession,
         hass: HomeAssistant,
     ) -> None:
@@ -352,18 +345,7 @@ class SecuritasHub:
 
     async def login(self):
         """Login to Securitas."""
-        # try:
         await self.session.login()
-        # except Login2FAError:
-
-        #     _LOGGER.info("2FA needed for the device")
-        #     return False
-        # except LoginError:
-        #     _LOGGER.error("Could not log in to Securitas")
-        #     return False
-
-        # _LOGGER.debug("Log in to Securitas was successful")
-        # return True
 
     async def validate_device(self) -> tuple[str, list[OtpPhone]]:
         """Validate the current device."""
