@@ -48,7 +48,7 @@ CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
-CONF_INSTALATION_KEY = "instalation"
+CONF_INSTALLATION_KEY = "instalation"
 CONF_ENABLE_CODE = "enable_code"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
 
@@ -85,13 +85,13 @@ CONFIG_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
-ATTR_INSTALATION_ID = "instalation_id"
-SERVICE_REFRESH_INSTALATION = "refresh_alarm_status"
+ATTR_INSTALLATION_ID = "instalation_id"
+SERVICE_REFRESH_INSTALLATION = "refresh_alarm_status"
 
 REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
     {
         vol.Required(
-            ATTR_INSTALATION_ID, description="Instalation number"
+            ATTR_INSTALLATION_ID, description="Installation number"
         ): cv.positive_int
     }
 )
@@ -201,7 +201,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 devices.append(SecuritasDirectDevice(installation))
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
-            hass.data.setdefault(DOMAIN, {})[CONF_INSTALATION_KEY] = devices
+            hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
             await hass.async_add_executor_job(setup_hass_services, hass)
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
@@ -233,16 +233,16 @@ def setup_hass_services(hass: HomeAssistant) -> None:
 
     async def async_change_setting(call: ServiceCall) -> None:
         """Change an Abode system setting."""
-        instalation_id: int = call.data[ATTR_INSTALATION_ID]
+        installation_id: int = call.data[ATTR_INSTALLATION_ID]
 
         client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
-        for instalation in client.installations:
-            if instalation.number == instalation_id:
-                await client.update_overview(instalation)
+        for installation in client.installations:
+            if installation.number == installation_id:
+                await client.update_overview(installation)
 
     hass.services.register(
         DOMAIN,
-        SERVICE_REFRESH_INSTALATION,
+        SERVICE_REFRESH_INSTALLATION,
         async_change_setting,
         schema=REFRESH_ALARM_STATUS_SCHEMA,
     )
@@ -268,10 +268,10 @@ def _notify_error(
 class SecuritasDirectDevice:
     """Securitas direct device instance."""
 
-    def __init__(self, instalation: Installation) -> None:
+    def __init__(self, installation: Installation) -> None:
         """Construct a device wrapper."""
-        self.instalation = instalation
-        self.name = instalation.alias
+        self.installation = installation
+        self.name = installation.alias
         self._available = True
 
     @property
@@ -282,31 +282,31 @@ class SecuritasDirectDevice:
     @property
     def device_id(self) -> str:
         """Return device ID."""
-        return self.instalation.number
+        return self.installation.number
 
     @property
     def address(self) -> str:
         """Return the address of the instalation."""
-        return self.instalation.address
+        return self.installation.address
 
     @property
     def city(self) -> str:
         """Return the city of the instalation."""
-        return self.instalation.city
+        return self.installation.city
 
     @property
     def postal_code(self) -> str:
         """Return the postalCode of the instalation."""
-        return self.instalation.postalCode
+        return self.installation.postalCode
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return a device description for device registry."""
         return DeviceInfo(
-            identifiers={(DOMAIN, f"{self.instalation.alias}")},
+            identifiers={(DOMAIN, f"{self.installation.alias}")},
             manufacturer="Securitas Direct",
-            model=self.instalation.type,
-            hw_version=self.instalation.panel,
+            model=self.installation.type,
+            hw_version=self.installation.panel,
             name=self.name,
         )
 

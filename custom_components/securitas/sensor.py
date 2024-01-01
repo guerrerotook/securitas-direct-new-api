@@ -20,7 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import (
-    CONF_INSTALATION_KEY,
+    CONF_INSTALLATION_KEY,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -41,13 +41,13 @@ async def async_setup_entry(
     client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     sensors = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
-        CONF_INSTALATION_KEY
+        CONF_INSTALLATION_KEY
     )
 
     sentinel_name: SentinelName = SentinelName()
     sentinel_confort_name = sentinel_name.get_sentinel_name(client.lang)
     for device in securitas_devices:
-        services: list[Service] = await client.get_services(device.instalation)
+        services: list[Service] = await client.get_services(device.installation)
         for service in services:
             if service.request == sentinel_confort_name:
                 sentinel_data: Sentinel = await client.session.get_sentinel_data(

@@ -32,7 +32,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from . import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_ENABLE_CODE,
-    CONF_INSTALATION_KEY,
+    CONF_INSTALLATION_KEY,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -51,15 +51,15 @@ async def async_setup_entry(
     client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     alarms = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
-        CONF_INSTALATION_KEY
+        CONF_INSTALLATION_KEY
     )
     for devices in securitas_devices:
         current_state: CheckAlarmStatus = await client.update_overview(
-            devices.instalation
+            devices.installation
         )
         alarms.append(
             SecuritasAlarm(
-                devices.instalation,
+                devices.installation,
                 state=current_state,
                 digits=client.config.get(CONF_CODE),
                 client=client,
