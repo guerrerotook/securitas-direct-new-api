@@ -406,7 +406,7 @@ class ApiManager:
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "CheckAlarm")
+        response = await self._execute_request(content, "CheckAlarm", installation)
 
         return response["data"]["xSCheckAlarm"]["referenceId"]
 
