@@ -91,8 +91,8 @@ class Attribute:
 class Attributes:
     """Attribute collection."""
 
-    name: str = ""
-    attributes: list[Attribute] = []
+    name: str
+    attributes: list[Attribute]
 
 
 @dataclass
