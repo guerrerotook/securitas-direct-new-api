@@ -33,6 +33,7 @@ from . import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_ENABLE_CODE,
     CONF_INSTALLATION_KEY,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -95,9 +96,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
         self._update_interval = timedelta(
-            seconds=client.config.get(
-                CONF_SCAN_INTERVAL, 1200
-            )  # FIXME is this used? other than next line
+            seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         )
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval

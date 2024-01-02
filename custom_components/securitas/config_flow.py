@@ -33,6 +33,7 @@ from . import (
     DEFAULT_CHECK_ALARM_PANEL,
     DEFAULT_CODE,
     DEFAULT_CODE_ENABLED,
+    DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SecuritasDirectDevice,
@@ -80,6 +81,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         code: str,
         check_alarm: bool,
         scan_interval: timedelta,
+        delay_check_operation: int,
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
@@ -97,6 +99,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_CODE] = code
         self.config[CONF_CHECK_ALARM_PANEL] = check_alarm
         self.config[CONF_SCAN_INTERVAL] = scan_interval
+        self.config[CONF_DELAY_CHECK_OPERATION] = delay_check_operation
         self.config[CONF_DEVICE_ID] = device_id
         self.config[CONF_UNIQUE_ID] = uuid
         self.config[CONF_DEVICE_INDIGITALL] = id_device_indigitall
@@ -168,6 +171,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 initial_data.get(CONF_CODE, DEFAULT_CODE),
                 initial_data.get(CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL),
                 initial_data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                initial_data.get(
+                    CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+                ),
                 initial_data.get(CONF_DEVICE_ID, uuid),
                 initial_data.get(CONF_UNIQUE_ID, uuid),
                 initial_data.get(CONF_DEVICE_INDIGITALL, ""),
@@ -206,6 +212,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_CODE],
             user_input[CONF_CHECK_ALARM_PANEL],
             user_input[CONF_SCAN_INTERVAL],
+            user_input[CONF_DELAY_CHECK_OPERATION],
             user_input[CONF_DEVICE_ID],
             user_input[CONF_UNIQUE_ID],
             user_input[CONF_DEVICE_INDIGITALL],

@@ -74,30 +74,30 @@ class ArmType(Enum):
 class SStatus:
     """Define the current status of the alarm."""
 
-    status: str
-    timestampUpdate: str
+    status: str = ""
+    timestampUpdate: str = ""
 
 
 @dataclass
 class Attribute:
     """Attribute for the service."""
 
-    name: str
-    value: str
-    active: bool
+    name: str = ""
+    value: str = ""
+    active: bool = False
 
 
 @dataclass
 class Attributes:
     """Attribute collection."""
 
-    name: str
-    attributes: list[Attribute]
+    name: str = ""
+    attributes: list[Attribute] = []
 
 
 @dataclass
 class Service:
-    """Define a securitas direct service."""
+    """Define a Securitas Direct service."""
 
     id: int
     id_service: int

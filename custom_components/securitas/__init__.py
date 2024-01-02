@@ -51,14 +51,14 @@ CONF_ENTRY_ID = "entry_id"
 CONF_INSTALLATION_KEY = "instalation"
 CONF_ENABLE_CODE = "enable_code"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
-
 DOMAIN = "securitas"
-
 MIN_SCAN_INTERVAL = 20  # FIXME: unused?
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CHECK_ALARM_PANEL = True
+DEFAULT_DELAY_CHECK_OPERATION = 2
 DEFAULT_CODE = ""
 DEFAULT_CODE_ENABLED = True
+
 
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
 HUB = None
@@ -147,8 +147,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    config[CONF_SCAN_INTERVAL] = 60
-    # FIXME: why 60? entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    config[CONF_SCAN_INTERVAL] = entry.data.get(
+        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+    )
+    # was 60
+    config[CONF_DELAY_CHECK_OPERATION] = entry.data.get(
+        CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+    )
     config[CONF_ENTRY_ID] = entry.entry_id
     config = add_device_information(config)
     # config = merge_configuration(config, entry)
@@ -208,7 +213,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return True
     else:
         config = add_device_information(entry.data.copy())
-        config[CONF_SCAN_INTERVAL] = 60  # FIXME: why number instead of const
+        config[CONF_SCAN_INTERVAL] = entry.data.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )  # was 60
         hass.async_create_task(
             hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": SOURCE_IMPORT}, data=config
@@ -340,6 +347,7 @@ class SecuritasHub:
             domain_config[CONF_DEVICE_ID],
             domain_config[CONF_UNIQUE_ID],
             domain_config[CONF_DEVICE_INDIGITALL],
+            domain_config[CONF_DELAY_CHECK_OPERATION],
         )
         self.installations: list[Installation] = []
 
@@ -389,7 +397,7 @@ class SecuritasHub:
         """Update the overview."""
 
         if self.check_alarm is not True:
-            status = SStatus()
+            # status = SStatus()
             try:
                 status: SStatus = await self.session.check_general_status(installation)
             except SecuritasDirectError as err:

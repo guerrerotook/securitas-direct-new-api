@@ -13,7 +13,8 @@
                     "code_digits": "Code Digits",
                     "code": "Code",
                     "check_alarm_panel": "Check alarm panel",
-                    "scan_interval": "Scan interval"
+                    "scan_interval": "Update scan interval (sec)",
+                    "delay_check_operation":"Delay to check the arming and disarming operations"
                 },
                 "description": "Login into Securitas Direct.",
                 "title": "Login"
@@ -36,7 +37,7 @@
                     "enable_code": "Enable or disable the local pin code.",
                     "scan_interval": "Scan interval to query the last status in the Server",
                     "check_alarm_panel": "Check the status of the panel in every request (NOT RECOMMENDED)",
-                    "delay_check_operation": "Delay in seconds to check the arming and dissarming operation"
+                    "delay_check_operation": "Delay in seconds to check the arming and disarming operation"
                 }
             }
         }
