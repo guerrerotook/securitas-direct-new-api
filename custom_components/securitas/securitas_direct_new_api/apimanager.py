@@ -99,7 +99,6 @@ class ApiManager:
             headers["X-Capabilities"] = installation.capabilities
 
         if self.authentication_token is not None:
-            await self._check_authentication_token()
             authorization_value = {
                 "loginTimestamp": self.authentication_milliseconds,
                 "user": self.username,
@@ -405,6 +404,7 @@ class ApiManager:
             },
             "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "CheckAlarm")
 
@@ -476,6 +476,7 @@ class ApiManager:
             },
             "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
         }
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Sentinel")
 
@@ -499,6 +500,7 @@ class ApiManager:
             },
             "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
         }
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "AirQualityGraph")
 
@@ -515,6 +517,7 @@ class ApiManager:
             "variables": {"numinst": str(installation.number)},
             "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
         }
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Status", installation)
 
@@ -525,7 +528,7 @@ class ApiManager:
         self, installation: Installation, reference_id: str
     ) -> CheckAlarmStatus:
         """Return the status of the alarm."""
-
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         count = 1
         raw_data = {}
@@ -577,6 +580,7 @@ class ApiManager:
             },
             "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel")
         response = response["data"]["xSArmPanel"]
@@ -643,6 +647,7 @@ class ApiManager:
             },
             "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
+        await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel")
         response = response["data"]["xSDisarmPanel"]
