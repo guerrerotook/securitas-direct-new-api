@@ -20,7 +20,6 @@ from securitas_direct_new_api.exceptions import SecuritasDirectError
 async def main():
     """Run Basic Securitas Direct example."""
 
-    print(datetime.datetime.now())
     user = input("User: ")
     password = input("Password: ")
     country = "es"
@@ -53,9 +52,6 @@ async def main():
             print("*** Installations ***\n", installations)
 
             for installation in installations:
-                services = await client.get_all_services(installation)
-                # print("*** Services ***\n", services)
-
                 general_status = await client.check_general_status(installation)
                 print("*** General status ***\n", general_status)
 
@@ -64,6 +60,9 @@ async def main():
 
                 status = await client.check_alarm_status(installation, reference_id)
                 print("*** Alarm status ***\n", status)
+
+                services = await client.get_all_services(installation)
+                print("*** Services ***\n", services)
 
                 # for service in services:
                 #     sentinel_data = await client.get_sentinel_data(

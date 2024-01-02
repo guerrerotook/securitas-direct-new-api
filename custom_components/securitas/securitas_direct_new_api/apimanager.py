@@ -63,6 +63,7 @@ class ApiManager:
         self.api_url = ApiDomains().get_url(language=language)
         self.authentication_token: str = None
         self.authentication_token_exp: datetime = datetime.max
+        self.authentication_milliseconds: int = 0
         self.authentication_otp_challenge_value: tuple[str, int] = None
         self.http_client = http_client
         self.refresh_token_value: str = None
@@ -95,10 +96,12 @@ class ApiManager:
         if installation is not None:
             headers["numinst"] = str(installation.number)
             headers["panel"] = installation.panel
+            headers["X-Capabilities"] = installation.capabilities
 
         if self.authentication_token is not None:
             await self._check_authentication_token()
             authorization_value = {
+                "loginTimestamp": self.authentication_milliseconds,
                 "user": self.username,
                 "id": self._generate_id(),
                 "country": self.country,
@@ -110,6 +113,7 @@ class ApiManager:
 
         if operation in ["mkValidateDevice", "RefreshLogin", "mkSendOTP"]:
             authorization_value = {
+                "loginTimestamp": self.authentication_milliseconds,
                 "user": self.username,
                 "id": self._generate_id(),
                 "country": self.country,
@@ -181,7 +185,6 @@ class ApiManager:
                 algorithms=["HS256"],
                 options={"verify_signature": False},
             )
-            print("capabilities token decoded", token)
         except jwt.exceptions.DecodeError as err:
             raise SecuritasDirectError(
                 f"Failed to decode capabilities token {installation.capabilities}"
@@ -345,6 +348,7 @@ class ApiManager:
             raise LoginError(err.args) from err
 
         self.authentication_token = response["data"]["xSLoginToken"]["hash"]
+        self.authentication_milliseconds = int(datetime.now().timestamp() * 1000)
 
         try:
             token = jwt.decode(
