@@ -53,6 +53,7 @@ class ApiManager:
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
+        delay_check_operation: int = 2,
     ) -> None:
         """Create the object."""
         self.username = username
@@ -61,6 +62,7 @@ class ApiManager:
         self.language = language.lower()
         self.api_url = ApiDomains().get_url(language=language)
         self.authentication_token: str = None
+        self.authentication_token_exp: datetime = datetime.max
         self.authentication_otp_challenge_value: tuple[str, int] = None
         self.http_client = http_client
         self.refresh_token_value: str = None
@@ -75,6 +77,7 @@ class ApiManager:
         self.device_type = ""
         self.device_version = "10.102.0"
         self.apollo_operation_id: str = secrets.token_hex(64)
+        self.delay_check_operation: int = delay_check_operation
 
     async def _execute_request(
         self, content, operation: str, installation: Optional[Installation] = None
@@ -94,6 +97,7 @@ class ApiManager:
             headers["panel"] = installation.panel
 
         if self.authentication_token is not None:
+            await self._check_authentication_token()
             authorization_value = {
                 "user": self.username,
                 "id": self._generate_id(),
@@ -146,15 +150,16 @@ class ApiManager:
         try:
             response_dict = json.loads(response_text)
         except json.JSONDecodeError as err:
+            _LOGGER.error("Problems decoding response %s", response_text)
             raise SecuritasDirectError(err.msg, None, headers, content) from err
 
-        login_error: bool = await self._check_errors(response_dict)
-        if login_error:
-            _LOGGER.info("Login is expired. Login again")
-            await self.login()
-            _LOGGER.info("Re-logging done")
+        # login_error: bool = await self._check_errors(response_dict)
+        # if login_error:
+        #     _LOGGER.info("Login is expired. Login again")
+        #     await self.login()
+        #     _LOGGER.info("Re-logging done")
 
-            await self._execute_request(content, operation)
+        #     await self._execute_request(content, operation)
 
         if "errors" in response_dict:
             raise SecuritasDirectError(
@@ -165,17 +170,18 @@ class ApiManager:
 
     async def _check_capabilities_token(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""
+        # FIXME: better to just store the expiration time and check against that
         if installation.capabilities == "":
             await self.get_all_services(installation)
             return
 
-        token = {}
         try:
             token = jwt.decode(
                 installation.capabilities,
                 algorithms=["HS256"],
                 options={"verify_signature": False},
             )
+            print("capabilities token decoded", token)
         except jwt.exceptions.DecodeError as err:
             raise SecuritasDirectError(
                 f"Failed to decode capabilities token {installation.capabilities}"
@@ -186,6 +192,14 @@ class ApiManager:
             if datetime.now() + timedelta(minutes=1) > expiration:
                 # if the token is expired get a new one
                 await self.get_all_services(installation)
+
+    async def _check_authentication_token(self) -> None:
+        """Check expiration of the authentication token and get a new one if needed."""
+
+        if (self.authentication_token is None) or (
+            datetime.now() + timedelta(minutes=1) > self.authentication_token_exp
+        ):
+            await self.login()
 
     def _generate_id(self) -> str:
         current: datetime = datetime.now()
@@ -201,21 +215,20 @@ class ApiManager:
             + str(current.microsecond)
         )
 
-    async def _check_errors(self, response: dict[str, Any]) -> bool:
-        """Return true if there is an invalid token or session."""
+    # async def _check_errors(self, response: dict[str, Any]) -> bool:
+    #     """Return true if there is an invalid token or session."""
 
-        if "errors" in response:
-            for error_item in response["errors"]:
-                if "message" in error_item:
-                    if (
-                        error_item["message"]
-                        == "Invalid session. Please, try again later."
-                        or error_item["message"] == "Invalid token: Expired"
-                    ):
-                        return True
-                    else:
-                        _LOGGER.error(error_item["message"])
-        return False
+    #     if "errors" in response:
+    #         for error_item in response["errors"]:
+    #             if "message" in error_item:
+    #                 if (
+    #                     error_item["message"]
+    #                     == "Invalid session. Please, try again later."
+    #                     or error_item["message"] == "Invalid token: Expired"
+    #                 ):
+    #                     return True
+
+    #     return False
 
     async def logout(self):
         """Logout."""
@@ -333,6 +346,22 @@ class ApiManager:
 
         self.authentication_token = response["data"]["xSLoginToken"]["hash"]
 
+        try:
+            token = jwt.decode(
+                self.authentication_token,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
+            )
+        except jwt.exceptions.DecodeError as err:
+            raise SecuritasDirectError(
+                f"Failed to decode authentication token {self.authentication_token}"
+            ) from err
+
+        if "exp" in token:
+            self.authentication_token_exp: datetime = datetime.fromtimestamp(
+                token["exp"]
+            )
+
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
         content = {
@@ -391,6 +420,7 @@ class ApiManager:
         installation.capabilities = response["data"]["xSSrv"]["installation"][
             "capabilities"
         ]
+
         # json_services = json.dumps(raw_data)
         # result = json.loads(json_services)
         for item in raw_data:
@@ -497,7 +527,7 @@ class ApiManager:
         raw_data = {}
 
         while (count == 1) or (raw_data.get("res") == "WAIT"):
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_alarm_status(installation, reference_id, count)
             count += 1
 
@@ -554,7 +584,7 @@ class ApiManager:
         count = 1
         raw_data = {}
         while (count == 1) or (raw_data.get("res") == "WAIT"):
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_arm_status(
                 installation, reference_id, mode, count, current_status
             )
@@ -617,11 +647,10 @@ class ApiManager:
 
         reference_id = response["referenceId"]
 
-        await asyncio.sleep(1)
         count = 1
         raw_data = {}
         while (count == 1) or raw_data.get("res") == "WAIT":
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_disarm_status(
                 installation,
                 reference_id,
