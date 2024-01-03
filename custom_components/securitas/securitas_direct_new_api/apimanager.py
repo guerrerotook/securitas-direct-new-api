@@ -562,7 +562,9 @@ class ApiManager:
             },
             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
         }
-        response = await self._execute_request(content, "CheckAlarmStatus")
+        response = await self._execute_request(
+            content, "CheckAlarmStatus", installation
+        )
 
         return response["data"]["xSCheckAlarmStatus"]
 
