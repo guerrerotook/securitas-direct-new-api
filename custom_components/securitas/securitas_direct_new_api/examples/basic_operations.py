@@ -1,14 +1,16 @@
 """Basic example for securitas_direct_new_api."""
 
 import asyncio
+import logging
 import sys
 from uuid import uuid4
 
 import aiohttp
 
-# sys.path.insert(0, "/workspaces/ha-core/config/custom_components/securitas/")
+sys.path.insert(0, "../../")
 
 from securitas_direct_new_api.apimanager import (
+    _LOGGER,
     ApiManager,
     generate_device_id,
     generate_uuid,
@@ -42,6 +44,9 @@ async def do_stuff(client):
 
 async def main():
     """Run Basic Securitas Direct example."""
+
+    _LOGGER.setLevel(10)
+    _LOGGER.addHandler(logging.StreamHandler())
 
     user = input("User: ")
     password = input("Password: ")

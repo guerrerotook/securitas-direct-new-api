@@ -1,5 +1,6 @@
 """Public datatypes for the securitas direct API."""
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -21,6 +22,7 @@ class Installation:
     email: str = ""
     phone: str = ""
     capabilities: str = ""
+    capabilities_exp: datetime = datetime.min
 
 
 @dataclass

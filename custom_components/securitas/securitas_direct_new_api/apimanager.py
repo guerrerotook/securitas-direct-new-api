@@ -62,7 +62,7 @@ class ApiManager:
         self.language = language.lower()
         self.api_url = ApiDomains().get_url(language=language)
         self.authentication_token: str = None
-        self.authentication_token_exp: datetime = datetime.max
+        self.authentication_token_exp: datetime = datetime.min
         self.authentication_milliseconds: int = 0
         self.authentication_otp_challenge_value: tuple[str, int] = None
         self.http_client = http_client
@@ -156,14 +156,6 @@ class ApiManager:
             _LOGGER.error("Problems decoding response %s", response_text)
             raise SecuritasDirectError(err.msg, None, headers, content) from err
 
-        # login_error: bool = await self._check_errors(response_dict)
-        # if login_error:
-        #     _LOGGER.info("Login is expired. Login again")
-        #     await self.login()
-        #     _LOGGER.info("Re-logging done")
-
-        #     await self._execute_request(content, operation)
-
         if "errors" in response_dict:
             raise SecuritasDirectError(
                 response_dict["errors"][0]["message"], response_dict, headers, content
@@ -173,34 +165,32 @@ class ApiManager:
 
     async def _check_capabilities_token(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""
-        # FIXME: better to just store the expiration time and check against that
-        if installation.capabilities == "":
+
+        _LOGGER.debug(
+            "Capabilities token expires %s and now is %s",
+            self.authentication_token_exp,
+            datetime.now(),
+        )
+
+        if (installation.capabilities == "") or (
+            datetime.now() + timedelta(minutes=1) > installation.capabilities_exp
+        ):
+            _LOGGER.debug("Expired capabilities token, getting a new one")
             await self.get_all_services(installation)
-            return
-
-        try:
-            token = jwt.decode(
-                installation.capabilities,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
-        except jwt.exceptions.DecodeError as err:
-            raise SecuritasDirectError(
-                f"Failed to decode capabilities token {installation.capabilities}"
-            ) from err
-
-        if "exp" in token:
-            expiration: datetime = datetime.fromtimestamp(token["exp"])
-            if datetime.now() + timedelta(minutes=1) > expiration:
-                # if the token is expired get a new one
-                await self.get_all_services(installation)
 
     async def _check_authentication_token(self) -> None:
         """Check expiration of the authentication token and get a new one if needed."""
 
+        _LOGGER.debug(
+            "Authentication token expires %s and now is %s",
+            self.authentication_token_exp,
+            datetime.now(),
+        )
+
         if (self.authentication_token is None) or (
             datetime.now() + timedelta(minutes=1) > self.authentication_token_exp
         ):
+            _LOGGER.debug("Authentication token expired, logging in again")
             await self.login()
 
     def _generate_id(self) -> str:
@@ -216,21 +206,6 @@ class ApiManager:
             + str(current.minute)
             + str(current.microsecond)
         )
-
-    # async def _check_errors(self, response: dict[str, Any]) -> bool:
-    #     """Return true if there is an invalid token or session."""
-
-    #     if "errors" in response:
-    #         for error_item in response["errors"]:
-    #             if "message" in error_item:
-    #                 if (
-    #                     error_item["message"]
-    #                     == "Invalid session. Please, try again later."
-    #                     or error_item["message"] == "Invalid token: Expired"
-    #                 ):
-    #                     return True
-
-    #     return False
 
     async def logout(self):
         """Logout."""
@@ -390,6 +365,7 @@ class ApiManager:
                 item["email"],
                 item["phone"],
                 "",
+                datetime.min,
             )
             result.append(installation_item)
         return result
@@ -424,6 +400,19 @@ class ApiManager:
         installation.capabilities = response["data"]["xSSrv"]["installation"][
             "capabilities"
         ]
+        try:
+            token = jwt.decode(
+                installation.capabilities,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
+            )
+        except jwt.exceptions.DecodeError as err:
+            raise SecuritasDirectError(
+                f"Failed to decode capabilities token {installation.capabilities}"
+            ) from err
+
+        if "exp" in token:
+            installation.capabilities_exp = datetime.fromtimestamp(token["exp"])
 
         # json_services = json.dumps(raw_data)
         # result = json.loads(json_services)
@@ -525,15 +514,18 @@ class ApiManager:
         return SStatus(raw_data["status"], raw_data["timestampUpdate"])
 
     async def check_alarm_status(
-        self, installation: Installation, reference_id: str
+        self, installation: Installation, reference_id: str, timeout: int = 10
     ) -> CheckAlarmStatus:
         """Return the status of the alarm."""
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         count = 1
         raw_data = {}
+        max_count = timeout / max(1, self.delay_check_operation)
 
-        while (count == 1) or (raw_data.get("res") == "WAIT"):
+        while ((count == 1) or (raw_data.get("res") == "WAIT")) and (
+            count <= max_count
+        ):
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_alarm_status(installation, reference_id, count)
             count += 1
