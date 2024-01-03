@@ -397,11 +397,10 @@ class SecuritasHub:
         """Update the overview."""
 
         if self.check_alarm is not True:
-            # status = SStatus()
             try:
                 status: SStatus = await self.session.check_general_status(installation)
             except SecuritasDirectError as err:
-                _LOGGER.error(err.args)
+                _LOGGER.info(err.args)
                 return None
 
             return CheckAlarmStatus(
@@ -417,7 +416,7 @@ class SecuritasHub:
         try:
             reference_id: str = await self.session.check_alarm(installation)
             await asyncio.sleep(1)
-            alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
+            alarm_status = await self.session.check_alarm_status(
                 installation, reference_id
             )
         except SecuritasDirectError as err:
