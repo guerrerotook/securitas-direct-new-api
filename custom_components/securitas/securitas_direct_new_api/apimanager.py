@@ -584,7 +584,7 @@ class ApiManager:
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSArmPanel")
+        response = await self._execute_request(content, "xSArmPanel", installation)
         response = response["data"]["xSArmPanel"]
         if response["res"] != "OK":
             raise SecuritasDirectError(response["msg"], response)
@@ -632,7 +632,7 @@ class ApiManager:
             },
             "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
-        response = await self._execute_request(content, "ArmStatus")
+        response = await self._execute_request(content, "ArmStatus", installation)
 
         raw_data = response["data"]["xSArmStatus"]
         return raw_data
@@ -651,7 +651,7 @@ class ApiManager:
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSDisarmPanel")
+        response = await self._execute_request(content, "xSDisarmPanel", installation)
         response = response["data"]["xSDisarmPanel"]
         if response["res"] != "OK":
             raise SecuritasDirectError(response["msg"], response)
@@ -703,6 +703,6 @@ class ApiManager:
             },
             "query": "query DisarmStatus($numinst: String!, $panel: String!, $referenceId: String!, $counter: Int!, $request: DisarmCodeRequest) {\n  xSDisarmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
-        response = await self._execute_request(content, "DisarmStatus")
+        response = await self._execute_request(content, "DisarmStatus", installation)
 
         return response["data"]["xSDisarmStatus"]
