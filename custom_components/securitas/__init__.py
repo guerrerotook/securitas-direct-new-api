@@ -1,13 +1,10 @@
 """Support for Securitas Direct alarms."""
 import asyncio
 from collections import OrderedDict
-from datetime import datetime, timedelta
 import logging
-import secrets
 from uuid import uuid4
 
 from aiohttp import ClientSession
-import jwt
 import voluptuous as vol
 
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
@@ -26,7 +23,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 
-from .securitas_direct_new_api.apimanager import ApiManager
+from .securitas_direct_new_api.apimanager import (
+    ApiManager,
+    generate_device_id,
+    generate_uuid,
+)
 from .securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
     Installation,
@@ -34,22 +35,31 @@ from .securitas_direct_new_api.dataTypes import (
     Service,
     SStatus,
 )
+from .securitas_direct_new_api.exceptions import (
+    Login2FAError,
+    LoginError,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_ALARM = "alarm"
+CONF_ALARM = "alarm"  # FIXME unused
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
-CONF_INSTALATION_KEY = "instalation"
+CONF_INSTALLATION_KEY = "instalation"
 CONF_ENABLE_CODE = "enable_code"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
-
 DOMAIN = "securitas"
+MIN_SCAN_INTERVAL = 20  # FIXME: unused?
+DEFAULT_SCAN_INTERVAL = 120
+DEFAULT_CHECK_ALARM_PANEL = True
+DEFAULT_DELAY_CHECK_OPERATION = 2
+DEFAULT_CODE = ""
+DEFAULT_CODE_ENABLED = True
 
-MIN_SCAN_INTERVAL = 20
-DEFAULT_SCAN_INTERVAL = 40
+
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
 HUB = None
 
@@ -64,8 +74,10 @@ CONFIG_SCHEMA = vol.Schema(
                     CONF_PASSWORD,
                 ): str,
                 vol.Optional(CONF_COUNTRY, default="ES"): str,
-                vol.Optional(CONF_CODE): str,
-                vol.Optional(CONF_CHECK_ALARM_PANEL, default=True): bool,
+                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(
+                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
+                ): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
             }
         )
@@ -73,37 +85,27 @@ CONFIG_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
-ATTR_INSTALATION_ID = "instalation_id"
-SERVICE_REFRESH_INSTALATION = "refresh_alarm_status"
+ATTR_INSTALLATION_ID = "instalation_id"
+SERVICE_REFRESH_INSTALLATION = "refresh_alarm_status"
 
 REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
     {
         vol.Required(
-            ATTR_INSTALATION_ID, description="Instalation number"
+            ATTR_INSTALLATION_ID, description="Installation number"
         ): cv.positive_int
     }
 )
 
 
-def generate_uuid() -> str:
-    """Create a device id."""
-    return str(uuid4()).replace("-", "")[0:16]
-
-
-def generate_device_id(lang: str) -> str:
-    """Create a device identifier for the API."""
-    return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
-
-
 def add_device_information(config: OrderedDict) -> OrderedDict:
     """Add device information to the configuration."""
-    if not CONF_DEVICE_ID in config:
+    if CONF_DEVICE_ID not in config:
         config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
 
-    if not CONF_UNIQUE_ID in config:
+    if CONF_UNIQUE_ID not in config:
         config[CONF_UNIQUE_ID] = generate_uuid()
 
-    if not CONF_DEVICE_INDIGITALL in config:
+    if CONF_DEVICE_INDIGITALL not in config:
         config[CONF_DEVICE_INDIGITALL] = str(uuid4())
 
     return config
@@ -145,7 +147,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
-    config[CONF_SCAN_INTERVAL] = 60
+    config[CONF_SCAN_INTERVAL] = entry.data.get(
+        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+    )
+    # was 60
+    config[CONF_DELAY_CHECK_OPERATION] = entry.data.get(
+        CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+    )
     config[CONF_ENTRY_ID] = entry.entry_id
     config = add_device_information(config)
     # config = merge_configuration(config, entry)
@@ -170,8 +178,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
-        result = await client.login()
-        if result == "2FA":
+        try:
+            await client.login()
+        except Login2FAError:
             msg = (
                 "Securitas Direct need a 2FA SMS code."
                 "Please login again with your phone"
@@ -184,25 +193,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
             )
             return False
+        except LoginError:
+            _LOGGER.error("Could not log in to Securitas")
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
-            instalations: list[
+            installations: list[
                 SecuritasDirectDevice
             ] = await client.session.list_installations()
             devices: list[SecuritasDirectDevice] = []
-            for instalation in instalations:
-                services: list[Service] = await client.get_services(instalation)
-                devices.append(SecuritasDirectDevice(instalation))
+            for installation in installations:
+                await client.get_services(installation)
+                devices.append(SecuritasDirectDevice(installation))
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
-            hass.data.setdefault(DOMAIN, {})[CONF_INSTALATION_KEY] = devices
+            hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
             await hass.async_add_executor_job(setup_hass_services, hass)
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
             return True
     else:
         config = add_device_information(entry.data.copy())
-        config[CONF_SCAN_INTERVAL] = 60
+        config[CONF_SCAN_INTERVAL] = entry.data.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )  # was 60
         hass.async_create_task(
             hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": SOURCE_IMPORT}, data=config
@@ -227,16 +240,16 @@ def setup_hass_services(hass: HomeAssistant) -> None:
 
     async def async_change_setting(call: ServiceCall) -> None:
         """Change an Abode system setting."""
-        instalation_id: int = call.data[ATTR_INSTALATION_ID]
+        installation_id: int = call.data[ATTR_INSTALLATION_ID]
 
         client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
-        for instalation in client.installations:
-            if instalation.number == instalation_id:
-                await client.update_overview(instalation)
+        for installation in client.installations:
+            if installation.number == installation_id:
+                await client.update_overview(installation)
 
     hass.services.register(
         DOMAIN,
-        SERVICE_REFRESH_INSTALATION,
+        SERVICE_REFRESH_INSTALLATION,
         async_change_setting,
         schema=REFRESH_ALARM_STATUS_SCHEMA,
     )
@@ -245,7 +258,7 @@ def setup_hass_services(hass: HomeAssistant) -> None:
 def _notify_error(
     hass: HomeAssistant, notification_id, title: str, message: str
 ) -> None:
-    """Notify user with persistent notification"""
+    """Notify user with persistent notification."""
     hass.async_create_task(
         hass.services.async_call(
             domain="persistent_notification",
@@ -262,10 +275,10 @@ def _notify_error(
 class SecuritasDirectDevice:
     """Securitas direct device instance."""
 
-    def __init__(self, instalation: Installation) -> None:
+    def __init__(self, installation: Installation) -> None:
         """Construct a device wrapper."""
-        self.instalation = instalation
-        self.name = instalation.alias
+        self.installation = installation
+        self.name = installation.alias
         self._available = True
 
     @property
@@ -276,31 +289,31 @@ class SecuritasDirectDevice:
     @property
     def device_id(self) -> str:
         """Return device ID."""
-        return self.instalation.number
+        return self.installation.number
 
     @property
     def address(self) -> str:
         """Return the address of the instalation."""
-        return self.instalation.address
+        return self.installation.address
 
     @property
     def city(self) -> str:
         """Return the city of the instalation."""
-        return self.instalation.city
+        return self.installation.city
 
     @property
     def postal_code(self) -> str:
         """Return the postalCode of the instalation."""
-        return self.instalation.postalCode
+        return self.installation.postalCode
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return a device description for device registry."""
         return DeviceInfo(
-            identifiers={(DOMAIN, f"{self.instalation.alias}")},
+            identifiers={(DOMAIN, f"{self.installation.alias}")},
             manufacturer="Securitas Direct",
-            model=self.instalation.type,
-            hw_version=self.instalation.panel,
+            model=self.installation.type,
+            hw_version=self.installation.panel,
             name=self.name,
         )
 
@@ -311,7 +324,7 @@ class SecuritasHub:
     def __init__(
         self,
         domain_config: OrderedDict,
-        config_entry: ConfigEntry,
+        config_entry: ConfigEntry,  # FIXME: this is never used
         http_client: ClientSession,
         hass: HomeAssistant,
     ) -> None:
@@ -334,22 +347,13 @@ class SecuritasHub:
             domain_config[CONF_DEVICE_ID],
             domain_config[CONF_UNIQUE_ID],
             domain_config[CONF_DEVICE_INDIGITALL],
+            domain_config[CONF_DELAY_CHECK_OPERATION],
         )
         self.installations: list[Installation] = []
 
     async def login(self):
         """Login to Securitas."""
-        succeed: tuple[bool, str] = await self.session.login()
-        if not succeed[0] and succeed[1] == "2FA":
-            # 2fa for securitas
-            _LOGGER.info("2FA needed for the device")
-            return succeed[1]
-
-        _LOGGER.debug("Log in Securitas: %s", succeed[0])
-        if not succeed[0]:
-            _LOGGER.error("Could not log in to Securitas: %s", succeed[1])
-            return False
-        return True
+        await self.session.login()
 
     async def validate_device(self) -> tuple[str, list[OtpPhone]]:
         """Validate the current device."""
@@ -366,19 +370,19 @@ class SecuritasHub:
         return await self.session.refresh_token()
 
     async def sent_opt(self, challange: str, phone_index: int):
-        """Calls for the SMS challange."""
+        """Call for the SMS challange."""
         return await self.session.send_otp(phone_index, challange)
 
     async def get_services(self, instalation: Installation) -> list[Service]:
-        """Gets the list of services from the instalation."""
+        """Get the list of services from the instalation."""
         return await self.session.get_all_services(instalation)
 
     def get_authentication_token(self) -> str:
-        """Gets the authentication token."""
+        """Get the authentication token."""
         return self.session.authentication_token
 
     def set_authentication_token(self, value: str):
-        """Sets the authentication token."""
+        """Set the authentication token."""
         self.session.authentication_token = value
 
     async def logout(self):
@@ -391,23 +395,14 @@ class SecuritasHub:
 
     async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
         """Update the overview."""
-        # decode the capabilities token
-        token = jwt.decode(
-            installation.capabilities,
-            algorithms=["HS256"],
-            options={"verify_signature": False},
-        )
-        if "exp" in token:
-            expiration: datetime = datetime.fromtimestamp(token["exp"])
-            if datetime.now() + timedelta(minutes=1) > expiration:
-                # if the token is expired get a new one
-                await self.get_services(installation)
 
         if self.check_alarm is not True:
-            status: SStatus = await self.session.check_general_status(installation)
-            if isinstance(status, str):
-                _LOGGER.error(status)
+            try:
+                status: SStatus = await self.session.check_general_status(installation)
+            except SecuritasDirectError as err:
+                _LOGGER.info(err.args)
                 return None
+
             return CheckAlarmStatus(
                 status.status,
                 None,
@@ -417,19 +412,17 @@ class SecuritasHub:
                 status.timestampUpdate,
             )
 
-        reference_id: str = await self.session.check_alarm(installation)
-        await asyncio.sleep(1)
-        count: int = 1
-        alarm_status: CheckAlarmStatus = await self.session.check_alarm_status(
-            installation, reference_id, count
-        )
-        if hasattr(alarm_status, "operation_status"):
-            while alarm_status.operation_status == "WAIT":
-                await asyncio.sleep(1)
-                count = count + 1
-                alarm_status = await self.session.check_alarm_status(
-                    installation, reference_id, count
-                )
+        alarm_status = CheckAlarmStatus()
+        try:
+            reference_id: str = await self.session.check_alarm(installation)
+            await asyncio.sleep(1)
+            alarm_status = await self.session.check_alarm_status(
+                installation, reference_id
+            )
+        except SecuritasDirectError as err:
+            _LOGGER.error(err.args)
+            return None
+
         return alarm_status
 
     @property

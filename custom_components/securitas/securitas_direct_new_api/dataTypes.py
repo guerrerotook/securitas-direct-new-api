@@ -1,66 +1,68 @@
 """Public datatypes for the securitas direct API."""
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from typing import Any, List
+from typing import Any
 
 
 @dataclass
 class Installation:
     """Define an Securitas Direct Installation."""
 
-    number: int
-    alias: str
-    panel: str
-    type: str
-    name: str
-    lastName: str
-    address: str
-    city: str
-    postalCode: int
-    province: str
-    email: str
-    phone: str
-    capabilities: str
+    number: int = 0
+    alias: str = ""
+    panel: str = ""
+    type: str = ""
+    name: str = ""
+    lastName: str = ""
+    address: str = ""
+    city: str = ""
+    postalCode: int = 0
+    province: str = ""
+    email: str = ""
+    phone: str = ""
+    capabilities: str = ""
+    capabilities_exp: datetime = datetime.min
 
 
 @dataclass
 class CheckAlarmStatus:
     """Define an Securitas Direct Alarm Check Status Operation."""
 
-    operation_status: str
-    message: str
-    status: str
-    InstallationNumer: int
-    protomResponse: str
-    protomResponseData: str
+    operation_status: str = ""
+    message: str = ""
+    status: str = ""
+    InstallationNumer: int = 0
+    protomResponse: str = ""
+    protomResponseData: str = ""
 
 
 @dataclass
 class ArmStatus:
     """Define a Securitas Direct Arm Alarm Status Operation."""
 
-    operation_status: str
-    message: str
-    status: int
-    InstallationNumer: int
-    protomResponse: str
-    protomResponseData: str
-    requestId: str
-    error: str
+    operation_status: str = ""
+    message: str = ""
+    status: int = ""
+    InstallationNumer: int = 0
+    protomResponse: str = ""
+    protomResponseData: str = ""
+    requestId: str = ""
+    error: str = ""
 
 
 @dataclass
 class DisarmStatus:
     """Define a Securitas Direct Disarm Alarm Status Operation."""
 
-    error: str
-    message: str
-    numinst: str
-    protomResponse: str
-    protomResponseData: str
-    requestId: str
-    operation_status: str
-    status: str
+    error: str = ""
+    message: str = ""
+    numinst: str = ""
+    protomResponse: str = ""
+    protomResponseData: str = ""
+    requestId: str = ""
+    operation_status: str = ""
+    status: str = ""
 
 
 @dataclass
@@ -74,17 +76,17 @@ class ArmType(Enum):
 class SStatus:
     """Define the current status of the alarm."""
 
-    status: str
-    timestampUpdate: str
+    status: str = ""
+    timestampUpdate: str = ""
 
 
 @dataclass
 class Attribute:
     """Attribute for the service."""
 
-    name: str
-    value: str
-    active: bool
+    name: str = ""
+    value: str = ""
+    active: bool = False
 
 
 @dataclass
@@ -92,12 +94,12 @@ class Attributes:
     """Attribute collection."""
 
     name: str
-    attributes: List[Attribute]
+    attributes: list[Attribute]
 
 
 @dataclass
 class Service:
-    """Define a securitas direct service."""
+    """Define a Securitas Direct service."""
 
     id: int
     id_service: int

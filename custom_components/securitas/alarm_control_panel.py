@@ -13,6 +13,7 @@ from homeassistant.components.alarm_control_panel.const import (
     SUPPORT_ALARM_ARM_NIGHT,
     CodeFormat
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     CONF_CODE,
     CONF_SCAN_INTERVAL,
@@ -24,30 +25,25 @@ from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
     STATE_ALARM_DISARMED,
     STATE_ALARM_DISARMING,
 )
-
-from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
+
 from . import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_ENABLE_CODE,
-    CONF_INSTALATION_KEY,
+    CONF_INSTALLATION_KEY,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
 )
-from .securitas_direct_new_api.dataTypes import (
-    ArmStatus,
-    ArmType,
-    CheckAlarmStatus,
-    DisarmStatus,
-    Installation,
-)
+from .securitas_direct_new_api.dataTypes import CheckAlarmStatus, Installation
+from .securitas_direct_new_api.exceptions import SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=1200)
+SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
 
 
 async def async_setup_entry(
@@ -57,15 +53,15 @@ async def async_setup_entry(
     client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
     alarms = []
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
-        CONF_INSTALATION_KEY
+        CONF_INSTALLATION_KEY
     )
     for devices in securitas_devices:
         current_state: CheckAlarmStatus = await client.update_overview(
-            devices.instalation
+            devices.installation
         )
         alarms.append(
             SecuritasAlarm(
-                devices.instalation,
+                devices.installation,
                 state=current_state,
                 digits=client.config.get(CONF_CODE),
                 client=client,
@@ -100,8 +96,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_extra_state_attributes = {}
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
-        self._update_interval = timedelta(seconds=client.config.get(CONF_SCAN_INTERVAL, 1200))
-        self._update_unsub = async_track_time_interval(hass, self.async_update_status, self._update_interval)
+        self._update_interval = timedelta(
+            seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        )
+        self._update_unsub = async_track_time_interval(
+            hass, self.async_update_status, self._update_interval
+        )
 
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
@@ -120,22 +120,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def get_delay_configuration(self) -> int:
         return self.client.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1)
 
-    async def get_arm_state(self):
+    async def get_arm_state(self) -> CheckAlarmStatus:
         """Get alarm state."""
         reference_id: str = self.client.session.check_alarm(self.installation)
-        count: int = 1
         await asyncio.sleep(1)
         alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
-            self.installation, reference_id, count
+            self.installation, reference_id
         )
-        while alarm_status.status == "WAIT":
-            await asyncio.sleep(self.get_delay_configuration())
-            count = count + 1
-            alarm_status: CheckAlarmStatus = (
-                await self.client.session.check_alarm_status(
-                    self.installation, reference_id, count
-                )
-            )
+        return alarm_status
 
     async def async_will_remove_from_hass(self):
         """When entity will be removed from Home Assistant."""
@@ -144,9 +136,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_update_status(self, now=None):
         """Update the status of the alarm."""
-        alarm_status = await self.client.update_overview(self.installation)
-        self.update_status_alarm(alarm_status)
-        self.async_write_ha_state()
+        try:
+            alarm_status = await self.client.update_overview(self.installation)
+        except SecuritasDirectError as err:
+            _LOGGER.info(err.args)
+        else:
+            self.update_status_alarm(alarm_status)
+            self.async_write_ha_state()
 
     def _notify_error(self, notification_id, title: str, message: str) -> None:
         """Notify user with persistent notification."""
@@ -162,99 +158,23 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
         )
 
-    async def set_arm_state(self, state, attempts=3):
+    async def set_arm_state(self, state, attempts=3) -> None:
         """Send set arm state command."""
-        if state == "DARM1":
-            response = await self.client.session.disarm_alarm(
-                self.installation, self._get_proto_status()
-            )
-            if response[0]:
-                # check arming status
-                await asyncio.sleep(self.get_delay_configuration())
-                count = 1
-                disarm_status: DisarmStatus = (
-                    await self.client.session.check_disarm_status(
-                        self.installation,
-                        response[1],
-                        ArmType.TOTAL,
-                        count,
-                        self._get_proto_status(),
-                    )
-                )
-                while disarm_status.operation_status == "WAIT":
-                    count = count + 1
-                    await asyncio.sleep(self.get_delay_configuration())
-                    disarm_status = await self.client.session.check_disarm_status(
-                        self.installation,
-                        response[1],
-                        ArmType.TOTAL,
-                        count,
-                        self._get_proto_status(),
-                    )
-                self._attr_extra_state_attributes["message"] = disarm_status.message
-                self._attr_extra_state_attributes[
-                    "response_data"
-                ] = disarm_status.protomResponseData
-                self.update_status_alarm(
-                    CheckAlarmStatus(
-                        disarm_status.operation_status,
-                        disarm_status.message,
-                        disarm_status.status,
-                        self.installation.number,
-                        disarm_status.protomResponse,
-                        disarm_status.protomResponseData,
-                    )
-                )
 
-            else:
-                _LOGGER.error(response[1])
-        else:
-            response = await self.client.session.arm_alarm(
-                self.installation, state, self._get_proto_status()
+        arm_status = await self.client.session.arm_alarm(
+            self.installation, state, self._get_proto_status()
+        )
+
+        self.update_status_alarm(
+            CheckAlarmStatus(
+                arm_status.operation_status,
+                arm_status.message,
+                arm_status.status,
+                arm_status.InstallationNumer,
+                arm_status.protomResponse,
+                arm_status.protomResponseData,
             )
-            if response[0]:
-                # check arming status
-                await asyncio.sleep(self.get_delay_configuration())
-                count = 1
-                arm_status: ArmStatus = await self.client.session.check_arm_status(
-                    self.installation,
-                    response[1],
-                    state,
-                    count,
-                    self._get_proto_status(),
-                )
-                if arm_status.operation_status == "ERROR":
-                    _LOGGER.error("Error %s arming", arm_status.message)
-                    self._notify_error(
-                        "arming_error", "Error arming", arm_status.message
-                    )
-                else:
-                    while arm_status.operation_status == "WAIT":
-                        count = count + 1
-                        await asyncio.sleep(self.get_delay_configuration())
-                        arm_status = await self.client.session.check_arm_status(
-                            self.installation,
-                            response[1],
-                            state,
-                            count,
-                            self._get_proto_status(),
-                        )
-                    self._attr_extra_state_attributes["message"] = arm_status.message
-                    self._attr_extra_state_attributes[
-                        "response_data"
-                    ] = arm_status.protomResponseData
-                    self.update_status_alarm(
-                        CheckAlarmStatus(
-                            arm_status.operation_status,
-                            arm_status.message,
-                            arm_status.status,
-                            arm_status.InstallationNumer,
-                            arm_status.protomResponse,
-                            arm_status.protomResponseData,
-                        )
-                    )
-            else:
-                _LOGGER.error(response[1])
+        )
 
     @property
     def name(self):
@@ -307,7 +227,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
 
             if status.protomResponse == "D":
-                # disarmed
                 self._state = STATE_ALARM_DISARMED
             elif status.protomResponse == "T":
                 self._state = STATE_ALARM_ARMED_AWAY
@@ -315,12 +234,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = STATE_ALARM_ARMED_NIGHT
             elif status.protomResponse == "P":
                 self._state = STATE_ALARM_ARMED_HOME
-            elif (
-                status.protomResponse == "E"  # PERI
-                or status.protomResponse == "B"  # PERI + ARMED_HOME
-                or status.protomResponse == "C"  # PERI + ARMED_NIGHT
-                or status.protomResponse == "A"  # PERI + ARMED_AWAY
-            ):
+            elif status.protomResponse in ("E", "B", "C", "A"):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
     async def async_update(self):
@@ -331,9 +245,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.update_status_alarm(alarm_status)
 
     def check_code(self, code=None) -> bool:
+        """Check that the code entered in the panel matches the code in the config."""
+
         result: bool = False
-        if isinstance(code, str):
-            code = int(code)
+
         if (
             self.client.config.get(CONF_CODE, "") == ""
             or str(self.client.config.get(CONF_CODE, "")) == str(code)
@@ -350,7 +265,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
-            await self.set_arm_state("DARM1")
+            disarm_status = await self.client.session.disarm_alarm(
+                self.installation, self._get_proto_status()
+            )
+
+            self.update_status_alarm(
+                CheckAlarmStatus(
+                    disarm_status.operation_status,
+                    disarm_status.message,
+                    disarm_status.status,
+                    self.installation.number,
+                    disarm_status.protomResponse,
+                    disarm_status.protomResponseData,
+                )
+            )
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
@@ -362,7 +290,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARM1")
+            await self.set_arm_state("ARM1PERI1")  # ARM1
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
@@ -374,7 +302,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm perimeter command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("PERI1")
+            await self.set_arm_state("PERI1")  # DARMPERI is the corresponding darm
 
     @property
     def supported_features(self) -> int:
