@@ -11,7 +11,7 @@ from homeassistant.components.alarm_control_panel.const import (
     SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
     SUPPORT_ALARM_ARM_HOME,
     SUPPORT_ALARM_ARM_NIGHT,
-    CodeFormat
+    CodeFormat,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
@@ -290,7 +290,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARM1PERI1")  # ARM1
+            await self.set_arm_state("ARM1")  # ARM1
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""

@@ -634,7 +634,7 @@ class ApiManager:
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
-                "request": "DARM1DARMPERI",  # DARM1
+                "request": "DARM1",  # DARM1
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
