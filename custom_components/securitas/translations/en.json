@@ -8,11 +8,11 @@
                 "data": {
                     "username": "Username",
                     "password": "Password",
+                    "use_2FA": "Use 2FA",
                     "country": "Country Code",
-                    "alarm": "Alarm",
                     "code_digits": "Code Digits",
                     "code": "Code",
-                    "check_alarm_panel": "Check alarm panel",
+                    "check_alarm_panel": "Check alarm panel (not recommended)",
                     "scan_interval": "Update scan interval (sec)",
                     "delay_check_operation":"Delay to check the arming and disarming operations"
                 },
