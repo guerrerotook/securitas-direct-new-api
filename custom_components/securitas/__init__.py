@@ -142,7 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
-    config[CONF_USE_2FA] = entry.data[CONF_USE_2FA]
+    config[CONF_USE_2FA] = entry.data.get(CONF_USE_2FA, True)
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
