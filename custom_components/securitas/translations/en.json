@@ -12,7 +12,7 @@
                     "country": "Country Code",
                     "code_digits": "Code Digits",
                     "code": "Code",
-                    "check_alarm_panel": "Check alarm panel (not recommended)",
+                    "check_alarm_panel": "Check alarm panel",
                     "scan_interval": "Update scan interval (sec)",
                     "delay_check_operation":"Delay to check the arming and disarming operations"
                 },
