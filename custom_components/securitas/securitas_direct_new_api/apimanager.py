@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import json
 import logging
 import secrets
-from typing import Any, Optional, Union
+from typing import Optional, Union
 from uuid import uuid4
 
 from aiohttp import ClientResponse, ClientSession
