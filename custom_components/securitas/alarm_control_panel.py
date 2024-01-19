@@ -6,15 +6,12 @@ from datetime import timedelta
 import logging
 
 import homeassistant.components.alarm_control_panel as alarm
-from homeassistant.components.alarm_control_panel.const import (
-    SUPPORT_ALARM_ARM_AWAY,
-    SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
-    SUPPORT_ALARM_ARM_HOME,
-    SUPPORT_ALARM_ARM_NIGHT,
+from homeassistant.components.alarm_control_panel import (
+    AlarmControlPanelEntityFeature,
     CodeFormat,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
+from homeassistant.const import (
     CONF_CODE,
     CONF_SCAN_INTERVAL,
     STATE_ALARM_ARMED_AWAY,
@@ -308,9 +305,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def supported_features(self) -> int:
         """Return the list of supported features."""
         return (
-            SUPPORT_ALARM_ARM_HOME
-            | SUPPORT_ALARM_ARM_AWAY
-            | SUPPORT_ALARM_ARM_NIGHT
-            | SUPPORT_ALARM_ARM_HOME
-            | SUPPORT_ALARM_ARM_CUSTOM_BYPASS
+            AlarmControlPanelEntityFeature.ARM_HOME
+            | AlarmControlPanelEntityFeature.ARM_AWAY
+            | AlarmControlPanelEntityFeature.ARM_NIGHT
+            | AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
         )
