@@ -10,11 +10,11 @@
                     "password": "Password",
                     "use_2FA": "Use 2FA",
                     "country": "Country Code",
-                    "code_digits": "Code Digits",
-                    "code": "Code",
-                    "check_alarm_panel": "Check alarm panel",
+                    "code": "PIN Code",
+                    "PERI_alarm": "Is there a Perimetral alarm?",
+                    "check_alarm_panel": "Check alarm panel's status in every request",
                     "scan_interval": "Update scan interval (sec)",
-                    "delay_check_operation":"Delay to check the arming and disarming operations"
+                    "delay_check_operation":"Delay to check the arming and disarming operations (sec)"
                 },
                 "description": "Login into Securitas Direct.",
                 "title": "Login"
@@ -33,11 +33,12 @@
         "step": {
             "init": {
                 "data": {
-                    "code": "Pin pad code.",
-                    "enable_code": "Enable or disable the local pin code.",
-                    "scan_interval": "Scan interval to query the last status in the Server",
-                    "check_alarm_panel": "Check the status of the panel in every request (NOT RECOMMENDED)",
-                    "delay_check_operation": "Delay in seconds to check the arming and disarming operation"
+                    "code": "PIN Code",
+                    "enable_code": "Enable or disable the PIN",
+                    "PERI_alarm": "Is there a Perimetral alarm?",
+                    "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
+                    "scan_interval": "Update scan interval (sec)",
+                    "delay_check_operation": "Delay in seconds to check the arming and disarming operation (sec)"
                 }
             }
         }
