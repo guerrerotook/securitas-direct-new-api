@@ -610,7 +610,7 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        mode: str,
+        mode: AlarmStates,
         counter: int,
         current_status: str,
     ) -> Union[ArmStatus, str]:
@@ -618,7 +618,7 @@ class ApiManager:
         content = {
             "operationName": "ArmStatus",
             "variables": {
-                "request": mode,
+                "request": self.command_map[mode],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -637,7 +637,7 @@ class ApiManager:
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
-                "request": API_DISARM,
+                "request": self.command_map[AlarmStates.TOTAL_DISARMED],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -660,7 +660,7 @@ class ApiManager:
             raw_data = await self._check_disarm_status(
                 installation,
                 reference_id,
-                ArmType.TOTAL,
+                AlarmStates.TOTAL_DISARMED,
                 count,
                 current_status,
             )
@@ -681,7 +681,7 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        arm_type: ArmType,
+        arm_type: AlarmStates,
         counter: int,
         current_status: str,
     ) -> DisarmStatus:
@@ -689,7 +689,7 @@ class ApiManager:
         content = {
             "operationName": "DisarmStatus",
             "variables": {
-                "request": API_DISARM + str(arm_type.value),
+                "request": self.command_map[arm_type],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,

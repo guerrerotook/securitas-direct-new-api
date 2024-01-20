@@ -52,10 +52,13 @@ PERI_COMMANDS_MAP = {
 
 
 class CommandType(IntEnum):
+    """Enumerate possible mappings from states to commands."""
+
     STD = auto()
     PERI = auto()
 
 
+# The ApiManager will pick one mapping from this
 COMMAND_MAP = {
     CommandType.STD: STD_COMMANDS_MAP,
     CommandType.PERI: PERI_COMMANDS_MAP,
