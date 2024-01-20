@@ -36,8 +36,12 @@ from . import (
     SecuritasDirectDevice,
     SecuritasHub,
 )
-from .securitas_direct_new_api.dataTypes import CheckAlarmStatus, Installation
-from .securitas_direct_new_api.exceptions import SecuritasDirectError
+from .securitas_direct_new_api import (
+    AlarmStates,
+    CheckAlarmStatus,
+    Installation,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
@@ -281,25 +285,25 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm home command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARMDAY1")
+            await self.set_arm_state(AlarmStates.INTERIOR_PARTIAL)  # "ARMDAY1"
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARM1")  # ARM1
+            await self.set_arm_state(AlarmStates.TOTAL_ARMED)  # ARM1
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARMNIGHT1")
+            await self.set_arm_state(AlarmStates.NIGHT_ARMED)  # "ARMNIGHT1"
 
     async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("PERI1")  # DARMPERI is the corresponding darm
+            await self.set_arm_state(AlarmStates.EXTERIOR_ARMED)  # "PERI1"
 
     @property
     def supported_features(self) -> int:

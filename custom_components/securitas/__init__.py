@@ -23,42 +23,43 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 
-from .securitas_direct_new_api.apimanager import (
+from .securitas_direct_new_api import (
     ApiManager,
-    generate_device_id,
-    generate_uuid,
-)
-from .securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
+    CommandType,
     Installation,
-    OtpPhone,
-    Service,
-    SStatus,
-)
-from .securitas_direct_new_api.exceptions import (
     Login2FAError,
     LoginError,
+    OtpPhone,
     SecuritasDirectError,
+    Service,
+    SStatus,
+    generate_device_id,
+    generate_uuid,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+DOMAIN = "securitas"
+# MIN_SCAN_INTERVAL = 20  # FIXME: unused?
+
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_USE_2FA = "use_2FA"
+CONF_PERI_ALARM = "PERI_alarm"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_INSTALLATION_KEY = "instalation"
 CONF_ENABLE_CODE = "enable_code"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
-DOMAIN = "securitas"
-MIN_SCAN_INTERVAL = 20  # FIXME: unused?
+
 DEFAULT_USE_2FA = False
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CHECK_ALARM_PANEL = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
 DEFAULT_CODE = ""
 DEFAULT_CODE_ENABLED = True
+DEFAULT_PERI_ALARM = False
 
 
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
@@ -73,6 +74,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
                 vol.Optional(CONF_COUNTRY, default="ES"): str,
                 vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
                 vol.Optional(
                     CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
                 ): bool,
@@ -142,9 +144,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
-    config[CONF_USE_2FA] = entry.data[CONF_USE_2FA]
+    config[CONF_USE_2FA] = entry.data.get(CONF_USE_2FA, DEFAULT_USE_2FA)
     config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
     config[CONF_CODE] = entry.data.get(CONF_CODE, None)
+    config[CONF_PERI_ALARM] = entry.data[CONF_PERI_ALARM]
     config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
     config[CONF_SCAN_INTERVAL] = entry.data.get(
         CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -337,6 +340,9 @@ class SecuritasHub:
         self.lang: str = self.country.lower() if self.country != "UK" else "en"
         self.hass: HomeAssistant = hass
         self.services: dict[int, list[Service]] = {1: []}
+        command_type: CommandType = (
+            CommandType.PERI if domain_config[CONF_PERI_ALARM] else CommandType.STD
+        )
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
@@ -346,6 +352,7 @@ class SecuritasHub:
             domain_config[CONF_DEVICE_ID],
             domain_config[CONF_UNIQUE_ID],
             domain_config[CONF_DEVICE_INDIGITALL],
+            command_type,
             domain_config[CONF_DELAY_CHECK_OPERATION],
         )
         self.installations: list[Installation] = []

@@ -10,6 +10,7 @@ from uuid import uuid4
 from aiohttp import ClientResponse, ClientSession
 import jwt
 
+from .const import COMMAND_MAP, AlarmStates, CommandType
 from .dataTypes import (
     AirQuality,
     ArmStatus,
@@ -53,6 +54,7 @@ class ApiManager:
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
+        command_type: CommandType,
         delay_check_operation: int = 2,
     ) -> None:
         """Create the object."""
@@ -61,6 +63,7 @@ class ApiManager:
         self.country = country.upper()
         self.language = language.lower()
         self.api_url = ApiDomains().get_url(language=language)
+        self.command_map = COMMAND_MAP[command_type]
         self.authentication_token: str = None
         self.authentication_token_exp: datetime = datetime.min
         self.authentication_milliseconds: int = 0
@@ -561,13 +564,13 @@ class ApiManager:
         return response["data"]["xSCheckAlarmStatus"]
 
     async def arm_alarm(
-        self, installation: Installation, mode: str, current_status: str
+        self, installation: Installation, mode: AlarmStates, current_status: str
     ) -> tuple[bool, str]:
         """Arms the alarm in the specified mode."""
         content = {
             "operationName": "xSArmPanel",
             "variables": {
-                "request": mode,
+                "request": self.command_map[mode],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -634,7 +637,7 @@ class ApiManager:
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
-                "request": "DARM1",  # DARM1
+                "request": API_DISARM,
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -686,7 +689,7 @@ class ApiManager:
         content = {
             "operationName": "DisarmStatus",
             "variables": {
-                "request": "DARM" + str(arm_type.value),
+                "request": API_DISARM + str(arm_type.value),
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
