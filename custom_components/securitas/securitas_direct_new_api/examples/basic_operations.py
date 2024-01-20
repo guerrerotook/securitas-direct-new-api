@@ -4,7 +4,6 @@ import asyncio
 import logging
 import sys
 from uuid import uuid4
-import json
 
 import aiohttp
 
@@ -13,9 +12,9 @@ sys.path.insert(0, "../../")
 from securitas_direct_new_api import (
     _LOGGER,
     ApiManager,
+    SecuritasDirectError,
     generate_device_id,
     generate_uuid,
-    SecuritasDirectError,
 )
 
 

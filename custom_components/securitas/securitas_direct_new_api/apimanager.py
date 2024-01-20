@@ -14,7 +14,6 @@ from .const import COMMAND_MAP, AlarmStates, CommandType
 from .dataTypes import (
     AirQuality,
     ArmStatus,
-    ArmType,
     Attribute,
     Attributes,
     CheckAlarmStatus,
@@ -316,7 +315,7 @@ class ApiManager:
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            (error_message, result_json) = err.args
+            (error_message, result_json, headers, content) = err.args
             if result_json["data"]["xSLoginToken"]:
                 if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
                     # needs a 2FA

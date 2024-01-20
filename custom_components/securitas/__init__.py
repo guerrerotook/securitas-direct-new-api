@@ -41,7 +41,6 @@ from .securitas_direct_new_api import (
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "securitas"
-# MIN_SCAN_INTERVAL = 20  # FIXME: unused?
 
 CONF_COUNTRY = "country"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
@@ -145,14 +144,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_USE_2FA] = entry.data.get(CONF_USE_2FA, DEFAULT_USE_2FA)
-    config[CONF_COUNTRY] = entry.data[CONF_COUNTRY]
-    config[CONF_CODE] = entry.data.get(CONF_CODE, None)
-    config[CONF_PERI_ALARM] = entry.data[CONF_PERI_ALARM]
-    config[CONF_CHECK_ALARM_PANEL] = entry.data[CONF_CHECK_ALARM_PANEL]
+    config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
+    config[CONF_CODE] = entry.data.get(CONF_CODE, DEFAULT_CODE)
+    config[CONF_PERI_ALARM] = entry.data.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
+    config[CONF_CHECK_ALARM_PANEL] = entry.data.get(
+        CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL
+    )
     config[CONF_SCAN_INTERVAL] = entry.data.get(
         CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
     )
-    # was 60
     config[CONF_DELAY_CHECK_OPERATION] = entry.data.get(
         CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
     )
@@ -217,7 +217,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config = add_device_information(entry.data.copy())
         config[CONF_SCAN_INTERVAL] = entry.data.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-        )  # was 60
+        )
         hass.async_create_task(
             hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": SOURCE_IMPORT}, data=config
