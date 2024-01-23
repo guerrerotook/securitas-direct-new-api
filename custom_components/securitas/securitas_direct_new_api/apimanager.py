@@ -354,7 +354,7 @@ class ApiManager:
         raw_installations = response["data"]["xSInstallations"]["installations"]
         for item in raw_installations:
             installation_item: Installation = Installation(
-                int(item["numinst"]),
+                item["numinst"],
                 item["alias"],
                 item["panel"],
                 item["type"],

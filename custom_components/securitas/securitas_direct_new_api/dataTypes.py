@@ -9,7 +9,7 @@ from typing import Any
 class Installation:
     """Define an Securitas Direct Installation."""
 
-    number: int = 0
+    number: str = ""
     alias: str = ""
     panel: str = ""
     type: str = ""
@@ -17,7 +17,7 @@ class Installation:
     lastName: str = ""
     address: str = ""
     city: str = ""
-    postalCode: int = 0
+    postalCode: str = ""
     province: str = ""
     email: str = ""
     phone: str = ""
@@ -32,7 +32,7 @@ class CheckAlarmStatus:
     operation_status: str = ""
     message: str = ""
     status: str = ""
-    InstallationNumer: int = 0
+    InstallationNumer: str = ""
     protomResponse: str = ""
     protomResponseData: str = ""
 
@@ -44,7 +44,7 @@ class ArmStatus:
     operation_status: str = ""
     message: str = ""
     status: int = ""
-    InstallationNumer: int = 0
+    InstallationNumer: str = ""
     protomResponse: str = ""
     protomResponseData: str = ""
     requestId: str = ""
