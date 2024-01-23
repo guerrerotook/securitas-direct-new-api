@@ -1,30 +1,19 @@
 """Securitas direct sentinel sensor."""
-from datetime import timedelta
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
-from .constants import SentinelName
-from homeassistant.helpers.entity import DeviceInfo
 
-from .securitas_direct_new_api.dataTypes import (
-    AirQuality,
-    Sentinel,
-    Service,
-)
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.const import (
-    PERCENTAGE,
-    UnitOfTemperature,
-)
+from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import (
-    CONF_INSTALLATION_KEY,
-    DOMAIN,
-    SecuritasDirectDevice,
-    SecuritasHub,
-)
+from . import CONF_INSTALLATION_KEY, DOMAIN, SecuritasDirectDevice, SecuritasHub
+from .constants import SentinelName
+from .securitas_direct_new_api.dataTypes import AirQuality, Sentinel, Service
 
 SCAN_INTERVAL = timedelta(minutes=30)
 
@@ -103,6 +92,7 @@ class SentinelTemperature(SensorEntity):
 
     def _update_sensor_data(self, sentinel: Sentinel):
         self._attr_device_class = SensorDeviceClass.TEMPERATURE
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_value = sentinel.temperature
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
@@ -141,6 +131,7 @@ class SentinelHumidity(SensorEntity):
 
     def _update_sensor_data(self, sentinel: Sentinel):
         self._attr_device_class = SensorDeviceClass.HUMIDITY
+        self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_value = sentinel.humidity
         self._attr_native_unit_of_measurement = PERCENTAGE
 
