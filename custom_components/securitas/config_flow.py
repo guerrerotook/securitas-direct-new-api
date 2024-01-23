@@ -1,4 +1,4 @@
-"""Config flow for the MELCloud platform."""
+"""Config flow for the Securitas Direct platform."""
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -7,6 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant import config_entries
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -19,6 +20,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import selector
 
 from . import (
@@ -28,24 +30,21 @@ from . import (
     CONF_DEVICE_INDIGITALL,
     CONF_ENABLE_CODE,
     CONF_ENTRY_ID,
+    CONF_PERI_ALARM,
     CONF_USE_2FA,
     CONFIG_SCHEMA,
     DEFAULT_CHECK_ALARM_PANEL,
     DEFAULT_CODE,
     DEFAULT_CODE_ENABLED,
     DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_PERI_ALARM,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
     generate_uuid,
 )
-from .securitas_direct_new_api.dataTypes import Installation, OtpPhone
-from .securitas_direct_new_api.exceptions import Login2FAError
-
-CONF_OTPSECRET = "otp_secret"
-from homeassistant import config_entries
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from .securitas_direct_new_api import CommandType, Installation, Login2FAError, OtpPhone
 
 VERSION = 1
 
@@ -255,12 +254,18 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             ),
         )
 
+        peri_alarm: CommandType = self.config_entry.options.get(
+            CONF_PERI_ALARM,
+            self.config_entry.data.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM),
+        )
+
         schema = vol.Schema(
             {
-                vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
                 vol.Optional(CONF_CODE, default=code): str,
                 vol.Optional(CONF_ENABLE_CODE, default=code_enabled): bool,
+                vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
                 vol.Optional(CONF_CHECK_ALARM_PANEL, default=check_alarm_panel): bool,
+                vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
                 vol.Optional(
                     CONF_DELAY_CHECK_OPERATION, default=delay_check_operation
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=15.0)),

@@ -10,10 +10,10 @@ from uuid import uuid4
 from aiohttp import ClientResponse, ClientSession
 import jwt
 
+from .const import COMMAND_MAP, AlarmStates, CommandType
 from .dataTypes import (
     AirQuality,
     ArmStatus,
-    ArmType,
     Attribute,
     Attributes,
     CheckAlarmStatus,
@@ -53,6 +53,7 @@ class ApiManager:
         device_id: str,
         uuid: str,
         id_device_indigitall: str,
+        command_type: CommandType,
         delay_check_operation: int = 2,
     ) -> None:
         """Create the object."""
@@ -61,6 +62,7 @@ class ApiManager:
         self.country = country.upper()
         self.language = language.lower()
         self.api_url = ApiDomains().get_url(language=language)
+        self.command_map = COMMAND_MAP[command_type]
         self.authentication_token: str = None
         self.authentication_token_exp: datetime = datetime.min
         self.authentication_milliseconds: int = 0
@@ -313,7 +315,7 @@ class ApiManager:
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            (error_message, result_json) = err.args
+            (error_message, result_json, headers, content) = err.args
             if result_json["data"]["xSLoginToken"]:
                 if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
                     # needs a 2FA
@@ -352,7 +354,7 @@ class ApiManager:
         raw_installations = response["data"]["xSInstallations"]["installations"]
         for item in raw_installations:
             installation_item: Installation = Installation(
-                int(item["numinst"]),
+                item["numinst"],
                 item["alias"],
                 item["panel"],
                 item["type"],
@@ -561,13 +563,13 @@ class ApiManager:
         return response["data"]["xSCheckAlarmStatus"]
 
     async def arm_alarm(
-        self, installation: Installation, mode: str, current_status: str
+        self, installation: Installation, mode: AlarmStates, current_status: str
     ) -> tuple[bool, str]:
         """Arms the alarm in the specified mode."""
         content = {
             "operationName": "xSArmPanel",
             "variables": {
-                "request": mode,
+                "request": self.command_map[mode],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -607,7 +609,7 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        mode: str,
+        mode: AlarmStates,
         counter: int,
         current_status: str,
     ) -> Union[ArmStatus, str]:
@@ -615,7 +617,7 @@ class ApiManager:
         content = {
             "operationName": "ArmStatus",
             "variables": {
-                "request": mode,
+                "request": self.command_map[mode],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -634,7 +636,7 @@ class ApiManager:
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
-                "request": "DARM1",  # DARM1
+                "request": self.command_map[AlarmStates.TOTAL_DISARMED],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,
@@ -657,7 +659,7 @@ class ApiManager:
             raw_data = await self._check_disarm_status(
                 installation,
                 reference_id,
-                ArmType.TOTAL,
+                AlarmStates.TOTAL_DISARMED,
                 count,
                 current_status,
             )
@@ -678,7 +680,7 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        arm_type: ArmType,
+        arm_type: AlarmStates,
         counter: int,
         current_status: str,
     ) -> DisarmStatus:
@@ -686,7 +688,7 @@ class ApiManager:
         content = {
             "operationName": "DisarmStatus",
             "variables": {
-                "request": "DARM" + str(arm_type.value),
+                "request": self.command_map[arm_type],
                 "numinst": str(installation.number),
                 "panel": installation.panel,
                 "currentStatus": current_status,

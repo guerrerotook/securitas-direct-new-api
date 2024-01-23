@@ -6,15 +6,12 @@ from datetime import timedelta
 import logging
 
 import homeassistant.components.alarm_control_panel as alarm
-from homeassistant.components.alarm_control_panel.const import (
-    SUPPORT_ALARM_ARM_AWAY,
-    SUPPORT_ALARM_ARM_CUSTOM_BYPASS,
-    SUPPORT_ALARM_ARM_HOME,
-    SUPPORT_ALARM_ARM_NIGHT,
+from homeassistant.components.alarm_control_panel import (
+    AlarmControlPanelEntityFeature,
     CodeFormat,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (  # STATE_UNAVAILABLE,; STATE_UNKNOWN,
+from homeassistant.const import (
     CONF_CODE,
     CONF_SCAN_INTERVAL,
     STATE_ALARM_ARMED_AWAY,
@@ -39,8 +36,12 @@ from . import (
     SecuritasDirectDevice,
     SecuritasHub,
 )
-from .securitas_direct_new_api.dataTypes import CheckAlarmStatus, Installation
-from .securitas_direct_new_api.exceptions import SecuritasDirectError
+from .securitas_direct_new_api import (
+    AlarmStates,
+    CheckAlarmStatus,
+    Installation,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
@@ -284,33 +285,32 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm home command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARMDAY1")
+            await self.set_arm_state(AlarmStates.INTERIOR_PARTIAL)  # "ARMDAY1"
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARM1")  # ARM1
+            await self.set_arm_state(AlarmStates.TOTAL_ARMED)  # ARM1
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("ARMNIGHT1")
+            await self.set_arm_state(AlarmStates.NIGHT_ARMED)  # "ARMNIGHT1"
 
     async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state("PERI1")  # DARMPERI is the corresponding darm
+            await self.set_arm_state(AlarmStates.EXTERIOR_ARMED)  # "PERI1"
 
     @property
     def supported_features(self) -> int:
         """Return the list of supported features."""
         return (
-            SUPPORT_ALARM_ARM_HOME
-            | SUPPORT_ALARM_ARM_AWAY
-            | SUPPORT_ALARM_ARM_NIGHT
-            | SUPPORT_ALARM_ARM_HOME
-            | SUPPORT_ALARM_ARM_CUSTOM_BYPASS
+            AlarmControlPanelEntityFeature.ARM_HOME
+            | AlarmControlPanelEntityFeature.ARM_AWAY
+            | AlarmControlPanelEntityFeature.ARM_NIGHT
+            | AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
         )

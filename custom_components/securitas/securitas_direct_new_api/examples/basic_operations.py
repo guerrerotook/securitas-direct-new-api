@@ -9,13 +9,13 @@ import aiohttp
 
 sys.path.insert(0, "../../")
 
-from securitas_direct_new_api.apimanager import (
+from securitas_direct_new_api import (
     _LOGGER,
     ApiManager,
+    SecuritasDirectError,
     generate_device_id,
     generate_uuid,
 )
-from securitas_direct_new_api.exceptions import SecuritasDirectError
 
 
 async def do_stuff(client):
