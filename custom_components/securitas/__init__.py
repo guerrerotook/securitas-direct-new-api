@@ -340,7 +340,7 @@ class SecuritasHub:
         self.lang: str = self.country.lower() if self.country != "UK" else "en"
         self.hass: HomeAssistant = hass
         self.services: dict[int, list[Service]] = {1: []}
-        command_type: CommandType = (
+        self.command_type: CommandType = (
             CommandType.PERI if domain_config[CONF_PERI_ALARM] else CommandType.STD
         )
         self.session: ApiManager = ApiManager(
@@ -352,7 +352,7 @@ class SecuritasHub:
             domain_config[CONF_DEVICE_ID],
             domain_config[CONF_UNIQUE_ID],
             domain_config[CONF_DEVICE_INDIGITALL],
-            command_type,
+            self.command_type,
             domain_config[CONF_DELAY_CHECK_OPERATION],
         )
         self.installations: list[Installation] = []
