@@ -2,13 +2,9 @@
 
 import asyncio
 import logging
-import sys
 from uuid import uuid4
 
 import aiohttp
-
-sys.path.insert(0, "../../")
-
 from securitas_direct_new_api import (
     _LOGGER,
     ApiManager,
@@ -50,17 +46,15 @@ async def main():
 
     user = input("User: ")
     password = input("Password: ")
-    country = "es"
-    language = "es"
+    country = "ES"
     async with aiohttp.ClientSession() as aiohttp_session:
         uuid = generate_uuid()
-        device_id = generate_device_id(language)
+        device_id = generate_device_id(country)
         id_device_indigitall = str(uuid4())
         client = ApiManager(
             user,
             password,
             country,
-            language,
             aiohttp_session,
             device_id,
             uuid,

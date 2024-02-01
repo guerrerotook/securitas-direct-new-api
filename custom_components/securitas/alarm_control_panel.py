@@ -182,7 +182,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
         arm_status = await self.client.session.arm_alarm(
             self.installation, self.state_map[mode]
-        )  # , self._get_proto_status()
+        )
 
         self.update_status_alarm(
             CheckAlarmStatus(
@@ -269,9 +269,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
-            disarm_status = await self.client.session.disarm_alarm(
-                self.installation
-            )  # , self._get_proto_status()
+            disarm_status = await self.client.session.disarm_alarm(self.installation)
 
             self.update_status_alarm(
                 CheckAlarmStatus(

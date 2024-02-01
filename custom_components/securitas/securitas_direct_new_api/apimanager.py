@@ -4,10 +4,10 @@ from datetime import datetime, timedelta
 import json
 import logging
 import secrets
-from typing import Optional, Union
+from typing import Any, Optional
 from uuid import uuid4
 
-from aiohttp import ClientResponse, ClientSession
+from aiohttp import ClientSession
 import jwt
 
 from .const import COMMAND_MAP, CommandType, SecDirAlarmState
@@ -48,7 +48,6 @@ class ApiManager:
         username: str,
         password: str,
         country: str,
-        language: str,
         http_client: ClientSession,
         device_id: str,
         uuid: str,
@@ -59,19 +58,20 @@ class ApiManager:
         """Create the object."""
         self.username = username
         self.password = password
+        domains = ApiDomains()
         self.country = country.upper()
-        self.language = language.lower()
-        self.api_url = ApiDomains().get_url(language=language)
+        self.language = domains.get_language(country)
+        self.api_url = domains.get_url(country)
         self.command_map = COMMAND_MAP[command_type]
         self.delay_check_operation: int = delay_check_operation
 
         self.protom_response: str
-        self.authentication_token: str = None
+        self.authentication_token: str = ""
         self.authentication_token_exp: datetime = datetime.min
         self.login_timestamp: int = 0
-        self.authentication_otp_challenge_value: tuple[str, int] = None
+        self.authentication_otp_challenge_value: Optional[tuple[str, str]] = None
         self.http_client = http_client
-        self.refresh_token_value: str = None
+        self.refresh_token_value: str = ""
 
         # device specific configuration for the API
         self.device_id: str = device_id
@@ -87,7 +87,7 @@ class ApiManager:
 
     async def _execute_request(
         self, content, operation: str, installation: Optional[Installation] = None
-    ) -> ClientResponse:
+    ) -> dict[str, Any]:
         """Send request to Securitas' API."""
 
         app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
@@ -103,7 +103,7 @@ class ApiManager:
             headers["panel"] = installation.panel
             headers["X-Capabilities"] = installation.capabilities
 
-        if self.authentication_token is not None:
+        if self.authentication_token != "":
             authorization_value = {
                 "loginTimestamp": self.login_timestamp,
                 "user": self.username,
@@ -341,9 +341,7 @@ class ApiManager:
             ) from err
 
         if "exp" in token:
-            self.authentication_token_exp: datetime = datetime.fromtimestamp(
-                token["exp"]
-            )
+            self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
@@ -525,7 +523,7 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         count = 1
-        raw_data = {}
+        raw_data: dict[str, Any] = {}
         max_count = timeout / max(1, self.delay_check_operation)
 
         while ((count == 1) or (raw_data.get("res") == "WAIT")) and (
@@ -547,7 +545,7 @@ class ApiManager:
 
     async def _check_alarm_status(
         self, installation: Installation, reference_id: str, count: int
-    ) -> CheckAlarmStatus:
+    ) -> dict[str, Any]:
         """Check status of the operation check alarm."""
         content = {
             "operationName": "CheckAlarmStatus",
@@ -568,7 +566,7 @@ class ApiManager:
 
     async def arm_alarm(
         self, installation: Installation, mode: SecDirAlarmState
-    ) -> tuple[bool, str]:
+    ) -> ArmStatus:
         """Arms the alarm in the specified mode."""
         content = {
             "operationName": "xSArmPanel",
@@ -590,7 +588,7 @@ class ApiManager:
         reference_id = response["referenceId"]
 
         count = 1
-        raw_data = {}
+        raw_data: dict[str, Any] = {}
         while (count == 1) or (raw_data.get("res") == "WAIT"):
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_arm_status(
@@ -616,7 +614,7 @@ class ApiManager:
         reference_id: str,
         mode: SecDirAlarmState,
         counter: int,
-    ) -> Union[ArmStatus, str]:
+    ) -> dict[str, Any]:
         """Check progress of the alarm."""
         content = {
             "operationName": "ArmStatus",
@@ -635,7 +633,7 @@ class ApiManager:
         raw_data = response["data"]["xSArmStatus"]
         return raw_data
 
-    async def disarm_alarm(self, installation: Installation):
+    async def disarm_alarm(self, installation: Installation) -> DisarmStatus:
         """Disarm the alarm."""
         content = {
             "operationName": "xSDisarmPanel",
@@ -657,7 +655,7 @@ class ApiManager:
         reference_id = response["referenceId"]
 
         count = 1
-        raw_data = {}
+        raw_data: dict[str, Any] = {}
         while (count == 1) or raw_data.get("res") == "WAIT":
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_disarm_status(
@@ -686,7 +684,7 @@ class ApiManager:
         reference_id: str,
         arm_type: SecDirAlarmState,
         counter: int,
-    ) -> DisarmStatus:
+    ) -> dict[str, Any]:
         """Check progress of the alarm."""
         content = {
             "operationName": "DisarmStatus",

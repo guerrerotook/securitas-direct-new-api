@@ -28,6 +28,7 @@ class SecDirAlarmState(IntEnum):
     TOTAL_DISARMED = auto()
 
 
+# not used (yet), but I wanted to store this mapping somewhere
 MAP_STATE_TO_PROTO_STATUS = {
     SecDirAlarmState.INTERIOR_PARTIAL: "P",
     SecDirAlarmState.INTERIOR_TOTAL: "T",

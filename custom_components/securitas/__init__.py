@@ -24,6 +24,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 
 from .securitas_direct_new_api import (
+    ApiDomains,
     ApiManager,
     CheckAlarmStatus,
     CommandType,
@@ -337,7 +338,7 @@ class SecuritasHub:
         self.sentinel_services: list[Service] = []
         self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
         self.country: str = domain_config[CONF_COUNTRY].upper()
-        self.lang: str = self.country.lower() if self.country != "UK" else "en"
+        self.lang: str = ApiDomains().get_language(self.country)
         self.hass: HomeAssistant = hass
         self.services: dict[int, list[Service]] = {1: []}
         self.command_type: CommandType = (
@@ -347,7 +348,6 @@ class SecuritasHub:
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
             self.country,
-            self.lang,
             http_client,
             domain_config[CONF_DEVICE_ID],
             domain_config[CONF_UNIQUE_ID],
