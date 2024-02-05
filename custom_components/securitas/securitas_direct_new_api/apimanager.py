@@ -4,13 +4,13 @@ from datetime import datetime, timedelta
 import json
 import logging
 import secrets
-from typing import Optional, Union
+from typing import Any, Optional
 from uuid import uuid4
 
-from aiohttp import ClientResponse, ClientSession
+from aiohttp import ClientSession
 import jwt
 
-from .const import COMMAND_MAP, AlarmStates, CommandType
+from .const import COMMAND_MAP, CommandType, SecDirAlarmState
 from .dataTypes import (
     AirQuality,
     ArmStatus,
@@ -48,7 +48,6 @@ class ApiManager:
         username: str,
         password: str,
         country: str,
-        language: str,
         http_client: ClientSession,
         device_id: str,
         uuid: str,
@@ -59,16 +58,21 @@ class ApiManager:
         """Create the object."""
         self.username = username
         self.password = password
+        domains = ApiDomains()
         self.country = country.upper()
-        self.language = language.lower()
-        self.api_url = ApiDomains().get_url(language=language)
+        self.language = domains.get_language(country)
+        self.api_url = domains.get_url(country)
         self.command_map = COMMAND_MAP[command_type]
-        self.authentication_token: str = None
+        self.delay_check_operation: int = delay_check_operation
+
+        self.protom_response: str
+        self.authentication_token: str = ""
         self.authentication_token_exp: datetime = datetime.min
-        self.authentication_milliseconds: int = 0
-        self.authentication_otp_challenge_value: tuple[str, int] = None
+        self.login_timestamp: int = 0
+        self.authentication_otp_challenge_value: Optional[tuple[str, str]] = None
         self.http_client = http_client
-        self.refresh_token_value: str = None
+        self.refresh_token_value: str = ""
+
         # device specific configuration for the API
         self.device_id: str = device_id
         self.uuid: str = uuid
@@ -80,11 +84,10 @@ class ApiManager:
         self.device_type = ""
         self.device_version = "10.102.0"
         self.apollo_operation_id: str = secrets.token_hex(64)
-        self.delay_check_operation: int = delay_check_operation
 
     async def _execute_request(
         self, content, operation: str, installation: Optional[Installation] = None
-    ) -> ClientResponse:
+    ) -> dict[str, Any]:
         """Send request to Securitas' API."""
 
         app: str = json.dumps({"appVersion": self.device_version, "origin": "native"})
@@ -96,13 +99,13 @@ class ApiManager:
             "extension": '{"mode":"full"}',
         }
         if installation is not None:
-            headers["numinst"] = str(installation.number)
+            headers["numinst"] = installation.number
             headers["panel"] = installation.panel
             headers["X-Capabilities"] = installation.capabilities
 
-        if self.authentication_token is not None:
+        if self.authentication_token != "":
             authorization_value = {
-                "loginTimestamp": self.authentication_milliseconds,
+                "loginTimestamp": self.login_timestamp,
                 "user": self.username,
                 "id": self._generate_id(),
                 "country": self.country,
@@ -114,7 +117,7 @@ class ApiManager:
 
         if operation in ["mkValidateDevice", "RefreshLogin", "mkSendOTP"]:
             authorization_value = {
-                "loginTimestamp": self.authentication_milliseconds,
+                "loginTimestamp": self.login_timestamp,
                 "user": self.username,
                 "id": self._generate_id(),
                 "country": self.country,
@@ -324,7 +327,7 @@ class ApiManager:
             raise LoginError(err.args) from err
 
         self.authentication_token = response["data"]["xSLoginToken"]["hash"]
-        self.authentication_milliseconds = int(datetime.now().timestamp() * 1000)
+        self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
         try:
             token = jwt.decode(
@@ -338,9 +341,7 @@ class ApiManager:
             ) from err
 
         if "exp" in token:
-            self.authentication_token_exp: datetime = datetime.fromtimestamp(
-                token["exp"]
-            )
+            self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
@@ -377,7 +378,7 @@ class ApiManager:
         content = {
             "operationName": "CheckAlarm",
             "variables": {
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "panel": installation.panel,
             },
             "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
@@ -392,7 +393,7 @@ class ApiManager:
         """Get the list of all services available to the user."""
         content = {
             "operationName": "Srv",
-            "variables": {"numinst": str(installation.number), "uuid": self.uuid},
+            "variables": {"numinst": installation.number, "uuid": self.uuid},
             "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      id\n      numinst\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        id\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        totalDevice\n        request\n        multipleReq\n        numDevicesMr\n        secretWord\n        minWrapperVersion\n        description\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        devices {\n          id\n          code\n          numDevices\n          cost\n          type\n          name\n        }\n        camerasArlo {\n          id\n          model\n          connectedToInstallation\n          usedForAlarmVerification\n          offer\n          name\n          locationHint\n          batteryLevel\n          connectivity\n          createdDate\n          modifiedDate\n          latestThumbnailUri\n        }\n        attributes {\n          name\n          attributes {\n            name\n            value\n            active\n          }\n        }\n        listdiy {\n          idMant\n          state\n        }\n        listprompt {\n          idNot\n          text\n          type\n          customParam\n          alias\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
         response = await self._execute_request(content, "Srv")
@@ -462,7 +463,7 @@ class ApiManager:
         content = {
             "operationName": "Sentinel",
             "variables": {
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "zone": str(service.attributes.attributes[0].value),
             },
             "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
@@ -486,7 +487,7 @@ class ApiManager:
         content = {
             "operationName": "AirQualityGraph",
             "variables": {
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "zone": str(service.attributes.attributes[0].value),
             },
             "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
@@ -505,7 +506,7 @@ class ApiManager:
         """Check current status of the alarm."""
         content = {
             "operationName": "Status",
-            "variables": {"numinst": str(installation.number)},
+            "variables": {"numinst": installation.number},
             "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
         }
         await self._check_authentication_token()
@@ -522,7 +523,7 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         count = 1
-        raw_data = {}
+        raw_data: dict[str, Any] = {}
         max_count = timeout / max(1, self.delay_check_operation)
 
         while ((count == 1) or (raw_data.get("res") == "WAIT")) and (
@@ -532,6 +533,7 @@ class ApiManager:
             raw_data = await self._check_alarm_status(installation, reference_id, count)
             count += 1
 
+        self.protom_response = raw_data["protomResponse"]
         return CheckAlarmStatus(
             raw_data["res"],
             raw_data["msg"],
@@ -543,12 +545,12 @@ class ApiManager:
 
     async def _check_alarm_status(
         self, installation: Installation, reference_id: str, count: int
-    ) -> CheckAlarmStatus:
+    ) -> dict[str, Any]:
         """Check status of the operation check alarm."""
         content = {
             "operationName": "CheckAlarmStatus",
             "variables": {
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,
                 "idService": "11",
@@ -563,16 +565,16 @@ class ApiManager:
         return response["data"]["xSCheckAlarmStatus"]
 
     async def arm_alarm(
-        self, installation: Installation, mode: AlarmStates, current_status: str
-    ) -> tuple[bool, str]:
+        self, installation: Installation, mode: SecDirAlarmState
+    ) -> ArmStatus:
         """Arms the alarm in the specified mode."""
         content = {
             "operationName": "xSArmPanel",
             "variables": {
                 "request": self.command_map[mode],
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "panel": installation.panel,
-                "currentStatus": current_status,
+                "currentStatus": self.protom_response,
             },
             "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
@@ -586,14 +588,15 @@ class ApiManager:
         reference_id = response["referenceId"]
 
         count = 1
-        raw_data = {}
+        raw_data: dict[str, Any] = {}
         while (count == 1) or (raw_data.get("res") == "WAIT"):
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_arm_status(
-                installation, reference_id, mode, count, current_status
+                installation, reference_id, mode, count
             )
             count += 1
 
+        self.protom_response = raw_data["protomResponse"]
         return ArmStatus(
             raw_data["res"],
             raw_data["msg"],
@@ -609,18 +612,17 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        mode: AlarmStates,
+        mode: SecDirAlarmState,
         counter: int,
-        current_status: str,
-    ) -> Union[ArmStatus, str]:
+    ) -> dict[str, Any]:
         """Check progress of the alarm."""
         content = {
             "operationName": "ArmStatus",
             "variables": {
                 "request": self.command_map[mode],
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "panel": installation.panel,
-                "currentStatus": current_status,
+                "currentStatus": self.protom_response,
                 "referenceId": reference_id,
                 "counter": counter,
             },
@@ -631,15 +633,15 @@ class ApiManager:
         raw_data = response["data"]["xSArmStatus"]
         return raw_data
 
-    async def disarm_alarm(self, installation: Installation, current_status: str):
+    async def disarm_alarm(self, installation: Installation) -> DisarmStatus:
         """Disarm the alarm."""
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
-                "request": self.command_map[AlarmStates.TOTAL_DISARMED],
-                "numinst": str(installation.number),
+                "request": self.command_map[SecDirAlarmState.TOTAL_DISARMED],
+                "numinst": installation.number,
                 "panel": installation.panel,
-                "currentStatus": current_status,
+                "currentStatus": self.protom_response,
             },
             "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
@@ -653,18 +655,18 @@ class ApiManager:
         reference_id = response["referenceId"]
 
         count = 1
-        raw_data = {}
+        raw_data: dict[str, Any] = {}
         while (count == 1) or raw_data.get("res") == "WAIT":
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_disarm_status(
                 installation,
                 reference_id,
-                AlarmStates.TOTAL_DISARMED,
+                SecDirAlarmState.TOTAL_DISARMED,
                 count,
-                current_status,
             )
             count = count + 1
 
+        self.protom_response = raw_data["protomResponse"]
         return DisarmStatus(
             raw_data["error"],
             raw_data["msg"],
@@ -680,18 +682,17 @@ class ApiManager:
         self,
         installation: Installation,
         reference_id: str,
-        arm_type: AlarmStates,
+        arm_type: SecDirAlarmState,
         counter: int,
-        current_status: str,
-    ) -> DisarmStatus:
+    ) -> dict[str, Any]:
         """Check progress of the alarm."""
         content = {
             "operationName": "DisarmStatus",
             "variables": {
                 "request": self.command_map[arm_type],
-                "numinst": str(installation.number),
+                "numinst": installation.number,
                 "panel": installation.panel,
-                "currentStatus": current_status,
+                "currentStatus": self.protom_response,
                 "referenceId": reference_id,
                 "counter": counter,
             },

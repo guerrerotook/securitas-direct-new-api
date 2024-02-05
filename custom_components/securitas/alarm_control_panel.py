@@ -28,7 +28,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
 from . import (
-    CONF_DELAY_CHECK_OPERATION,
     CONF_ENABLE_CODE,
     CONF_INSTALLATION_KEY,
     DEFAULT_SCAN_INTERVAL,
@@ -37,14 +36,35 @@ from . import (
     SecuritasHub,
 )
 from .securitas_direct_new_api import (
-    AlarmStates,
     CheckAlarmStatus,
+    CommandType,
     Installation,
+    SecDirAlarmState,
     SecuritasDirectError,
 )
 
+STD_STATE_MAP = {
+    STATE_ALARM_DISARMED: SecDirAlarmState.TOTAL_DISARMED,
+    STATE_ALARM_ARMED_AWAY: SecDirAlarmState.TOTAL_ARMED,
+    STATE_ALARM_ARMED_NIGHT: SecDirAlarmState.NIGHT_ARMED,
+    STATE_ALARM_ARMED_HOME: SecDirAlarmState.INTERIOR_PARTIAL,
+    STATE_ALARM_ARMED_CUSTOM_BYPASS: SecDirAlarmState.EXTERIOR_ARMED,
+}
+PERI_STATE_MAP = {
+    STATE_ALARM_DISARMED: SecDirAlarmState.TOTAL_DISARMED,
+    STATE_ALARM_ARMED_AWAY: SecDirAlarmState.TOTAL_ARMED,
+    STATE_ALARM_ARMED_NIGHT: SecDirAlarmState.INTERIOR_PARTIAL_AND_PERI,
+    STATE_ALARM_ARMED_HOME: SecDirAlarmState.INTERIOR_PARTIAL,
+    STATE_ALARM_ARMED_CUSTOM_BYPASS: SecDirAlarmState.EXTERIOR_ARMED,
+}
+
+STATE_MAP = {
+    CommandType.STD: STD_STATE_MAP,
+    CommandType.PERI: PERI_STATE_MAP,
+}
+
 _LOGGER = logging.getLogger(__name__)
-SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
+# SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
 
 
 async def async_setup_entry(
@@ -86,7 +106,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Initialize the Securitas alarm panel."""
         self._state: str = STATE_ALARM_DISARMED
         self._last_status: str = STATE_ALARM_DISARMED
-        self._digits: int = digits
+        self._digits: int = digits  # FIXME: never used
         self._changed_by = None
         self._device = installation.address
         self._entity_id = f"securitas_direct.{installation.number}"
@@ -96,6 +116,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.installation = installation
         self._attr_extra_state_attributes = {}
         self.client: SecuritasHub = client
+        self.state_map = STATE_MAP[self.client.command_type]
         self.hass: HomeAssistant = hass
         self._update_interval = timedelta(
             seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -117,9 +138,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._last_status = self._state
         self._state = state
         self.async_schedule_update_ha_state()
-
-    def get_delay_configuration(self) -> int:
-        return self.client.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1)
 
     async def get_arm_state(self) -> CheckAlarmStatus:
         """Get alarm state."""
@@ -159,11 +177,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
         )
 
-    async def set_arm_state(self, state, attempts=3) -> None:
+    async def set_arm_state(self, mode, attempts=3) -> None:
         """Send set arm state command."""
 
         arm_status = await self.client.session.arm_alarm(
-            self.installation, state, self._get_proto_status()
+            self.installation, self.state_map[mode]
         )
 
         self.update_status_alarm(
@@ -201,21 +219,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def changed_by(self):
         """Return the last change triggered by."""
         return self._changed_by
-
-    def _get_proto_status(self) -> str:
-        """Get the string that represent the alarm status."""
-        if self._last_status == STATE_ALARM_DISARMED:
-            return "D"
-        elif self._last_status == STATE_ALARM_ARMED_AWAY:
-            return "T"
-        elif self._last_status == STATE_ALARM_ARMED_NIGHT:
-            return "Q"
-        elif self._last_status == STATE_ALARM_ARMED_HOME:
-            return "P"
-        elif self._last_status == STATE_ALARM_ARMED_CUSTOM_BYPASS:
-            return "E"
-        else:
-            return "D"
 
     def update_status_alarm(self, status: CheckAlarmStatus = None):
         """Update alarm status, from last alarm setting register or EST."""
@@ -266,9 +269,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
-            disarm_status = await self.client.session.disarm_alarm(
-                self.installation, self._get_proto_status()
-            )
+            disarm_status = await self.client.session.disarm_alarm(self.installation)
 
             self.update_status_alarm(
                 CheckAlarmStatus(
@@ -285,25 +286,25 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send arm home command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(AlarmStates.INTERIOR_PARTIAL)  # "ARMDAY1"
+            await self.set_arm_state(STATE_ALARM_ARMED_HOME)
 
     async def async_alarm_arm_away(self, code=None):
         """Send arm away command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(AlarmStates.TOTAL_ARMED)  # ARM1
+            await self.set_arm_state(STATE_ALARM_ARMED_AWAY)
 
     async def async_alarm_arm_night(self, code=None):
         """Send arm home command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(AlarmStates.NIGHT_ARMED)  # "ARMNIGHT1"
+            await self.set_arm_state(STATE_ALARM_ARMED_NIGHT)
 
     async def async_alarm_arm_custom_bypass(self, code=None):
         """Send arm perimeter command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(AlarmStates.EXTERIOR_ARMED)  # "PERI1"
+            await self.set_arm_state(STATE_ALARM_ARMED_CUSTOM_BYPASS)
 
     @property
     def supported_features(self) -> int:
