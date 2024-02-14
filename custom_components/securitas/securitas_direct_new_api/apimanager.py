@@ -65,7 +65,7 @@ class ApiManager:
         self.command_map = COMMAND_MAP[command_type]
         self.delay_check_operation: int = delay_check_operation
 
-        self.protom_response: str
+        self.protom_response: str = ""
         self.authentication_token: str = ""
         self.authentication_token_exp: datetime = datetime.min
         self.login_timestamp: int = 0
