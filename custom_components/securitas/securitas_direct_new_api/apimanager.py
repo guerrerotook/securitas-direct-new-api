@@ -65,7 +65,7 @@ class ApiManager:
         self.command_map = COMMAND_MAP[command_type]
         self.delay_check_operation: int = delay_check_operation
 
-        self.protom_response: str
+        self.protom_response: str = ""
         self.authentication_token: str = ""
         self.authentication_token_exp: datetime = datetime.min
         self.login_timestamp: int = 0
@@ -253,11 +253,10 @@ class ApiManager:
             for item in data["auth-phones"]:
                 phones.append(OtpPhone(item["id"], item["phone"]))
             return (otp_hash, phones)
-        else:
-            self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
-            return (None, None)
 
-    # FIXME needs testing
+        self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
+        return (None, None)
+
     async def refresh_token(self) -> bool:
         """Send a login refresh."""
         content = {
@@ -318,11 +317,12 @@ class ApiManager:
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            (error_message, result_json, headers, content) = err.args
-            if result_json["data"]["xSLoginToken"]:
-                if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
-                    # needs a 2FA
-                    raise Login2FAError(err.args) from err
+            result_json = err.args[1]
+            if result_json["data"]:
+                if result_json["data"]["xSLoginToken"]:
+                    if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
+                        # needs a 2FA
+                        raise Login2FAError(err.args) from err
 
             raise LoginError(err.args) from err
 
