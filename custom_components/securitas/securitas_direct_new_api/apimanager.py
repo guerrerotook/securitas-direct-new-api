@@ -7,7 +7,7 @@ import secrets
 from typing import Any, Optional
 from uuid import uuid4
 
-from aiohttp import ClientSession
+from aiohttp import ClientConnectorError, ClientSession
 import jwt
 
 from .const import COMMAND_MAP, CommandType, SecDirAlarmState
@@ -147,10 +147,15 @@ class ApiManager:
         # _LOGGER.debug(content)
         # _LOGGER.debug("--------------Headers---------------")
         # _LOGGER.debug(headers)
-        async with self.http_client.post(
-            self.api_url, headers=headers, json=content
-        ) as response:
-            response_text: str = await response.text()
+        try:
+            async with self.http_client.post(
+                self.api_url, headers=headers, json=content
+            ) as response:
+                response_text: str = await response.text()
+        except ClientConnectorError as err:
+            raise SecuritasDirectError(
+                f"Connection error with URL {self.api_url}", None, headers, content
+            ) from err
 
         _LOGGER.debug("--------------Response--------------")
         _LOGGER.debug(response_text)

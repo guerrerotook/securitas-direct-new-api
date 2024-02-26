@@ -50,7 +50,6 @@ CONF_PERI_ALARM = "PERI_alarm"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_INSTALLATION_KEY = "instalation"
-CONF_ENABLE_CODE = "enable_code"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
 
 DEFAULT_USE_2FA = False
@@ -58,32 +57,11 @@ DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CHECK_ALARM_PANEL = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
 DEFAULT_CODE = ""
-DEFAULT_CODE_ENABLED = True
 DEFAULT_PERI_ALARM = False
 
 
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
 HUB = None
-
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            {
-                vol.Required(CONF_USERNAME): str,
-                vol.Required(CONF_PASSWORD): str,
-                vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
-                vol.Optional(CONF_COUNTRY, default="ES"): str,
-                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
-                vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
-                vol.Optional(
-                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
-                ): bool,
-                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
-            }
-        )
-    },
-    extra=vol.ALLOW_EXTRA,
-)
 
 ATTR_INSTALLATION_ID = "instalation_id"
 SERVICE_REFRESH_INSTALLATION = "refresh_alarm_status"
@@ -116,7 +94,6 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     if any(
         entry.data.get(attrib) != entry.options.get(attrib)
         for attrib in (
-            CONF_ENABLE_CODE,
             CONF_CODE,
             CONF_SCAN_INTERVAL,
             CONF_CHECK_ALARM_PANEL,
@@ -127,14 +104,6 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             entry, data={**entry.data, **entry.options}
         )
         await hass.config_entries.async_reload(entry.entry_id)
-
-
-def merge_configuration(items: OrderedDict, entry: ConfigEntry) -> OrderedDict:
-    if entry.data[CONF_CODE] != items[CONF_CODE]:
-        items[CONF_CODE] = entry.data[CONF_CODE]
-
-    if entry.data[CONF_SCAN_INTERVAL] != items[CONF_SCAN_INTERVAL]:
-        items[CONF_SCAN_INTERVAL] = entry.data[CONF_SCAN_INTERVAL]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -159,7 +128,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     config[CONF_ENTRY_ID] = entry.entry_id
     config = add_device_information(config)
-    # config = merge_configuration(config, entry)
     if CONF_DEVICE_ID in entry.data:
         config[CONF_DEVICE_ID] = entry.data[CONF_DEVICE_ID]
     else:
@@ -196,8 +164,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
             )
             return False
-        except LoginError:
-            _LOGGER.error("Could not log in to Securitas")
+        except LoginError as err:
+            _LOGGER.error("Could not log in to Securitas %s", err.args)
+        except SecuritasDirectError as err:
+            _LOGGER.error("Could not log in to Securitas %s", err.args)
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             installations: list[

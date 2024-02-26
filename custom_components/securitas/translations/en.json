@@ -10,7 +10,7 @@
                     "password": "Password",
                     "use_2FA": "Use 2FA",
                     "country": "Country Code",
-                    "code": "PIN Code",
+                    "code": "PIN Code (leave empty for no PIN)",
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request",
                     "scan_interval": "Update scan interval (sec)",
@@ -33,12 +33,11 @@
         "step": {
             "init": {
                 "data": {
-                    "code": "PIN Code",
-                    "enable_code": "Enable or disable the PIN",
+                    "code": "PIN Code (leave empty for no PIN)",
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
                     "scan_interval": "Update scan interval (sec)",
-                    "delay_check_operation": "Delay in seconds to check the arming and disarming operation (sec)"
+                    "delay_check_operation": "Delay to check the arming and disarming operation (sec)"
                 }
             }
         }

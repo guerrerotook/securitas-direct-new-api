@@ -28,7 +28,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
 from . import (
-    CONF_ENABLE_CODE,
     CONF_INSTALLATION_KEY,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -109,7 +108,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._digits: int = digits  # FIXME: never used
         self._changed_by = None
         self._device = installation.address
-        self._entity_id = f"securitas_direct.{installation.number}"
+        self.entity_id = f"securitas_direct.{installation.number}"
         self._attr_unique_id = f"securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message = ""
@@ -139,30 +138,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._state = state
         self.async_schedule_update_ha_state()
 
-    async def get_arm_state(self) -> CheckAlarmStatus:
-        """Get alarm state."""
-        reference_id: str = self.client.session.check_alarm(self.installation)
-        await asyncio.sleep(1)
-        alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
-            self.installation, reference_id
-        )
-        return alarm_status
-
-    async def async_will_remove_from_hass(self):
-        """When entity will be removed from Home Assistant."""
-        if self._update_unsub:
-            self._update_unsub()  # Unsubscribe from updates
-
-    async def async_update_status(self, now=None):
-        """Update the status of the alarm."""
-        try:
-            alarm_status = await self.client.update_overview(self.installation)
-        except SecuritasDirectError as err:
-            _LOGGER.info(err.args)
-        else:
-            self.update_status_alarm(alarm_status)
-            self.async_write_ha_state()
-
     def _notify_error(self, notification_id, title: str, message: str) -> None:
         """Notify user with persistent notification."""
         self.hass.async_create_task(
@@ -174,24 +149,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     "message": message,
                     "notification_id": f"{DOMAIN}.{notification_id}",
                 },
-            )
-        )
-
-    async def set_arm_state(self, mode, attempts=3) -> None:
-        """Send set arm state command."""
-
-        arm_status = await self.client.session.arm_alarm(
-            self.installation, self.state_map[mode]
-        )
-
-        self.update_status_alarm(
-            CheckAlarmStatus(
-                arm_status.operation_status,
-                arm_status.message,
-                arm_status.status,
-                arm_status.InstallationNumer,
-                arm_status.protomResponse,
-                arm_status.protomResponseData,
             )
         )
 
@@ -220,6 +177,34 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Return the last change triggered by."""
         return self._changed_by
 
+    async def get_arm_state(self) -> CheckAlarmStatus:
+        """Get alarm state."""
+        reference_id: str = self.client.session.check_alarm(self.installation)
+        await asyncio.sleep(1)
+        alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
+            self.installation, reference_id
+        )
+        return alarm_status
+
+    async def async_will_remove_from_hass(self):
+        """When entity will be removed from Home Assistant."""
+        if self._update_unsub:
+            self._update_unsub()  # Unsubscribe from updates
+
+    async def async_update(self):
+        """Update the status of the alarm based on the configuration. This is called when HA reloads."""
+        await self.async_update_status()
+
+    async def async_update_status(self, now=None):
+        """Update the status of the alarm."""
+        try:
+            alarm_status = await self.client.update_overview(self.installation)
+        except SecuritasDirectError as err:
+            _LOGGER.info(err.args)
+        else:
+            self.update_status_alarm(alarm_status)
+            self.async_write_ha_state()
+
     def update_status_alarm(self, status: CheckAlarmStatus = None):
         """Update alarm status, from last alarm setting register or EST."""
         if status is not None and hasattr(status, "message"):
@@ -241,13 +226,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             elif status.protomResponse in ("E", "B", "C", "A"):
                 self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
 
-    async def async_update(self):
-        """Update the status of the alarm based on the configuration."""
-        alarm_status: CheckAlarmStatus = await self.client.update_overview(
-            self.installation
-        )
-        self.update_status_alarm(alarm_status)
-
     def check_code(self, code=None) -> bool:
         """Check that the code entered in the panel matches the code in the config."""
 
@@ -259,9 +237,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             or self.client.config.get(CONF_CODE, None) is None
         ):
             result = True
-
-        if not self.client.config_entry.data.get(CONF_ENABLE_CODE, True):
-            result = True
+        else:
+            _LOGGER.info("PIN doesn't match")
 
         return result
 
@@ -269,7 +246,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
-            disarm_status = await self.client.session.disarm_alarm(self.installation)
+            try:
+                disarm_status = await self.client.session.disarm_alarm(
+                    self.installation
+                )
+            except SecuritasDirectError as err:
+                _LOGGER.info(err.args)
+                self._notify_error("Error disarming the alarm", err.args[0])
 
             self.update_status_alarm(
                 CheckAlarmStatus(
@@ -281,6 +264,28 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     disarm_status.protomResponseData,
                 )
             )
+
+    async def set_arm_state(self, mode, attempts=3) -> None:
+        """Send set arm state command."""
+
+        try:
+            arm_status = await self.client.session.arm_alarm(
+                self.installation, self.state_map[mode]
+            )
+        except SecuritasDirectError as err:
+            _LOGGER.info(err.args)
+            self._notify_error("Error arming the alarm", err.args[0])
+
+        self.update_status_alarm(
+            CheckAlarmStatus(
+                arm_status.operation_status,
+                arm_status.message,
+                arm_status.status,
+                arm_status.InstallationNumer,
+                arm_status.protomResponse,
+                arm_status.protomResponseData,
+            )
+        )
 
     async def async_alarm_arm_home(self, code=None):
         """Send arm home command."""
