@@ -43,7 +43,7 @@ class ArmStatus:
 
     operation_status: str = ""
     message: str = ""
-    status: int = ""
+    status: str = ""
     InstallationNumer: str = ""
     protomResponse: str = ""
     protomResponseData: str = ""

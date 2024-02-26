@@ -171,7 +171,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             installations: list[
-                SecuritasDirectDevice
+                Installation
             ] = await client.session.list_installations()
             devices: list[SecuritasDirectDevice] = []
             for installation in installations:
@@ -341,7 +341,7 @@ class SecuritasHub:
         """Send the SMS."""
         return await self.session.validate_device(True, auth_otp_hash, sms_code)
 
-    async def refresh_token(self) -> tuple[str, list[OtpPhone]]:
+    async def refresh_token(self) -> bool:
         """Refresh the token."""
         return await self.session.refresh_token()
 
@@ -381,7 +381,7 @@ class SecuritasHub:
 
             return CheckAlarmStatus(
                 status.status,
-                None,
+                "",
                 status.status,
                 installation.number,
                 status.status,

@@ -31,11 +31,12 @@ from . import (
     CONF_ENTRY_ID,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
-    CONFIG_SCHEMA,
     DEFAULT_CHECK_ALARM_PANEL,
+    DEFAULT_CODE,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_PERI_ALARM,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_USE_2FA,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -47,6 +48,26 @@ VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
 
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_USERNAME): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
+                vol.Optional(CONF_COUNTRY, default="ES"): str,
+                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
+                vol.Optional(
+                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
+                ): bool,
+                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
 
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow."""
@@ -56,7 +77,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the flow handler."""
-        self.config = OrderedDict()
+        self.config: OrderedDict = OrderedDict()
         self.securitas: SecuritasHub = None
         self.otp_challenge: tuple[str, list[OtpPhone]] = None
 
