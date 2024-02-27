@@ -14,13 +14,27 @@ securitas:
 
 ## Features
 
-- List all your installations and add a panel into Home Assistant.
-- Support Sentinel and add two sensor for each Sentinel in each installation you have. The sensor are temperature and humidity.
-- If the option is set to False, the check_alarm will only check the last status that securitas have in their server instead of checking in the alarm itself. This will decrease the number of request that show in your account. In this is set to true and you arm or disarm the alarm not throught Home Assistant, this will likely show a different state. The default value is True.
-- Added a new configuration panel to change some of the options that you set during the setup. Here is an screenshot.
+- Lists all your installations and add a panel into Home Assistant.
+- Supports Sentinel and adds temperature and humidity sensors for each Sentinel in each installation you have.
+- Supports installations with Perimetral (external) alarms.
+
+## Setup
+![Options](./docs/images/setup.png)
+
+- Enter the username and password for your Securitas account.
+- Use 2FA (default: no). It is not necessary to use two-factor authentication to use this integration, but we're leaving that option in case Securitas changes that in the future.
+- Country Code. One of BR (Brasil), CL (Chile), ES (Spain), FR (France), GB (Great Britain), IE (Ireland), IT (Italy). If you are outside of those countries, try entering "default" and if that doesn't work open an issue to see if we can expand.
+- PIN code (optional). If you set a PIN here, you will need to enter it to arm or disarm the alarm using the Home Assistant panel. This PIN is independent of Securitas. It is never sent to Securitas and it has nothing to do with your account with them.
+- Perimetral alarm (default: no). If you have sensors outside of your home, check the box. Otherwise, leave the box unchecked. This will ensure that the integration sends the correct commands to arm the alarm.
+- Check alarm panel (default: yes). The integration checks periodically the status of the alarm (see next option). If this Option is On, the integration will check the alarm status in the alarm in your home and HA will reflect the alarm's status. This will result in the requests showing in your account and there are reports of users saying that Securitas calls them to ask about these requests. If this option is Off, the integration will check the last status that Securitas have in their server instead of checking in the alarm itself. This will decrease the number of request that show in your account. But if you arm or disarm the alarm using the Securitas app, the alarm in Home Assistant will likely show a different state.
+- Update scan interval (default: 120). How often the integration checks the status of the alarm.
+
+## Options
+If you need to change some of the options, you can configure the integration (in HA, go to Settings -> Integrations -> Securitas Direct -> Configure)
 
 ![Options](./docs/images/options.png)
 
+
 ## Breaking changes
 
-If you update the component, the domain has been changed from securitas_direct to securitas, so you need to change your configuration as well or Home Assistant will not found the integration.
+If you update the component, the domain has been changed from securitas_direct to securitas, so you need to change your configuration as well or Home Assistant will not find the integration.
