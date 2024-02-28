@@ -22,7 +22,7 @@ securitas:
 ![Options](./docs/images/setup.png)
 
 - Enter the username and password for your Securitas account.
-- Use 2FA (default: no). It is not necessary to use two-factor authentication to use this integration, but we're leaving that option in case Securitas changes that in the future.
+- Use 2FA (default: yes). Uncheck this box if you want to skip the 2FA. 
 - Country Code. One of BR (Brasil), CL (Chile), ES (Spain), FR (France), GB (Great Britain), IE (Ireland), IT (Italy). If you are outside of those countries, try entering "default" and if that doesn't work open an issue to see if we can expand.
 - PIN code (optional). If you set a PIN here, you will need to enter it to arm or disarm the alarm using the Home Assistant panel. This PIN is independent of Securitas. It is never sent to Securitas and it has nothing to do with your account with them.
 - Perimetral alarm (default: no). If you have sensors outside of your home, check the box. Otherwise, leave the box unchecked. This will ensure that the integration sends the correct commands to arm the alarm.
