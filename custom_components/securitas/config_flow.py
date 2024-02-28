@@ -28,17 +28,15 @@ from . import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
-    CONF_ENABLE_CODE,
     CONF_ENTRY_ID,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
-    CONFIG_SCHEMA,
     DEFAULT_CHECK_ALARM_PANEL,
     DEFAULT_CODE,
-    DEFAULT_CODE_ENABLED,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_PERI_ALARM,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_USE_2FA,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -50,6 +48,26 @@ VERSION = 1
 
 _LOGGER = logging.getLogger(__name__)
 
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_USERNAME): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
+                vol.Optional(CONF_COUNTRY, default="ES"): str,
+                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
+                vol.Optional(
+                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
+                ): bool,
+                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
 
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow."""
@@ -59,7 +77,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize the flow handler."""
-        self.config = OrderedDict()
+        self.config: OrderedDict = OrderedDict()
         self.securitas: SecuritasHub = None
         self.otp_challenge: tuple[str, list[OtpPhone]] = None
 
@@ -230,21 +248,16 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
 
-        code: str = self.config_entry.options.get(
-            CONF_CODE, self.config_entry.data.get(CONF_CODE, DEFAULT_CODE)
-        )
+        code: str = ""
+        # self.config_entry.options.get(
+        #     CONF_CODE, self.config_entry.data.get(CONF_CODE, DEFAULT_CODE)
+        # )
 
-        if isinstance(code, int):
-            code = str(code)
-
-        code_enabled: bool = self.config_entry.options.get(
-            CONF_ENABLE_CODE,
-            self.config_entry.data.get(CONF_ENABLE_CODE, DEFAULT_CODE_ENABLED),
-        )
-
-        delay_check_operation: bool = self.config_entry.options.get(
+        delay_check_operation: int = self.config_entry.options.get(
             CONF_DELAY_CHECK_OPERATION,
-            self.config_entry.data.get(CONF_DELAY_CHECK_OPERATION, 1),
+            self.config_entry.data.get(
+                CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+            ),
         )
 
         check_alarm_panel: bool = self.config_entry.options.get(
@@ -262,7 +275,6 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         schema = vol.Schema(
             {
                 vol.Optional(CONF_CODE, default=code): str,
-                vol.Optional(CONF_ENABLE_CODE, default=code_enabled): bool,
                 vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
                 vol.Optional(CONF_CHECK_ALARM_PANEL, default=check_alarm_panel): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
