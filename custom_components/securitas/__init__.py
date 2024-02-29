@@ -66,6 +66,27 @@ HUB = None
 ATTR_INSTALLATION_ID = "instalation_id"
 SERVICE_REFRESH_INSTALLATION = "refresh_alarm_status"
 
+
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_USERNAME): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
+                vol.Optional(CONF_COUNTRY, default="ES"): str,
+                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
+                vol.Optional(
+                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
+                ): bool,
+                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
 REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
     {
         vol.Required(
@@ -297,7 +318,7 @@ class SecuritasHub:
     def __init__(
         self,
         domain_config: OrderedDict,
-        config_entry: ConfigEntry,  # FIXME: this is never used
+        config_entry: ConfigEntry,
         http_client: ClientSession,
         hass: HomeAssistant,
     ) -> None:
@@ -373,11 +394,11 @@ class SecuritasHub:
         """Update the overview."""
 
         if self.check_alarm is not True:
+            status: SStatus = SStatus()
             try:
-                status: SStatus = await self.session.check_general_status(installation)
+                status = await self.session.check_general_status(installation)
             except SecuritasDirectError as err:
                 _LOGGER.info(err.args)
-                return None
 
             return CheckAlarmStatus(
                 status.status,
@@ -397,7 +418,6 @@ class SecuritasHub:
             )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
-            return None
 
         return alarm_status
 
