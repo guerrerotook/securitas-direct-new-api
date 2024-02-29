@@ -5,7 +5,9 @@ import logging
 from .apimanager import ApiManager, generate_device_id, generate_uuid  # noqa: F401
 from .const import CommandType, SecDirAlarmState  # noqa: F401
 from .dataTypes import (  # noqa: F401
+    ArmStatus,
     CheckAlarmStatus,
+    DisarmStatus,
     Installation,
     OtpPhone,
     Service,

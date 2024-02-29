@@ -36,8 +36,10 @@ from . import (
     SecuritasHub,
 )
 from .securitas_direct_new_api import (
+    ArmStatus,
     CheckAlarmStatus,
     CommandType,
+    DisarmStatus,
     Installation,
     SecDirAlarmState,
     SecuritasDirectError,
@@ -195,6 +197,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_update_status(self, now=None) -> None:
         """Update the status of the alarm."""
+        alarm_status: CheckAlarmStatus = CheckAlarmStatus()
         try:
             alarm_status = await self.client.update_overview(self.installation)
         except SecuritasDirectError as err:
@@ -244,6 +247,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(STATE_ALARM_DISARMING)
+            disarm_status: DisarmStatus = DisarmStatus()
             try:
                 disarm_status = await self.client.session.disarm_alarm(
                     self.installation
@@ -265,12 +269,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def set_arm_state(self, mode: str) -> None:
         """Send set arm state command."""
 
+        arm_status: ArmStatus = ArmStatus()
         try:
             arm_status = await self.client.session.arm_alarm(
                 self.installation, self.state_map[mode]
             )
         except SecuritasDirectError as err:
             _LOGGER.info(err.args)
+            return
 
         self.update_status_alarm(
             CheckAlarmStatus(
