@@ -318,7 +318,7 @@ class SecuritasHub:
     def __init__(
         self,
         domain_config: OrderedDict,
-        config_entry: ConfigEntry,  # FIXME: this is never used
+        config_entry: ConfigEntry,
         http_client: ClientSession,
         hass: HomeAssistant,
     ) -> None:
@@ -394,11 +394,11 @@ class SecuritasHub:
         """Update the overview."""
 
         if self.check_alarm is not True:
+            status: SStatus = SStatus()
             try:
-                status: SStatus = await self.session.check_general_status(installation)
+                status = await self.session.check_general_status(installation)
             except SecuritasDirectError as err:
                 _LOGGER.info(err.args)
-                return None
 
             return CheckAlarmStatus(
                 status.status,
@@ -418,7 +418,6 @@ class SecuritasHub:
             )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
-            return None
 
         return alarm_status
 
