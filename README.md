@@ -1,17 +1,6 @@
 # securitas-direct-new-api
 This repository contains the new securitas direct API that can be integrated in Home Assistant.
 
-## Example configuration
-
-```yaml
-securitas:
-  username: !secret securitas_direct_username
-  password: !secret securitas_direct_password
-  code: !secret securitas_direct_code
-  country: ES
-  check_alarm_panel: false # defaultValue:True | set to false for NOT to check the alarm each time. See features.
-```
-
 ## Features
 
 - Lists all your installations and add a panel into Home Assistant.
@@ -20,6 +9,8 @@ securitas:
 
 ## Setup
 ![Options](./docs/images/setup.png)
+
+This integration support config flow, so go to the list of integrations and click on add Securitas from there.
 
 - Enter the username and password for your Securitas account.
 - Use 2FA (default: yes). Uncheck this box if you want to skip the 2FA. 
