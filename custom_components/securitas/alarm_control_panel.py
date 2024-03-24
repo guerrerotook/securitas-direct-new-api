@@ -66,6 +66,7 @@ STATE_MAP = {
 }
 
 _LOGGER = logging.getLogger(__name__)
+
 SCAN_INTERVAL = timedelta(seconds=1200)
 
 
