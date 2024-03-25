@@ -66,7 +66,8 @@ STATE_MAP = {
 }
 
 _LOGGER = logging.getLogger(__name__)
-# SCAN_INTERVAL = timedelta(seconds=1200)  # FIXME: is this used?
+
+SCAN_INTERVAL = timedelta(seconds=1200)
 
 
 async def async_setup_entry(
