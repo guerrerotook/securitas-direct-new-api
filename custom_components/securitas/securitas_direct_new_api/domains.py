@@ -8,6 +8,7 @@ class ApiDomains:
         """Define default constructor."""
         self.domains = {
             "default": "https://customers.securitasdirect.{country}/owa-api/graphql",
+            "AR": "https://customers.verisure.com.ar/owa-api/graphql",
             "BR": "https://customers.verisure.com.br/owa-api/graphql",
             "CL": "https://customers.verisure.cl/owa-api/graphql",
             "ES": "https://customers.securitasdirect.es/owa-api/graphql",
@@ -19,6 +20,7 @@ class ApiDomains:
 
         self.languages = {
             "default": "en",
+            "AR": "es",
             "BR": "br",  # I know they speak Portuguese, but past code basically did lang=country.lower()
             "CL": "es",
             "ES": "es",
