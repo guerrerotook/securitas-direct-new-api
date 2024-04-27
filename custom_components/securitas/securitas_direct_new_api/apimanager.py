@@ -179,31 +179,23 @@ class ApiManager:
 
     async def _check_errros(self, value: str) -> bool:
         if value is not None:
-            try:
-                response = json.loads(value)
-                if "errors" in response:
-                    for error_item in response["errors"]:
-                        if "message" in error_item:
-                            if (
-                                error_item["message"]
-                                == "Invalid session. Please, try again later."
-                                or error_item["message"] == "Invalid token: Expired"
-                                or error_item["message"]
-                                == "Required request header 'x-installationNumber' for method parameter type String is not present"
-                            ):
-                                self.authentication_token = None
-                                _LOGGER.info("Login is expired. Login again")
-                                await self.login()
-                                return True
-                            else:
-                                _LOGGER.error(error_item["message"])
-            except Exception as error:
-                _LOGGER.error(value)
-                _LOGGER.error(error)
-                if "Request unsuccessful. Incapsula incident ID" in value:
-                    self.authentication_token = None
-                    _LOGGER.info("Login is expired. Login again")
-                    await self.login()
+            response = json.loads(value)
+            if "errors" in response:
+                for error_item in response["errors"]:
+                    if "message" in error_item:
+                        if (
+                            error_item["message"]
+                            == "Invalid session. Please, try again later."
+                            or error_item["message"] == "Invalid token: Expired"
+                            or error_item["message"]
+                            == "Required request header 'x-installationNumber' for method parameter type String is not present"
+                        ):
+                            self.authentication_token = None
+                            _LOGGER.info("Login is expired. Login again")
+                            await self.login()
+                            return True
+                        else:
+                            _LOGGER.error(error_item["message"])
         return False
 
     async def _check_capabilities_token(self, installation: Installation) -> None:
