@@ -1,4 +1,5 @@
 """Securitas Direct API implementation."""
+
 import asyncio
 from datetime import datetime, timedelta
 import json
@@ -161,6 +162,9 @@ class ApiManager:
         _LOGGER.debug(response_text)
 
         try:
+            error_login: bool = await self._check_errros(response_text)
+            if error_login:
+                return await self._execute_request(content, operation, installation)
             response_dict = json.loads(response_text)
         except json.JSONDecodeError as err:
             _LOGGER.error("Problems decoding response %s", response_text)
@@ -172,6 +176,35 @@ class ApiManager:
             )
 
         return response_dict
+
+    async def _check_errros(self, value: str) -> bool:
+        if value is not None:
+            try:
+                response = json.loads(value)
+                if "errors" in response:
+                    for error_item in response["errors"]:
+                        if "message" in error_item:
+                            if (
+                                error_item["message"]
+                                == "Invalid session. Please, try again later."
+                                or error_item["message"] == "Invalid token: Expired"
+                                or error_item["message"]
+                                == "Required request header 'x-installationNumber' for method parameter type String is not present"
+                            ):
+                                self.authentication_token = None
+                                _LOGGER.info("Login is expired. Login again")
+                                await self.login()
+                                return True
+                            else:
+                                _LOGGER.error(error_item["message"])
+            except Exception as error:
+                _LOGGER.error(value)
+                _LOGGER.error(error)
+                if "Request unsuccessful. Incapsula incident ID" in value:
+                    self.authentication_token = None
+                    _LOGGER.info("Login is expired. Login again")
+                    await self.login()
+        return False
 
     async def _check_capabilities_token(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""

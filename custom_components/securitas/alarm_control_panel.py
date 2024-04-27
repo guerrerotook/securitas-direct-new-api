@@ -67,7 +67,7 @@ STATE_MAP = {
 
 _LOGGER = logging.getLogger(__name__)
 
-SCAN_INTERVAL = timedelta(seconds=1200)
+SCAN_INTERVAL = timedelta(minutes=20)
 
 
 async def async_setup_entry(
@@ -212,9 +212,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         if status is not None and hasattr(status, "message"):
             self._message = status.message
             self._attr_extra_state_attributes["message"] = status.message
-            self._attr_extra_state_attributes[
-                "response_data"
-            ] = status.protomResponseData
+            self._attr_extra_state_attributes["response_data"] = (
+                status.protomResponseData
+            )
             # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
 
             if status.protomResponse == "D":
@@ -254,7 +254,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     self.installation
                 )
             except SecuritasDirectError as err:
-                _LOGGER.info(err.args)
+                _LOGGER.error(err.args)
 
             self.update_status_alarm(
                 CheckAlarmStatus(
@@ -276,7 +276,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self.installation, self.state_map[mode]
             )
         except SecuritasDirectError as err:
-            _LOGGER.info(err.args)
+            _LOGGER.error(err.args)
             return
 
         self.update_status_alarm(
