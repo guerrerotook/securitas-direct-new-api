@@ -78,7 +78,7 @@ class SentinelTemperature(SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Temperature Sensor",
-            model=service.id_service,
+            model=str(service.id_service) if service.id_service is not None else None,
             name=service.description,
             via_device=parent_device,
         )
@@ -117,7 +117,7 @@ class SentinelHumidity(SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Humidity Sensor",
-            model=service.id_service,
+            model=str(service.id_service) if service.id_service is not None else None,
             name=service.description,
             via_device=parent_device,
         )
@@ -157,14 +157,14 @@ class SentinelAirQuality(SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Air Quality Sensor",
-            model=service.id_service,
+            model=str(service.id_service) if service.id_service is not None else None,
             name=service.description,
             via_device=parent_device,
         )
 
     async def async_update(self):
         """Update the status of the alarm based on the configuration."""
-        air_quality: Sentinel = await self._client.session.get_air_quality_data(
+        air_quality: AirQuality = await self._client.session.get_air_quality_data(
             self._service.installation, self._service
         )
         self._update_sensor_data(air_quality)
