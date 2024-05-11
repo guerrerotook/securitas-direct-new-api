@@ -164,9 +164,9 @@ class ApiManager:
         try:
             # error_login: bool = await self._check_errros(response_text)
             # if error_login:
-            response_text: str = await self._execute_request(
-                content, operation, installation
-            )
+            # response_text: str = await self._execute_request(
+            #     content, operation, installation
+            # )
             response_dict = json.loads(response_text)
         except json.JSONDecodeError as err:
             _LOGGER.error("Problems decoding response %s", response_text)
