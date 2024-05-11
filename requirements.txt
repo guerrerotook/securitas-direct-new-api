@@ -1,1 +1,5 @@
 requests>=2.26.0
+homeassistant~=2024.5.2
+voluptuous~=0.13.1
+aiohttp~=3.9.5
+PyJWT~=2.8.0
