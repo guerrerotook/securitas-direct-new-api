@@ -3,14 +3,31 @@ This repository contains the new securitas direct API that can be integrated in 
 
 ## Features
 
-- Lists all your installations and add a panel into Home Assistant.
+- Lists all your installations and adds a panel into Home Assistant.
 - Supports Sentinel and adds temperature and humidity sensors for each Sentinel in each installation you have.
 - Supports installations with Perimetral (external) alarms.
+
+## Installation
+
+### HACS
+
+Securitas Direct API is available in the [Home Assistant Community Store](https://hacs.xyz/) (HACS).
+
+If you already have HACKS installed, use this link to directly go to the repository in HACS
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=guerrerotook&repository=securitas-direct-new-api)
+
+_or_
+
+1. If you don't have it already, [install HACS](https://www.hacs.xyz/docs/use/download/download/)
+2. Open the HACS dashboard in Home Assistant
+3. Search for <kbd>Securitas Direct Alarm</kbd>
+4. Select that entry and click the download button. ⬇️
 
 ## Setup
 ![Options](./docs/images/setup.png)
 
-This integration support config flow, so go to the list of integrations and click on add Securitas from there.
+This integration supports config flow, so go to the list of integrations and click on add Securitas from there.
 
 - Enter the username and password for your Securitas account.
 - Use 2FA (default: yes). Uncheck this box if you want to skip the 2FA. 
