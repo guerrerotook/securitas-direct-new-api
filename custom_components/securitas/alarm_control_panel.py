@@ -150,11 +150,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         return self.installation.alias
 
     @property
-    def state(self) -> str:
-        """Return the state of the device."""
-        return self._state
-
-    @property
     def code_format(self) -> CodeFormat:
         """Return one or more digits/characters."""
         return CodeFormat.NUMBER
@@ -304,6 +299,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         if self.check_code(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
+
+    @property
+    def alarm_state(self) -> AlarmControlPanelState | None:
+        """Return the state of the alarm."""
+        try:
+            return getattr(AlarmControlPanelState, self._state.upper())
+        except ValueError:
+            return None
 
     @property
     def supported_features(self) -> int:

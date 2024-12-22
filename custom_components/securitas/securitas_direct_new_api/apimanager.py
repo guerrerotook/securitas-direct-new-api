@@ -172,9 +172,16 @@ class ApiManager:
             _LOGGER.error("Problems decoding response %s", response_text)
             raise SecuritasDirectError(err.msg, None, headers, content) from err
 
-        if "errors" in response_dict:
+        if (
+            "errors" in response_dict
+            and "data" in response_dict["errors"]
+            and "reason" in response_dict["errors"]["data"]
+        ):
             raise SecuritasDirectError(
-                response_dict["errors"][0]["message"], response_dict, headers, content
+                response_dict["errors"]["data"]["reason"],
+                response_dict,
+                headers,
+                content,
             )
 
         return response_dict
@@ -504,6 +511,9 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Sentinel")
 
+        if "errors" in response:
+            return Sentinel("", "", 0, 0)
+
         raw_data = response["data"]["xSAllConfort"][0]["ddi"]["status"]
         return Sentinel(
             response["data"]["xSAllConfort"][0]["ddi"]["alias"],
@@ -527,6 +537,9 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "AirQualityGraph")
+
+        if "errors" in response:
+            return AirQuality(0, "")
 
         raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
         return AirQuality(
