@@ -305,7 +305,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Return the state of the alarm."""
         try:
             return getattr(AlarmControlPanelState, self._state.upper())
-        except ValueError:
+        except AttributeError:
             return None
 
     @property
