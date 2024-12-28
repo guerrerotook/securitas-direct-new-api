@@ -1,4 +1,5 @@
 """Securitas direct sentinel sensor."""
+
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
@@ -80,7 +81,6 @@ class SentinelTemperature(SensorEntity):
             manufacturer="Temperature Sensor",
             model=str(service.id_service) if service.id_service is not None else None,
             name=service.description,
-            via_device=parent_device,
         )
 
     async def async_update(self):
@@ -119,7 +119,6 @@ class SentinelHumidity(SensorEntity):
             manufacturer="Humidity Sensor",
             model=str(service.id_service) if service.id_service is not None else None,
             name=service.description,
-            via_device=parent_device,
         )
 
     async def async_update(self):
@@ -159,7 +158,6 @@ class SentinelAirQuality(SensorEntity):
             manufacturer="Air Quality Sensor",
             model=str(service.id_service) if service.id_service is not None else None,
             name=service.description,
-            via_device=parent_device,
         )
 
     async def async_update(self):

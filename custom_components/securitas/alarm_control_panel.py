@@ -11,18 +11,9 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntityFeature,
     CodeFormat,
 )
+from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CONF_CODE,
-    CONF_SCAN_INTERVAL,
-    STATE_ALARM_ARMED_AWAY,
-    STATE_ALARM_ARMED_CUSTOM_BYPASS,
-    STATE_ALARM_ARMED_HOME,
-    STATE_ALARM_ARMED_NIGHT,
-    STATE_ALARM_ARMING,
-    STATE_ALARM_DISARMED,
-    STATE_ALARM_DISARMING,
-)
+from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -46,18 +37,18 @@ from .securitas_direct_new_api import (
 )
 
 STD_STATE_MAP = {
-    STATE_ALARM_DISARMED: SecDirAlarmState.TOTAL_DISARMED,
-    STATE_ALARM_ARMED_AWAY: SecDirAlarmState.TOTAL_ARMED,
-    STATE_ALARM_ARMED_NIGHT: SecDirAlarmState.NIGHT_ARMED,
-    STATE_ALARM_ARMED_HOME: SecDirAlarmState.INTERIOR_PARTIAL,
-    STATE_ALARM_ARMED_CUSTOM_BYPASS: SecDirAlarmState.EXTERIOR_ARMED,
+    AlarmControlPanelState.DISARMED: SecDirAlarmState.TOTAL_DISARMED,
+    AlarmControlPanelState.ARMED_AWAY: SecDirAlarmState.TOTAL_ARMED,
+    AlarmControlPanelState.ARMED_NIGHT: SecDirAlarmState.NIGHT_ARMED,
+    AlarmControlPanelState.ARMED_HOME: SecDirAlarmState.INTERIOR_PARTIAL,
+    AlarmControlPanelState.ARMED_CUSTOM_BYPASS: SecDirAlarmState.EXTERIOR_ARMED,
 }
 PERI_STATE_MAP = {
-    STATE_ALARM_DISARMED: SecDirAlarmState.TOTAL_DISARMED,
-    STATE_ALARM_ARMED_AWAY: SecDirAlarmState.TOTAL_ARMED,
-    STATE_ALARM_ARMED_NIGHT: SecDirAlarmState.INTERIOR_PARTIAL_AND_PERI,
-    STATE_ALARM_ARMED_HOME: SecDirAlarmState.INTERIOR_PARTIAL,
-    STATE_ALARM_ARMED_CUSTOM_BYPASS: SecDirAlarmState.EXTERIOR_ARMED,
+    AlarmControlPanelState.DISARMED: SecDirAlarmState.TOTAL_DISARMED,
+    AlarmControlPanelState.ARMED_AWAY: SecDirAlarmState.TOTAL_ARMED,
+    AlarmControlPanelState.ARMED_NIGHT: SecDirAlarmState.INTERIOR_PARTIAL_AND_PERI,
+    AlarmControlPanelState.ARMED_HOME: SecDirAlarmState.INTERIOR_PARTIAL,
+    AlarmControlPanelState.ARMED_CUSTOM_BYPASS: SecDirAlarmState.EXTERIOR_ARMED,
 }
 
 STATE_MAP = {
@@ -105,8 +96,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         hass: HomeAssistant,
     ) -> None:
         """Initialize the Securitas alarm panel."""
-        self._state: str = STATE_ALARM_DISARMED
-        self._last_status: str = STATE_ALARM_DISARMED
+        self._state: str = AlarmControlPanelState.DISARMED
+        self._last_status: str = AlarmControlPanelState.DISARMED
         self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
@@ -157,11 +148,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def name(self) -> str:
         """Return the name of the device."""
         return self.installation.alias
-
-    @property
-    def state(self) -> str:
-        """Return the state of the device."""
-        return self._state
 
     @property
     def code_format(self) -> CodeFormat:
@@ -218,15 +204,15 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
 
             if status.protomResponse == "D":
-                self._state = STATE_ALARM_DISARMED
+                self._state = AlarmControlPanelState.DISARMED
             elif status.protomResponse == "T":
-                self._state = STATE_ALARM_ARMED_AWAY
+                self._state = AlarmControlPanelState.ARMED_AWAY
             elif status.protomResponse == "Q":
-                self._state = STATE_ALARM_ARMED_NIGHT
+                self._state = AlarmControlPanelState.ARMED_NIGHT
             elif status.protomResponse == "P":
-                self._state = STATE_ALARM_ARMED_HOME
+                self._state = AlarmControlPanelState.ARMED_HOME
             elif status.protomResponse in ("E", "B", "C", "A"):
-                self._state = STATE_ALARM_ARMED_CUSTOM_BYPASS
+                self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
 
     def check_code(self, code=None) -> bool:
         """Check that the code entered in the panel matches the code in the config."""
@@ -247,7 +233,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
         if self.check_code(code):
-            self.__force_state(STATE_ALARM_DISARMING)
+            self.__force_state(AlarmControlPanelState.DISARMING)
             disarm_status: DisarmStatus = DisarmStatus()
             try:
                 disarm_status = await self.client.session.disarm_alarm(
@@ -293,26 +279,34 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def async_alarm_arm_home(self, code: str | None = None):
         """Send arm home command."""
         if self.check_code(code):
-            self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(STATE_ALARM_ARMED_HOME)
+            self.__force_state(AlarmControlPanelState.ARMING)
+            await self.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
     async def async_alarm_arm_away(self, code: str | None = None):
         """Send arm away command."""
         if self.check_code(code):
-            self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(STATE_ALARM_ARMED_AWAY)
+            self.__force_state(AlarmControlPanelState.ARMING)
+            await self.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
     async def async_alarm_arm_night(self, code: str | None = None):
         """Send arm home command."""
         if self.check_code(code):
-            self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(STATE_ALARM_ARMED_NIGHT)
+            self.__force_state(AlarmControlPanelState.ARMING)
+            await self.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None):
         """Send arm perimeter command."""
         if self.check_code(code):
-            self.__force_state(STATE_ALARM_ARMING)
-            await self.set_arm_state(STATE_ALARM_ARMED_CUSTOM_BYPASS)
+            self.__force_state(AlarmControlPanelState.ARMING)
+            await self.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
+
+    @property
+    def alarm_state(self) -> AlarmControlPanelState | None:
+        """Return the state of the alarm."""
+        try:
+            return getattr(AlarmControlPanelState, self._state.upper())
+        except AttributeError:
+            return None
 
     @property
     def supported_features(self) -> int:

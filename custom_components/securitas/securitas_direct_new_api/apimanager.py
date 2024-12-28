@@ -172,9 +172,16 @@ class ApiManager:
             _LOGGER.error("Problems decoding response %s", response_text)
             raise SecuritasDirectError(err.msg, None, headers, content) from err
 
-        if "errors" in response_dict:
+        if (
+            "errors" in response_dict
+            and "data" in response_dict["errors"]
+            and "reason" in response_dict["errors"]["data"]
+        ):
             raise SecuritasDirectError(
-                response_dict["errors"][0]["message"], response_dict, headers, content
+                response_dict["errors"]["data"]["reason"],
+                response_dict,
+                headers,
+                content,
             )
 
         return response_dict
@@ -426,7 +433,7 @@ class ApiManager:
         content = {
             "operationName": "Srv",
             "variables": {"numinst": installation.number, "uuid": self.uuid},
-            "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      id\n      numinst\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        id\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        totalDevice\n        request\n        multipleReq\n        numDevicesMr\n        secretWord\n        minWrapperVersion\n        description\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        devices {\n          id\n          code\n          numDevices\n          cost\n          type\n          name\n        }\n        camerasArlo {\n          id\n          model\n          connectedToInstallation\n          usedForAlarmVerification\n          offer\n          name\n          locationHint\n          batteryLevel\n          connectivity\n          createdDate\n          modifiedDate\n          latestThumbnailUri\n        }\n        attributes {\n          name\n          attributes {\n            name\n            value\n            active\n          }\n        }\n        listdiy {\n          idMant\n          state\n        }\n        listprompt {\n          idNot\n          text\n          type\n          customParam\n          alias\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
+            "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      numinst\n      role\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        request\n        minWrapperVersion\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        attributes {\n          attributes {\n            name\n            value\n            active\n          }\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
         response = await self._execute_request(content, "Srv")
 
@@ -451,9 +458,12 @@ class ApiManager:
 
         # json_services = json.dumps(raw_data)
         # result = json.loads(json_services)
+        item: dict = {}
         for item in raw_data:
-            root_attributes: Attributes = Attributes("", [])
-            if item["attributes"] is not None and "name" in item["attributes"]:
+            if (
+                item["attributes"] is not None
+                and item["attributes"]["attributes"] is not None
+            ):
                 attribute_list: list[Attribute] = []
                 for attribute_item in item["attributes"]["attributes"]:
                     attribute_list.append(
@@ -463,24 +473,23 @@ class ApiManager:
                             bool(attribute_item["active"]),
                         )
                     )
-                root_attributes = Attributes(item["attributes"]["name"], attribute_list)
             result.append(
                 Service(
-                    int(item["id"]),
+                    int(item["idService"]),
                     int(item["idService"]),
                     bool(item["active"]),
                     bool(item["visible"]),
                     bool(item["bde"]),
                     bool(item["isPremium"]),
                     bool(item["codOper"]),
-                    int(item["totalDevice"]),
+                    int(item.get("totalDevice", 0)),
                     item["request"],
-                    bool(item["multipleReq"]),
-                    int(item["numDevicesMr"]),
-                    bool(item["secretWord"]),
+                    False,
+                    0,
+                    False,
                     item["minWrapperVersion"],
-                    item["description"],
-                    root_attributes,
+                    item.get("description", ""),
+                    attribute_list,
                     [],
                     [],
                     installation,
@@ -496,13 +505,16 @@ class ApiManager:
             "operationName": "Sentinel",
             "variables": {
                 "numinst": installation.number,
-                "zone": str(service.attributes.attributes[0].value),
+                "zone": str(service.attributes[0].value),
             },
-            "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}\n",
+            "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "Sentinel")
+        response = await self._execute_request(content, "Sentinel", installation)
+
+        if "errors" in response:
+            return Sentinel("", "", 0, 0)
 
         raw_data = response["data"]["xSAllConfort"][0]["ddi"]["status"]
         return Sentinel(
@@ -520,13 +532,16 @@ class ApiManager:
             "operationName": "AirQualityGraph",
             "variables": {
                 "numinst": installation.number,
-                "zone": str(service.attributes.attributes[0].value),
+                "zone": str(service.attributes[0].value),
             },
             "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "AirQualityGraph")
+
+        if "errors" in response:
+            return AirQuality(0, "")
 
         raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
         return AirQuality(
