@@ -560,8 +560,15 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Status", installation)
 
-        raw_data = response["data"]["xSStatus"]
-        return SStatus(raw_data["status"], raw_data["timestampUpdate"])
+        if "errors" in response:
+            _LOGGER.error(response)
+            return SStatus(None, None)
+
+        if "data" in response:
+            raw_data = response["data"]["xSStatus"]
+            return SStatus(raw_data["status"], raw_data["timestampUpdate"])
+
+        return SStatus(None, None)
 
     async def check_alarm_status(
         self, installation: Installation, reference_id: str, timeout: int = 10
