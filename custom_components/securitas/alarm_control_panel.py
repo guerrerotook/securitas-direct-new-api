@@ -240,6 +240,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     self.installation
                 )
             except SecuritasDirectError as err:
+                self._notify_error(self.hass, "Error disarming", err.args)
                 _LOGGER.error(err.args)
 
             self.update_status_alarm(

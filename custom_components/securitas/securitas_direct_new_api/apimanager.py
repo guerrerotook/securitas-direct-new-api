@@ -703,8 +703,11 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel", installation)
         response = response["data"]["xSDisarmPanel"]
-        if response["res"] != "OK":
+        if "res" in response and response["res"] != "OK":
             raise SecuritasDirectError(response["msg"], response)
+
+        if "referenceId" not in response or "res" not in response:
+            raise SecuritasDirectError("No referenceId in response", response)
 
         reference_id = response["referenceId"]
 
