@@ -420,13 +420,40 @@ class ApiManager:
                 "numinst": installation.number,
                 "panel": installation.panel,
             },
-            "query": "query CheckAlarm($numinst: String!, $panel: String!) {\n  xSCheckAlarm(numinst: $numinst, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
+            "query": """
+                query CheckAlarm($numinst: String!, $panel: String!) {
+                    xSCheckAlarm(numinst: $numinst, panel: $panel) {
+                        res
+                        msg
+                        referenceId
+                    }
+                }
+            """,
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
+
+        # Ejecutar la solicitud y capturar la respuesta
         response = await self._execute_request(content, "CheckAlarm", installation)
 
-        return response["data"]["xSCheckAlarm"]["referenceId"]
+        # Log para depuración
+        print("Response from API:", response)
+
+        # Validar que la respuesta sea válida
+        if not response:
+            raise ValueError("La API devolvió una respuesta nula o vacía.")
+        
+        if "data" not in response or "xSCheckAlarm" not in response["data"]:
+            raise KeyError(f"Respuesta inesperada de la API: {response}")
+        
+        # Validar que "referenceId" esté presente
+        xSCheckAlarm = response["data"]["xSCheckAlarm"]
+        if "referenceId" not in xSCheckAlarm or not xSCheckAlarm["referenceId"]:
+            raise ValueError(f"No se encontró 'referenceId' en la respuesta: {xSCheckAlarm}")
+        
+        # Retornar el ID de referencia
+        return xSCheckAlarm["referenceId"]
+
 
     async def get_all_services(self, installation: Installation) -> list[Service]:
         """Get the list of all services available to the user."""
