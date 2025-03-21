@@ -24,6 +24,9 @@ from .dataTypes import (
     Sentinel,
     Service,
     SStatus,
+    SmartLock,
+    SmartLockMode,
+    SmartLockModeStatus,
 )
 from .domains import ApiDomains
 from .exceptions import Login2FAError, LoginError, SecuritasDirectError
@@ -769,3 +772,118 @@ class ApiManager:
         response = await self._execute_request(content, "DisarmStatus", installation)
 
         return response["data"]["xSDisarmStatus"]
+
+    async def get_smart_lock_config(self, installation: Installation) -> SmartLock:
+        content = {
+            "operationName": "xSGetSmartlockConfig",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "devices": [{"deviceType": "DR", "deviceId": "01", "keytype": "0"}]
+                },
+            "query": "query xSGetSmartlockConfig($numinst: String!, $panel: String!, $devices: [SmartlockDevicesInfo]!) {\n  xSGetSmartlockConfig(numinst: $numinst, panel: $panel, devices: $devices) {\n    res\n    referenceId\n    zoneId\n    serialNumber\n    location\n    family\n    type\n    label\n    features {\n      holdBackLatchTime\n      calibrationType\n      autolock {\n        active\n        timeout\n      }\n    }\n  }\n}",
+        }
+        await self._check_authentication_token()
+        await self._check_capabilities_token(installation)
+        response = await self._execute_request(content, "xSGetSmartlockConfig", installation)
+
+        if "errors" in response:
+            _LOGGER.error(response)
+            return SmartLock(None, None, None)
+
+        if "data" in response:
+            raw_data = response["data"]["xSGetSmartlockConfig"]
+            return SmartLock(
+                raw_data["res"], 
+                raw_data["location"],
+                raw_data["type"])
+
+        return SmartLock(None, None, None)
+    
+    async def get_lock_current_mode(self, installation: Installation) -> SmartLockMode:
+        content = {
+            "operationName": "xSGetLockCurrentMode",
+            "variables": {
+                "numinst": installation.number,
+            },
+            "query": "query xSGetLockCurrentMode($numinst: String!, $counter: Int) {\n  xSGetLockCurrentMode(numinst: $numinst, counter: $counter) {\n    res\n    smartlockInfo {\n      lockStatus\n      deviceId\n    }\n  }\n}",
+        }
+        await self._check_authentication_token()
+        await self._check_capabilities_token(installation)
+        response = await self._execute_request(content, "xSGetLockCurrentMode", installation)
+
+        if "errors" in response:
+            _LOGGER.error(response)
+            return SmartLockMode(None, None)
+
+        if "data" in response:
+            raw_data = response["data"]["xSGetLockCurrentMode"]
+            return SmartLockMode(
+                raw_data["res"], 
+                raw_data["smartlockInfo"][0]["lockStatus"])
+
+        return SmartLockMode(None, None)
+    
+    async def change_lock_mode(self, installation: Installation, lock: bool) -> SmartLockModeStatus:
+        content = {
+            "operationName": "xSChangeSmartlockMode",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "deviceType": "DR", 
+                "deviceId": "01", 
+                "lock": lock,
+            },
+            "query": "mutation xSChangeSmartlockMode($numinst: String!, $panel: String!, $deviceId: String!, $deviceType: String!, $lock: Boolean!) {\n  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n  ) {\n    res\n    msg\n    referenceId\n  }\n}",
+        }
+        await self._check_authentication_token()
+        await self._check_capabilities_token(installation)
+        response = await self._execute_request(content, "xSChangeSmartlockMode", installation)
+        response = response["data"]["xSChangeSmartlockMode"]
+        if "res" in response and response["res"] != "OK":
+            raise SecuritasDirectError(response["msg"], response)
+
+        if "referenceId" not in response or "res" not in response:
+            raise SecuritasDirectError("No referenceId in response", response)
+
+        reference_id = response["referenceId"]
+
+        count = 1
+        raw_data: dict[str, Any] = {}
+        while (count == 1) or raw_data.get("res") == "WAIT":
+            await asyncio.sleep(self.delay_check_operation)
+            raw_data = await self._check_change_lock_mode(
+                installation,
+                reference_id,
+                count,
+            )
+            count = count + 1
+
+        self.protom_response = raw_data["protomResponse"]
+        return SmartLockModeStatus(
+            raw_data["res"],
+            raw_data["msg"],
+            raw_data["protomResponse"],
+            raw_data["status"]
+        )
+
+    async def _check_change_lock_mode(
+        self,
+        installation: Installation,
+        reference_id: str,
+        counter: int,
+    ) -> dict[str, Any]:
+        content = {
+            "operationName": "xSChangeSmartlockModeStatus",
+            "variables": {
+                "counter": counter,
+                "deviceId": "01",
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": reference_id,
+            },
+            "query": "query xSChangeSmartlockModeStatus($numinst: String!, $panel: String!, $referenceId: String!, $deviceId: String, $counter: Int) {\n  xSChangeSmartlockModeStatus(\n    numinst: $numinst\n    panel: $panel\n    referenceId: $referenceId\n    counter: $counter\n    deviceId: $deviceId\n  ) {\n    res\n    msg\n    protomResponse\n    status\n  }\n}",
+        }
+        response = await self._execute_request(content, "xSChangeSmartlockModeStatus", installation)
+
+        return response["data"]["xSChangeSmartlockModeStatus"]
