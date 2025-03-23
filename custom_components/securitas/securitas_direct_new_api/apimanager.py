@@ -859,6 +859,7 @@ class ApiManager:
             )
             count = count + 1
 
+        await asyncio.sleep(self.delay_check_operation*7)
         self.protom_response = raw_data["protomResponse"]
         return SmartLockModeStatus(
             raw_data["res"],
