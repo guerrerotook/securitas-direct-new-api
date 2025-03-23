@@ -29,6 +29,8 @@ from .securitas_direct_new_api import (
     SmartLockModeStatus,
 )
 
+from .securitas_direct_new_api.dataTypes import Service
+
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=20)
@@ -43,18 +45,22 @@ async def async_setup_entry(
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
         CONF_INSTALLATION_KEY
     )
-    for devices in securitas_devices:
-        locks.append(
-            SecuritasLock(
-                devices.installation,
-                #state=LockState.LOCKED,
-                client=client,
-                hass=hass,
-            )
-        )
-    async_add_entities(locks, True)
-
-
+    for device in securitas_devices:
+        services: list[Service] = await client.get_services(device.installation)
+        for service in services:
+            _LOGGER.debug("Service: %s", service.request)
+            if service.request == "DOORLOCK": 
+                locks.append(
+                    SecuritasLock(
+                        device.installation,
+                        #state=LockState.LOCKED,
+                        client=client,
+                        hass=hass,
+                    )
+                )
+                async_add_entities(locks, True)
+                locks[0].async_update_status()
+                
 class SecuritasLock(lock.LockEntity):
     def __init__(
         self,
@@ -63,6 +69,7 @@ class SecuritasLock(lock.LockEntity):
         hass: HomeAssistant,
     ) -> None:
         self._state = "2" # locked
+        self._last_state = "2"
         self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
@@ -88,10 +95,9 @@ class SecuritasLock(lock.LockEntity):
             name=installation.alias,
             hw_version=installation.type,
         )
-        #self.async_update_status(state)
 
     def __force_state(self, state: str) -> None:
-        self._last_status = self._state
+        self._last_state = self._state
         self._state = state
         self.async_schedule_update_ha_state()
 
@@ -152,7 +158,10 @@ class SecuritasLock(lock.LockEntity):
 
     @property
     def is_locking(self) -> bool:
-        return False
+        if self._state == "4":
+            return True
+        else:
+            return False
 
     @property
     def is_unlocking(self) -> bool:
@@ -160,13 +169,17 @@ class SecuritasLock(lock.LockEntity):
 
     @property
     def is_opening(self) -> bool:
-        return False
+        if self._state == "3":
+            return True
+        else:
+            return False
 
     @property
     def is_jammed(self) -> bool:
         return False
 
     async def async_lock(self, **kwargs):
+        self.__force_state("4") #locking
         lock_status: SmartLockModeStatus = SmartLockModeStatus()
         try:
             lock_status = await self.client.session.change_lock_mode(self.installation, True)
@@ -177,6 +190,7 @@ class SecuritasLock(lock.LockEntity):
         self._state = "2"
 
     async def async_unlock(self, **kwargs):
+        self.__force_state("3") #opening
         lock_status: SmartLockModeStatus = SmartLockModeStatus()
         try:
             lock_status = await self.client.session.change_lock_mode(self.installation, False)
