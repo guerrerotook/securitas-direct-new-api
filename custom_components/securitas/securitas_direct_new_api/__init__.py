@@ -12,6 +12,8 @@ from .dataTypes import (  # noqa: F401
     OtpPhone,
     Service,
     SStatus,
+    SmartLockMode,
+    SmartLockModeStatus,
 )
 from .domains import ApiDomains  # noqa: F401
 from .exceptions import Login2FAError, LoginError, SecuritasDirectError  # noqa: F401

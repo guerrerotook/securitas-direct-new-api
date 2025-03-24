@@ -60,7 +60,7 @@ DEFAULT_CODE = ""
 DEFAULT_PERI_ALARM = False
 
 
-PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR]
+PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR, Platform.LOCK]
 HUB = None
 
 ATTR_INSTALLATION_ID = "instalation_id"
