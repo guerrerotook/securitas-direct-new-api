@@ -803,7 +803,7 @@ class ApiManager:
 
         if "errors" in response:
             _LOGGER.error(response)
-            return SmartLockMode(None, None)
+            return SmartLockMode(None, "0")
 
         if "data" in response:
             raw_data = response["data"]["xSGetLockCurrentMode"]
@@ -811,7 +811,7 @@ class ApiManager:
                 raw_data["res"], 
                 raw_data["smartlockInfo"][0]["lockStatus"])
 
-        return SmartLockMode(None, None)
+        return SmartLockMode(None, "0")
     
     async def change_lock_mode(self, installation: Installation, lock: bool) -> SmartLockModeStatus:
         content = {
