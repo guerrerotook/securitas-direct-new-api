@@ -134,7 +134,9 @@ class SecuritasLock(lock.LockEntity):
         await self.async_update_status()
     
     async def async_update_status(self, now=None) -> None:
-        self._state = await self.get_lock_state()
+        self._new_state = await self.get_lock_state()
+        if self._new_state != "0": 
+            self._state = self._new_state
 
     async def get_lock_state(self) -> str:
         smartlock_status: SmartLockMode = await self.client.session.get_lock_current_mode(
