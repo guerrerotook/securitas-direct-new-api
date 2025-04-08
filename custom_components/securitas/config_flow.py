@@ -1,4 +1,5 @@
 """Config flow for the Securitas Direct platform."""
+
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -126,17 +127,21 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> SecuritasOptionsFlowHandler:
         """Get the options flow for this handler."""
-        return SecuritasOptionsFlowHandler(config_entry)
+        return SecuritasOptionsFlowHandler()
 
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
-        if user_input is None and self.init_data is None:
+        if (user_input is None and self.init_data is None) or self.init_data.get(
+            "error", None
+        ) == "login":
             return self.async_show_form(
                 step_id="user",
                 data_schema=CONFIG_SCHEMA.schema[DOMAIN],
             )
 
         self.config: OrderedDict = user_input
+        if self.config is None:
+            self.config = self.init_data.copy()
 
         if self.securitas is None:
             uuid = generate_uuid()
@@ -168,7 +173,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Import a config entry."""
         if user_input.get(CONF_ERROR):
             error = user_input[CONF_ERROR]
-            if error == "2FA":
+            if error in {"2FA", "login"}:
                 return self.async_show_form(
                     step_id="user",
                     data_schema=vol.Schema(
@@ -209,10 +214,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
 class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle PVPC options."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

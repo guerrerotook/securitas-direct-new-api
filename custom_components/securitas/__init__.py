@@ -1,4 +1,5 @@
 """Support for Securitas Direct alarms."""
+
 import asyncio
 from collections import OrderedDict
 import logging
@@ -186,6 +187,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             return False
         except LoginError as err:
+            _notify_error(hass, "login_error", "Securitas Direct", err.args)
+            config[CONF_ERROR] = "login"
+            hass.async_create_task(
+                hass.config_entries.flow.async_init(
+                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
+                )
+            )
             _LOGGER.error("Could not log in to Securitas %s", err.args)
         except SecuritasDirectError as err:
             _LOGGER.error("Could not log in to Securitas %s", err.args)
@@ -333,7 +341,9 @@ class SecuritasHub:
         self.hass: HomeAssistant = hass
         self.services: dict[int, list[Service]] = {1: []}
         self.command_type: CommandType = (
-            CommandType.PERI if domain_config[CONF_PERI_ALARM] else CommandType.STD
+            CommandType.PERI
+            if domain_config.get(CONF_PERI_ALARM, False)
+            else CommandType.STD
         )
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
