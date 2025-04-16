@@ -131,9 +131,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         """User initiated config flow."""
-        if (user_input is None and self.init_data is None) or self.init_data.get(
-            "error", None
-        ) == "login":
+        if (user_input is None and self.init_data is None) or (
+            self.init_data is not None and self.init_data.get("error", None) == "login"
+        ):
             return self.async_show_form(
                 step_id="user",
                 data_schema=CONFIG_SCHEMA.schema[DOMAIN],
