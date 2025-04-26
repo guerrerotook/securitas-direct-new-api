@@ -263,6 +263,14 @@ class ApiManager:
         }
         await self._execute_request(content, "Logout")
 
+    def _extract_otp_data(self, data) -> tuple[str, list[OtpPhone]]:
+        otp_hash = data["auth-otp-hash"]
+        phones: list[OtpPhone] = []
+        for item in data["auth-phones"]:
+            phones.append(OtpPhone(item["id"], item["phone"]))
+
+        return (otp_hash, phones)
+
     async def validate_device(
         self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
     ) -> tuple[str, list[OtpPhone]]:
@@ -289,12 +297,11 @@ class ApiManager:
             self.authentication_otp_challenge_value = None
         except SecuritasDirectError as err:
             # the API call fails but we want the phone data in the response
-            data = err.args[1]["errors"][0]["data"]
-            otp_hash = data["auth-otp-hash"]
-            phones: list[OtpPhone] = []
-            for item in data["auth-phones"]:
-                phones.append(OtpPhone(item["id"], item["phone"]))
-            return (otp_hash, phones)
+            return self._extract_otp_data(err.args[1]["errors"][0]["data"])
+
+        if "errors" in response and response["errors"][0]["message"] == "Unauthorized":
+            # the API call succeeds but is unauthorized
+            return self._extract_otp_data(response["errors"][0]["data"])
 
         self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
         return (None, None)
@@ -367,6 +374,10 @@ class ApiManager:
                         raise Login2FAError(err.args) from err
 
             raise LoginError(err.args) from err
+
+        if "errors" in response:
+            _LOGGER.error("Login error %s", response["errors"][0]["message"])
+            raise LoginError(response["errors"][0]["message"], response)
 
         self.authentication_token = response["data"]["xSLoginToken"]["hash"]
         self.login_timestamp = int(datetime.now().timestamp() * 1000)

@@ -16,11 +16,11 @@ class ApiDomains:
             "GB": "https://customers.verisure.co.uk/owa-api/graphql",
             "IE": "https://customers.verisure.ie/owa-api/graphql",
             "IT": "https://customers.verisure.it/owa-api/graphql",
+            "AR": "https://customers.verisure.com.ar/owa-api/graphql",
         }
 
         self.languages = {
             "default": "en",
-            "AR": "es",
             "BR": "br",  # I know they speak Portuguese, but past code basically did lang=country.lower()
             "CL": "es",
             "ES": "es",
@@ -28,6 +28,7 @@ class ApiDomains:
             "GB": "en",
             "IE": "en",
             "IT": "it",
+            "AR": "ar",
         }
 
     def get_url(self, country: str) -> str:
