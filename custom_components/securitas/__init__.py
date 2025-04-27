@@ -261,34 +261,28 @@ def setup_hass_services(hass: HomeAssistant) -> None:
                 # Récupérer le statut de l'alarme avec le nouveau référence_id
                 alarm_status = await client.session.check_alarm_status(found_installation, reference_id)
                 
-                _LOGGER.info("Statut de l'alarme mis à jour avec succès pour l'installation %s", installation_id)
+                # Mettre à jour le statut manuellement dans l'API
+                client.session.protom_response = alarm_status.protomResponse
                 
-                # Trouver toutes les entités d'alarme qui correspondent à cette installation
-                found_entity = False
-                for entity_id, state in hass.states.async_all():
-                    if entity_id.startswith("alarm_control_panel.") and "securitas_direct" in entity_id:
-                        # Récupérer l'entité
-                        entity = hass.data.get("entity_registry", {}).get_entity(entity_id)
-                        if entity and hasattr(entity, "unique_id") and f"securitas_direct.{found_installation.number}" in entity.unique_id:
-                            found_entity = True
-                            # Forcer une mise à jour synchrone
-                            for platform in hass.data.get(DOMAIN, {}).get("platforms", []):
-                                if hasattr(platform, "entities"):
-                                    for alarm_entity in platform.entities:
-                                        if alarm_entity.entity_id == entity_id:
-                                            await alarm_entity.async_update()
-                                            alarm_entity.async_write_ha_state()
+                # Déclencher un événement pour informer Home Assistant
+                hass.bus.async_fire(f"{DOMAIN}_alarm_updated", {
+                    "installation_id": installation_id,
+                    "status": alarm_status.protomResponse
+                })
                 
-                # Si aucune entité correspondante n'a été trouvée, essayons une autre méthode
-                if not found_entity:
-                    # Créer un événement pour déclencher l'actualisation
-                    hass.bus.async_fire(f"{DOMAIN}_alarm_updated", {
-                        "installation_id": installation_id,
-                        "status": alarm_status.protomResponse
-                    })
-                    
-                    # Force Home Assistant à rafraîchir les états
-                    async_dispatcher_send(hass, f"{DOMAIN}_alarm_update_{installation_id}")
+                # Redémarrer les entités d'alarme
+                alarm_entity_id = f"alarm_control_panel.securitas_direct_{installation_id}"
+                if alarm_entity_id in hass.states.async_entity_ids("alarm_control_panel"):
+                    # Demander une mise à jour de l'état
+                    await hass.services.async_call(
+                        "homeassistant", 
+                        "update_entity", 
+                        {"entity_id": alarm_entity_id},
+                        blocking=True
+                    )
+                
+                _LOGGER.info("Statut de l'alarme mis à jour avec succès pour l'installation %s: %s", 
+                           installation_id, alarm_status.protomResponse)
                 
             except Exception as ex:
                 _LOGGER.error("Erreur lors de la mise à jour du statut de l'alarme: %s", str(ex))
