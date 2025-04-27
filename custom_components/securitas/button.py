@@ -66,28 +66,35 @@ class SecuritasRefreshButton(ButtonEntity):
             # Mettre à jour le statut dans l'API
             self.client.session.protom_response = alarm_status.protomResponse
             
-            # Mettre à jour toutes les entités d'alarme
-            alarm_entity_id = f"alarm_control_panel.securitas_direct_{self.installation.number}"
-            if alarm_entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
-                await self.hass.services.async_call(
-                    "homeassistant", 
-                    "update_entity", 
-                    {"entity_id": alarm_entity_id},
-                    blocking=True
-                )
-            
-            _LOGGER.info("Statut de l'alarme mis à jour avec succès pour l'installation %s: %s", 
+            _LOGGER.info("Statut de l'alarme obtenu avec succès pour l'installation %s: %s", 
                        self.installation.number, alarm_status.protomResponse)
                        
-            # Maintenant, chercher et mettre à jour directement l'entité associée
-            for entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
-                if f"securitas_direct.{self.installation.number}" in entity_id:
-                    await self.hass.services.async_call(
-                        "homeassistant",
-                        "update_entity",
-                        {"entity_id": entity_id},
-                        blocking=True
-                    )
+            # Trouver l'entité d'alarme correspondante et mettre à jour directement son état
+            found_entity = False
+            for entity_id, entity in self.hass.data.get("entity_component", {}).get("alarm_control_panel", {}).entities.items():
+                # Vérifier si c'est notre entité d'alarme Securitas
+                if hasattr(entity, "installation") and entity.installation.number == self.installation.number:
+                    _LOGGER.debug("Entité d'alarme trouvée: %s", entity_id)
+                    # Appeler directement update_status_alarm avec le nouveau statut
+                    entity.update_status_alarm(alarm_status)
+                    # Forcer le rafraîchissement de l'état dans l'interface
+                    entity.async_write_ha_state()
+                    found_entity = True
+                    _LOGGER.info("État de l'entité d'alarme mis à jour directement")
+                    break
+            
+            if not found_entity:
+                _LOGGER.warning("Aucune entité d'alarme correspondant à l'installation %s n'a été trouvée", self.installation.number)
+                # Essayer une méthode alternative - trouver l'entité par ID
+                for entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
+                    if f"securitas_direct.{self.installation.number}" in entity_id:
+                        await self.hass.services.async_call(
+                            "homeassistant",
+                            "update_entity",
+                            {"entity_id": entity_id},
+                            blocking=True
+                        )
+                        _LOGGER.info("Essai de mise à jour de l'entité via update_entity: %s", entity_id)
                     
         except SecuritasDirectError as err:
             _LOGGER.error("Erreur lors de la mise à jour du statut de l'alarme: %s", str(err))
