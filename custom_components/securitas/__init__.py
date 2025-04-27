@@ -241,7 +241,7 @@ def setup_hass_services(hass: HomeAssistant) -> None:
     """Home Assistant services."""
 
     async def async_change_setting(call: ServiceCall) -> None:
-        """Change an Abode system setting."""
+        """Mise à jour du statut de l'alarme Securitas."""
         installation_id = call.data[ATTR_INSTALLATION_ID]
 
         client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
@@ -253,9 +253,26 @@ def setup_hass_services(hass: HomeAssistant) -> None:
                 break
                 
         if found_installation:
-            await client.update_overview(found_installation)
+            try:
+                # Obtenir un nouveau référence_id pour forcer une mise à jour complète
+                reference_id = await client.session.check_alarm(found_installation)
+                # Court délai pour laisser le temps à l'API de traiter la demande
+                await asyncio.sleep(1)
+                # Récupérer le statut de l'alarme avec le nouveau référence_id
+                alarm_status = await client.session.check_alarm_status(found_installation, reference_id)
+                
+                _LOGGER.info("Statut de l'alarme mis à jour avec succès pour l'installation %s", installation_id)
+                
+                # Forcer une mise à jour des entités d'alarme
+                for device in hass.data[DOMAIN].get(CONF_INSTALLATION_KEY, []):
+                    if device.installation.number == found_installation.number:
+                        # Notifier Home Assistant qu'une mise à jour est disponible
+                        hass.bus.async_fire("securitas_alarm_updated", {"installation_id": installation_id})
+                        return
+            except Exception as ex:
+                _LOGGER.error("Erreur lors de la mise à jour du statut de l'alarme: %s", str(ex))
         else:
-            _LOGGER.error("No installation found with ID %s", installation_id)
+            _LOGGER.error("Aucune installation trouvée avec l'ID %s", installation_id)
 
     hass.services.register(
         DOMAIN,
