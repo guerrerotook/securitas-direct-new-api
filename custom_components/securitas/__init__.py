@@ -242,12 +242,20 @@ def setup_hass_services(hass: HomeAssistant) -> None:
 
     async def async_change_setting(call: ServiceCall) -> None:
         """Change an Abode system setting."""
-        installation_id: int = call.data[ATTR_INSTALLATION_ID]
+        installation_id = call.data[ATTR_INSTALLATION_ID]
 
         client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
-        for installation in client.installations:
-            if installation.number == installation_id:
-                await client.update_overview(installation)
+        found_installation = None
+        
+        for installation in await client.session.list_installations():
+            if installation.number == str(installation_id):
+                found_installation = installation
+                break
+                
+        if found_installation:
+            await client.update_overview(found_installation)
+        else:
+            _LOGGER.error("No installation found with ID %s", installation_id)
 
     hass.services.register(
         DOMAIN,
