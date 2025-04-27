@@ -19,7 +19,7 @@ from homeassistant.const import (
     CONF_USERNAME,
     Platform,
 )
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
@@ -64,9 +64,6 @@ DEFAULT_PERI_ALARM = False
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR, Platform.BUTTON]
 HUB = None
 
-ATTR_INSTALLATION_ID = "instalation_id"
-SERVICE_REFRESH_INSTALLATION = "refresh_alarm_status"
-
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -86,14 +83,6 @@ CONFIG_SCHEMA = vol.Schema(
         )
     },
     extra=vol.ALLOW_EXTRA,
-)
-
-REFRESH_ALARM_STATUS_SCHEMA = vol.Schema(
-    {
-        vol.Required(
-            ATTR_INSTALLATION_ID, description="Installation number"
-        ): cv.positive_int
-    }
 )
 
 
@@ -209,9 +198,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
-            await hass.async_add_executor_job(setup_hass_services, hass)
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-            # hass.bus.listen_once(EVENT_HOMEASSISTANT_STOP, lambda event: client.logout())
             return True
     else:
         config = add_device_information(entry.data.copy())
@@ -235,26 +222,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
     return unload_ok
-
-
-def setup_hass_services(hass: HomeAssistant) -> None:
-    """Home Assistant services."""
-
-    async def async_change_setting(call: ServiceCall) -> None:
-        """Change an Abode system setting."""
-        installation_id: int = call.data[ATTR_INSTALLATION_ID]
-
-        client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
-        for installation in client.installations:
-            if installation.number == installation_id:
-                await client.update_overview(installation)
-
-    hass.services.register(
-        DOMAIN,
-        SERVICE_REFRESH_INSTALLATION,
-        async_change_setting,
-        schema=REFRESH_ALARM_STATUS_SCHEMA,
-    )
 
 
 def _notify_error(
