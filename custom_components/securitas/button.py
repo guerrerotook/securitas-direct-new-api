@@ -66,44 +66,65 @@ class SecuritasRefreshButton(ButtonEntity):
             # Mettre à jour le statut dans l'API
             self.client.session.protom_response = alarm_status.protomResponse
             
-            _LOGGER.info("Statut de l'alarme obtenu avec succès pour l'installation %s: %s", 
-                       self.installation.number, alarm_status.protomResponse)
-                       
-            # Rechercher toutes les entités d'alarme qui pourraient correspondre à notre installation
+            _LOGGER.info("Statut de l'alarme obtenu via API: %s pour l'installation %s", 
+                       alarm_status.protomResponse, self.installation.number)
+            
+            # Méthode 1: Chercher l'entité d'alarme dans les devices CONF_INSTALLATION_KEY
             found_entity = False
+            if CONF_INSTALLATION_KEY in self.hass.data.get(DOMAIN, {}):
+                for device in self.hass.data[DOMAIN][CONF_INSTALLATION_KEY]:
+                    if device.installation.number == self.installation.number:
+                        # Trouvé le bon device, maintenant trouver l'entité associée
+                        for entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
+                            if f"securitas_direct.{device.installation.number}" in entity_id:
+                                # Trouver l'entité à partir de son ID
+                                alarm_entity = None
+                                for component in self.hass.data.get("alarm_control_panel", {}).values():
+                                    if hasattr(component, "entities"):
+                                        for entity in component.entities:
+                                            if entity.entity_id == entity_id:
+                                                alarm_entity = entity
+                                                break
+                                
+                                if alarm_entity:
+                                    # Nous avons trouvé l'entité, mettre à jour son état
+                                    _LOGGER.info("Entité d'alarme trouvée, mise à jour de son état")
+                                    alarm_entity.update_status_alarm(alarm_status)
+                                    alarm_entity.async_write_ha_state()
+                                    found_entity = True
             
-            # Méthode 1: Vérifier les entités dans le domaine
-            if DOMAIN in self.hass.data:
-                for device_key, device_data in self.hass.data.get(DOMAIN, {}).items():
-                    if hasattr(device_data, "update_status_alarm") and hasattr(device_data, "installation"):
-                        if device_data.installation.number == self.installation.number:
-                            _LOGGER.debug("Entité d'alarme trouvée via domaine: %s", device_key)
-                            device_data.update_status_alarm(alarm_status)
-                            device_data.async_write_ha_state()
-                            found_entity = True
-                            _LOGGER.info("État de l'entité d'alarme mis à jour directement via domaine")
-            
-            # Méthode 2: Essayer de trouver l'entité par son ID
-            alarm_entity_id = f"securitas_direct.{self.installation.number}"
-            if not found_entity and self.hass.states.get(alarm_entity_id) is not None:
-                # Trouver l'entité dans le registre des entités
-                from homeassistant.helpers import entity_registry as er
-                entity_registry = er.async_get(self.hass)
-                
-                for entity_id, entity_entry in entity_registry.entities.items():
-                    if entity_id == alarm_entity_id or f"securitas_direct_{self.installation.number}" in entity_id:
-                        # Essayer de forcer une mise à jour
-                        await self.hass.services.async_call(
-                            "homeassistant",
-                            "update_entity",
-                            {"entity_id": entity_id},
-                            blocking=True
-                        )
-                        found_entity = True
-                        _LOGGER.info("Essai de mise à jour de l'entité via update_entity: %s", entity_id)
-            
-            # Méthode 3: Forcer une mise à jour de toutes les entités d'alarme
+            # Méthode 2: Force une mise à jour de l'entité via set_arm_state
             if not found_entity:
+                # Chercher dans tous les composants d'alarme
+                alarm_entities = []
+                for platform in self.hass.data.get("entity_component", {}).get("alarm_control_panel", {}).get("entities", []):
+                    for entity in platform.entities:
+                        if hasattr(entity, "installation") and entity.installation.number == self.installation.number:
+                            alarm_entities.append(entity)
+                
+                if alarm_entities:
+                    # Mettre à jour directement
+                    for entity in alarm_entities:
+                        _LOGGER.info("Mise à jour de l'entité d'alarme via set_arm_state")
+                        # Déterminer le mode en fonction de protomResponse
+                        current_mode = None
+                        if alarm_status.protomResponse == "T":
+                            current_mode = "ARMED_AWAY"
+                        elif alarm_status.protomResponse == "D":
+                            current_mode = "DISARMED"
+                        elif alarm_status.protomResponse == "P":
+                            current_mode = "ARMED_HOME"
+                        elif alarm_status.protomResponse == "Q":
+                            current_mode = "ARMED_NIGHT"
+                        
+                        if current_mode:
+                            # Cette approche fonctionne car set_arm_state va mettre à jour l'entité
+                            await entity.set_arm_state(current_mode)
+                            found_entity = True
+            
+            # Méthode 3: Dernière tentative - force update_entity sur toutes les entités
+            if not found_entity:
+                _LOGGER.warning("Aucune entité correspondante trouvée par les méthodes directes, utilisation de update_entity")
                 for entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
                     if "securitas" in entity_id:
                         await self.hass.services.async_call(
@@ -112,13 +133,8 @@ class SecuritasRefreshButton(ButtonEntity):
                             {"entity_id": entity_id},
                             blocking=True
                         )
-                        _LOGGER.info("Forçage de la mise à jour de toutes les entités d'alarme Securitas: %s", entity_id)
-                
-                # Envoyer un événement pour que d'autres composants puissent réagir
-                self.hass.bus.async_fire(f"{DOMAIN}_alarm_updated", {
-                    "installation_id": self.installation.number,
-                    "status": alarm_status.protomResponse
-                })
+                # Enregistrer le status pour les futures mises à jour
+                self.hass.data[f"{DOMAIN}_last_status_{self.installation.number}"] = alarm_status
                 
         except SecuritasDirectError as err:
             _LOGGER.error("Erreur lors de la mise à jour du statut de l'alarme: %s", str(err))
