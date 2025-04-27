@@ -46,11 +46,13 @@ class SecuritasRefreshButton(ButtonEntity):
         self.installation = installation
         self.client = client
         self.hass = hass
+        # Utiliser le même identifiant d'appareil que celui du panneau d'alarme
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{installation.alias}")},
+            identifiers={(DOMAIN, f"securitas_direct.{installation.number}")},
             manufacturer="Securitas Direct",
             model=installation.panel,
             name=installation.alias,
+            hw_version=installation.type,
         )
 
     async def async_press(self) -> None:
