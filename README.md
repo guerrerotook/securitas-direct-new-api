@@ -42,6 +42,9 @@ If you need to change some of the options, you can configure the integration (in
 
 ![Options](./docs/images/options.png)
 
+## New Features
+
+Added a button to update the status of your alamr using the API. Thanks to @edwin-anne.
 
 ## Breaking changes
 
