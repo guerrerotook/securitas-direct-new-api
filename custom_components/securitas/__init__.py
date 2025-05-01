@@ -61,7 +61,7 @@ DEFAULT_CODE = ""
 DEFAULT_PERI_ALARM = False
 
 
-PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR, Platform.BUTTON]
+PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.BUTTON, Platform.SENSOR]
 HUB = None
 
 

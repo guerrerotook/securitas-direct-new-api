@@ -41,7 +41,7 @@ class SecuritasRefreshButton(ButtonEntity):
         hass: HomeAssistant,
     ) -> None:
         """Initialize the refresh button."""
-        self._attr_name = f"Rafraîchir {installation.alias}"
+        self._attr_name = f"Refresh {installation.alias}"
         self._attr_unique_id = f"refresh_button_{installation.number}"
         self.installation = installation
         self.client = client
@@ -63,7 +63,7 @@ class SecuritasRefreshButton(ButtonEntity):
             
             self.client.session.protom_response = alarm_status.protomResponse
             
-            _LOGGER.info("Statut de l'alarme obtenu via API: %s pour l'installation %s", 
+            _LOGGER.info("Status of the Alarm via API: %s installation id: %s", 
                        alarm_status.protomResponse, self.installation.number)
             
             _LOGGER.info("Update entity alarm panel securitas")
@@ -77,6 +77,6 @@ class SecuritasRefreshButton(ButtonEntity):
                     )
             
         except SecuritasDirectError as err:
-            _LOGGER.error("Erreur lors de la mise à jour du statut de l'alarme: %s", str(err))
+            _LOGGER.error("Error calling the securitas direct API: %s", str(err))
         except Exception as ex:
             _LOGGER.error("Erreur inattendue: %s", str(ex))
