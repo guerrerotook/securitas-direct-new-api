@@ -145,3 +145,21 @@ class OtpPhone:
 
     id: int
     phone: str
+
+@dataclass
+class SmartLock:
+    res: str
+    location: str
+    type: int
+
+@dataclass
+class SmartLockMode:
+    res: str
+    lockStatus: str
+
+@dataclass
+class SmartLockModeStatus:
+    requestId: str = ""
+    message: str = ""
+    protomResponse: str = ""
+    status: str = ""
