@@ -89,9 +89,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_phone_list(self, user_input=None) -> FlowResult:
         """Show the list of phones for the OTP challenge."""
         phone_index: int = -1
-        for phone_item in self.otp_challenge[1]:
-            if phone_item.phone == user_input["phones"]:
-                phone_index = phone_item.id
+        selected_phone_key = user_input["phones"]
+        
+        try:
+            index_str = selected_phone_key.split("_")[0]
+            list_index = int(index_str)
+            if 0 <= list_index < len(self.otp_challenge[1]):
+                phone_index = self.otp_challenge[1][list_index].id
+        except (ValueError, IndexError):
+            for phone_item in self.otp_challenge[1]:
+                if phone_item.phone in selected_phone_key:
+                    phone_index = phone_item.id
+                    break
+        
         await self.securitas.send_opt(self.otp_challenge[0], phone_index)
         return self.async_show_form(
             step_id="otp_challenge",
@@ -161,10 +171,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             str, list[OtpPhone]
         ] = await self.securitas.validate_device()
         phones: list[str] = []
-        for phone_item in self.otp_challenge[1]:
-            phones.append(phone_item.phone)
+        phone_options: list[dict] = []
+        for i, phone_item in enumerate(self.otp_challenge[1]):
+            phone_key = f"{i}_{phone_item.phone}"
+            phones.append(phone_key)
+            phone_options.append({
+                "value": phone_key,
+                "label": phone_item.phone
+            })
         data_schema = {}
-        data_schema["phones"] = selector({"select": {"options": phones}})
+        data_schema["phones"] = selector({"select": {"options": phone_options}})
         return self.async_show_form(
             step_id="phone_list", data_schema=vol.Schema(data_schema)
         )
