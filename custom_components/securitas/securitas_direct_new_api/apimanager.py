@@ -519,7 +519,6 @@ class ApiManager:
             "operationName": "Sentinel",
             "variables": {
                 "numinst": installation.number,
-                "zone": str(service.attributes[0].value),
             },
             "query": "query Sentinel($numinst: String!) {\n  xSComfort(numinst: $numinst) {\n    res\n    devices {\n      alias\n      status {\n        temperature\n        humidity\n        airQualityCode\n      }\n      zone\n    }\n    forecast {\n      city\n      currentHum\n      currentTemp\n      forecastCode\n      forecastedDays {\n        date\n        forecastCode\n        maxTemp\n        minTemp\n      }\n    }\n  }\n}",
         }
@@ -527,7 +526,6 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Sentinel", installation)
-
 
         if "errors" in response:
             return Sentinel("", "", 0, 0)
