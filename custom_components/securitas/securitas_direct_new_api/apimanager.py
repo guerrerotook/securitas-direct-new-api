@@ -519,10 +519,10 @@ class ApiManager:
             "operationName": "Sentinel",
             "variables": {
                 "numinst": installation.number,
-                "zone": str(service.attributes[0].value),
             },
-            "query": "query Sentinel($numinst: String!, $zone: String!) {\n  xSAllConfort(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    ddi {\n      zone\n      alias\n      zonePrevious\n      aliasPrevious\n      zoneNext\n      aliasNext\n      moreDdis\n      status {\n        airQuality\n        airQualityMsg\n        humidity\n        temperature\n      }\n      forecast {\n        city\n        currentTemp\n        currentHum\n        description\n        forecastImg\n        day1 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day2 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day3 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day4 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n        day5 {\n          forecastImg\n          maxTemp\n          minTemp\n          value\n        }\n      }\n    }\n  }\n}",
+            "query": "query Sentinel($numinst: String!) {\n  xSComfort(numinst: $numinst) {\n    res\n    devices {\n      alias\n      status {\n        temperature\n        humidity\n        airQualityCode\n      }\n      zone\n    }\n    forecast {\n      city\n      currentHum\n      currentTemp\n      forecastCode\n      forecastedDays {\n        date\n        forecastCode\n        maxTemp\n        minTemp\n      }\n    }\n  }\n}",
         }
+
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Sentinel", installation)
@@ -530,12 +530,23 @@ class ApiManager:
         if "errors" in response:
             return Sentinel("", "", 0, 0)
 
-        raw_data = response["data"]["xSAllConfort"][0]["ddi"]["status"]
+        zone = service.attributes[0].value
+        devices = response["data"]["xSComfort"]["devices"]
+        target_device = None
+        
+        for device in devices:
+            if device.get("zone") == zone:
+                target_device = device
+                break
+        
+        if target_device is None:
+            return Sentinel("", "", 0, 0)
+
         return Sentinel(
-            response["data"]["xSAllConfort"][0]["ddi"]["alias"],
-            raw_data["airQualityMsg"],
-            int(raw_data["humidity"]),
-            int(raw_data["temperature"]),
+            target_device["alias"],
+            "",
+            int(target_device["status"]["humidity"]),
+            int(target_device["status"]["temperature"]),
         )
 
     async def get_air_quality_data(
