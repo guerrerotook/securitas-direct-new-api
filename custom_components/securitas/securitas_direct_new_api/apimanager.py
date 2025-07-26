@@ -474,12 +474,11 @@ class ApiManager:
         # result = json.loads(json_services)
         item: dict = {}
         for item in raw_data:
-            if (
-                item["attributes"] is not None
-                and item["attributes"]["attributes"] is not None
-            ):
-                attribute_list: list[Attribute] = []
-                for attribute_item in item["attributes"]["attributes"]:
+            attribute_list: list[Attribute] = []
+
+            attributes = item.get("attributes")
+            if attributes and attributes.get("attributes"):
+                for attribute_item in attributes["attributes"]:
                     attribute_list.append(
                         Attribute(
                             attribute_item["name"],
@@ -487,6 +486,8 @@ class ApiManager:
                             bool(attribute_item["active"]),
                         )
                     )
+        
+
             result.append(
                 Service(
                     int(item["idService"]),
