@@ -367,9 +367,9 @@ class ApiManager:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
             result_json = err.args[1]
-            if result_json["data"]:
-                if result_json["data"]["xSLoginToken"]:
-                    if result_json["data"]["xSLoginToken"]["needDeviceAuthorization"]:
+            if result_json.get("data"):
+                if result_json["data"].get("xSLoginToken"):
+                    if result_json["data"]["xSLoginToken"].get("needDeviceAuthorization"):
                         # needs a 2FA
                         raise Login2FAError(err.args) from err
 
@@ -379,22 +379,31 @@ class ApiManager:
             _LOGGER.error("Login error %s", response["errors"][0]["message"])
             raise LoginError(response["errors"][0]["message"], response)
 
-        self.authentication_token = response["data"]["xSLoginToken"]["hash"]
-        self.login_timestamp = int(datetime.now().timestamp() * 1000)
+        # Check if 2FA is required even on successful response
+        if response["data"]["xSLoginToken"].get("needDeviceAuthorization", False):
+            # needs a 2FA
+            raise Login2FAError("2FA authentication required", response)
 
-        try:
-            token = jwt.decode(
-                self.authentication_token,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
-        except jwt.exceptions.DecodeError as err:
-            raise SecuritasDirectError(
-                f"Failed to decode authentication token {self.authentication_token}"
-            ) from err
+        if response["data"]["xSLoginToken"]["hash"] is not None:
+            self.authentication_token = response["data"]["xSLoginToken"]["hash"]
+            self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
-        if "exp" in token:
-            self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
+            try:
+                token = jwt.decode(
+                    self.authentication_token,
+                    algorithms=["HS256"],
+                    options={"verify_signature": False},
+                )
+            except jwt.exceptions.DecodeError as err:
+                raise SecuritasDirectError(
+                    f"Failed to decode authentication token {self.authentication_token}"
+                ) from err
+
+            if "exp" in token:
+                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
+        else:
+            # Token is null, this is expected for 2FA
+            self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
     async def list_installations(self) -> list[Installation]:
         """List securitas direct installations."""
