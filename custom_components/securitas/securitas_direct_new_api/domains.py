@@ -17,6 +17,7 @@ class ApiDomains:
             "IE": "https://customers.verisure.ie/owa-api/graphql",
             "IT": "https://customers.verisure.it/owa-api/graphql",
             "AR": "https://customers.verisure.com.ar/owa-api/graphql",
+            "PT": "https://customers.securitasdirect.pt/owa-api/graphql",
         }
 
         self.languages = {
@@ -29,6 +30,7 @@ class ApiDomains:
             "IE": "en",
             "IT": "it",
             "AR": "ar",
+            "PT": "pt",
         }
 
     def get_url(self, country: str) -> str:
