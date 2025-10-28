@@ -189,7 +189,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             alarm_status = await self.client.update_overview(self.installation)
         except SecuritasDirectError as err:
             _LOGGER.info(err.args)
-            self._state = self._last_status  # mantener último estado conocido
+            self._state = self._last_status  # Maintain last known state
         else:
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
@@ -235,7 +235,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Send disarm command."""
         if self.check_code(code):
             self.__force_state(AlarmControlPanelState.DISARMING)
-            disarm_status: DisarmStatus = DisarmStatus()
             try:
                 disarm_status = await self.client.session.disarm_alarm(
                     self.installation
