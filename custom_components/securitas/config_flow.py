@@ -25,6 +25,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import selector
 
 from . import (
+    CONF_ARM_AWAY_AS_ARM_NIGHT,
     CONF_CHECK_ALARM_PANEL,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
@@ -33,6 +34,7 @@ from . import (
     CONF_PERI_ALARM,
     CONF_USE_2FA,
     CONFIG_SCHEMA,
+    DEFAULT_ARM_AWAY_AS_ARM_NIGHT,
     DEFAULT_CHECK_ALARM_PANEL,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_PERI_ALARM,
@@ -203,6 +205,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
         self.config[CONF_COUNTRY] = user_input[CONF_COUNTRY]
         self.config[CONF_CODE] = user_input[CONF_CODE]
+        self.config[CONF_ARM_AWAY_AS_ARM_NIGHT] = user_input[CONF_ARM_AWAY_AS_ARM_NIGHT]
         self.config[CONF_CHECK_ALARM_PANEL] = user_input[CONF_CHECK_ALARM_PANEL]
         self.config[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
         self.config[CONF_DELAY_CHECK_OPERATION] = user_input[CONF_DELAY_CHECK_OPERATION]
@@ -249,6 +252,13 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         #     CONF_CODE, self.config_entry.data.get(CONF_CODE, DEFAULT_CODE)
         # )
 
+        arm_away_as_arm_night: bool = self.config_entry.options.get(
+            CONF_ARM_AWAY_AS_ARM_NIGHT,
+            self.config_entry.data.get(
+                CONF_ARM_AWAY_AS_ARM_NIGHT, DEFAULT_ARM_AWAY_AS_ARM_NIGHT
+            ),
+        )
+
         delay_check_operation: int = self.config_entry.options.get(
             CONF_DELAY_CHECK_OPERATION,
             self.config_entry.data.get(
@@ -272,6 +282,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Optional(CONF_CODE, default=code): str,
                 vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
+                vol.Optional(CONF_ARM_AWAY_AS_ARM_NIGHT, default=arm_away_as_arm_night): bool,
                 vol.Optional(CONF_CHECK_ALARM_PANEL, default=check_alarm_panel): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
                 vol.Optional(

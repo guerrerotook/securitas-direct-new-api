@@ -22,6 +22,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from . import (
     CONF_INSTALLATION_KEY,
     DEFAULT_SCAN_INTERVAL,
+    CONF_ARM_AWAY_AS_ARM_NIGHT,
+    DEFAULT_ARM_AWAY_AS_ARM_NIGHT,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -112,6 +114,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._update_interval: timedelta = timedelta(
             seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         )
+        self._arm_away_as_arm_night: bool = bool(self.client.config.get(CONF_ARM_AWAY_AS_ARM_NIGHT, DEFAULT_ARM_AWAY_AS_ARM_NIGHT))
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
         )
@@ -285,6 +288,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_alarm_arm_away(self, code: str | None = None):
         """Send arm away command."""
+        if self._arm_away_as_arm_night:
+            await self.async_alarm_arm_night(code)
+            return
         if self.check_code(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
