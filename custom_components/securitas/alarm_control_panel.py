@@ -18,10 +18,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.exceptions import ServiceValidationError
 
 from . import (
     CONF_INSTALLATION_KEY,
     DEFAULT_SCAN_INTERVAL,
+    CONF_CODE_ARM_REQUIRED,
+    CONF_ARM_AWAY_AS_ARM_NIGHT,
+    DEFAULT_ARM_AWAY_AS_ARM_NIGHT,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -98,7 +102,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Initialize the Securitas alarm panel."""
         self._state: str = AlarmControlPanelState.DISARMED
         self._last_status: str = AlarmControlPanelState.DISARMED
-        self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
         self._attr_unique_id: str = f"securitas_direct.{installation.number}"
@@ -115,6 +118,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
         )
+        
+        self._code: str | None = client.config.get(CONF_CODE, None)
+        self._attr_code_format: CodeFormat | None = None
+        if self._code:
+            self._attr_code_format = CodeFormat.NUMBER if self._code.isdigit() else CodeFormat.TEXT
+                
+        self._arm_away_as_arm_night: bool = bool(client.config.get(CONF_ARM_AWAY_AS_ARM_NIGHT, DEFAULT_ARM_AWAY_AS_ARM_NIGHT))
+        self._attr_code_arm_required: bool = client.config.get(CONF_CODE_ARM_REQUIRED, True) if self._code else False
 
         self._attr_device_info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
@@ -148,21 +159,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def name(self) -> str:
         """Return the name of the device."""
         return self.installation.alias
-
-    @property
-    def code_format(self) -> CodeFormat:
-        """Return one or more digits/characters."""
-        return CodeFormat.NUMBER
-
-    @property
-    def code_arm_required(self) -> bool:
-        """Whether the code is required for arm actions."""
-        return False
-
-    @property
-    def changed_by(self) -> str:
-        """Return the last change triggered by."""
-        return self._changed_by
 
     async def get_arm_state(self) -> CheckAlarmStatus:
         """Get alarm state."""
@@ -201,8 +197,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self._attr_extra_state_attributes["response_data"] = (
                 status.protomResponseData
             )
-            # self._time = datetime.datetime.fromisoformat(status.protomResponseData)
-
+            
             if status.protomResponse == "D":
                 self._state = AlarmControlPanelState.DISARMED
             elif status.protomResponse == "T":
@@ -213,26 +208,29 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = AlarmControlPanelState.ARMED_HOME
             elif status.protomResponse in ("E", "B", "C", "A"):
                 self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+                
+    def _check_code_for_arm_if_required(self, code: str | None) -> bool:
+        """Check that the code entered in the panel matches the code in the config only if arm require code is enable."""
+        if not self.code_arm_required:
+            return True
+        return self._check_code(code)
 
-    def check_code(self, code=None) -> bool:
+    def _check_code(self, code: str | None) -> bool:
         """Check that the code entered in the panel matches the code in the config."""
-
-        result: bool = False
-
-        if (
-            self.client.config.get(CONF_CODE, "") == ""
-            or str(self.client.config.get(CONF_CODE, "")) == str(code)
-            or self.client.config.get(CONF_CODE, None) is None
-        ):
-            result = True
-        else:
-            _LOGGER.info("PIN doesn't match")
-
+        result: bool = not self._code or self._code == code
+        if not result:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_pin_code",
+                translation_placeholders={
+                    "entity_id": self.entity_id,
+                },
+            )
         return result
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
-        if self.check_code(code):
+        if self._check_code(code):
             self.__force_state(AlarmControlPanelState.DISARMING)
             disarm_status: DisarmStatus = DisarmStatus()
             try:
@@ -279,25 +277,28 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_alarm_arm_home(self, code: str | None = None):
         """Send arm home command."""
-        if self.check_code(code):
+        if self._check_code_for_arm_if_required(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
     async def async_alarm_arm_away(self, code: str | None = None):
         """Send arm away command."""
-        if self.check_code(code):
+        if self._arm_away_as_arm_night:
+            await self.async_alarm_arm_night(code)
+            return
+        if self._check_code_for_arm_if_required(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
     async def async_alarm_arm_night(self, code: str | None = None):
         """Send arm home command."""
-        if self.check_code(code):
+        if self._check_code_for_arm_if_required(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
     async def async_alarm_arm_custom_bypass(self, code: str | None = None):
         """Send arm perimeter command."""
-        if self.check_code(code):
+        if self._check_code_for_arm_if_required(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
