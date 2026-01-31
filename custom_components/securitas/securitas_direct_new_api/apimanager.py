@@ -82,7 +82,7 @@ class ApiManager:
         self.uuid: str = uuid
         self.id_device_indigitall: str = id_device_indigitall
         self.device_brand = "samsung"
-        self.device_name = "SM-S901U"  # Samsung Galaxy S22
+        self.device_name = "SM-S901U"
         self.device_os_version = "12"
         self.device_resolution = ""
         self.device_type = ""
@@ -147,14 +147,16 @@ class ApiManager:
             self.uuid,
             self.id_device_indigitall,
         )
+
         try:
             async with self.http_client.post(
                 self.api_url, headers=headers, json=content
             ) as response:
                 response_text: str = await response.text()
-        except ClientConnectorError as err:
+        except Exception as err:
+            # FIX: Si hay error de red, lanzamos excepción antes de intentar leer JSON
             raise SecuritasDirectError(
-                f"Connection error with URL {self.api_url}", None, headers, content
+                f"Connection error with URL {self.api_url}: {str(err)}", None, headers, content
             ) from err
 
         _LOGGER.debug("--------------Response--------------")
@@ -168,6 +170,7 @@ class ApiManager:
 
         if (
             "errors" in response_dict
+            and isinstance(response_dict["errors"], dict)
             and "data" in response_dict["errors"]
             and "reason" in response_dict["errors"]["data"]
         ):
@@ -211,7 +214,7 @@ class ApiManager:
 
     async def _check_authentication_token(self) -> None:
         """Check expiration of the authentication token and get a new one if needed."""
-        if (self.authentication_token is None) or (
+        if (not self.authentication_token) or (
             datetime.now() + timedelta(minutes=1) > self.authentication_token_exp
         ):
             _LOGGER.debug("Authentication token expired, logging in again")
@@ -223,12 +226,7 @@ class ApiManager:
             "OWA_______________"
             + self.username
             + "_______________"
-            + str(current.year)
-            + str(current.month)
-            + str(current.day)
-            + str(current.hour)
-            + str(current.minute)
-            + str(current.microsecond)
+            + current.strftime("%Y%m%d%H%M%S%f")
         )
 
     async def logout(self):
@@ -241,16 +239,15 @@ class ApiManager:
         await self._execute_request(content, "Logout")
 
     def _extract_otp_data(self, data) -> tuple[str, list[OtpPhone]]:
-        otp_hash = data["auth-otp-hash"]
+        if not data:
+            return (None, [])
+        otp_hash = data.get("auth-otp-hash")
         phones: list[OtpPhone] = []
-        for item in data["auth-phones"]:
+        for item in data.get("auth-phones", []):
             phones.append(OtpPhone(item["id"], item["phone"]))
-
         return (otp_hash, phones)
 
-    async def validate_device(
-        self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
-    ) -> tuple[str, list[OtpPhone]]:
+    async def validate_device(self, otp_succeed: bool = False, auth_otp_hash: str = None, sms_code: str = None) -> tuple:
         """Validate the device."""
         content = {
             "operationName": "mkValidateDevice",
@@ -268,18 +265,20 @@ class ApiManager:
 
         if otp_succeed:
             self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
-        response = {}
+        
         try:
             response = await self._execute_request(content, "mkValidateDevice")
             self.authentication_otp_challenge_value = None
+            self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
+            return (None, None)
         except SecuritasDirectError as err:
-            return self._extract_otp_data(err.args[1]["errors"][0]["data"])
-
-        if "errors" in response and response["errors"][0]["message"] == "Unauthorized":
-            return self._extract_otp_data(response["errors"][0]["data"])
-
-        self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
-        return (None, None)
+            # FIX: Comprobar None para evitar crash por DNS/Red
+            if len(err.args) > 1 and err.args[1] is not None:
+                try:
+                    return self._extract_otp_data(err.args[1]["errors"][0]["data"])
+                except (KeyError, IndexError, TypeError):
+                    pass
+            raise err
 
     async def refresh_token(self) -> bool:
         """Send a login refresh."""
@@ -295,8 +294,7 @@ class ApiManager:
             "query": "mutation RefreshLogin($refreshToken: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) {\n  xSRefreshLogin(refreshToken: $refreshToken, id: $id, country: $country, lang: $lang, callby: $callby, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) {\n    __typename\n    res\n    msg\n    hash\n    refreshToken\n    legals\n    changePassword\n    needDeviceAuthorization\n    mainUser\n  }\n}",
         }
         response = await self._execute_request(content, "RefreshLogin")
-
-        return response["data"]["xSSendOtp"]["res"]
+        return response["data"]["xSRefreshLogin"]["res"] == "OK"
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
         """Send the OTP device challenge."""
@@ -309,8 +307,7 @@ class ApiManager:
             "query": "mutation mkSendOTP($recordId: Int!, $otpHash: String!) {\n  xSSendOtp(recordId: $recordId, otpHash: $otpHash) {\n    res\n    msg\n  }\n}\n",
         }
         response = await self._execute_request(content, "mkSendOTP")
-
-        return response["data"]["xSSendOtp"]["res"]
+        return response["data"]["xSSendOtp"]["res"] == "OK"
 
     async def login(self) -> None:
         """Send Login info and sets authentication token."""
@@ -336,14 +333,14 @@ class ApiManager:
             "query": "mutation mkLoginToken($user: String!, $password: String!, $id: String!, $country: String!, $lang: String!, $callby: String!, $idDevice: String!, $idDeviceIndigitall: String!, $deviceType: String!, $deviceVersion: String!, $deviceResolution: String!, $deviceName: String!, $deviceBrand: String!, $deviceOsVersion: String!, $uuid: String!) { xSLoginToken(user: $user, password: $password, country: $country, lang: $lang, callby: $callby, id: $id, idDevice: $idDevice, idDeviceIndigitall: $idDeviceIndigitall, deviceType: $deviceType, deviceVersion: $deviceVersion, deviceResolution: $deviceResolution, deviceName: $deviceName, deviceBrand: $deviceBrand, deviceOsVersion: $deviceOsVersion, uuid: $uuid) { __typename res msg hash refreshToken legals changePassword needDeviceAuthorization mainUser } }",
         }
 
-        response = {}
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            result_json = err.args[1]
-            if result_json.get("data") and result_json["data"].get("xSLoginToken"):
-                if result_json["data"]["xSLoginToken"].get("needDeviceAuthorization"):
-                    raise Login2FAError(err.args) from err
+            result_json = err.args[1] if len(err.args) > 1 else None
+            if result_json and result_json.get("data"):
+                if result_json["data"].get("xSLoginToken"):
+                    if result_json["data"]["xSLoginToken"].get("needDeviceAuthorization"):
+                        raise Login2FAError(err.args) from err
             raise LoginError(err.args) from err
 
         if "errors" in response:
@@ -356,20 +353,18 @@ class ApiManager:
         if response["data"]["xSLoginToken"]["hash"] is not None:
             self.authentication_token = response["data"]["xSLoginToken"]["hash"]
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
-
             try:
                 token = jwt.decode(
                     self.authentication_token,
                     algorithms=["HS256"],
                     options={"verify_signature": False},
                 )
+                if "exp" in token:
+                    self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
             except jwt.exceptions.DecodeError as err:
                 raise SecuritasDirectError(
                     f"Failed to decode authentication token {self.authentication_token}"
                 ) from err
-
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
         else:
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
@@ -380,17 +375,27 @@ class ApiManager:
             "query": "query mkInstallationList {\n  xSInstallations {\n    installations {\n      numinst\n      alias\n      panel\n      type\n      name\n      surname\n      address\n      city\n      postcode\n      province\n      email\n      phone\n    }\n  }\n}\n",
         }
         response = await self._execute_request(content, "mkInstallationList")
-
         result: list[Installation] = []
         raw_installations = response["data"]["xSInstallations"]["installations"]
         for item in raw_installations:
-            installation_item: Installation = Installation(
-                item["numinst"], item["alias"], item["panel"], item["type"],
-                item["name"], item["surname"], item["address"], item["city"],
-                item["postcode"], item["province"], item["email"], item["phone"],
-                "", datetime.min,
+            result.append(
+                Installation(
+                    item["numinst"],
+                    item["alias"],
+                    item["panel"],
+                    item["type"],
+                    item["name"],
+                    item["surname"],
+                    item["address"],
+                    item["city"],
+                    item["postcode"],
+                    item["province"],
+                    item["email"],
+                    item["phone"],
+                    "",
+                    datetime.min,
+                )
             )
-            result.append(installation_item)
         return result
 
     async def check_alarm(self, installation: Installation) -> str:
@@ -406,130 +411,137 @@ class ApiManager:
         return response["data"]["xSCheckAlarm"]["referenceId"]
 
     async def get_all_services(self, installation: Installation) -> list[Service]:
-        """Get the list of all services available."""
+        """Get the list of all services available to the user."""
         content = {
             "operationName": "Srv",
             "variables": {"numinst": installation.number, "uuid": self.uuid},
             "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      numinst\n      role\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        request\n        minWrapperVersion\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        attributes {\n          attributes {\n            name\n            value\n            active\n          }\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
         response = await self._execute_request(content, "Srv")
-
-        result: list[Service] = []
         raw_data = response["data"]["xSSrv"]["installation"]["services"]
-        installation.capabilities = response["data"]["xSSrv"]["installation"]["capabilities"]
+        installation.capabilities = response["data"]["xSSrv"]["installation"][
+            "capabilities"
+        ]
         try:
             token = jwt.decode(
-                installation.capabilities, algorithms=["HS256"], options={"verify_signature": False},
+                installation.capabilities,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
             )
+            if "exp" in token:
+                installation.capabilities_exp = datetime.fromtimestamp(token["exp"])
         except jwt.exceptions.DecodeError as err:
-            raise SecuritasDirectError(f"Failed to decode capabilities token {installation.capabilities}") from err
+            raise SecuritasDirectError(
+                f"Failed to decode capabilities token {installation.capabilities}"
+            ) from err
 
-        if "exp" in token:
-            installation.capabilities_exp = datetime.fromtimestamp(token["exp"])
-
+        result: list[Service] = []
         for item in raw_data:
             attribute_list: list[Attribute] = []
             attributes = item.get("attributes")
-            if attributes and attributes.get("attributes"):
-                for attribute_item in attributes["attributes"]:
+            if attributes is not None:
+                for attr in attributes["attributes"]:
                     attribute_list.append(
-                        Attribute(attribute_item["name"], attribute_item["value"], bool(attribute_item["active"]))
+                        Attribute(attr["name"], attr["value"], bool(attr["active"]))
                     )
-
             result.append(
                 Service(
-                    int(item["idService"]), int(item["idService"]), bool(item["active"]),
-                    bool(item["visible"]), bool(item["bde"]), bool(item["isPremium"]),
-                    bool(item["codOper"]), int(item.get("totalDevice", 0)), item["request"],
-                    False, 0, False, item["minWrapperVersion"], item.get("description", ""),
-                    attribute_list, [], [], installation,
+                    int(item["idService"]),
+                    int(item["idService"]),
+                    bool(item["active"]),
+                    bool(item["visible"]),
+                    bool(item["bde"]),
+                    bool(item["isPremium"]),
+                    bool(item["codOper"]),
+                    int(item.get("totalDevice", 0)),
+                    item["request"],
+                    False,
+                    0,
+                    # datetime.fromtimestamp(item['instDate']/1000),
+                    False,
+                    item["minWrapperVersion"],
+                    item.get("description", ""),
+                    attribute_list,
+                    [],
+                    [],
+                    installation,
                 )
             )
         return result
 
-    async def get_sentinel_data(self, installation: Installation, service: Service) -> Sentinel:
+    async def get_sentinel_data(
+        self, installation: Installation, service: Service
+    ) -> Sentinel:
         """Get sentinel status."""
+        # FIX: Evitar IndexError
+        if not service.attributes or len(service.attributes) == 0:
+            return Sentinel("Desconocido", "", 0, 0)
+            
         content = {
             "operationName": "Sentinel",
             "variables": {"numinst": installation.number},
-            "query": "query Sentinel($numinst: String!) {\n  xSComfort(numinst: $numinst) {\n    res\n    devices {\n      alias\n      status {\n        temperature\n        humidity\n        airQualityCode\n      }\n      zone\n    }\n    forecast {\n      city\n      currentHum\n      currentTemp\n      forecastCode\n      forecastedDays {\n        date\n        forecastCode\n        maxTemp\n        minTemp\n      }\n    }\n  }\n}",
+            "query": "query Sentinel($numinst: String!) {\n  xSComfort(numinst: $numinst) {\n    res\n    devices {\n      alias\n      status {\n        temperature\n        humidity\n        airQualityCode\n      }\n      zone\n    }\n  }\n}",
         }
-
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Sentinel", installation)
-
         if "errors" in response:
             return Sentinel("", "", 0, 0)
 
-        # FIX: Ensure attributes exist before accessing index 0
-        if not service.attributes or len(service.attributes) == 0:
-            _LOGGER.warning("No attributes found for sentinel service %s. Skipping.", service.id)
-            return Sentinel("", "", 0, 0)
-
         zone = service.attributes[0].value
-        devices = response["data"]["xSComfort"]["devices"]
-        target_device = None
-        
-        for device in devices:
+        for device in response["data"]["xSComfort"]["devices"]:
             if device.get("zone") == zone:
-                target_device = device
-                break
-        
-        if target_device is None:
-            return Sentinel("", "", 0, 0)
+                return Sentinel(
+                    device["alias"],
+                    "",
+                    int(device["status"]["humidity"]),
+                    int(device["status"]["temperature"]),
+                )
+        return Sentinel("", "", 0, 0)
 
-        return Sentinel(
-            target_device["alias"], "",
-            int(target_device["status"]["humidity"]),
-            int(target_device["status"]["temperature"]),
-        )
-
-    async def get_air_quality_data(self, installation: Installation, service: Service) -> AirQuality:
-        """Get air quality."""
-        # FIX: Safety check for zone attribute
-        zone_val = "0"
-        if service.attributes and len(service.attributes) > 0:
-            zone_val = str(service.attributes[0].value)
-
+    async def get_air_quality_data(
+        self, installation: Installation, service: Service
+    ) -> AirQuality:
+        """Get air quality status."""
+        # FIX: Evitar IndexError
+        if not service.attributes or len(service.attributes) == 0:
+            return AirQuality(0, "Sin datos")
+            
         content = {
             "operationName": "AirQualityGraph",
-            "variables": {"numinst": installation.number, "zone": zone_val},
-            "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        avg6h\n        avg6hMsg\n        avg24h\n        avg24hMsg\n        avg7d\n        avg7dMsg\n        avg4w\n        avg4wMsg\n        current\n        currentMsg\n      }\n      daysTotal\n      days {\n        id\n        value\n      }\n      hoursTotal\n      hours {\n        id\n        value\n      }\n      weeksTotal\n      weeks {\n        id\n        value\n      }\n    }\n  }\n}",
+            "variables": {
+                "numinst": installation.number,
+                "zone": str(service.attributes[0].value),
+            },
+            "query": "query AirQualityGraph($numinst: String!, $zone: String!) {\n  xSAirQ(numinst: $numinst, zone: $zone) {\n    res\n    msg\n    graphData {\n      status {\n        current\n        currentMsg\n      }\n    }\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "AirQualityGraph")
-
         if "errors" in response:
             return AirQuality(0, "")
-
-        raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
-        return AirQuality(int(raw_data["current"]), raw_data["currentMsg"])
+        raw = response["data"]["xSAirQ"]["graphData"]["status"]
+        return AirQuality(int(raw["current"]), raw["currentMsg"])
 
     async def check_general_status(self, installation: Installation) -> SStatus:
-        """Check current status."""
+        """Check current status of the alarm."""
         content = {
             "operationName": "Status",
             "variables": {"numinst": installation.number},
-            "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
+            "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "Status", installation)
-
-        if "errors" in response:
-            _LOGGER.error(response)
-            return SStatus(None, None)
-
         if "data" in response:
-            raw_data = response["data"]["xSStatus"]
-            return SStatus(raw_data["status"], raw_data["timestampUpdate"])
-
+            raw = response["data"]["xSStatus"]
+            return SStatus(raw["status"], raw["timestampUpdate"])
         return SStatus(None, None)
 
-    async def check_alarm_status(self, installation: Installation, reference_id: str, timeout: int = 10) -> CheckAlarmStatus:
-        """Return status."""
+    async def check_alarm_status(
+        self, installation: Installation, reference_id: str, timeout: int = 10
+    ) -> CheckAlarmStatus:
+        """Return the status of the alarm."""
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         count = 1
@@ -538,140 +550,196 @@ class ApiManager:
 
         while ((count == 1) or (raw_data.get("res") == "WAIT")) and (count <= max_count):
             await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_alarm_status(installation, reference_id, count)
-            count += 1
+            raw_data = await self._check_alarm_status_internal(
+                installation, reference_id, count
+            )
+            count = count + 1
 
-        self.protom_response = raw_data["protomResponse"]
+        self.protom_response = raw_data.get("protomResponse", "")
         return CheckAlarmStatus(
-            raw_data["res"], raw_data["msg"], raw_data["status"],
-            raw_data["numinst"], raw_data["protomResponse"], raw_data["protomResponseDate"],
+            raw_data.get("res"),
+            raw_data.get("msg"),
+            raw_data.get("status"),
+            raw_data.get("numinst"),
+            raw_data.get("protomResponse"),
+            raw_data.get("protomResponseDate"),
         )
 
-    async def _check_alarm_status(self, installation: Installation, reference_id: str, count: int) -> dict[str, Any]:
+    async def _check_alarm_status_internal(
+        self,
+        installation: Installation,
+        reference_id: str,
+        count: int,
+    ) -> dict[str, Any]:
         content = {
             "operationName": "CheckAlarmStatus",
             "variables": {
-                "numinst": installation.number, "panel": installation.panel,
-                "referenceId": reference_id, "idService": "11", "counter": count,
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": reference_id,
+                "idService": "11",
+                "counter": count,
             },
-            "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
+            "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(\n    numinst: $numinst\n    idService: $idService\n    panel: $panel\n    referenceId: $referenceId\n  ) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
         }
         response = await self._execute_request(content, "CheckAlarmStatus", installation)
         return response["data"]["xSCheckAlarmStatus"]
 
-    async def arm_alarm(self, installation: Installation, mode: SecDirAlarmState) -> ArmStatus:
+    async def arm_alarm(
+        self, installation: Installation, mode: SecDirAlarmState
+    ) -> ArmStatus:
+        """Arms the alarm."""
         content = {
             "operationName": "xSArmPanel",
             "variables": {
-                "request": self.command_map[mode], "numinst": installation.number,
-                "panel": installation.panel, "currentStatus": self.protom_response,
+                "request": self.command_map[mode],
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "currentStatus": self.protom_response,
             },
-            "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
+            "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(\n    numinst: $numinst\n    request: $request\n    panel: $panel\n    currentStatus: $currentStatus\n  ) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel", installation)
-        response = response["data"]["xSArmPanel"]
-        if response["res"] != "OK":
-            raise SecuritasDirectError(response["msg"], response)
+        res_data = response["data"]["xSArmPanel"]
+        if res_data["res"] != "OK":
+            raise SecuritasDirectError(res_data["msg"], res_data)
 
-        reference_id = response["referenceId"]
+        ref_id = res_data["referenceId"]
         count = 1
         raw_data: dict[str, Any] = {}
         while (count == 1) or (raw_data.get("res") == "WAIT"):
             await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_arm_status(installation, reference_id, mode, count)
-            count += 1
+            raw_data = await self._check_arm_status_internal(
+                installation, ref_id, mode, count
+            )
+            count = count + 1
 
-        self.protom_response = raw_data["protomResponse"]
+        self.protom_response = raw_data.get("protomResponse", "")
         return ArmStatus(
-            raw_data["res"], raw_data["msg"], raw_data["status"],
-            raw_data["numinst"], raw_data["protomResponse"], raw_data["protomResponseDate"],
-            raw_data["requestId"], raw_data["error"],
+            raw_data.get("res"),
+            raw_data.get("msg"),
+            raw_data.get("status"),
+            raw_data.get("numinst"),
+            raw_data.get("protomResponse"),
+            raw_data.get("protomResponseDate"),
+            raw_data.get("requestId"),
+            raw_data.get("error"),
         )
 
-    async def _check_arm_status(self, installation: Installation, reference_id: str, mode: SecDirAlarmState, counter: int) -> dict[str, Any]:
+    async def _check_arm_status_internal(
+        self,
+        installation: Installation,
+        reference_id: str,
+        mode: SecDirAlarmState,
+        counter: int,
+    ) -> dict[str, Any]:
         content = {
             "operationName": "ArmStatus",
             "variables": {
-                "request": self.command_map[mode], "numinst": installation.number,
-                "panel": installation.panel, "currentStatus": self.protom_response,
-                "referenceId": reference_id, "counter": counter,
+                "request": self.command_map[mode],
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "currentStatus": self.protom_response,
+                "referenceId": reference_id,
+                "counter": counter,
             },
-            "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
+            "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(\n    numinst: $numinst\n    panel: $panel\n    referenceId: $referenceId\n    counter: $counter\n    request: $request\n  ) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
         response = await self._execute_request(content, "ArmStatus", installation)
         return response["data"]["xSArmStatus"]
 
     async def disarm_alarm(self, installation: Installation) -> DisarmStatus:
+        """Disarm the alarm."""
         content = {
             "operationName": "xSDisarmPanel",
             "variables": {
                 "request": self.command_map[SecDirAlarmState.TOTAL_DISARMED],
-                "numinst": installation.number, "panel": installation.panel,
-                "currentStatus": self.protom_response,
+                "numinst": installation.number,
+                "panel": installation.panel,
             },
             "query": "mutation xSDisarmPanel($numinst: String!, $request: DisarmCodeRequest!, $panel: String!) {\n  xSDisarmPanel(numinst: $numinst, request: $request, panel: $panel) {\n    res\n    msg\n    referenceId\n  }\n}\n",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel", installation)
-        response = response["data"]["xSDisarmPanel"]
-        if "res" in response and response["res"] != "OK":
-            raise SecuritasDirectError(response["msg"], response)
+        res_data = response["data"]["xSDisarmPanel"]
+        if res_data.get("res") != "OK":
+            raise SecuritasDirectError(res_data.get("msg"), res_data)
 
-        reference_id = response["referenceId"]
+        ref_id = res_data["referenceId"]
         count = 1
         raw_data: dict[str, Any] = {}
         while (count == 1) or raw_data.get("res") == "WAIT":
             await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_disarm_status(installation, reference_id, SecDirAlarmState.TOTAL_DISARMED, count)
-            count += 1
+            raw_data = await self._check_disarm_status_internal(
+                installation,
+                ref_id,
+                SecDirAlarmState.TOTAL_DISARMED,
+                count,
+            )
+            count = count + 1
 
-        self.protom_response = raw_data["protomResponse"]
+        self.protom_response = raw_data.get("protomResponse", "")
         return DisarmStatus(
-            raw_data["error"], raw_data["msg"], raw_data["numinst"],
-            raw_data["protomResponse"], raw_data["protomResponseDate"],
-            raw_data["requestId"], raw_data["res"], raw_data["status"],
+            raw_data.get("error"),
+            raw_data.get("msg"),
+            raw_data.get("numinst"),
+            raw_data.get("protomResponse"),
+            raw_data.get("protomResponseDate"),
+            raw_data.get("requestId"),
+            raw_data.get("res"),
+            raw_data.get("status"),
         )
 
-    async def _check_disarm_status(self, installation: Installation, reference_id: str, arm_type: SecDirAlarmState, counter: int) -> dict[str, Any]:
+    async def _check_disarm_status_internal(
+        self,
+        installation: Installation,
+        reference_id: str,
+        arm_type: SecDirAlarmState,
+        counter: int,
+    ) -> dict[str, Any]:
         content = {
             "operationName": "DisarmStatus",
             "variables": {
-                "request": self.command_map[arm_type], "numinst": installation.number,
-                "panel": installation.panel, "currentStatus": self.protom_response,
-                "referenceId": reference_id, "counter": counter,
+                "request": self.command_map[arm_type],
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "currentStatus": self.protom_response,
+                "referenceId": reference_id,
+                "counter": counter,
             },
-            "query": "query DisarmStatus($numinst: String!, $panel: String!, $referenceId: String!, $counter: Int!, $request: DisarmCodeRequest) {\n  xSDisarmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
+            "query": "query DisarmStatus($numinst: String!, $panel: String!, $referenceId: String!, $counter: Int!, $request: DisarmCodeRequest) {\n  xSDisarmStatus(\n    numinst: $numinst\n    panel: $panel\n    referenceId: $referenceId\n    counter: $counter\n    request: $request\n  ) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
         }
         response = await self._execute_request(content, "DisarmStatus", installation)
         return response["data"]["xSDisarmStatus"]
 
     async def get_smart_lock_config(self, installation: Installation) -> SmartLock:
+        """Get the smart lock configuration."""
         content = {
             "operationName": "xSGetSmartlockConfig",
             "variables": {
-                "numinst": installation.number, "panel": installation.panel,
-                "devices": [{"deviceType": "DR", "deviceId": "01", "keytype": "0"}]
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "devices": [{"deviceType": "DR", "deviceId": "01", "keytype": "0"}],
             },
             "query": "query xSGetSmartlockConfig($numinst: String!, $panel: String!, $devices: [SmartlockDevicesInfo]!) {\n  xSGetSmartlockConfig(numinst: $numinst, panel: $panel, devices: $devices) {\n    res\n    referenceId\n    zoneId\n    serialNumber\n    location\n    family\n    type\n    label\n    features {\n      holdBackLatchTime\n      calibrationType\n      autolock {\n        active\n        timeout\n      }\n    }\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSGetSmartlockConfig", installation)
-
-        if "errors" in response:
-            _LOGGER.error(response)
-            return SmartLock(None, None, None)
-
+        response = await self._execute_request(
+            content, "xSGetSmartlockConfig", installation
+        )
         if "data" in response:
-            raw_data = response["data"]["xSGetSmartlockConfig"]
-            return SmartLock(raw_data["res"], raw_data["location"], raw_data["type"])
+            raw = response["data"]["xSGetSmartlockConfig"]
+            return SmartLock(raw.get("res"), raw.get("location"), raw.get("type"))
         return SmartLock(None, None, None)
-    
-    async def get_lock_current_mode(self, installation: Installation) -> SmartLockMode:
-        """Get current lock mode."""
+
+    async def get_lock_current_mode(
+        self, installation: Installation
+    ) -> SmartLockMode:
+        """Get the current mode of the smart lock."""
         content = {
             "operationName": "xSGetLockCurrentMode",
             "variables": {"numinst": installation.number},
@@ -679,58 +747,82 @@ class ApiManager:
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSGetLockCurrentMode", installation)
-
-        if "errors" in response:
-            _LOGGER.error(response)
-            return SmartLockMode(None, "0")
-
+        response = await self._execute_request(
+            content, "xSGetLockCurrentMode", installation
+        )
         if "data" in response:
-            raw_data = response["data"]["xSGetLockCurrentMode"]
-            # FIX: Ensure smartlockInfo exists before accessing index 0
-            lock_status = "0"
-            if raw_data.get("smartlockInfo") and len(raw_data["smartlockInfo"]) > 0:
-                lock_status = raw_data["smartlockInfo"][0]["lockStatus"]
-            return SmartLockMode(raw_data["res"], lock_status)
-
+            raw = response["data"]["xSGetLockCurrentMode"]
+            return SmartLockMode(
+                raw.get("res"),
+                raw["smartlockInfo"][0]["lockStatus"]
+                if raw.get("smartlockInfo")
+                else "0",
+            )
         return SmartLockMode(None, "0")
-    
-    async def change_lock_mode(self, installation: Installation, lock: bool) -> SmartLockModeStatus:
+
+    async def change_lock_mode(
+        self, installation: Installation, lock: bool
+    ) -> SmartLockModeStatus:
+        """Change the mode of the smart lock."""
         content = {
             "operationName": "xSChangeSmartlockMode",
             "variables": {
-                "numinst": installation.number, "panel": installation.panel,
-                "deviceType": "DR", "deviceId": "01", "lock": lock,
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "deviceType": "DR",
+                "deviceId": "01",
+                "lock": lock,
             },
             "query": "mutation xSChangeSmartlockMode($numinst: String!, $panel: String!, $deviceId: String!, $deviceType: String!, $lock: Boolean!) {\n  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n  ) {\n    res\n    msg\n    referenceId\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSChangeSmartlockMode", installation)
-        response = response["data"]["xSChangeSmartlockMode"]
-        if "res" in response and response["res"] != "OK":
-            raise SecuritasDirectError(response["msg"], response)
+        response = await self._execute_request(
+            content, "xSChangeSmartlockMode", installation
+        )
+        res_data = response["data"]["xSChangeSmartlockMode"]
+        if res_data.get("res") != "OK":
+            raise SecuritasDirectError(res_data.get("msg"), res_data)
 
-        reference_id = response["referenceId"]
+        reference_id = res_data["referenceId"]
         count = 1
         raw_data: dict[str, Any] = {}
         while (count == 1) or raw_data.get("res") == "WAIT":
             await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_change_lock_mode(installation, reference_id, count)
-            count += 1
+            raw_data = await self._check_change_lock_mode_internal(
+                installation,
+                reference_id,
+                count,
+            )
+            count = count + 1
 
-        await asyncio.sleep(self.delay_check_operation*7)
-        self.protom_response = raw_data["protomResponse"]
-        return SmartLockModeStatus(raw_data["res"], raw_data["msg"], raw_data["protomResponse"], raw_data["status"])
+        await asyncio.sleep(self.delay_check_operation * 7)
+        self.protom_response = raw_data.get("protomResponse", "")
+        return SmartLockModeStatus(
+            raw_data.get("res"),
+            raw_data.get("msg"),
+            raw_data.get("protomResponse"),
+            raw_data.get("status"),
+        )
 
-    async def _check_change_lock_mode(self, installation: Installation, reference_id: str, counter: int) -> dict[str, Any]:
+    async def _check_change_lock_mode_internal(
+        self,
+        installation: Installation,
+        reference_id: str,
+        counter: int,
+    ) -> dict[str, Any]:
         content = {
             "operationName": "xSChangeSmartlockModeStatus",
             "variables": {
-                "counter": counter, "deviceId": "01", "numinst": installation.number,
-                "panel": installation.panel, "referenceId": reference_id,
+                "counter": counter,
+                "deviceId": "01",
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": reference_id,
             },
             "query": "query xSChangeSmartlockModeStatus($numinst: String!, $panel: String!, $referenceId: String!, $deviceId: String, $counter: Int) {\n  xSChangeSmartlockModeStatus(\n    numinst: $numinst\n    panel: $panel\n    referenceId: $referenceId\n    counter: $counter\n    deviceId: $deviceId\n  ) {\n    res\n    msg\n    protomResponse\n    status\n  }\n}",
         }
-        response = await self._execute_request(content, "xSChangeSmartlockModeStatus", installation)
+        response = await self._execute_request(
+            content, "xSChangeSmartlockModeStatus", installation
+        )
         return response["data"]["xSChangeSmartlockModeStatus"]
