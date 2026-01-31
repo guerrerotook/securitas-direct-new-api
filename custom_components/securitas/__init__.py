@@ -61,9 +61,10 @@ DEFAULT_ARM_AWAY_AS_ARM_NIGHT = False
 DEFAULT_CODE_ARM_REQUIRED = True
 DEFAULT_CHECK_ALARM_PANEL = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
-DEFAULT_CODE = ""
 DEFAULT_PERI_ALARM = False
+DEFAULT_COUNTRY = "ES"
 
+EMPTY_CODE = ""
 
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR, Platform.LOCK]
 HUB = None
@@ -76,8 +77,8 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
-                vol.Optional(CONF_COUNTRY, default="ES"): str,
-                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
+                vol.Optional(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
+                vol.Optional(CONF_CODE, default=EMPTY_CODE): str,
                 vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
                 vol.Optional(CONF_ARM_AWAY_AS_ARM_NIGHT, default=DEFAULT_ARM_AWAY_AS_ARM_NIGHT): bool,
                 vol.Optional(CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED): bool,
@@ -134,7 +135,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_USE_2FA] = entry.data.get(CONF_USE_2FA, DEFAULT_USE_2FA)
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
-    config[CONF_CODE] = entry.data.get(CONF_CODE, DEFAULT_CODE)
+    config[CONF_CODE] = entry.data.get(CONF_CODE, None)
     config[CONF_PERI_ALARM] = entry.data.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
     config[CONF_ARM_AWAY_AS_ARM_NIGHT] = entry.data.get(
         CONF_ARM_AWAY_AS_ARM_NIGHT, DEFAULT_ARM_AWAY_AS_ARM_NIGHT
