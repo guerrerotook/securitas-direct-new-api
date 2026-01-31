@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 import homeassistant.components.lock as lock
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
@@ -28,7 +27,6 @@ from .securitas_direct_new_api import (
     SmartLockMode,
     SmartLockModeStatus,
 )
-
 from .securitas_direct_new_api.dataTypes import Service
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,22 +43,32 @@ async def async_setup_entry(
     securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
         CONF_INSTALLATION_KEY
     )
+
     for device in securitas_devices:
         services: list[Service] = await client.get_services(device.installation)
         for service in services:
             _LOGGER.debug("Service: %s", service.request)
-            if service.request == "DOORLOCK": 
+            if service.request == "DOORLOCK":
                 locks.append(
                     SecuritasLock(
                         device.installation,
-                        #state=LockState.LOCKED,
+                        # state=LockState.LOCKED,
                         client=client,
                         hass=hass,
                     )
                 )
-                async_add_entities(locks, True)
-                locks[0].async_update_status()
-                
+
+    if not locks:
+        _LOGGER.debug("No Securitas Direct DOORLOCK services found for this entry")
+        return
+
+    async_add_entities(locks, True)
+
+    # Actualiza el primer lock inmediatamente para tener estado inicial,
+    # pero solo si existe al menos uno (comprobado arriba)
+    await locks[0].async_update_status()
+
+
 class SecuritasLock(lock.LockEntity):
     def __init__(
         self,
@@ -68,8 +76,9 @@ class SecuritasLock(lock.LockEntity):
         client: SecuritasHub,
         hass: HomeAssistant,
     ) -> None:
-        self._state = "2" # locked
+        self._state = "2"  # locked
         self._last_state = "2"
+        self._new_state: str = "2"
         self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
@@ -83,11 +92,9 @@ class SecuritasLock(lock.LockEntity):
         self._update_interval: timedelta = timedelta(
             seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         )
-
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
         )
-        
         self._attr_device_info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
@@ -95,6 +102,8 @@ class SecuritasLock(lock.LockEntity):
             name=installation.alias,
             hw_version=installation.type,
         )
+        # Por defecto, asumimos que está disponible hasta el primer fallo
+        self._attr_available = True
 
     def __force_state(self, state: str) -> None:
         self._last_state = self._state
@@ -129,14 +138,23 @@ class SecuritasLock(lock.LockEntity):
         """When entity will be removed from Home Assistant."""
         if self._update_unsub:
             self._update_unsub()  # Unsubscribe from updates
+            self._update_unsub = None
 
     async def async_update(self) -> None:
         await self.async_update_status()
-    
+
     async def async_update_status(self, now=None) -> None:
-        self._new_state = await self.get_lock_state()
-        if self._new_state != "0": 
-            self._state = self._new_state
+        """Periodic status update from Securitas Direct."""
+        try:
+            self._new_state = await self.get_lock_state()
+            if self._new_state != "0":
+                self._state = self._new_state
+            # Si llegamos aquí, la entidad está disponible
+            self._attr_available = True
+        except SecuritasDirectError as err:
+            _LOGGER.error("Error updating Securitas lock state: %s", err)
+            # Marcamos la entidad como no disponible si hay error de conexión/API
+            self._attr_available = False
 
     async def get_lock_state(self) -> str:
         smartlock_status: SmartLockMode = await self.client.session.get_lock_current_mode(
@@ -181,30 +199,34 @@ class SecuritasLock(lock.LockEntity):
         return False
 
     async def async_lock(self, **kwargs):
-        self.__force_state("4") #locking
+        self.__force_state("4")  # locking
         lock_status: SmartLockModeStatus = SmartLockModeStatus()
         try:
-            lock_status = await self.client.session.change_lock_mode(self.installation, True)
+            lock_status = await self.client.session.change_lock_mode(
+                self.installation, True
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
+            # Opcional: podrías marcar unavailable aquí también
+            self._attr_available = False
             return
-        
         self._state = "2"
 
     async def async_unlock(self, **kwargs):
-        self.__force_state("3") #opening
+        self.__force_state("3")  # opening
         lock_status: SmartLockModeStatus = SmartLockModeStatus()
         try:
-            lock_status = await self.client.session.change_lock_mode(self.installation, False)
+            lock_status = await self.client.session.change_lock_mode(
+                self.installation, False
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
+            self._attr_available = False
             return
-        
         self._state = "1"
 
     @property
     def supported_features(self) -> int:
         """Return the list of supported features."""
-        return (
-            0
-        )
+        # No se declaran características extra, solo lock/unlock básico
+        return 0
