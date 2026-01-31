@@ -41,6 +41,7 @@ from . import (
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_PERI_ALARM,
     DEFAULT_SCAN_INTERVAL,
+    EMPTY_CODE,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
@@ -285,7 +286,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_CODE, default=""): str,
+                vol.Optional(CONF_CODE, default=EMPTY_CODE): str,
                 vol.Optional(CONF_CODE_ARM_REQUIRED, default=code_arm_required): bool,
                 vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
                 vol.Optional(CONF_ARM_AWAY_AS_ARM_NIGHT, default=arm_away_as_arm_night): bool,
