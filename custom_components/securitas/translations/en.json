@@ -11,6 +11,7 @@
                     "use_2FA": "Use 2FA",
                     "country": "Country Code",
                     "code": "PIN Code (leave empty for no PIN)",
+                    "code_arm_required": "PIN code is required to arm ?",
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request",
                     "scan_interval": "Update scan interval (sec)",
@@ -29,11 +30,17 @@
             }
         }
     },
+    "exceptions": {
+        "invalid_pin_code": {
+            "message": "The PIN code doesn't match with the configured one"
+        }
+    },
     "options": {
         "step": {
             "init": {
                 "data": {
                     "code": "PIN Code (leave empty for no PIN)",
+                    "code_arm_required": "PIN code is required to arm ?",
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
                     "scan_interval": "Update scan interval (sec)",
