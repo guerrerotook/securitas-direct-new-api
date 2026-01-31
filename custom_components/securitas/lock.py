@@ -59,7 +59,7 @@ async def async_setup_entry(
                     )
                 )
                 async_add_entities(locks, True)
-                locks[0].async_update_status()
+                await locks[0].async_update_status()
                 
 class SecuritasLock(lock.LockEntity):
     def __init__(
