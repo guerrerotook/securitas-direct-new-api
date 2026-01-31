@@ -46,6 +46,7 @@ DOMAIN = "securitas"
 
 CONF_COUNTRY = "country"
 CONF_ARM_AWAY_AS_ARM_NIGHT = "arm_away_as_arm_night"
+CONF_CODE_ARM_REQUIRED = "code_arm_required"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_USE_2FA = "use_2FA"
 CONF_PERI_ALARM = "PERI_alarm"
@@ -57,6 +58,7 @@ CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
 DEFAULT_USE_2FA = True
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_ARM_AWAY_AS_ARM_NIGHT = False
+DEFAULT_CODE_ARM_REQUIRED = True
 DEFAULT_CHECK_ALARM_PANEL = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
 DEFAULT_CODE = ""
@@ -78,6 +80,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
                 vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
                 vol.Optional(CONF_ARM_AWAY_AS_ARM_NIGHT, default=DEFAULT_ARM_AWAY_AS_ARM_NIGHT): bool,
+                vol.Optional(CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED): bool,
                 vol.Optional(
                     CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
                 ): bool,
@@ -110,6 +113,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         for attrib in (
             CONF_CODE,
             CONF_ARM_AWAY_AS_ARM_NIGHT,
+            CONF_CODE_ARM_REQUIRED,
             CONF_SCAN_INTERVAL,
             CONF_CHECK_ALARM_PANEL,
         )
@@ -134,6 +138,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_PERI_ALARM] = entry.data.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
     config[CONF_ARM_AWAY_AS_ARM_NIGHT] = entry.data.get(
         CONF_ARM_AWAY_AS_ARM_NIGHT, DEFAULT_ARM_AWAY_AS_ARM_NIGHT
+    )
+    config[CONF_CODE_ARM_REQUIRED] = entry.data.get(
+        CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
     )
     config[CONF_CHECK_ALARM_PANEL] = entry.data.get(
         CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL
@@ -308,7 +315,6 @@ class SecuritasHub:
         self.config = domain_config
         self.config_entry: ConfigEntry = config_entry
         self.sentinel_services: list[Service] = []
-        self.arm_away_as_arm_night: bool = domain_config[CONF_ARM_AWAY_AS_ARM_NIGHT]
         self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
         self.country: str = domain_config[CONF_COUNTRY].upper()
         self.lang: str = ApiDomains().get_language(self.country)
