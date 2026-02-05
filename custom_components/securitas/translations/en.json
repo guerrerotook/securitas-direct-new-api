@@ -11,7 +11,9 @@
                     "use_2FA": "Use 2FA",
                     "country": "Country Code",
                     "code": "PIN Code (leave empty for no PIN)",
+                    "code_arm_required": "PIN code is required to arm ?",
                     "PERI_alarm": "Is there a Perimetral alarm?",
+                    "arm_away_as_arm_night": "Arm away button put the alarm in night mode (usefull if no away mode is configured)",
                     "check_alarm_panel": "Check alarm panel's status in every request",
                     "scan_interval": "Update scan interval (sec)",
                     "delay_check_operation":"Delay to check the arming and disarming operations (sec)"
@@ -29,12 +31,19 @@
             }
         }
     },
+    "exceptions": {
+        "invalid_pin_code": {
+            "message": "The PIN code doesn't match with the configured one"
+        }
+    },
     "options": {
         "step": {
             "init": {
                 "data": {
                     "code": "PIN Code (leave empty for no PIN)",
+                    "code_arm_required": "PIN code is required to arm ?",
                     "PERI_alarm": "Is there a Perimetral alarm?",
+                    "arm_away_as_arm_night": "Arm away button put the alarm in night mode (usefull if no away mode is configured)",
                     "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
                     "scan_interval": "Update scan interval (sec)",
                     "delay_check_operation": "Delay to check the arming and disarming operation (sec)"
