@@ -446,7 +446,11 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "CheckAlarm", installation)
 
-        return response["data"]["xSCheckAlarm"]["referenceId"]
+        check_alarm = response.get("data", {}).get("xSCheckAlarm")
+        if check_alarm is None:
+            raise SecuritasDirectError("API returned no check alarm data")
+
+        return check_alarm["referenceId"]
 
     async def get_all_services(self, installation: Installation) -> list[Service]:
         """Get the list of all services available to the user."""
