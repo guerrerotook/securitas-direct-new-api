@@ -457,11 +457,14 @@ class ApiManager:
         }
         response = await self._execute_request(content, "Srv")
 
+        installation_data = response.get("data", {}).get("xSSrv", {}).get("installation")
+        if installation_data is None:
+            _LOGGER.warning("API returned no installation data for %s", installation.number)
+            return []
+
         result: list[Service] = []
-        raw_data = response["data"]["xSSrv"]["installation"]["services"]
-        installation.capabilities = response["data"]["xSSrv"]["installation"][
-            "capabilities"
-        ]
+        raw_data = installation_data["services"]
+        installation.capabilities = installation_data["capabilities"]
         try:
             token = jwt.decode(
                 installation.capabilities,
