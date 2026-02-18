@@ -363,8 +363,8 @@ class ApiManager:
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            result_json = err.args[1]
-            if result_json.get("data"):
+            result_json = err.args[1] if len(err.args) > 1 else None
+            if result_json and result_json.get("data"):
                 if result_json["data"].get("xSLoginToken"):
                     if result_json["data"]["xSLoginToken"].get("needDeviceAuthorization"):
                         # needs a 2FA
