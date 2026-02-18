@@ -461,7 +461,8 @@ class ApiManager:
         }
         response = await self._execute_request(content, "Srv")
 
-        installation_data = response.get("data", {}).get("xSSrv", {}).get("installation")
+        installation_data = (response.get("data") or {}).get("xSSrv") or {}
+        installation_data = installation_data.get("installation")
         if installation_data is None:
             _LOGGER.warning("API returned no installation data for %s", installation.number)
             return []
