@@ -9,6 +9,7 @@ from aiohttp import ClientSession
 import voluptuous as vol
 
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -230,17 +231,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Could not log in to Securitas %s", err.args)
             return False
         except SecuritasDirectError as err:
-            _LOGGER.error("Could not log in to Securitas %s", err.args)
-            return False
+            raise ConfigEntryNotReady(
+                f"Unable to connect to Securitas Direct: {err}"
+            ) from err
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
-            installations: list[
-                Installation
-            ] = await client.session.list_installations()
-            devices: list[SecuritasDirectDevice] = []
-            for installation in installations:
-                await client.get_services(installation)
-                devices.append(SecuritasDirectDevice(installation))
+            try:
+                installations: list[
+                    Installation
+                ] = await client.session.list_installations()
+                devices: list[SecuritasDirectDevice] = []
+                for installation in installations:
+                    await client.get_services(installation)
+                    devices.append(SecuritasDirectDevice(installation))
+            except SecuritasDirectError as err:
+                raise ConfigEntryNotReady(
+                    f"Unable to connect to Securitas Direct: {err}"
+                ) from err
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
