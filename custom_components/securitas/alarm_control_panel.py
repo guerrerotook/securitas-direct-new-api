@@ -128,7 +128,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         if self._code:
             self._attr_code_format = CodeFormat.NUMBER if self._code.isdigit() else CodeFormat.TEXT
                 
-        self._arm_away_as_arm_night: bool = bool(client.config.get(CONF_ARM_AWAY_AS_ARM_NIGHT, DEFAULT_ARM_AWAY_AS_ARM_NIGHT))
         self._attr_code_arm_required: bool = client.config.get(CONF_CODE_ARM_REQUIRED, True) if self._code else False
 
         self._attr_device_info: DeviceInfo = DeviceInfo(
