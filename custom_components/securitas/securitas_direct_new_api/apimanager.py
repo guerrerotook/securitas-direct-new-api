@@ -300,7 +300,10 @@ class ApiManager:
             # the API call succeeds but is unauthorized
             return self._extract_otp_data(response["errors"][0]["data"])
 
-        self.authentication_token = response["data"]["xSValidateDevice"]["hash"]
+        validate_data = response["data"]["xSValidateDevice"]
+        if validate_data is None:
+            raise SecuritasDirectError("xSValidateDevice response is None", response)
+        self.authentication_token = validate_data["hash"]
         return (None, None)
 
     async def refresh_token(self) -> bool:
@@ -318,7 +321,10 @@ class ApiManager:
         }
         response = await self._execute_request(content, "RefreshLogin")
 
-        return response["data"]["xSSendOtp"]["res"]
+        otp_data = response["data"]["xSSendOtp"]
+        if otp_data is None:
+            raise SecuritasDirectError("xSSendOtp response is None", response)
+        return otp_data["res"]
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
         """Send the OTP device challenge."""
@@ -332,7 +338,10 @@ class ApiManager:
         }
         response = await self._execute_request(content, "mkSendOTP")
 
-        return response["data"]["xSSendOtp"]["res"]
+        otp_data = response["data"]["xSSendOtp"]
+        if otp_data is None:
+            raise SecuritasDirectError("xSSendOtp response is None", response)
+        return otp_data["res"]
 
     async def login(self) -> None:
         """Send Login info and sets authentication token."""
@@ -377,12 +386,15 @@ class ApiManager:
             raise LoginError(response["errors"][0]["message"], response)
 
         # Check if 2FA is required even on successful response
-        if response["data"]["xSLoginToken"].get("needDeviceAuthorization", False):
+        login_data = response["data"]["xSLoginToken"]
+        if login_data is None:
+            raise SecuritasDirectError("xSLoginToken response is None", response)
+        if login_data.get("needDeviceAuthorization", False):
             # needs a 2FA
             raise Login2FAError("2FA authentication required", response)
 
-        if response["data"]["xSLoginToken"]["hash"] is not None:
-            self.authentication_token = response["data"]["xSLoginToken"]["hash"]
+        if login_data["hash"] is not None:
+            self.authentication_token = login_data["hash"]
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
             try:
@@ -411,7 +423,10 @@ class ApiManager:
         response = await self._execute_request(content, "mkInstallationList")
 
         result: list[Installation] = []
-        raw_installations = response["data"]["xSInstallations"]["installations"]
+        installations_data = response["data"]["xSInstallations"]
+        if installations_data is None:
+            raise SecuritasDirectError("xSInstallations response is None", response)
+        raw_installations = installations_data["installations"]
         for item in raw_installations:
             installation_item: Installation = Installation(
                 item["numinst"],
@@ -546,7 +561,10 @@ class ApiManager:
             return Sentinel("", "", 0, 0)
 
         zone = service.attributes[0].value
-        devices = response["data"]["xSComfort"]["devices"]
+        comfort_data = response["data"]["xSComfort"]
+        if comfort_data is None:
+            return Sentinel("", "", 0, 0)
+        devices = comfort_data["devices"]
         target_device = None
         
         for device in devices:
@@ -583,7 +601,10 @@ class ApiManager:
         if "errors" in response:
             return AirQuality(0, "")
 
-        raw_data = response["data"]["xSAirQ"]["graphData"]["status"]
+        air_data = response["data"]["xSAirQ"]
+        if air_data is None:
+            return AirQuality(0, "")
+        raw_data = air_data["graphData"]["status"]
         return AirQuality(
             int(raw_data["current"]),
             raw_data["currentMsg"],
@@ -606,6 +627,8 @@ class ApiManager:
 
         if "data" in response:
             raw_data = response["data"]["xSStatus"]
+            if raw_data is None:
+                return SStatus(None, None)
             return SStatus(raw_data["status"], raw_data["timestampUpdate"])
 
         return SStatus(None, None)
@@ -656,7 +679,10 @@ class ApiManager:
             content, "CheckAlarmStatus", installation
         )
 
-        return response["data"]["xSCheckAlarmStatus"]
+        check_data = response["data"]["xSCheckAlarmStatus"]
+        if check_data is None:
+            raise SecuritasDirectError("xSCheckAlarmStatus response is None", response)
+        return check_data
 
     async def arm_alarm(
         self, installation: Installation, command: str
@@ -676,6 +702,8 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel", installation)
         response = response["data"]["xSArmPanel"]
+        if response is None:
+            raise SecuritasDirectError("xSArmPanel response is None", response)
         if response["res"] != "OK":
             raise SecuritasDirectError(response["msg"], response)
 
@@ -725,6 +753,8 @@ class ApiManager:
         response = await self._execute_request(content, "ArmStatus", installation)
 
         raw_data = response["data"]["xSArmStatus"]
+        if raw_data is None:
+            raise SecuritasDirectError("xSArmStatus response is None", response)
         return raw_data
 
     async def disarm_alarm(
@@ -813,7 +843,10 @@ class ApiManager:
         }
         response = await self._execute_request(content, "DisarmStatus", installation)
 
-        return response["data"]["xSDisarmStatus"]
+        disarm_data = response["data"]["xSDisarmStatus"]
+        if disarm_data is None:
+            raise SecuritasDirectError("xSDisarmStatus response is None", response)
+        return disarm_data
 
     async def get_smart_lock_config(self, installation: Installation) -> SmartLock:
         content = {
@@ -835,8 +868,10 @@ class ApiManager:
 
         if "data" in response:
             raw_data = response["data"]["xSGetSmartlockConfig"]
+            if raw_data is None:
+                return SmartLock(None, None, None)
             return SmartLock(
-                raw_data["res"], 
+                raw_data["res"],
                 raw_data["location"],
                 raw_data["type"])
 
@@ -860,8 +895,10 @@ class ApiManager:
 
         if "data" in response:
             raw_data = response["data"]["xSGetLockCurrentMode"]
+            if raw_data is None:
+                return SmartLockMode(None, "0")
             return SmartLockMode(
-                raw_data["res"], 
+                raw_data["res"],
                 raw_data["smartlockInfo"][0]["lockStatus"])
 
         return SmartLockMode(None, "0")
@@ -882,6 +919,8 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSChangeSmartlockMode", installation)
         response = response["data"]["xSChangeSmartlockMode"]
+        if response is None:
+            raise SecuritasDirectError("xSChangeSmartlockMode response is None", response)
         if "res" in response and response["res"] != "OK":
             raise SecuritasDirectError(response["msg"], response)
 
@@ -929,4 +968,7 @@ class ApiManager:
         }
         response = await self._execute_request(content, "xSChangeSmartlockModeStatus", installation)
 
-        return response["data"]["xSChangeSmartlockModeStatus"]
+        lock_status_data = response["data"]["xSChangeSmartlockModeStatus"]
+        if lock_status_data is None:
+            raise SecuritasDirectError("xSChangeSmartlockModeStatus response is None", response)
+        return lock_status_data
