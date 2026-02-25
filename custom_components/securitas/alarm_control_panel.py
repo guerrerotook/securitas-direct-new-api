@@ -194,7 +194,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             alarm_status = await self.client.update_overview(self.installation)
         except SecuritasDirectError as err:
-            _LOGGER.info(err.args)
+            _LOGGER.warning("Error updating alarm status: %s", err.args)
         else:
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
@@ -259,7 +259,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     self.installation, STATE_TO_COMMAND[SecuritasState.DISARMED]
                 )
             except SecuritasDirectError as err:
-                self._notify_error(self.hass, "Error disarming", err.args)
+                self._notify_error("disarm_error", "Securitas: Error disarming", str(err.args))
                 _LOGGER.error(err.args)
 
             self.update_status_alarm(

@@ -222,6 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Could not log in to Securitas %s", err.args)
         except SecuritasDirectError as err:
             _LOGGER.error("Could not log in to Securitas %s", err.args)
+            return False
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             installations: list[
@@ -404,7 +405,7 @@ class SecuritasHub:
             try:
                 status = await self.session.check_general_status(installation)
             except SecuritasDirectError as err:
-                _LOGGER.info(err.args)
+                _LOGGER.warning("Error checking general status: %s", err.args)
 
             return CheckAlarmStatus(
                 status.status,

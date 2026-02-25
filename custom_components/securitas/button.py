@@ -78,5 +78,3 @@ class SecuritasRefreshButton(ButtonEntity):
             
         except SecuritasDirectError as err:
             _LOGGER.error("Error calling the securitas direct API: %s", str(err))
-        except Exception as ex:
-            _LOGGER.error("Erreur inattendue: %s", str(ex))
