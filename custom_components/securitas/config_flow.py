@@ -219,7 +219,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
         self.config[CONF_COUNTRY] = user_input[CONF_COUNTRY]
         self.config[CONF_CODE] = user_input[CONF_CODE]
-        self.config[CONF_CODE_ARM_REQUIRED] = user_input[CONF_CODE_ARM_REQUIRED]
+        self.config[CONF_CODE_ARM_REQUIRED] = user_input.get(CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED)
         self.config[CONF_CHECK_ALARM_PANEL] = user_input[CONF_CHECK_ALARM_PANEL]
         self.config[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
         self.config[CONF_DELAY_CHECK_OPERATION] = user_input[CONF_DELAY_CHECK_OPERATION]
@@ -267,7 +267,6 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             return await self.async_step_mappings()
 
         scan_interval = self._get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        code = ""
         delay_check_operation = self._get(
             CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
         )
@@ -281,7 +280,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_CODE, default=EMPTY_CODE): str,
+                vol.Optional(CONF_CODE, default=self._get(CONF_CODE, EMPTY_CODE)): str,
                 vol.Optional(CONF_CODE_ARM_REQUIRED, default=code_arm_required): bool,
                 vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
                 vol.Optional(
