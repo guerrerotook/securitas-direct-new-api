@@ -32,7 +32,7 @@
     },
     "exceptions": {
         "invalid_pin_code": {
-            "message": "The PIN code doesn't match with the configured one"
+            "message": "The PIN code doesn't match the configured one"
         }
     },
     "options": {
