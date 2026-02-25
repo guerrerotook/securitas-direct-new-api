@@ -748,7 +748,18 @@ class ApiManager:
 
         count = 1
         raw_data: dict[str, Any] = {}
-        while (count == 1) or raw_data.get("res") == "WAIT":
+        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
+        while (count == 1) or (
+            raw_data.get("res") == "WAIT"
+            or raw_data.get("msg") == "alarm-manager.error_no_response_to_request"
+        ):
+            if count > max_retries:
+                _LOGGER.warning(
+                    "Disarm status check exceeded max retries (%d), last response: %s",
+                    max_retries,
+                    raw_data,
+                )
+                break
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_disarm_status(
                 installation,
@@ -758,16 +769,17 @@ class ApiManager:
             )
             count = count + 1
 
-        self.protom_response = raw_data["protomResponse"]
+        if raw_data.get("protomResponse"):
+            self.protom_response = raw_data["protomResponse"]
         return DisarmStatus(
-            raw_data["error"],
-            raw_data["msg"],
-            raw_data["numinst"],
-            raw_data["protomResponse"],
-            raw_data["protomResponseDate"],
-            raw_data["requestId"],
-            raw_data["res"],
-            raw_data["status"],
+            raw_data.get("error"),
+            raw_data.get("msg", ""),
+            raw_data.get("numinst", ""),
+            raw_data.get("protomResponse", ""),
+            raw_data.get("protomResponseDate", ""),
+            raw_data.get("requestId", ""),
+            raw_data.get("res", ""),
+            raw_data.get("status", ""),
         )
 
     async def _check_disarm_status(
