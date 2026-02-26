@@ -483,8 +483,17 @@ class ApiManager:
             return []
 
         result: list[Service] = []
-        raw_data = installation_data["services"]
-        installation.capabilities = installation_data["capabilities"]
+        raw_data = installation_data.get("services")
+        if raw_data is None:
+            _LOGGER.warning("API returned no services for %s", installation.number)
+            return []
+
+        capabilities = installation_data.get("capabilities")
+        if capabilities is None:
+            _LOGGER.warning("API returned no capabilities for %s", installation.number)
+            return []
+
+        installation.capabilities = capabilities
         try:
             token = jwt.decode(
                 installation.capabilities,
