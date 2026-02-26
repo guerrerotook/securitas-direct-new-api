@@ -463,7 +463,7 @@ class ApiManager:
 
         check_alarm = response.get("data", {}).get("xSCheckAlarm")
         if check_alarm is None:
-            raise SecuritasDirectError("API returned no check alarm data")
+            raise SecuritasDirectError("API returned no check alarm data", response)
 
         return check_alarm["referenceId"]
 
