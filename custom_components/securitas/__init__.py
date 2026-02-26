@@ -220,6 +220,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
             )
             _LOGGER.error("Could not log in to Securitas %s", err.args)
+            return False
         except SecuritasDirectError as err:
             _LOGGER.error("Could not log in to Securitas %s", err.args)
             return False

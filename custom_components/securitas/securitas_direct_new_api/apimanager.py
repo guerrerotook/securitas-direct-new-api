@@ -321,10 +321,10 @@ class ApiManager:
         }
         response = await self._execute_request(content, "RefreshLogin")
 
-        otp_data = response["data"]["xSSendOtp"]
-        if otp_data is None:
-            raise SecuritasDirectError("xSSendOtp response is None", response)
-        return otp_data["res"]
+        refresh_data = response["data"]["xSRefreshLogin"]
+        if refresh_data is None:
+            raise SecuritasDirectError("xSRefreshLogin response is None", response)
+        return refresh_data["res"]
 
     async def send_otp(self, device_id: int, auth_otp_hash: str) -> bool:
         """Send the OTP device challenge."""
