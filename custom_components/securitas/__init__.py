@@ -231,10 +231,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Could not log in to Securitas %s", err.args)
             return False
         except SecuritasDirectError as err:
-            _LOGGER.error("Unable to connect to Securitas Direct: %s", err)
+            _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
             raise ConfigEntryNotReady(
                 "Unable to connect to Securitas Direct"
-            ) from err
+            ) from None
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             try:
@@ -246,10 +246,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     await client.get_services(installation)
                     devices.append(SecuritasDirectDevice(installation))
             except SecuritasDirectError as err:
-                _LOGGER.error("Unable to connect to Securitas Direct: %s", err)
+                _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
                 raise ConfigEntryNotReady(
                     "Unable to connect to Securitas Direct"
-                ) from err
+                ) from None
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
