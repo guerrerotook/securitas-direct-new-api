@@ -710,13 +710,13 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel", installation)
-        response = response["data"]["xSArmPanel"]
-        if response is None:
+        arm_data = response["data"]["xSArmPanel"]
+        if arm_data is None:
             raise SecuritasDirectError("xSArmPanel response is None", response)
-        if response["res"] != "OK":
-            raise SecuritasDirectError(response["msg"], response)
+        if arm_data["res"] != "OK":
+            raise SecuritasDirectError(arm_data["msg"], response)
 
-        reference_id = response["referenceId"]
+        reference_id = arm_data["referenceId"]
 
         count = 1
         raw_data: dict[str, Any] = {}
@@ -783,16 +783,16 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel", installation)
-        response = response["data"]["xSDisarmPanel"]
-        if response is None:
+        disarm_data = response["data"]["xSDisarmPanel"]
+        if disarm_data is None:
             raise SecuritasDirectError("Disarm response is None", response)
-        if "res" in response and response["res"] != "OK":
-            raise SecuritasDirectError(response["msg"], response)
+        if "res" in disarm_data and disarm_data["res"] != "OK":
+            raise SecuritasDirectError(disarm_data["msg"], response)
 
-        if "referenceId" not in response or "res" not in response:
+        if "referenceId" not in disarm_data or "res" not in disarm_data:
             raise SecuritasDirectError("No referenceId in response", response)
 
-        reference_id = response["referenceId"]
+        reference_id = disarm_data["referenceId"]
 
         count = 1
         raw_data: dict[str, Any] = {}
@@ -927,16 +927,16 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSChangeSmartlockMode", installation)
-        response = response["data"]["xSChangeSmartlockMode"]
-        if response is None:
+        lock_data = response["data"]["xSChangeSmartlockMode"]
+        if lock_data is None:
             raise SecuritasDirectError("xSChangeSmartlockMode response is None", response)
-        if "res" in response and response["res"] != "OK":
-            raise SecuritasDirectError(response["msg"], response)
+        if "res" in lock_data and lock_data["res"] != "OK":
+            raise SecuritasDirectError(lock_data["msg"], response)
 
-        if "referenceId" not in response or "res" not in response:
+        if "referenceId" not in lock_data or "res" not in lock_data:
             raise SecuritasDirectError("No referenceId in response", response)
 
-        reference_id = response["referenceId"]
+        reference_id = lock_data["referenceId"]
 
         count = 1
         raw_data: dict[str, Any] = {}
