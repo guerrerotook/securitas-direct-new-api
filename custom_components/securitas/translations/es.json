@@ -11,7 +11,7 @@
                     "use_2FA": "Usar 2FA",
                     "country": "Código de país",
                     "code": "Código PIN (dejar vacío si no hay PIN)",
-                    "code_arm_required": "Requerir código PIN para armar",
+                    "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
                     "PERI_alarm": "¿Hay una alarma perimetral?",
                     "check_alarm_panel": "Comprobar el estado del panel de alarma en cada solicitud",
                     "scan_interval": "Intervalo de actualización (seg)",
@@ -35,7 +35,7 @@
             "init": {
                 "data": {
                     "code": "Código PIN (dejar vacío si no hay PIN)",
-                    "code_arm_required": "Requerir código PIN para armar",
+                    "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
                     "PERI_alarm": "¿Hay una alarma perimetral?",
                     "check_alarm_panel": "Comprobar el estado del panel de alarma en cada solicitud (no recomendado)",
                     "scan_interval": "Intervalo de actualización (seg)",
