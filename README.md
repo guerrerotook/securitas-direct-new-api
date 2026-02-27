@@ -142,7 +142,7 @@ If your installation includes smart door locks, the integration creates lock ent
 
 ## Reporting Issues
 
-If you encounter a bug or unexpected behaviour, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) and include the following:
+If you encounter a bug or unexpected behavior, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) and include the following:
 
 1. **Home Assistant version** and **integration version** (from Settings → Integrations → Securitas Direct).
 2. **Country code** you are using.
