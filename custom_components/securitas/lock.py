@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 from datetime import timedelta
 import logging
@@ -7,9 +6,9 @@ from typing import Any
 import homeassistant.components.lock as lock
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -21,12 +20,9 @@ from . import (
     SecuritasHub,
 )
 from .securitas_direct_new_api import (
-    CommandType,
-    DisarmStatus,
     Installation,
     SecuritasDirectError,
     SmartLockMode,
-    SmartLockModeStatus,
 )
 
 from .securitas_direct_new_api.dataTypes import Service
@@ -34,6 +30,16 @@ from .securitas_direct_new_api.dataTypes import Service
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=20)
+
+# Service request name that identifies a smart-lock capability
+DOORLOCK_SERVICE = "DOORLOCK"
+
+# lockStatus codes returned by the Securitas smart-lock API
+LOCK_STATUS_UNKNOWN = "0"
+LOCK_STATUS_OPEN = "1"
+LOCK_STATUS_LOCKED = "2"
+LOCK_STATUS_OPENING = "3"
+LOCK_STATUS_LOCKING = "4"
 
 
 async def async_setup_entry(
@@ -49,7 +55,7 @@ async def async_setup_entry(
         services: list[Service] = await client.get_services(device.installation)
         for service in services:
             _LOGGER.debug("Service: %s", service.request)
-            if service.request == "DOORLOCK":
+            if service.request == DOORLOCK_SERVICE:
                 locks.append(
                     SecuritasLock(
                         device.installation,
@@ -59,7 +65,7 @@ async def async_setup_entry(
                 )
 
     if not locks:
-        _LOGGER.debug("No Securitas Direct DOORLOCK services found")
+        _LOGGER.debug("No Securitas Direct %s services found", DOORLOCK_SERVICE)
         return
 
     async_add_entities(locks, True)
@@ -72,13 +78,13 @@ class SecuritasLock(lock.LockEntity):
         client: SecuritasHub,
         hass: HomeAssistant,
     ) -> None:
-        self._state = "2" # locked
-        self._last_state = "2"
-        self._new_state: str = "2"
+        self._state = LOCK_STATUS_LOCKED
+        self._last_state = LOCK_STATUS_LOCKED
+        self._new_state: str = LOCK_STATUS_LOCKED
         self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
-        self._attr_unique_id: str = f"securitas_direct.{installation.number}"
+        self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self.installation: Installation = installation
@@ -92,8 +98,8 @@ class SecuritasLock(lock.LockEntity):
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
         )
-        
-        self._attr_device_info: DeviceInfo = DeviceInfo(
+
+        self._attr_device_info: DeviceInfo | None = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
             model=installation.panel,
@@ -121,12 +127,12 @@ class SecuritasLock(lock.LockEntity):
         )
 
     @property
-    def name(self) -> str:
+    def name(self) -> str:  # type: ignore[override]
         """Return the name of the device."""
-        return "Puerta"
+        return self.installation.alias
 
     @property
-    def changed_by(self) -> str:
+    def changed_by(self) -> str:  # type: ignore[override]
         """Return the last change triggered by."""
         return self._changed_by
 
@@ -138,82 +144,78 @@ class SecuritasLock(lock.LockEntity):
 
     async def async_update(self) -> None:
         await self.async_update_status()
-    
+
     async def async_update_status(self, now=None) -> None:
         try:
             self._new_state = await self.get_lock_state()
-            if self._new_state != "0":
+            if self._new_state != LOCK_STATUS_UNKNOWN:
                 self._state = self._new_state
         except SecuritasDirectError as err:
             _LOGGER.error("Error updating Securitas lock state: %s", err)
 
     async def get_lock_state(self) -> str:
-        smartlock_status: SmartLockMode = await self.client.session.get_lock_current_mode(
-            self.installation
+        smartlock_status: SmartLockMode = (
+            await self.client.session.get_lock_current_mode(self.installation)
         )
         return smartlock_status.lockStatus
 
     @property
-    def is_locked(self) -> bool:
-        if self._state == "2":
+    def is_locked(self) -> bool:  # type: ignore[override]
+        if self._state == LOCK_STATUS_LOCKED:
             return True
         else:
             return False
 
     @property
-    def is_open(self) -> bool:
-        if self._state == "1":
+    def is_open(self) -> bool:  # type: ignore[override]
+        if self._state == LOCK_STATUS_OPEN:
             return True
         else:
             return False
 
     @property
-    def is_locking(self) -> bool:
-        if self._state == "4":
+    def is_locking(self) -> bool:  # type: ignore[override]
+        if self._state == LOCK_STATUS_LOCKING:
             return True
         else:
             return False
 
     @property
-    def is_unlocking(self) -> bool:
+    def is_unlocking(self) -> bool:  # type: ignore[override]
         return False
 
     @property
-    def is_opening(self) -> bool:
-        if self._state == "3":
+    def is_opening(self) -> bool:  # type: ignore[override]
+        if self._state == LOCK_STATUS_OPENING:
             return True
         else:
             return False
 
     @property
-    def is_jammed(self) -> bool:
+    def is_jammed(self) -> bool:  # type: ignore[override]
         return False
 
     async def async_lock(self, **kwargs):
-        self.__force_state("4") #locking
-        lock_status: SmartLockModeStatus = SmartLockModeStatus()
+        self.__force_state(LOCK_STATUS_LOCKING)
         try:
-            lock_status = await self.client.session.change_lock_mode(self.installation, True)
+            await self.client.session.change_lock_mode(self.installation, True)
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
-        
-        self._state = "2"
+
+        self._state = LOCK_STATUS_LOCKED
 
     async def async_unlock(self, **kwargs):
-        self.__force_state("3") #opening
-        lock_status: SmartLockModeStatus = SmartLockModeStatus()
+        self.__force_state(LOCK_STATUS_OPENING)
         try:
-            lock_status = await self.client.session.change_lock_mode(self.installation, False)
+            await self.client.session.change_lock_mode(self.installation, False)
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
-        
-        self._state = "1"
+
+        self._state = LOCK_STATUS_OPEN
 
     @property
-    def supported_features(self) -> int:
+    def supported_features(self) -> int:  # type: ignore[override]
         """Return the list of supported features."""
-        return (
-            0
-        )
+        return 0

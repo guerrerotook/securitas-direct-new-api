@@ -1,16 +1,20 @@
 """Support for Securitas Direct refresh button."""
+
 import asyncio
 import logging
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import CONF_INSTALLATION_KEY, DOMAIN, SecuritasDirectDevice, SecuritasHub
-from .securitas_direct_new_api import CheckAlarmStatus, Installation, SecuritasDirectError
+from .securitas_direct_new_api import (
+    ALARM_STATUS_POLL_DELAY,
+    Installation,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,9 +29,7 @@ async def async_setup_entry(
         CONF_INSTALLATION_KEY
     )
     for device in securitas_devices:
-        buttons.append(
-            SecuritasRefreshButton(device.installation, client, hass)
-        )
+        buttons.append(SecuritasRefreshButton(device.installation, client, hass))
     async_add_entities(buttons, True)
 
 
@@ -58,23 +60,28 @@ class SecuritasRefreshButton(ButtonEntity):
         """Update alarm status when button pressed."""
         try:
             reference_id = await self.client.session.check_alarm(self.installation)
-            await asyncio.sleep(1)
-            alarm_status = await self.client.session.check_alarm_status(self.installation, reference_id)
-            
+            await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
+            alarm_status = await self.client.session.check_alarm_status(
+                self.installation, reference_id
+            )
+
             self.client.session.protom_response = alarm_status.protomResponse
-            
-            _LOGGER.info("Status of the Alarm via API: %s installation id: %s", 
-                       alarm_status.protomResponse, self.installation.number)
-            
+
+            _LOGGER.info(
+                "Status of the Alarm via API: %s installation id: %s",
+                alarm_status.protomResponse,
+                self.installation.number,
+            )
+
             _LOGGER.info("Update entity alarm panel securitas")
             for entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
-                if "securitas" in entity_id or "alarm_control_panel" in entity_id:
+                if "securitas" in entity_id:
                     await self.hass.services.async_call(
                         "homeassistant",
                         "update_entity",
                         {"entity_id": entity_id},
-                        blocking=True
+                        blocking=True,
                     )
-            
+
         except SecuritasDirectError as err:
             _LOGGER.error("Error calling the securitas direct API: %s", str(err))

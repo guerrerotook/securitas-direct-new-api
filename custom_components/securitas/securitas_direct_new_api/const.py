@@ -5,12 +5,14 @@ from enum import StrEnum
 
 class CommandType(StrEnum):
     """Legacy command type enum - kept for migration from old config."""
+
     STD = "std"
     PERI = "peri"
 
 
 class SecuritasState(StrEnum):
     """Verisure alarm states - combinations of interior mode and perimeter."""
+
     NOT_USED = "not_used"
     DISARMED = "disarmed"
     DISARMED_PERI = "disarmed_peri"
@@ -35,6 +37,13 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
     SecuritasState.PARTIAL_NIGHT_PERI: "ARMNIGHT1PERI1",
     SecuritasState.TOTAL_PERI: "ARM1PERI1",
 }
+
+# Proto response code for the disarmed state (handled separately from PROTO_TO_STATE
+# in alarm_control_panel.py because it applies unconditionally regardless of mapping)
+PROTO_DISARMED = "D"
+
+# Seconds to wait after triggering a status-check operation before polling the result
+ALARM_STATUS_POLL_DELAY: float = 1.0
 
 # Map protomResponse code -> SecuritasState
 PROTO_TO_STATE: dict[str, SecuritasState] = {

@@ -15,7 +15,6 @@ from .dataTypes import (
     AirQuality,
     ArmStatus,
     Attribute,
-    Attributes,
     CheckAlarmStatus,
     DisarmStatus,
     Installation,
@@ -31,6 +30,24 @@ from .domains import ApiDomains
 from .exceptions import Login2FAError, LoginError, SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
+
+# API protocol constants
+API_CALLBY = "OWA_10"
+API_ID_PREFIX = "OWA_______________"
+
+# Smart-lock device identifiers expected by the Securitas API
+SMARTLOCK_DEVICE_TYPE = "DR"
+SMARTLOCK_DEVICE_ID = "01"
+SMARTLOCK_KEY_TYPE = "0"
+
+# Service ID used when polling CheckAlarmStatus
+ALARM_STATUS_SERVICE_ID = "11"
+
+# Default timeout (seconds) for check_alarm_status polling loop
+CHECK_ALARM_STATUS_TIMEOUT = 10
+
+# Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
+LOCK_MODE_SETTLE_MULTIPLIER = 7
 
 
 def generate_uuid() -> str:
@@ -67,7 +84,7 @@ class ApiManager:
         self.delay_check_operation: int = delay_check_operation
 
         self.protom_response: str = ""
-        self.authentication_token: str = ""
+        self.authentication_token: str | None = ""
         self.authentication_token_exp: datetime = datetime.min
         self.login_timestamp: int = 0
         self.authentication_otp_challenge_value: Optional[tuple[str, str]] = None
@@ -111,7 +128,7 @@ class ApiManager:
                 "id": self._generate_id(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "hash": self.authentication_token,
             }
             headers["auth"] = json.dumps(authorization_value)
@@ -123,7 +140,7 @@ class ApiManager:
                 "id": self._generate_id(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "hash": "",
                 "refreshToken": "",
             }
@@ -162,7 +179,7 @@ class ApiManager:
         _LOGGER.debug(response_text)
 
         try:
-            # error_login: bool = await self._check_errros(response_text)
+            # error_login: bool = await self._check_errors(response_text)
             # if error_login:
             # response_text: str = await self._execute_request(
             #     content, operation, installation
@@ -187,7 +204,7 @@ class ApiManager:
 
         return response_dict
 
-    async def _check_errros(self, value: str) -> bool:
+    async def _check_errors(self, value: str) -> bool:
         if value is not None:
             response = json.loads(value)
             if "errors" in response:
@@ -249,7 +266,7 @@ class ApiManager:
     def _generate_id(self) -> str:
         current: datetime = datetime.now()
         return (
-            "OWA_______________"
+            API_ID_PREFIX
             + self.username
             + "_______________"
             + str(current.year)
@@ -269,7 +286,7 @@ class ApiManager:
         }
         await self._execute_request(content, "Logout")
 
-    def _extract_otp_data(self, data) -> tuple[str, list[OtpPhone]]:
+    def _extract_otp_data(self, data) -> tuple[str | None, list[OtpPhone]]:
         if not data:
             return (None, [])
         otp_hash = data.get("auth-otp-hash")
@@ -280,7 +297,7 @@ class ApiManager:
 
     async def validate_device(
         self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
-    ) -> tuple[str, list[OtpPhone]]:
+    ) -> tuple[str | None, list[OtpPhone] | None]:
         """Validate the device."""
         content = {
             "operationName": "mkValidateDevice",
@@ -319,6 +336,7 @@ class ApiManager:
             raise SecuritasDirectError("xSValidateDevice response is None", response)
         self.authentication_token = validate_data["hash"]
         try:
+            assert self.authentication_token is not None
             token = jwt.decode(
                 self.authentication_token,
                 algorithms=["HS256"],
@@ -345,7 +363,7 @@ class ApiManager:
                 "uuid": self.uuid,
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
                 "deviceType": self.device_type,
@@ -369,6 +387,7 @@ class ApiManager:
         if refresh_data.get("hash"):
             self.authentication_token = refresh_data["hash"]
             try:
+                assert self.authentication_token is not None
                 token = jwt.decode(
                     self.authentication_token,
                     algorithms=["HS256"],
@@ -378,9 +397,7 @@ class ApiManager:
                 _LOGGER.warning("Failed to decode refreshed authentication token")
                 return False
             if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(
-                    token["exp"]
-                )
+                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
         else:
             return False
@@ -416,7 +433,7 @@ class ApiManager:
                 "password": self.password,
                 "id": self._generate_id(),
                 "country": self.country,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "lang": self.language,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
@@ -438,7 +455,9 @@ class ApiManager:
             result_json = err.args[1] if len(err.args) > 1 else None
             if result_json is not None and result_json.get("data"):
                 if result_json["data"].get("xSLoginToken"):
-                    if result_json["data"]["xSLoginToken"].get("needDeviceAuthorization"):
+                    if result_json["data"]["xSLoginToken"].get(
+                        "needDeviceAuthorization"
+                    ):
                         # needs a 2FA
                         raise Login2FAError(err.args) from err
                 raise LoginError(err.args) from err
@@ -466,6 +485,7 @@ class ApiManager:
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
             try:
+                assert self.authentication_token is not None
                 token = jwt.decode(
                     self.authentication_token,
                     algorithms=["HS256"],
@@ -547,7 +567,9 @@ class ApiManager:
         installation_data = (response.get("data") or {}).get("xSSrv") or {}
         installation_data = installation_data.get("installation")
         if installation_data is None:
-            _LOGGER.warning("API returned no installation data for %s", installation.number)
+            _LOGGER.warning(
+                "API returned no installation data for %s", installation.number
+            )
             return []
 
         result: list[Service] = []
@@ -592,7 +614,6 @@ class ApiManager:
                             bool(attribute_item["active"]),
                         )
                     )
-        
 
             result.append(
                 Service(
@@ -637,7 +658,7 @@ class ApiManager:
         if "errors" in response:
             return Sentinel("", "", 0, 0)
 
-        if not service.attributes:
+        if not service.attributes or not isinstance(service.attributes, list):
             _LOGGER.warning("No attributes found for sentinel service %s", service.id)
             return Sentinel("", "", 0, 0)
 
@@ -647,12 +668,12 @@ class ApiManager:
             return Sentinel("", "", 0, 0)
         devices = comfort_data["devices"]
         target_device = None
-        
+
         for device in devices:
             if device.get("zone") == zone:
                 target_device = device
                 break
-        
+
         if target_device is None:
             return Sentinel("", "", 0, 0)
 
@@ -668,10 +689,12 @@ class ApiManager:
     ) -> AirQuality:
         """Get sentinel status."""
         zone_val = "0"
-        if service.attributes:
+        if service.attributes and isinstance(service.attributes, list):
             zone_val = str(service.attributes[0].value)
         else:
-            _LOGGER.warning("No attributes found for air quality service %s", service.id)
+            _LOGGER.warning(
+                "No attributes found for air quality service %s", service.id
+            )
 
         content = {
             "operationName": "AirQualityGraph",
@@ -721,7 +744,10 @@ class ApiManager:
         return SStatus(None, None)
 
     async def check_alarm_status(
-        self, installation: Installation, reference_id: str, timeout: int = 10
+        self,
+        installation: Installation,
+        reference_id: str,
+        timeout: int = CHECK_ALARM_STATUS_TIMEOUT,
     ) -> CheckAlarmStatus:
         """Return the status of the alarm."""
         await self._check_authentication_token()
@@ -757,7 +783,7 @@ class ApiManager:
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,
-                "idService": "11",
+                "idService": ALARM_STATUS_SERVICE_ID,
                 "counter": count,
             },
             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
@@ -771,9 +797,7 @@ class ApiManager:
             raise SecuritasDirectError("xSCheckAlarmStatus response is None", response)
         return check_data
 
-    async def arm_alarm(
-        self, installation: Installation, command: str
-    ) -> ArmStatus:
+    async def arm_alarm(self, installation: Installation, command: str) -> ArmStatus:
         """Arms the alarm in the specified mode."""
         content = {
             "operationName": "xSArmPanel",
@@ -941,13 +965,21 @@ class ApiManager:
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "devices": [{"deviceType": "DR", "deviceId": "01", "keytype": "0"}]
-                },
+                "devices": [
+                    {
+                        "deviceType": SMARTLOCK_DEVICE_TYPE,
+                        "deviceId": SMARTLOCK_DEVICE_ID,
+                        "keytype": SMARTLOCK_KEY_TYPE,
+                    }
+                ],
+            },
             "query": "query xSGetSmartlockConfig($numinst: String!, $panel: String!, $devices: [SmartlockDevicesInfo]!) {\n  xSGetSmartlockConfig(numinst: $numinst, panel: $panel, devices: $devices) {\n    res\n    referenceId\n    zoneId\n    serialNumber\n    location\n    family\n    type\n    label\n    features {\n      holdBackLatchTime\n      calibrationType\n      autolock {\n        active\n        timeout\n      }\n    }\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSGetSmartlockConfig", installation)
+        response = await self._execute_request(
+            content, "xSGetSmartlockConfig", installation
+        )
 
         if "errors" in response:
             _LOGGER.error(response)
@@ -957,13 +989,10 @@ class ApiManager:
             raw_data = response["data"]["xSGetSmartlockConfig"]
             if raw_data is None:
                 return SmartLock(None, None, None)
-            return SmartLock(
-                raw_data["res"],
-                raw_data["location"],
-                raw_data["type"])
+            return SmartLock(raw_data["res"], raw_data["location"], raw_data["type"])
 
         return SmartLock(None, None, None)
-    
+
     async def get_lock_current_mode(self, installation: Installation) -> SmartLockMode:
         content = {
             "operationName": "xSGetLockCurrentMode",
@@ -974,7 +1003,9 @@ class ApiManager:
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSGetLockCurrentMode", installation)
+        response = await self._execute_request(
+            content, "xSGetLockCurrentMode", installation
+        )
 
         if "errors" in response:
             _LOGGER.error(response)
@@ -990,25 +1021,31 @@ class ApiManager:
             return SmartLockMode(raw_data["res"], lock_status)
 
         return SmartLockMode(None, "0")
-    
-    async def change_lock_mode(self, installation: Installation, lock: bool) -> SmartLockModeStatus:
+
+    async def change_lock_mode(
+        self, installation: Installation, lock: bool
+    ) -> SmartLockModeStatus:
         content = {
             "operationName": "xSChangeSmartlockMode",
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "deviceType": "DR", 
-                "deviceId": "01", 
+                "deviceType": SMARTLOCK_DEVICE_TYPE,
+                "deviceId": SMARTLOCK_DEVICE_ID,
                 "lock": lock,
             },
             "query": "mutation xSChangeSmartlockMode($numinst: String!, $panel: String!, $deviceId: String!, $deviceType: String!, $lock: Boolean!) {\n  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n  ) {\n    res\n    msg\n    referenceId\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
-        response = await self._execute_request(content, "xSChangeSmartlockMode", installation)
+        response = await self._execute_request(
+            content, "xSChangeSmartlockMode", installation
+        )
         lock_data = response["data"]["xSChangeSmartlockMode"]
         if lock_data is None:
-            raise SecuritasDirectError("xSChangeSmartlockMode response is None", response)
+            raise SecuritasDirectError(
+                "xSChangeSmartlockMode response is None", response
+            )
         if "res" in lock_data and lock_data["res"] != "OK":
             raise SecuritasDirectError(lock_data["msg"], response)
 
@@ -1028,13 +1065,13 @@ class ApiManager:
             )
             count = count + 1
 
-        await asyncio.sleep(self.delay_check_operation*7)
+        await asyncio.sleep(self.delay_check_operation * LOCK_MODE_SETTLE_MULTIPLIER)
         self.protom_response = raw_data["protomResponse"]
         return SmartLockModeStatus(
             raw_data["res"],
             raw_data["msg"],
             raw_data["protomResponse"],
-            raw_data["status"]
+            raw_data["status"],
         )
 
     async def _check_change_lock_mode(
@@ -1047,16 +1084,20 @@ class ApiManager:
             "operationName": "xSChangeSmartlockModeStatus",
             "variables": {
                 "counter": counter,
-                "deviceId": "01",
+                "deviceId": SMARTLOCK_DEVICE_ID,
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,
             },
             "query": "query xSChangeSmartlockModeStatus($numinst: String!, $panel: String!, $referenceId: String!, $deviceId: String, $counter: Int) {\n  xSChangeSmartlockModeStatus(\n    numinst: $numinst\n    panel: $panel\n    referenceId: $referenceId\n    counter: $counter\n    deviceId: $deviceId\n  ) {\n    res\n    msg\n    protomResponse\n    status\n  }\n}",
         }
-        response = await self._execute_request(content, "xSChangeSmartlockModeStatus", installation)
+        response = await self._execute_request(
+            content, "xSChangeSmartlockModeStatus", installation
+        )
 
         lock_status_data = response["data"]["xSChangeSmartlockModeStatus"]
         if lock_status_data is None:
-            raise SecuritasDirectError("xSChangeSmartlockModeStatus response is None", response)
+            raise SecuritasDirectError(
+                "xSChangeSmartlockModeStatus response is None", response
+            )
         return lock_status_data

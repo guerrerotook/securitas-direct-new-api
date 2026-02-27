@@ -1,4 +1,5 @@
 """Public datatypes for the securitas direct API."""
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -55,7 +56,7 @@ class ArmStatus:
 class DisarmStatus:
     """Define a Securitas Direct Disarm Alarm Status Operation."""
 
-    error: str = ""
+    error: str | None = ""
     message: str = ""
     numinst: str = ""
     protomResponse: str = ""
@@ -65,7 +66,6 @@ class DisarmStatus:
     status: str = ""
 
 
-@dataclass
 class ArmType(Enum):
     """Define an Securitas Direct Arm Type."""
 
@@ -76,8 +76,8 @@ class ArmType(Enum):
 class SStatus:
     """Define the current status of the alarm."""
 
-    status: str = ""
-    timestampUpdate: str = ""
+    status: str | None = ""
+    timestampUpdate: str | None = ""
 
 
 @dataclass
@@ -115,7 +115,7 @@ class Service:
     secret_word: bool
     min_wrapper_version: None
     description: str
-    attributes: Attributes
+    attributes: Attributes | list[Attribute]
     listdiy: list[Any]
     listprompt: list[Any]
     installation: Installation
@@ -146,16 +146,19 @@ class OtpPhone:
     id: int
     phone: str
 
+
 @dataclass
 class SmartLock:
-    res: str
-    location: str
-    type: int
+    res: str | None = None
+    location: str | None = None
+    type: int | None = None
+
 
 @dataclass
 class SmartLockMode:
-    res: str
-    lockStatus: str
+    res: str | None = None
+    lockStatus: str = ""
+
 
 @dataclass
 class SmartLockModeStatus:
