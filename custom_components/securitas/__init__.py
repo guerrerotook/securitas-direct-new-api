@@ -46,6 +46,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "securitas"
 
 CONF_COUNTRY = "country"
+CONF_CODE_ARM_REQUIRED = "code_arm_required"
 CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
 CONF_USE_2FA = "use_2FA"
 CONF_PERI_ALARM = "PERI_alarm"
@@ -60,10 +61,12 @@ CONF_MAP_CUSTOM = "map_custom"
 
 DEFAULT_USE_2FA = True
 DEFAULT_SCAN_INTERVAL = 120
+DEFAULT_CODE_ARM_REQUIRED = False
 DEFAULT_CHECK_ALARM_PANEL = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
 DEFAULT_CODE = ""
 DEFAULT_PERI_ALARM = False
+DEFAULT_COUNTRY = "ES"
 
 
 PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR, Platform.LOCK]
@@ -77,9 +80,10 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
-                vol.Optional(CONF_COUNTRY, default="ES"): str,
+                vol.Optional(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
                 vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
                 vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
+                vol.Optional(CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED): bool,
                 vol.Optional(
                     CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
                 ): bool,
@@ -111,6 +115,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         entry.data.get(attrib) != entry.options.get(attrib)
         for attrib in (
             CONF_CODE,
+            CONF_CODE_ARM_REQUIRED,
             CONF_SCAN_INTERVAL,
             CONF_CHECK_ALARM_PANEL,
             CONF_PERI_ALARM,
@@ -138,6 +143,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
     config[CONF_CODE] = entry.data.get(CONF_CODE, DEFAULT_CODE)
     config[CONF_PERI_ALARM] = entry.data.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
+    config[CONF_CODE_ARM_REQUIRED] = entry.data.get(
+        CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
+    )
     config[CONF_CHECK_ALARM_PANEL] = entry.data.get(
         CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL
     )
