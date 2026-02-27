@@ -5,12 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.apimanager import ApiManager
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     AirQuality,
     Attribute,
     Installation,
-    OtpPhone,
     Sentinel,
     Service,
 )
@@ -156,13 +154,13 @@ class TestListInstallations:
     async def test_none_xsinstallations_raises_error(self, api, mock_execute):
         mock_execute.return_value = {"data": {"xSInstallations": None}}
 
-        with pytest.raises(SecuritasDirectError, match="xSInstallations response is None"):
+        with pytest.raises(
+            SecuritasDirectError, match="xSInstallations response is None"
+        ):
             await api.list_installations()
 
     async def test_empty_installations_returns_empty(self, api, mock_execute):
-        mock_execute.return_value = {
-            "data": {"xSInstallations": {"installations": []}}
-        }
+        mock_execute.return_value = {"data": {"xSInstallations": {"installations": []}}}
 
         result = await api.list_installations()
 
@@ -342,9 +340,7 @@ class TestGetSentinelData:
     async def test_error_response_returns_empty_sentinel(
         self, authed_api, mock_execute, installation, mock_service
     ):
-        mock_execute.return_value = {
-            "errors": [{"message": "Something went wrong"}]
-        }
+        mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
         result = await authed_api.get_sentinel_data(installation, mock_service)
 
@@ -396,9 +392,7 @@ class TestGetAirQualityData:
         mock_execute.return_value = {
             "data": {
                 "xSAirQ": {
-                    "graphData": {
-                        "status": {"current": 85, "currentMsg": "Good"}
-                    }
+                    "graphData": {"status": {"current": 85, "currentMsg": "Good"}}
                 }
             }
         }
@@ -412,9 +406,7 @@ class TestGetAirQualityData:
     async def test_error_response_returns_empty_air_quality(
         self, authed_api, mock_execute, installation, mock_service
     ):
-        mock_execute.return_value = {
-            "errors": [{"message": "Something went wrong"}]
-        }
+        mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
         result = await authed_api.get_air_quality_data(installation, mock_service)
 
@@ -435,9 +427,7 @@ class TestGetAirQualityData:
 
 class TestSendOtp:
     async def test_returns_res_value(self, api, mock_execute):
-        mock_execute.return_value = {
-            "data": {"xSSendOtp": {"res": "OK", "msg": ""}}
-        }
+        mock_execute.return_value = {"data": {"xSSendOtp": {"res": "OK", "msg": ""}}}
 
         result = await api.send_otp(device_id=1, auth_otp_hash="hash123")
 
@@ -547,9 +537,7 @@ class TestGetAirQualityDataEdgeCases:
         mock_execute.return_value = {
             "data": {
                 "xSAirQ": {
-                    "graphData": {
-                        "status": {"current": 75, "currentMsg": "Moderate"}
-                    }
+                    "graphData": {"status": {"current": 75, "currentMsg": "Moderate"}}
                 }
             }
         }

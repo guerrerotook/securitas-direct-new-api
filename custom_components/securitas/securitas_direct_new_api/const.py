@@ -5,12 +5,14 @@ from enum import StrEnum
 
 class CommandType(StrEnum):
     """Legacy command type enum - kept for migration from old config."""
+
     STD = "std"
     PERI = "peri"
 
 
 class SecuritasState(StrEnum):
     """Verisure alarm states - combinations of interior mode and perimeter."""
+
     NOT_USED = "not_used"
     DISARMED = "disarmed"
     DISARMED_PERI = "disarmed_peri"

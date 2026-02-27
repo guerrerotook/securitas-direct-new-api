@@ -5,11 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from homeassistant.config_entries import SOURCE_IMPORT
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
-    CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
@@ -25,7 +23,6 @@ from custom_components.securitas import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
-    CONF_ENTRY_ID,
     CONF_INSTALLATION_KEY,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -33,13 +30,6 @@ from custom_components.securitas import (
     CONF_MAP_NIGHT,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
-    DEFAULT_CHECK_ALARM_PANEL,
-    DEFAULT_CODE,
-    DEFAULT_CODE_ARM_REQUIRED,
-    DEFAULT_DELAY_CHECK_OPERATION,
-    DEFAULT_PERI_ALARM,
-    DEFAULT_SCAN_INTERVAL,
-    DEFAULT_USE_2FA,
     DOMAIN,
     PLATFORMS,
     SecuritasDirectDevice,
@@ -56,7 +46,6 @@ from custom_components.securitas.securitas_direct_new_api.const import (
 )
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
-    Installation,
     SStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
@@ -66,7 +55,6 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
 )
 
 from tests.conftest import (
-    FAKE_JWT,
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
@@ -298,9 +286,7 @@ class TestSecuritasHub:
         hub.session = AsyncMock()
         hub.session.validate_device = AsyncMock(return_value=("hash", []))
         await hub.send_sms_code("otp-hash", "123456")
-        hub.session.validate_device.assert_awaited_once_with(
-            True, "otp-hash", "123456"
-        )
+        hub.session.validate_device.assert_awaited_once_with(True, "otp-hash", "123456")
 
     async def test_refresh_token_delegates(self):
         """refresh_token() should delegate to session.refresh_token()."""
@@ -362,9 +348,7 @@ class TestSecuritasHub:
         hub.session.check_alarm_status = AsyncMock(return_value=expected_status)
         inst = make_installation()
 
-        with patch(
-            "custom_components.securitas.asyncio.sleep", new_callable=AsyncMock
-        ):
+        with patch("custom_components.securitas.asyncio.sleep", new_callable=AsyncMock):
             result = await hub.update_overview(inst)
 
         hub.session.check_alarm.assert_awaited_once_with(inst)
@@ -397,9 +381,7 @@ class TestAsyncSetupEntry:
     def mock_hub(self):
         """Create a mock SecuritasHub for setup tests."""
         hub = make_securitas_hub_mock()
-        hub.session.list_installations = AsyncMock(
-            return_value=[make_installation()]
-        )
+        hub.session.list_installations = AsyncMock(return_value=[make_installation()])
         return hub
 
     async def test_setup_success(self, hass, mock_hub):
@@ -496,9 +478,7 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(hass, entry)
 
-    async def test_setup_securitas_error_during_get_services(
-        self, hass, mock_hub
-    ):
+    async def test_setup_securitas_error_during_get_services(self, hass, mock_hub):
         """SecuritasDirectError during get_services should raise ConfigEntryNotReady."""
         mock_hub.get_services = AsyncMock(
             side_effect=SecuritasDirectError("service error")

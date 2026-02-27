@@ -106,7 +106,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Show the list of phones for the OTP challenge."""
         phone_index: int = -1
         selected_phone_key = user_input["phones"]
-        
+
         try:
             index_str = selected_phone_key.split("_")[0]
             list_index = int(index_str)
@@ -117,7 +117,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 if phone_item.phone in selected_phone_key:
                     phone_index = phone_item.id
                     break
-        
+
         await self.securitas.send_opt(self.otp_challenge[0], phone_index)
         return self.async_show_form(
             step_id="otp_challenge",
@@ -191,10 +191,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         for i, phone_item in enumerate(self.otp_challenge[1]):
             phone_key = f"{i}_{phone_item.phone}"
             phones.append(phone_key)
-            phone_options.append({
-                "value": phone_key,
-                "label": phone_item.phone
-            })
+            phone_options.append({"value": phone_key, "label": phone_item.phone})
         data_schema = {}
         data_schema["phones"] = selector({"select": {"options": phone_options}})
         return self.async_show_form(
@@ -280,19 +277,18 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         delay_check_operation = self._get(
             CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
         )
-        check_alarm_panel = self._get(
-            CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL
-        )
+        check_alarm_panel = self._get(CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL)
         peri_alarm = self._get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_CODE, description={"suggested_value": self._get(CONF_CODE, DEFAULT_CODE)}): str,
+                vol.Optional(
+                    CONF_CODE,
+                    description={"suggested_value": self._get(CONF_CODE, DEFAULT_CODE)},
+                ): str,
                 vol.Optional(CONF_CODE_ARM_REQUIRED, default=code_arm_required): bool,
                 vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
-                vol.Optional(
-                    CONF_CHECK_ALARM_PANEL, default=check_alarm_panel
-                ): bool,
+                vol.Optional(CONF_CHECK_ALARM_PANEL, default=check_alarm_panel): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): int,
                 vol.Optional(
                     CONF_DELAY_CHECK_OPERATION, default=delay_check_operation
@@ -328,8 +324,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         # Build dropdown options
         select_options = [
-            {"value": state.value, "label": STATE_LABELS[state]}
-            for state in options
+            {"value": state.value, "label": STATE_LABELS[state]} for state in options
         ]
 
         schema = vol.Schema(

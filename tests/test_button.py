@@ -6,14 +6,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from custom_components.securitas.button import SecuritasRefreshButton, async_setup_entry
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     CheckAlarmStatus,
-    Installation,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
 )
-from custom_components.securitas import DOMAIN, SecuritasHub
+from custom_components.securitas import DOMAIN
 
-from tests.conftest import make_installation, make_securitas_hub_mock, setup_integration_data
+from tests.conftest import (
+    make_installation,
+    make_securitas_hub_mock,
+    setup_integration_data,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +96,9 @@ class TestSecuritasRefreshButtonAsyncPress:
         button.client.session.check_alarm = AsyncMock(return_value="ref-123")
         button.client.session.check_alarm_status = AsyncMock(return_value=alarm_status)
 
-        with patch("custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock):
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
             await button.async_press()
 
         button.client.session.check_alarm.assert_called_once_with(button.installation)
@@ -117,7 +122,9 @@ class TestSecuritasRefreshButtonAsyncPress:
         button.client.session.check_alarm = AsyncMock(return_value="ref-456")
         button.client.session.check_alarm_status = AsyncMock(return_value=alarm_status)
 
-        with patch("custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock):
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
             await button.async_press()
 
         button.hass.services.async_call.assert_called_once_with(
@@ -134,7 +141,9 @@ class TestSecuritasRefreshButtonAsyncPress:
             side_effect=SecuritasDirectError("API timeout")
         )
 
-        with patch("custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock):
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
             # Should not raise
             await button.async_press()
 
@@ -149,7 +158,9 @@ class TestSecuritasRefreshButtonAsyncPress:
             side_effect=SecuritasDirectError("status timeout")
         )
 
-        with patch("custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock):
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
             # Should not raise
             await button.async_press()
 
@@ -171,7 +182,9 @@ class TestSecuritasRefreshButtonAsyncPress:
         button.client.session.check_alarm = AsyncMock(return_value="ref-000")
         button.client.session.check_alarm_status = AsyncMock(return_value=alarm_status)
 
-        with patch("custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ) as mock_sleep:
             await button.async_press()
 
         mock_sleep.assert_called_once_with(1)

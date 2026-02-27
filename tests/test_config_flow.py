@@ -4,7 +4,6 @@ from collections import OrderedDict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
 from custom_components.securitas import (
     CONF_CHECK_ALARM_PANEL,
@@ -20,21 +19,16 @@ from custom_components.securitas import (
     CONF_PERI_ALARM,
     CONF_USE_2FA,
     DEFAULT_CHECK_ALARM_PANEL,
-    DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
-    DEFAULT_PERI_ALARM,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    SecuritasHub,
 )
 from custom_components.securitas.securitas_direct_new_api import (
     Login2FAError,
     OtpPhone,
     PERI_DEFAULTS,
-    PERI_OPTIONS,
     STD_DEFAULTS,
-    STD_OPTIONS,
     SecuritasState,
 )
 from homeassistant.config_entries import SOURCE_IMPORT, SOURCE_USER
@@ -388,7 +382,7 @@ async def test_otp_challenge_sends_sms_code(hass):
     flow_id = await _get_to_otp_step(hass, mock_hub)
 
     with _patches(mock_hub):
-        result = await hass.config_entries.flow.async_configure(
+        await hass.config_entries.flow.async_configure(
             flow_id, user_input={CONF_CODE: "123456"}
         )
 
@@ -549,7 +543,7 @@ async def test_import_success_copies_config_and_creates_client(hass):
         patch(PATCH_HUB, hub_cls),
         patch(PATCH_SESSION, return_value=MagicMock()),
     ):
-        result = await flow.async_step_import(IMPORT_DATA)
+        await flow.async_step_import(IMPORT_DATA)
 
     hub_cls.assert_called_once()
     mock_hub.login.assert_awaited_once()
@@ -589,7 +583,7 @@ async def test_import_sets_all_config_fields(hass):
         patch(PATCH_HUB, hub_cls),
         patch(PATCH_SESSION, return_value=MagicMock()),
     ):
-        result = await flow.async_step_import(IMPORT_DATA)
+        await flow.async_step_import(IMPORT_DATA)
 
     mock_hub.login.assert_awaited_once()
     # Verify the config was passed to SecuritasHub constructor
@@ -829,7 +823,11 @@ async def test_options_get_reads_from_options_first(hass):
     mock_entry.data = {CONF_SCAN_INTERVAL: 120}
 
     # config_entry is a property on OptionsFlow, use patch to set it
-    with patch.object(type(handler), "config_entry", new_callable=lambda: property(lambda self: mock_entry)):
+    with patch.object(
+        type(handler),
+        "config_entry",
+        new_callable=lambda: property(lambda self: mock_entry),
+    ):
         result = handler._get(CONF_SCAN_INTERVAL)
     assert result == 60
 
@@ -843,6 +841,10 @@ async def test_options_get_falls_back_to_data(hass):
     mock_entry.options = {}
     mock_entry.data = {CONF_SCAN_INTERVAL: 120}
 
-    with patch.object(type(handler), "config_entry", new_callable=lambda: property(lambda self: mock_entry)):
+    with patch.object(
+        type(handler),
+        "config_entry",
+        new_callable=lambda: property(lambda self: mock_entry),
+    ):
         result = handler._get(CONF_SCAN_INTERVAL)
     assert result == 120

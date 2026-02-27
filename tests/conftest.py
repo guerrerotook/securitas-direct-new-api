@@ -1,6 +1,5 @@
 """Shared fixtures for securitas-direct-new-api integration tests."""
 
-from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -20,11 +19,7 @@ from custom_components.securitas import (
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
     CONF_PERI_ALARM,
-    DEFAULT_CHECK_ALARM_PANEL,
-    DEFAULT_CODE,
-    DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
-    DEFAULT_PERI_ALARM,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SecuritasDirectDevice,
@@ -228,8 +223,12 @@ def make_config_entry_data(
         CONF_DEVICE_INDIGITALL: id_device_indigitall,
         CONF_MAP_HOME: map_home if map_home is not None else defaults[CONF_MAP_HOME],
         CONF_MAP_AWAY: map_away if map_away is not None else defaults[CONF_MAP_AWAY],
-        CONF_MAP_NIGHT: map_night if map_night is not None else defaults[CONF_MAP_NIGHT],
-        CONF_MAP_CUSTOM: map_custom if map_custom is not None else defaults[CONF_MAP_CUSTOM],
+        CONF_MAP_NIGHT: map_night
+        if map_night is not None
+        else defaults[CONF_MAP_NIGHT],
+        CONF_MAP_CUSTOM: map_custom
+        if map_custom is not None
+        else defaults[CONF_MAP_CUSTOM],
     }
 
 

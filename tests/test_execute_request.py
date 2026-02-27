@@ -4,10 +4,9 @@ import json
 
 import pytest
 from aiohttp import ClientConnectorError
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.securitas_direct_new_api.apimanager import (
-    ApiManager,
     generate_device_id,
     generate_uuid,
 )
@@ -48,9 +47,7 @@ class TestExecuteRequest:
 
     async def test_success_returns_parsed_json(self, api, mock_post):
         """Successful request returns parsed JSON dict."""
-        result = await api._execute_request(
-            {"query": "test"}, "TestOperation"
-        )
+        result = await api._execute_request({"query": "test"}, "TestOperation")
         assert result == {"data": {"test": "ok"}}
 
     async def test_sets_correct_headers(self, api, mock_post):
@@ -144,9 +141,7 @@ class TestExecuteRequest:
 
     async def test_error_with_reason_raises_securitas_error(self, api):
         """Response containing errors.data.reason raises SecuritasDirectError."""
-        error_response = json.dumps(
-            {"errors": {"data": {"reason": "Session expired"}}}
-        )
+        error_response = json.dumps({"errors": {"data": {"reason": "Session expired"}}})
         response = AsyncMock()
         response.text = AsyncMock(return_value=error_response)
 
@@ -263,9 +258,7 @@ class TestCheckErrors:
     async def test_expired_token_error_triggers_relogin(self, api):
         """Response with 'Invalid token: Expired' error triggers re-login."""
         api.login = AsyncMock()
-        response_text = json.dumps(
-            {"errors": [{"message": "Invalid token: Expired"}]}
-        )
+        response_text = json.dumps({"errors": [{"message": "Invalid token: Expired"}]})
 
         result = await api._check_errors(response_text)
 
@@ -276,9 +269,7 @@ class TestCheckErrors:
     async def test_other_errors_dont_trigger_relogin(self, api):
         """Other error messages don't trigger re-login."""
         api.login = AsyncMock()
-        response_text = json.dumps(
-            {"errors": [{"message": "Some other error"}]}
-        )
+        response_text = json.dumps({"errors": [{"message": "Some other error"}]})
 
         result = await api._check_errors(response_text)
 
@@ -304,9 +295,7 @@ class TestCheckCapabilitiesToken:
 
     async def test_empty_capabilities_refreshes(self, api):
         """When installation.capabilities is empty, refreshes by calling get_all_services."""
-        installation = Installation(
-            number="123", panel="PANEL-01", capabilities=""
-        )
+        installation = Installation(number="123", panel="PANEL-01", capabilities="")
         api.get_all_services = AsyncMock(return_value=[])
 
         await api._check_capabilities_token(installation)
@@ -350,9 +339,7 @@ class TestCheckCapabilitiesToken:
 
     async def test_none_capabilities_refreshes(self, api):
         """When capabilities is None (falsy), refreshes."""
-        installation = Installation(
-            number="123", panel="PANEL-01", capabilities=""
-        )
+        installation = Installation(number="123", panel="PANEL-01", capabilities="")
         api.get_all_services = AsyncMock(return_value=[])
 
         await api._check_capabilities_token(installation)

@@ -22,7 +22,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 
 from .securitas_direct_new_api import (
@@ -84,7 +83,9 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
                 vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
                 vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
-                vol.Optional(CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED): bool,
+                vol.Optional(
+                    CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED
+                ): bool,
                 vol.Optional(
                     CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
                 ): bool,
@@ -232,9 +233,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return False
         except SecuritasDirectError as err:
             _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
-            raise ConfigEntryNotReady(
-                "Unable to connect to Securitas Direct"
-            ) from None
+            raise ConfigEntryNotReady("Unable to connect to Securitas Direct") from None
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             try:
@@ -277,6 +276,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
     return unload_ok
+
 
 def _notify_error(
     hass: HomeAssistant, notification_id, title: str, message: str

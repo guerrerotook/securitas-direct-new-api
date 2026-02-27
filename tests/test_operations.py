@@ -83,9 +83,7 @@ class TestCheckAlarm:
     async def test_none_response_raises_error(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "data": {"xSCheckAlarm": None}
-        }
+        mock_execute.return_value = {"data": {"xSCheckAlarm": None}}
 
         with pytest.raises(SecuritasDirectError, match="no check alarm data"):
             await authed_api.check_alarm(installation)
@@ -161,14 +159,12 @@ class TestCheckAlarmStatus:
     async def test_none_check_alarm_status_raises_error(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "data": {"xSCheckAlarmStatus": None}
-        }
+        mock_execute.return_value = {"data": {"xSCheckAlarmStatus": None}}
 
-        with pytest.raises(SecuritasDirectError, match="xSCheckAlarmStatus response is None"):
-            await authed_api.check_alarm_status(
-                installation, "ref-123", timeout=10
-            )
+        with pytest.raises(
+            SecuritasDirectError, match="xSCheckAlarmStatus response is None"
+        ):
+            await authed_api.check_alarm_status(installation, "ref-123", timeout=10)
 
 
 # ── arm_alarm() ──────────────────────────────────────────────────────────────
@@ -230,9 +226,7 @@ class TestArmAlarm:
     async def test_none_response_raises_error(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "data": {"xSArmPanel": None}
-        }
+        mock_execute.return_value = {"data": {"xSArmPanel": None}}
 
         with pytest.raises(SecuritasDirectError, match="xSArmPanel response is None"):
             await authed_api.arm_alarm(installation, "ARM1")
@@ -346,9 +340,7 @@ class TestDisarmAlarm:
     async def test_none_response_raises_error(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "data": {"xSDisarmPanel": None}
-        }
+        mock_execute.return_value = {"data": {"xSDisarmPanel": None}}
 
         with pytest.raises(SecuritasDirectError, match="Disarm response is None"):
             await authed_api.disarm_alarm(installation, "DARM1")
@@ -470,9 +462,7 @@ class TestCheckGeneralStatus:
     async def test_errors_in_response_returns_none_sstatus(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "errors": [{"message": "Something went wrong"}]
-        }
+        mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
         result = await authed_api.check_general_status(installation)
 
@@ -483,9 +473,7 @@ class TestCheckGeneralStatus:
     async def test_none_xsstatus_returns_none_sstatus(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "data": {"xSStatus": None}
-        }
+        mock_execute.return_value = {"data": {"xSStatus": None}}
 
         result = await authed_api.check_general_status(installation)
 

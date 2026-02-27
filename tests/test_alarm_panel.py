@@ -18,7 +18,6 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
 )
 from custom_components.securitas.securitas_direct_new_api.const import (
     PERI_DEFAULTS,
-    PROTO_TO_STATE,
     STATE_TO_COMMAND,
     STD_DEFAULTS,
     SecuritasState,
@@ -27,7 +26,6 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
 )
 from custom_components.securitas.alarm_control_panel import (
-    HA_STATE_TO_CONF_KEY,
     SecuritasAlarm,
 )
 
@@ -93,9 +91,7 @@ def make_alarm(
         patch(
             "custom_components.securitas.alarm_control_panel.async_track_time_interval"
         ) as mock_track,
-        patch.object(
-            SecuritasAlarm, "async_schedule_update_ha_state", MagicMock()
-        ),
+        patch.object(SecuritasAlarm, "async_schedule_update_ha_state", MagicMock()),
         patch.object(SecuritasAlarm, "async_write_ha_state", MagicMock()),
     ):
         mock_track.return_value = MagicMock()  # unsub callable
@@ -663,18 +659,39 @@ class TestMappingTables:
     def test_std_command_map(self):
         """STD defaults build the expected command map."""
         alarm = make_alarm(has_peri=False)
-        assert alarm._command_map[AlarmControlPanelState.ARMED_HOME] == STATE_TO_COMMAND[SecuritasState.PARTIAL_DAY]
-        assert alarm._command_map[AlarmControlPanelState.ARMED_AWAY] == STATE_TO_COMMAND[SecuritasState.TOTAL]
-        assert alarm._command_map[AlarmControlPanelState.ARMED_NIGHT] == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT]
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_HOME]
+            == STATE_TO_COMMAND[SecuritasState.PARTIAL_DAY]
+        )
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_AWAY]
+            == STATE_TO_COMMAND[SecuritasState.TOTAL]
+        )
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_NIGHT]
+            == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT]
+        )
         assert AlarmControlPanelState.ARMED_CUSTOM_BYPASS not in alarm._command_map
 
     def test_peri_command_map(self):
         """PERI defaults build the expected command map including custom bypass."""
         alarm = make_alarm(has_peri=True)
-        assert alarm._command_map[AlarmControlPanelState.ARMED_HOME] == STATE_TO_COMMAND[SecuritasState.PARTIAL_DAY]
-        assert alarm._command_map[AlarmControlPanelState.ARMED_AWAY] == STATE_TO_COMMAND[SecuritasState.TOTAL_PERI]
-        assert alarm._command_map[AlarmControlPanelState.ARMED_NIGHT] == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT_PERI]
-        assert alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS] == STATE_TO_COMMAND[SecuritasState.PERI_ONLY]
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_HOME]
+            == STATE_TO_COMMAND[SecuritasState.PARTIAL_DAY]
+        )
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_AWAY]
+            == STATE_TO_COMMAND[SecuritasState.TOTAL_PERI]
+        )
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_NIGHT]
+            == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT_PERI]
+        )
+        assert (
+            alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
+            == STATE_TO_COMMAND[SecuritasState.PERI_ONLY]
+        )
 
     def test_std_status_map(self):
         """STD defaults build status_map mapping proto codes to HA states."""
@@ -781,10 +798,12 @@ class TestGetArmState:
             protomResponse="T",
             protomResponseData="",
         )
-        alarm.client.session.check_alarm_status = AsyncMock(return_value=expected_status)
+        alarm.client.session.check_alarm_status = AsyncMock(
+            return_value=expected_status
+        )
 
         with patch("custom_components.securitas.alarm_control_panel.asyncio.sleep"):
-            result = await alarm.get_arm_state()
+            await alarm.get_arm_state()
 
         alarm.client.session.check_alarm.assert_called_once_with(alarm.installation)
         alarm.client.session.check_alarm_status.assert_called_once_with(
@@ -803,7 +822,9 @@ class TestGetArmState:
             protomResponse="D",
             protomResponseData="some-data",
         )
-        alarm.client.session.check_alarm_status = AsyncMock(return_value=expected_status)
+        alarm.client.session.check_alarm_status = AsyncMock(
+            return_value=expected_status
+        )
 
         with patch("custom_components.securitas.alarm_control_panel.asyncio.sleep"):
             result = await alarm.get_arm_state()
@@ -1034,7 +1055,10 @@ class TestArmMethods:
 
         alarm.client.session.arm_alarm.assert_called_once()
         call_args = alarm.client.session.arm_alarm.call_args
-        assert call_args[0][1] == alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
+        assert (
+            call_args[0][1]
+            == alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
+        )
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
 
     async def test_each_arm_method_transitions_through_arming(self):

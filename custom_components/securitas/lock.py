@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 from datetime import timedelta
 import logging
@@ -7,7 +6,7 @@ from typing import Any
 import homeassistant.components.lock as lock
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,12 +20,9 @@ from . import (
     SecuritasHub,
 )
 from .securitas_direct_new_api import (
-    CommandType,
-    DisarmStatus,
     Installation,
     SecuritasDirectError,
     SmartLockMode,
-    SmartLockModeStatus,
 )
 
 from .securitas_direct_new_api.dataTypes import Service
@@ -72,7 +68,7 @@ class SecuritasLock(lock.LockEntity):
         client: SecuritasHub,
         hass: HomeAssistant,
     ) -> None:
-        self._state = "2" # locked
+        self._state = "2"  # locked
         self._last_state = "2"
         self._new_state: str = "2"
         self._changed_by: str = ""
@@ -92,7 +88,7 @@ class SecuritasLock(lock.LockEntity):
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
         )
-        
+
         self._attr_device_info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
@@ -138,7 +134,7 @@ class SecuritasLock(lock.LockEntity):
 
     async def async_update(self) -> None:
         await self.async_update_status()
-    
+
     async def async_update_status(self, now=None) -> None:
         try:
             self._new_state = await self.get_lock_state()
@@ -148,8 +144,8 @@ class SecuritasLock(lock.LockEntity):
             _LOGGER.error("Error updating Securitas lock state: %s", err)
 
     async def get_lock_state(self) -> str:
-        smartlock_status: SmartLockMode = await self.client.session.get_lock_current_mode(
-            self.installation
+        smartlock_status: SmartLockMode = (
+            await self.client.session.get_lock_current_mode(self.installation)
         )
         return smartlock_status.lockStatus
 
@@ -190,30 +186,26 @@ class SecuritasLock(lock.LockEntity):
         return False
 
     async def async_lock(self, **kwargs):
-        self.__force_state("4") #locking
-        lock_status: SmartLockModeStatus = SmartLockModeStatus()
+        self.__force_state("4")  # locking
         try:
-            lock_status = await self.client.session.change_lock_mode(self.installation, True)
+            await self.client.session.change_lock_mode(self.installation, True)
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
-        
+
         self._state = "2"
 
     async def async_unlock(self, **kwargs):
-        self.__force_state("3") #opening
-        lock_status: SmartLockModeStatus = SmartLockModeStatus()
+        self.__force_state("3")  # opening
         try:
-            lock_status = await self.client.session.change_lock_mode(self.installation, False)
+            await self.client.session.change_lock_mode(self.installation, False)
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
-        
+
         self._state = "1"
 
     @property
     def supported_features(self) -> int:
         """Return the list of supported features."""
-        return (
-            0
-        )
+        return 0

@@ -67,7 +67,9 @@ def make_service():
 
 def make_sentinel(temp=22, humidity=45):
     """Create a test Sentinel data object."""
-    return Sentinel(alias="Living", air_quality="GOOD", humidity=humidity, temperature=temp)
+    return Sentinel(
+        alias="Living", air_quality="GOOD", humidity=humidity, temperature=temp
+    )
 
 
 def make_air_quality(value=85, message="Good"):
@@ -105,9 +107,7 @@ def make_lock():
         "custom_components.securitas.lock.async_track_time_interval"
     ) as mock_track:
         mock_track.return_value = MagicMock()
-        lock_entity = SecuritasLock(
-            installation=installation, client=client, hass=hass
-        )
+        lock_entity = SecuritasLock(installation=installation, client=client, hass=hass)
     return lock_entity
 
 
@@ -121,7 +121,9 @@ class TestSentinelTemperature:
 
     def test_init_sets_native_value_to_temperature(self):
         sentinel = make_sentinel(temp=22)
-        sensor = SentinelTemperature(sentinel, make_service(), make_client(), make_device())
+        sensor = SentinelTemperature(
+            sentinel, make_service(), make_client(), make_device()
+        )
         assert sensor._attr_native_value == 22
 
     def test_init_sets_device_class_to_temperature(self):
@@ -167,7 +169,9 @@ class TestSentinelTemperature:
 
     def test_name_contains_alias(self):
         sentinel = make_sentinel()
-        sensor = SentinelTemperature(sentinel, make_service(), make_client(), make_device())
+        sensor = SentinelTemperature(
+            sentinel, make_service(), make_client(), make_device()
+        )
         assert "Living" in sensor._attr_name
 
 
@@ -181,7 +185,9 @@ class TestSentinelHumidity:
 
     def test_init_sets_native_value_to_humidity(self):
         sentinel = make_sentinel(humidity=45)
-        sensor = SentinelHumidity(sentinel, make_service(), make_client(), make_device())
+        sensor = SentinelHumidity(
+            sentinel, make_service(), make_client(), make_device()
+        )
         assert sensor._attr_native_value == 45
 
     def test_init_sets_device_class_to_humidity(self):
@@ -313,7 +319,9 @@ class TestSecuritasLockInit:
         lock = make_lock()
         for state in ("1", "3", "4", "0"):
             lock._state = state
-            assert lock.is_locked is False, f"Expected is_locked=False for state={state}"
+            assert lock.is_locked is False, (
+                f"Expected is_locked=False for state={state}"
+            )
 
     def test_is_open_returns_true_when_state_is_1(self):
         lock = make_lock()
@@ -335,7 +343,9 @@ class TestSecuritasLockInit:
         lock = make_lock()
         for state in ("1", "2", "3", "0"):
             lock._state = state
-            assert lock.is_locking is False, f"Expected is_locking=False for state={state}"
+            assert lock.is_locking is False, (
+                f"Expected is_locking=False for state={state}"
+            )
 
     def test_is_opening_returns_true_when_state_is_3(self):
         lock = make_lock()
@@ -346,7 +356,9 @@ class TestSecuritasLockInit:
         lock = make_lock()
         for state in ("1", "2", "4", "0"):
             lock._state = state
-            assert lock.is_opening is False, f"Expected is_opening=False for state={state}"
+            assert lock.is_opening is False, (
+                f"Expected is_opening=False for state={state}"
+            )
 
     def test_is_jammed_always_returns_false(self):
         lock = make_lock()

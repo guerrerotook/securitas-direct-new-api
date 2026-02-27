@@ -1,12 +1,10 @@
 """Tests for ApiManager authentication flow."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
-import jwt as pyjwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.apimanager import ApiManager
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     Login2FAError,
     LoginError,
@@ -69,7 +67,9 @@ class TestLogin:
         with pytest.raises(LoginError):
             await api.login()
 
-    async def test_execute_request_error_raises_securitas_error(self, api, mock_execute):
+    async def test_execute_request_error_raises_securitas_error(
+        self, api, mock_execute
+    ):
         """Connection error (no response data) re-raises SecuritasDirectError."""
         mock_execute.side_effect = SecuritasDirectError("Connection failed", None)
 
@@ -160,7 +160,9 @@ class TestRefreshToken:
     async def test_none_response_raises_error(self, api, mock_execute):
         mock_execute.return_value = {"data": {"xSRefreshLogin": None}}
 
-        with pytest.raises(SecuritasDirectError, match="xSRefreshLogin response is None"):
+        with pytest.raises(
+            SecuritasDirectError, match="xSRefreshLogin response is None"
+        ):
             await api.refresh_token()
 
     async def test_does_not_store_tokens_on_failure(self, api, mock_execute):
@@ -344,18 +346,14 @@ class TestLoginEdgeCases:
                 }
             }
         }
-        mock_execute.side_effect = SecuritasDirectError(
-            "Some error", error_response
-        )
+        mock_execute.side_effect = SecuritasDirectError("Some error", error_response)
 
         with pytest.raises(LoginError):
             await api.login()
 
     async def test_null_xslogintoken_raises_error(self, api, mock_execute):
         """When xSLoginToken is None in the response, SecuritasDirectError is raised."""
-        mock_execute.return_value = {
-            "data": {"xSLoginToken": None}
-        }
+        mock_execute.return_value = {"data": {"xSLoginToken": None}}
 
         with pytest.raises(SecuritasDirectError, match="xSLoginToken response is None"):
             await api.login()
@@ -391,9 +389,7 @@ class TestValidateDeviceEdgeCases:
                 }
             ]
         }
-        mock_execute.side_effect = SecuritasDirectError(
-            "Unauthorized", error_response
-        )
+        mock_execute.side_effect = SecuritasDirectError("Unauthorized", error_response)
 
         result = await api.validate_device(
             otp_succeed=False, auth_otp_hash="", sms_code=""
@@ -431,11 +427,11 @@ class TestValidateDeviceEdgeCases:
 
     async def test_null_validate_data_raises_error(self, api, mock_execute):
         """When xSValidateDevice is None, SecuritasDirectError is raised."""
-        mock_execute.return_value = {
-            "data": {"xSValidateDevice": None}
-        }
+        mock_execute.return_value = {"data": {"xSValidateDevice": None}}
 
-        with pytest.raises(SecuritasDirectError, match="xSValidateDevice response is None"):
+        with pytest.raises(
+            SecuritasDirectError, match="xSValidateDevice response is None"
+        ):
             await api.validate_device(
                 otp_succeed=True, auth_otp_hash="hash", sms_code="123456"
             )

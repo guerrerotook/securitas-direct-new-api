@@ -1,4 +1,5 @@
 """Public datatypes for the securitas direct API."""
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -146,16 +147,19 @@ class OtpPhone:
     id: int
     phone: str
 
+
 @dataclass
 class SmartLock:
     res: str
     location: str
     type: int
 
+
 @dataclass
 class SmartLockMode:
     res: str
     lockStatus: str
+
 
 @dataclass
 class SmartLockModeStatus:

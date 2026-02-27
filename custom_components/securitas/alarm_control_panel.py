@@ -133,8 +133,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._code: str | None = client.config.get(CONF_CODE, None)
         self._attr_code_format: CodeFormat | None = None
         if self._code:
-            self._attr_code_format = CodeFormat.NUMBER if self._code.isdigit() else CodeFormat.TEXT
-        self._attr_code_arm_required: bool = client.config.get(CONF_CODE_ARM_REQUIRED, False) if self._code else False
+            self._attr_code_format = (
+                CodeFormat.NUMBER if self._code.isdigit() else CodeFormat.TEXT
+            )
+        self._attr_code_arm_required: bool = (
+            client.config.get(CONF_CODE_ARM_REQUIRED, False) if self._code else False
+        )
 
         self._attr_device_info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},

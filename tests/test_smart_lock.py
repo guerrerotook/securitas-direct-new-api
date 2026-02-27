@@ -3,7 +3,6 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from custom_components.securitas.securitas_direct_new_api.apimanager import ApiManager
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     Installation,
     SmartLock,
@@ -66,9 +65,7 @@ class TestGetSmartLockConfig:
     async def test_error_in_response_returns_empty_smart_lock(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "errors": [{"message": "Something went wrong"}]
-        }
+        mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
         result = await authed_api.get_smart_lock_config(installation)
 
@@ -113,9 +110,7 @@ class TestGetLockCurrentMode:
             "data": {
                 "xSGetLockCurrentMode": {
                     "res": "OK",
-                    "smartlockInfo": [
-                        {"lockStatus": "2", "deviceId": "01"}
-                    ],
+                    "smartlockInfo": [{"lockStatus": "2", "deviceId": "01"}],
                 }
             }
         }
@@ -133,9 +128,7 @@ class TestGetLockCurrentMode:
             "data": {
                 "xSGetLockCurrentMode": {
                     "res": "OK",
-                    "smartlockInfo": [
-                        {"lockStatus": "1", "deviceId": "01"}
-                    ],
+                    "smartlockInfo": [{"lockStatus": "1", "deviceId": "01"}],
                 }
             }
         }
@@ -149,9 +142,7 @@ class TestGetLockCurrentMode:
     async def test_error_in_response_returns_default_mode(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "errors": [{"message": "Something went wrong"}]
-        }
+        mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
         result = await authed_api.get_lock_current_mode(installation)
 
@@ -260,9 +251,7 @@ class TestChangeLockMode:
     async def test_none_initial_response_raises_error(
         self, authed_api, mock_execute, installation
     ):
-        mock_execute.return_value = {
-            "data": {"xSChangeSmartlockMode": None}
-        }
+        mock_execute.return_value = {"data": {"xSChangeSmartlockMode": None}}
 
         with pytest.raises(
             SecuritasDirectError, match="xSChangeSmartlockMode response is None"
