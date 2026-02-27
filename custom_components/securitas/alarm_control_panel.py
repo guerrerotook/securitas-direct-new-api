@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import re
 from datetime import timedelta
 import logging
 from typing import Any
@@ -102,7 +103,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
         self._has_peri = self.client.config.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
-        self._disarm_state = SecuritasState.DISARMED_PERI if self._has_peri else SecuritasState.DISARMED
+        self._disarm_state = (
+            SecuritasState.DISARMED_PERI if self._has_peri else SecuritasState.DISARMED
+        )
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
@@ -147,8 +150,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._state = state
         self.async_schedule_update_ha_state()
 
-    def _notify_error(self, notification_id, title: str, message: str) -> None:
+    def _notify_error(self, title: str, message: str) -> None:
         """Notify user with persistent notification."""
+        notification_id = re.sub(r"\W+", "_", title.lower()).strip("_")
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
@@ -205,9 +209,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
 
             if not status.protomResponse:
-                _LOGGER.debug(
-                    "Received empty protomResponse from Securitas, ignoring"
-                )
+                _LOGGER.debug("Received empty protomResponse from Securitas, ignoring")
                 return
             if status.protomResponse == "D":
                 self._state = AlarmControlPanelState.DISARMED
@@ -221,7 +223,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     status.protomResponse,
                 )
                 self._notify_error(
-                    "unmapped_state",
                     "Securitas: Unmapped alarm state",
                     f"The alarm returned status code **{status.protomResponse}** "
                     f"which is not mapped to any Home Assistant alarm state. "
@@ -258,8 +259,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     self.installation, STATE_TO_COMMAND[self._disarm_state]
                 )
             except SecuritasDirectError as err:
-                self._notify_error("disarm_error", "Securitas: Error disarming", str(err.args))
+                self._notify_error("Securitas: Error disarming", str(err.args))
                 _LOGGER.error(err.args)
+                self._state = self._last_status
+                self.async_write_ha_state()
+                return
 
             self.update_status_alarm(
                 CheckAlarmStatus(
@@ -312,11 +316,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
         arm_status: ArmStatus = ArmStatus()
         try:
-            arm_status = await self.client.session.arm_alarm(
-                self.installation, command
-            )
+            arm_status = await self.client.session.arm_alarm(self.installation, command)
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
+            self._state = self._last_status
+            self.async_write_ha_state()
             return
 
         self.update_status_alarm(
@@ -343,7 +347,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             await self.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
     async def async_alarm_arm_night(self, code: str | None = None):
-        """Send arm home command."""
+        """Send arm night command."""
         if self._check_code_for_arm_if_required(code):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
