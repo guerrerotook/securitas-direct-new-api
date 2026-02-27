@@ -1,6 +1,5 @@
 """Securitas direct sentinel sensor."""
 
-from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -171,7 +170,7 @@ class SentinelAirQuality(SensorEntity):
         self._attr_native_value = air_quality.message
 
     @property
-    def extra_state_attributes(self) -> Mapping[str, Any]:  # type: ignore[override]
+    def extra_state_attributes(self) -> dict[str, Any] | None:  # type: ignore[override]
         """Return the state attributes."""
         sensor_attributes: dict[str, Any] = {}
         sensor_attributes["message"] = self._air_quality.message

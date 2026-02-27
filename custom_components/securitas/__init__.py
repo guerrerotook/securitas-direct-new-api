@@ -222,7 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             return False
         except LoginError as err:
-            _notify_error(hass, "login_error", "Securitas Direct", str(err.args))
+            _notify_error(hass, "login_error", "Securitas Direct", str(err))
             config[CONF_ERROR] = "login"
             hass.async_create_task(
                 hass.config_entries.flow.async_init(

@@ -71,7 +71,7 @@ class SecuritasRefreshButton(ButtonEntity):
 
             _LOGGER.info("Update entity alarm panel securitas")
             for entity_id in self.hass.states.async_entity_ids("alarm_control_panel"):
-                if "securitas" in entity_id or "alarm_control_panel" in entity_id:
+                if "securitas" in entity_id:
                     await self.hass.services.async_call(
                         "homeassistant",
                         "update_entity",
