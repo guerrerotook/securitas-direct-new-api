@@ -271,6 +271,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Step 1: General settings."""
         if user_input is not None:
+            user_input.setdefault(CONF_CODE, DEFAULT_CODE)
             self._general_data = user_input
             return await self.async_step_mappings()
         scan_interval = self._get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -286,7 +287,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_CODE, default=self._get(CONF_CODE, DEFAULT_CODE)): str,
+                vol.Optional(CONF_CODE, description={"suggested_value": self._get(CONF_CODE, DEFAULT_CODE)}): str,
                 vol.Optional(CONF_CODE_ARM_REQUIRED, default=code_arm_required): bool,
                 vol.Optional(CONF_PERI_ALARM, default=peri_alarm): bool,
                 vol.Optional(

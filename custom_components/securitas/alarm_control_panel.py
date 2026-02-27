@@ -131,7 +131,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_code_format: CodeFormat | None = None
         if self._code:
             self._attr_code_format = CodeFormat.NUMBER if self._code.isdigit() else CodeFormat.TEXT
-        self._attr_code_arm_required: bool = client.config.get(CONF_CODE_ARM_REQUIRED, True) if self._code else False
+        self._attr_code_arm_required: bool = client.config.get(CONF_CODE_ARM_REQUIRED, False) if self._code else False
 
         self._attr_device_info: DeviceInfo = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
@@ -230,8 +230,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
-        """Check the code only if arming requires a code."""
-        if not self.code_arm_required:
+        """Check the code only if arming requires a code and a PIN is configured."""
+        if not self._code or not self.code_arm_required:
             return True
         return self._check_code(code)
 
