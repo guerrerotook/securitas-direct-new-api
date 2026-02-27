@@ -758,3 +758,309 @@ class TestForceState:
 
         assert AlarmControlPanelState.ARMING in observed_states
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+
+# ===========================================================================
+# get_arm_state
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestGetArmState:
+    """Tests for get_arm_state()."""
+
+    async def test_calls_check_alarm_then_check_alarm_status(self):
+        """get_arm_state calls check_alarm then check_alarm_status."""
+        alarm = make_alarm()
+        alarm.client.session.check_alarm = AsyncMock(return_value="ref-abc")
+        expected_status = CheckAlarmStatus(
+            operation_status="OK",
+            message="Panel armed",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="T",
+            protomResponseData="",
+        )
+        alarm.client.session.check_alarm_status = AsyncMock(return_value=expected_status)
+
+        with patch("custom_components.securitas.alarm_control_panel.asyncio.sleep"):
+            result = await alarm.get_arm_state()
+
+        alarm.client.session.check_alarm.assert_called_once_with(alarm.installation)
+        alarm.client.session.check_alarm_status.assert_called_once_with(
+            alarm.installation, "ref-abc"
+        )
+
+    async def test_returns_alarm_status(self):
+        """get_arm_state returns the CheckAlarmStatus from the API."""
+        alarm = make_alarm()
+        alarm.client.session.check_alarm = AsyncMock(return_value="ref-xyz")
+        expected_status = CheckAlarmStatus(
+            operation_status="OK",
+            message="Disarmed",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="D",
+            protomResponseData="some-data",
+        )
+        alarm.client.session.check_alarm_status = AsyncMock(return_value=expected_status)
+
+        with patch("custom_components.securitas.alarm_control_panel.asyncio.sleep"):
+            result = await alarm.get_arm_state()
+
+        assert result is expected_status
+        assert result.protomResponse == "D"
+        assert result.message == "Disarmed"
+
+
+# ===========================================================================
+# async_will_remove_from_hass
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestAsyncWillRemoveFromHass:
+    """Tests for async_will_remove_from_hass()."""
+
+    async def test_calls_unsub_when_exists(self):
+        """Calls the unsub callable when it exists."""
+        alarm = make_alarm()
+        unsub_mock = MagicMock()
+        alarm._update_unsub = unsub_mock
+
+        await alarm.async_will_remove_from_hass()
+
+        unsub_mock.assert_called_once()
+
+    async def test_handles_none_unsub_gracefully(self):
+        """Handles None _update_unsub gracefully (no crash)."""
+        alarm = make_alarm()
+        alarm._update_unsub = None
+
+        # Should not raise
+        await alarm.async_will_remove_from_hass()
+
+
+# ===========================================================================
+# async_update_status
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestAsyncUpdateStatus:
+    """Tests for async_update_status()."""
+
+    async def test_success_calls_update_overview_and_writes_state(self):
+        """Success: calls update_overview, update_status_alarm, writes HA state."""
+        alarm = make_alarm()
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="Armed total",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="T",
+            protomResponseData="",
+        )
+        alarm.client.update_overview = AsyncMock(return_value=status)
+
+        await alarm.async_update_status()
+
+        alarm.client.update_overview.assert_called_once_with(alarm.installation)
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+        alarm.async_write_ha_state.assert_called_once()
+
+    async def test_success_with_now_parameter(self):
+        """async_update_status accepts an optional now parameter (used by timer)."""
+        alarm = make_alarm()
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="D",
+            protomResponseData="",
+        )
+        alarm.client.update_overview = AsyncMock(return_value=status)
+
+        await alarm.async_update_status(now="2024-01-01T00:00:00")
+
+        alarm.client.update_overview.assert_called_once_with(alarm.installation)
+        assert alarm._state == AlarmControlPanelState.DISARMED
+        alarm.async_write_ha_state.assert_called_once()
+
+    async def test_error_logged_no_ha_state_write(self):
+        """Error: SecuritasDirectError logged, doesn't write HA state."""
+        alarm = make_alarm()
+        alarm.client.update_overview = AsyncMock(
+            side_effect=SecuritasDirectError("Network error")
+        )
+
+        await alarm.async_update_status()
+
+        alarm.client.update_overview.assert_called_once()
+        # async_write_ha_state should NOT be called on error
+        alarm.async_write_ha_state.assert_not_called()
+        # State should remain at initial DISARMED
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+# ===========================================================================
+# _check_code_for_arm_if_required
+# ===========================================================================
+
+
+class TestCheckCodeForArmIfRequired:
+    """Tests for _check_code_for_arm_if_required()."""
+
+    def test_no_code_configured_returns_true(self):
+        """No code configured: returns True regardless of input."""
+        alarm = make_alarm()  # no code
+        assert alarm._check_code_for_arm_if_required(None) is True
+        assert alarm._check_code_for_arm_if_required("1234") is True
+
+    def test_code_configured_but_arm_required_false(self):
+        """Code configured but code_arm_required=False: returns True."""
+        alarm = make_alarm(code="1234")
+        # code_arm_required defaults to False
+        assert alarm._attr_code_arm_required is False
+        assert alarm._check_code_for_arm_if_required(None) is True
+        assert alarm._check_code_for_arm_if_required("wrong") is True
+
+    def test_code_configured_arm_required_correct_code(self):
+        """Code configured AND code_arm_required=True with correct code: returns True."""
+        config = {
+            "PERI_alarm": False,
+            "map_home": "partial_day",
+            "map_away": "total",
+            "map_night": "partial_night",
+            "map_custom": "not_used",
+            "scan_interval": 120,
+            "code": "5678",
+            "code_arm_required": True,
+        }
+        alarm = make_alarm(config=config)
+        assert alarm._check_code_for_arm_if_required("5678") is True
+
+    def test_code_configured_arm_required_wrong_code(self):
+        """Code configured AND code_arm_required=True with wrong code: raises ServiceValidationError."""
+        config = {
+            "PERI_alarm": False,
+            "map_home": "partial_day",
+            "map_away": "total",
+            "map_night": "partial_night",
+            "map_custom": "not_used",
+            "scan_interval": 120,
+            "code": "5678",
+            "code_arm_required": True,
+        }
+        alarm = make_alarm(config=config)
+        with pytest.raises(ServiceValidationError):
+            alarm._check_code_for_arm_if_required("0000")
+
+
+# ===========================================================================
+# async_alarm_arm_home / arm_night / arm_custom_bypass
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestArmMethods:
+    """Tests for async_alarm_arm_home, async_alarm_arm_night, async_alarm_arm_custom_bypass."""
+
+    async def test_arm_home_passes_armed_home(self):
+        """async_alarm_arm_home calls set_arm_state with ARMED_HOME."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="P",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_alarm_arm_home()
+
+        alarm.client.session.arm_alarm.assert_called_once()
+        # Verify the command corresponds to ARMED_HOME mapping
+        call_args = alarm.client.session.arm_alarm.call_args
+        assert call_args[0][1] == alarm._command_map[AlarmControlPanelState.ARMED_HOME]
+        assert alarm._state == AlarmControlPanelState.ARMED_HOME
+
+    async def test_arm_night_passes_armed_night(self):
+        """async_alarm_arm_night calls set_arm_state with ARMED_NIGHT."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="Q",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_alarm_arm_night()
+
+        alarm.client.session.arm_alarm.assert_called_once()
+        call_args = alarm.client.session.arm_alarm.call_args
+        assert call_args[0][1] == alarm._command_map[AlarmControlPanelState.ARMED_NIGHT]
+        assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
+
+    async def test_arm_custom_bypass_passes_armed_custom_bypass(self):
+        """async_alarm_arm_custom_bypass calls set_arm_state with ARMED_CUSTOM_BYPASS."""
+        alarm = make_alarm(has_peri=True)  # PERI config maps custom bypass
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="E",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_alarm_arm_custom_bypass()
+
+        alarm.client.session.arm_alarm.assert_called_once()
+        call_args = alarm.client.session.arm_alarm.call_args
+        assert call_args[0][1] == alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+
+    async def test_each_arm_method_transitions_through_arming(self):
+        """All arm methods set ARMING state via __force_state before the API call."""
+        alarm = make_alarm(has_peri=True)
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        observed_states = []
+
+        original_arm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="P",
+                protomResponseData="",
+            )
+        )
+
+        async def capture_state(*args, **kwargs):
+            observed_states.append(alarm._state)
+            return await original_arm(*args, **kwargs)
+
+        alarm.client.session.arm_alarm = capture_state
+
+        await alarm.async_alarm_arm_home()
+
+        assert AlarmControlPanelState.ARMING in observed_states

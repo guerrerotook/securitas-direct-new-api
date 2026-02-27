@@ -239,3 +239,122 @@ class TestGenerateDeviceId:
         a = generate_device_id("ES")
         b = generate_device_id("ES")
         assert a != b
+
+
+# ── _check_errros tests ──────────────────────────────────────────────────────
+
+
+class TestCheckErrors:
+    """Tests for ApiManager._check_errros (note: typo in method name matches source)."""
+
+    async def test_invalid_session_error_triggers_relogin(self, api):
+        """Response with 'Invalid session' error triggers re-login."""
+        api.login = AsyncMock()
+        response_text = json.dumps(
+            {"errors": [{"message": "Invalid session. Please, try again later."}]}
+        )
+
+        result = await api._check_errros(response_text)
+
+        assert result is True
+        assert api.authentication_token is None
+        api.login.assert_awaited_once()
+
+    async def test_expired_token_error_triggers_relogin(self, api):
+        """Response with 'Invalid token: Expired' error triggers re-login."""
+        api.login = AsyncMock()
+        response_text = json.dumps(
+            {"errors": [{"message": "Invalid token: Expired"}]}
+        )
+
+        result = await api._check_errros(response_text)
+
+        assert result is True
+        assert api.authentication_token is None
+        api.login.assert_awaited_once()
+
+    async def test_other_errors_dont_trigger_relogin(self, api):
+        """Other error messages don't trigger re-login."""
+        api.login = AsyncMock()
+        response_text = json.dumps(
+            {"errors": [{"message": "Some other error"}]}
+        )
+
+        result = await api._check_errros(response_text)
+
+        assert result is False
+        api.login.assert_not_called()
+
+    async def test_no_errors_does_nothing(self, api):
+        """Response without errors field does nothing."""
+        api.login = AsyncMock()
+        response_text = json.dumps({"data": {"test": "ok"}})
+
+        result = await api._check_errros(response_text)
+
+        assert result is False
+        api.login.assert_not_called()
+
+
+# ── _check_capabilities_token tests ──────────────────────────────────────────
+
+
+class TestCheckCapabilitiesToken:
+    """Tests for ApiManager._check_capabilities_token."""
+
+    async def test_empty_capabilities_refreshes(self, api):
+        """When installation.capabilities is empty, refreshes by calling get_all_services."""
+        installation = Installation(
+            number="123", panel="PANEL-01", capabilities=""
+        )
+        api.get_all_services = AsyncMock(return_value=[])
+
+        await api._check_capabilities_token(installation)
+
+        api.get_all_services.assert_awaited_once_with(installation)
+
+    async def test_expired_capabilities_refreshes(self, api):
+        """When installation.capabilities_exp is in the past, refreshes."""
+        from datetime import datetime as dt
+        from tests.conftest import make_jwt
+
+        installation = Installation(
+            number="123",
+            panel="PANEL-01",
+            capabilities=make_jwt(exp_minutes=60),
+        )
+        # Set expiry in the past
+        installation.capabilities_exp = dt.min
+        api.get_all_services = AsyncMock(return_value=[])
+
+        await api._check_capabilities_token(installation)
+
+        api.get_all_services.assert_awaited_once_with(installation)
+
+    async def test_valid_capabilities_does_nothing(self, api):
+        """When capabilities are valid and not expired, no refresh happens."""
+        from datetime import datetime as dt, timedelta
+        from tests.conftest import make_jwt
+
+        installation = Installation(
+            number="123",
+            panel="PANEL-01",
+            capabilities=make_jwt(exp_minutes=60),
+        )
+        installation.capabilities_exp = dt.now() + timedelta(hours=1)
+        api.get_all_services = AsyncMock(return_value=[])
+
+        await api._check_capabilities_token(installation)
+
+        api.get_all_services.assert_not_called()
+
+    async def test_none_capabilities_refreshes(self, api):
+        """When capabilities is None (falsy), refreshes."""
+        installation = Installation(
+            number="123", panel="PANEL-01", capabilities=""
+        )
+        api.get_all_services = AsyncMock(return_value=[])
+
+        await api._check_capabilities_token(installation)
+
+        api.get_all_services.assert_awaited_once_with(installation)

@@ -465,3 +465,168 @@ class TestLogout:
         operation = call_args[0][1]
         assert content["operationName"] == "Logout"
         assert operation == "Logout"
+
+
+# ── Additional sentinel / air quality edge cases ─────────────────────────────
+
+
+class TestGetSentinelDataEdgeCases:
+    async def test_get_sentinel_data_with_no_attributes_returns_empty(
+        self, authed_api, mock_execute, installation
+    ):
+        """Service with no attributes returns empty Sentinel."""
+        service_no_attrs = Service(
+            id=1,
+            id_service=1,
+            active=True,
+            visible=True,
+            bde=False,
+            is_premium=False,
+            cod_oper=False,
+            total_device=0,
+            request="CONFORT",
+            multiple_req=False,
+            num_devices_mr=0,
+            secret_word=False,
+            min_wrapper_version=None,
+            description="Sentinel",
+            attributes=[],
+            listdiy=[],
+            listprompt=[],
+            installation=installation,
+        )
+        mock_execute.return_value = {
+            "data": {
+                "xSComfort": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "alias": "Living",
+                            "status": {
+                                "temperature": 22,
+                                "humidity": 45,
+                                "airQualityCode": "GOOD",
+                            },
+                            "zone": "1",
+                        }
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_sentinel_data(installation, service_no_attrs)
+
+        assert result == Sentinel("", "", 0, 0)
+
+
+class TestGetAirQualityDataEdgeCases:
+    async def test_get_air_quality_with_no_attributes_uses_zone_0(
+        self, authed_api, mock_execute, installation
+    ):
+        """Service with no zone attribute defaults to zone '0'."""
+        service_no_attrs = Service(
+            id=2,
+            id_service=2,
+            active=True,
+            visible=True,
+            bde=False,
+            is_premium=False,
+            cod_oper=False,
+            total_device=0,
+            request="AIR_QUALITY",
+            multiple_req=False,
+            num_devices_mr=0,
+            secret_word=False,
+            min_wrapper_version=None,
+            description="Air Quality",
+            attributes=[],
+            listdiy=[],
+            listprompt=[],
+            installation=installation,
+        )
+        mock_execute.return_value = {
+            "data": {
+                "xSAirQ": {
+                    "graphData": {
+                        "status": {"current": 75, "currentMsg": "Moderate"}
+                    }
+                }
+            }
+        }
+
+        result = await authed_api.get_air_quality_data(installation, service_no_attrs)
+
+        assert isinstance(result, AirQuality)
+        assert result.value == 75
+        assert result.message == "Moderate"
+        # Verify it used zone "0" by checking the request variables
+        call_args = mock_execute.call_args
+        content = call_args[0][0]
+        assert content["variables"]["zone"] == "0"
+
+
+class TestGetAllServicesEdgeCases:
+    async def test_null_xssrv_returns_empty_list(self, api, mock_execute, installation):
+        """When xSSrv response is None, returns empty list."""
+        mock_execute.return_value = {"data": {"xSSrv": None}}
+
+        result = await api.get_all_services(installation)
+
+        assert result == []
+
+
+# ── check_alarm / check_alarm_status tests ───────────────────────────────────
+
+
+class TestCheckAlarm:
+    async def test_check_alarm_returns_reference_id(
+        self, authed_api, mock_execute, installation
+    ):
+        """check_alarm returns the reference ID string."""
+        mock_execute.return_value = {
+            "data": {
+                "xSCheckAlarm": {
+                    "res": "OK",
+                    "msg": "",
+                    "referenceId": "ref-abc-123",
+                }
+            }
+        }
+
+        result = await authed_api.check_alarm(installation)
+
+        assert result == "ref-abc-123"
+
+
+class TestCheckAlarmStatus:
+    async def test_check_alarm_status_returns_status(
+        self, authed_api, mock_execute, installation
+    ):
+        """check_alarm_status returns CheckAlarmStatus dataclass."""
+        from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+            CheckAlarmStatus,
+        )
+
+        # Return immediate (non-WAIT) response so no loop
+        mock_execute.return_value = {
+            "data": {
+                "xSCheckAlarmStatus": {
+                    "res": "OK",
+                    "msg": "",
+                    "status": "ARM1",
+                    "numinst": "123456",
+                    "protomResponse": "PROT_RESP",
+                    "protomResponseDate": "2024-01-01",
+                }
+            }
+        }
+
+        result = await authed_api.check_alarm_status(
+            installation, "ref-abc-123", timeout=3
+        )
+
+        assert isinstance(result, CheckAlarmStatus)
+        assert result.operation_status == "OK"
+        assert result.status == "ARM1"
+        assert result.InstallationNumer == "123456"
+        assert result.protomResponse == "PROT_RESP"

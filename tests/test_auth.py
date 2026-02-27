@@ -305,3 +305,157 @@ class TestValidateDevice:
 
         # Should be cleared after successful validation
         assert api.authentication_otp_challenge_value is None
+
+
+# ── Additional login edge cases ──────────────────────────────────────────────
+
+
+class TestLoginEdgeCases:
+    async def test_error_with_need_device_authorization_raises_login2fa_error(
+        self, api, mock_execute
+    ):
+        """When _execute_request raises SecuritasDirectError whose response data
+        contains xSLoginToken.needDeviceAuthorization=True, Login2FAError is raised."""
+        error_response = {
+            "data": {
+                "xSLoginToken": {
+                    "needDeviceAuthorization": True,
+                    "hash": None,
+                    "refreshToken": None,
+                }
+            }
+        }
+        mock_execute.side_effect = SecuritasDirectError(
+            "Session expired", error_response
+        )
+
+        with pytest.raises(Login2FAError):
+            await api.login()
+
+    async def test_error_response_with_data_raises_login_error(self, api, mock_execute):
+        """When _execute_request raises SecuritasDirectError whose response data
+        has xSLoginToken but needDeviceAuthorization is False, LoginError is raised."""
+        error_response = {
+            "data": {
+                "xSLoginToken": {
+                    "needDeviceAuthorization": False,
+                    "hash": None,
+                    "refreshToken": None,
+                }
+            }
+        }
+        mock_execute.side_effect = SecuritasDirectError(
+            "Some error", error_response
+        )
+
+        with pytest.raises(LoginError):
+            await api.login()
+
+    async def test_null_xslogintoken_raises_error(self, api, mock_execute):
+        """When xSLoginToken is None in the response, SecuritasDirectError is raised."""
+        mock_execute.return_value = {
+            "data": {"xSLoginToken": None}
+        }
+
+        with pytest.raises(SecuritasDirectError, match="xSLoginToken response is None"):
+            await api.login()
+
+    async def test_login_stores_empty_token_for_null_hash(self, api, mock_execute):
+        """When hash is None (2FA flow), auth token stays empty but timestamp is set."""
+        mock_execute.return_value = login_response(hash_token=None)
+
+        await api.login()
+
+        assert api.authentication_token == ""
+        assert api.login_timestamp > 0
+
+
+# ── Additional validate_device edge cases ────────────────────────────────────
+
+
+class TestValidateDeviceEdgeCases:
+    async def test_error_with_phone_data_returns_otp_tuple(self, api, mock_execute):
+        """When _execute_request raises SecuritasDirectError with phone data in
+        the error response, returns (otp_hash, phones) tuple."""
+        error_response = {
+            "errors": [
+                {
+                    "message": "Unauthorized",
+                    "data": {
+                        "auth-otp-hash": "challenge-hash-123",
+                        "auth-phones": [
+                            {"id": 1, "phone": "***456"},
+                            {"id": 2, "phone": "***789"},
+                        ],
+                    },
+                }
+            ]
+        }
+        mock_execute.side_effect = SecuritasDirectError(
+            "Unauthorized", error_response
+        )
+
+        result = await api.validate_device(
+            otp_succeed=False, auth_otp_hash="", sms_code=""
+        )
+
+        assert result[0] == "challenge-hash-123"
+        assert len(result[1]) == 2
+        assert result[1][0].phone == "***456"
+        assert result[1][1].phone == "***789"
+
+    async def test_otp_not_succeed_returns_challenge_and_phones(
+        self, api, mock_execute
+    ):
+        """When otp_succeed=False and response has errors with 'Unauthorized',
+        returns the OTP challenge hash and phone list."""
+        mock_execute.return_value = {
+            "errors": [
+                {
+                    "message": "Unauthorized",
+                    "data": {
+                        "auth-otp-hash": "otp-hash-abc",
+                        "auth-phones": [{"id": 1, "phone": "***111"}],
+                    },
+                }
+            ]
+        }
+
+        result = await api.validate_device(
+            otp_succeed=False, auth_otp_hash="", sms_code=""
+        )
+
+        assert result[0] == "otp-hash-abc"
+        assert len(result[1]) == 1
+        assert result[1][0].id == 1
+
+    async def test_null_validate_data_raises_error(self, api, mock_execute):
+        """When xSValidateDevice is None, SecuritasDirectError is raised."""
+        mock_execute.return_value = {
+            "data": {"xSValidateDevice": None}
+        }
+
+        with pytest.raises(SecuritasDirectError, match="xSValidateDevice response is None"):
+            await api.validate_device(
+                otp_succeed=True, auth_otp_hash="hash", sms_code="123456"
+            )
+
+
+# ── Additional refresh/auth edge cases ──────────────────────────────────────
+
+
+class TestRefreshTokenEdgeCases:
+    async def test_refresh_token_after_expired_calls_login(self, api):
+        """When refresh fails and token is expired, falls back to login."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min  # expired
+        api.refresh_token_value = "some-refresh-token"
+        api.refresh_token = AsyncMock(
+            side_effect=SecuritasDirectError("Refresh failed", None)
+        )
+        api.login = AsyncMock()
+
+        await api._check_authentication_token()
+
+        api.refresh_token.assert_awaited_once()
+        api.login.assert_awaited_once()
