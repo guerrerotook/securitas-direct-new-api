@@ -50,6 +50,8 @@ If you need to change some of the options, you can configure the integration (in
 
 Securitas Direct supports several alarm modes, but Home Assistant's alarm panel only has four buttons: **Home**, **Away**, **Night**, and **Custom Bypass**. This integration lets you choose which Securitas mode each button activates.
 
+![Alarm State Mapping](./docs/images/state-mappings.png)
+
 ### Securitas Alarm Modes
 
 | Mode                      | Description                           |
