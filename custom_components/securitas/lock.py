@@ -8,7 +8,7 @@ import homeassistant.components.lock as lock
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -74,7 +74,7 @@ class SecuritasLock(lock.LockEntity):
         self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
-        self._attr_unique_id: str = f"securitas_direct.{installation.number}"
+        self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self.installation: Installation = installation
@@ -89,7 +89,7 @@ class SecuritasLock(lock.LockEntity):
             hass, self.async_update_status, self._update_interval
         )
 
-        self._attr_device_info: DeviceInfo = DeviceInfo(
+        self._attr_device_info: DeviceInfo | None = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
             model=installation.panel,
@@ -117,12 +117,12 @@ class SecuritasLock(lock.LockEntity):
         )
 
     @property
-    def name(self) -> str:
+    def name(self) -> str:  # type: ignore[override]
         """Return the name of the device."""
         return "Puerta"
 
     @property
-    def changed_by(self) -> str:
+    def changed_by(self) -> str:  # type: ignore[override]
         """Return the last change triggered by."""
         return self._changed_by
 
@@ -150,39 +150,39 @@ class SecuritasLock(lock.LockEntity):
         return smartlock_status.lockStatus
 
     @property
-    def is_locked(self) -> bool:
+    def is_locked(self) -> bool:  # type: ignore[override]
         if self._state == "2":
             return True
         else:
             return False
 
     @property
-    def is_open(self) -> bool:
+    def is_open(self) -> bool:  # type: ignore[override]
         if self._state == "1":
             return True
         else:
             return False
 
     @property
-    def is_locking(self) -> bool:
+    def is_locking(self) -> bool:  # type: ignore[override]
         if self._state == "4":
             return True
         else:
             return False
 
     @property
-    def is_unlocking(self) -> bool:
+    def is_unlocking(self) -> bool:  # type: ignore[override]
         return False
 
     @property
-    def is_opening(self) -> bool:
+    def is_opening(self) -> bool:  # type: ignore[override]
         if self._state == "3":
             return True
         else:
             return False
 
     @property
-    def is_jammed(self) -> bool:
+    def is_jammed(self) -> bool:  # type: ignore[override]
         return False
 
     async def async_lock(self, **kwargs):
@@ -206,6 +206,6 @@ class SecuritasLock(lock.LockEntity):
         self._state = "1"
 
     @property
-    def supported_features(self) -> int:
+    def supported_features(self) -> int:  # type: ignore[override]
         """Return the list of supported features."""
         return 0

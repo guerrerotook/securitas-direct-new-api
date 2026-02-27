@@ -66,7 +66,7 @@ class ApiManager:
         self.delay_check_operation: int = delay_check_operation
 
         self.protom_response: str = ""
-        self.authentication_token: str = ""
+        self.authentication_token: str | None = ""
         self.authentication_token_exp: datetime = datetime.min
         self.login_timestamp: int = 0
         self.authentication_otp_challenge_value: Optional[tuple[str, str]] = None
@@ -268,7 +268,7 @@ class ApiManager:
         }
         await self._execute_request(content, "Logout")
 
-    def _extract_otp_data(self, data) -> tuple[str, list[OtpPhone]]:
+    def _extract_otp_data(self, data) -> tuple[str | None, list[OtpPhone]]:
         if not data:
             return (None, [])
         otp_hash = data.get("auth-otp-hash")
@@ -279,7 +279,7 @@ class ApiManager:
 
     async def validate_device(
         self, otp_succeed: bool, auth_otp_hash: str, sms_code: str
-    ) -> tuple[str, list[OtpPhone]]:
+    ) -> tuple[str | None, list[OtpPhone] | None]:
         """Validate the device."""
         content = {
             "operationName": "mkValidateDevice",
@@ -318,6 +318,7 @@ class ApiManager:
             raise SecuritasDirectError("xSValidateDevice response is None", response)
         self.authentication_token = validate_data["hash"]
         try:
+            assert self.authentication_token is not None
             token = jwt.decode(
                 self.authentication_token,
                 algorithms=["HS256"],
@@ -368,6 +369,7 @@ class ApiManager:
         if refresh_data.get("hash"):
             self.authentication_token = refresh_data["hash"]
             try:
+                assert self.authentication_token is not None
                 token = jwt.decode(
                     self.authentication_token,
                     algorithms=["HS256"],
@@ -465,6 +467,7 @@ class ApiManager:
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
             try:
+                assert self.authentication_token is not None
                 token = jwt.decode(
                     self.authentication_token,
                     algorithms=["HS256"],
@@ -637,7 +640,7 @@ class ApiManager:
         if "errors" in response:
             return Sentinel("", "", 0, 0)
 
-        if not service.attributes:
+        if not service.attributes or not isinstance(service.attributes, list):
             _LOGGER.warning("No attributes found for sentinel service %s", service.id)
             return Sentinel("", "", 0, 0)
 
@@ -668,7 +671,7 @@ class ApiManager:
     ) -> AirQuality:
         """Get sentinel status."""
         zone_val = "0"
-        if service.attributes:
+        if service.attributes and isinstance(service.attributes, list):
             zone_val = str(service.attributes[0].value)
         else:
             _LOGGER.warning(

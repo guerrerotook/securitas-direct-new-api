@@ -9,14 +9,14 @@ from typing import Any
 
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.components.alarm_control_panel import (
-    AlarmControlPanelEntityFeature,
-    CodeFormat,
+    AlarmControlPanelEntityFeature,  # type: ignore[attr-defined]
+    CodeFormat,  # type: ignore[attr-defined]
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.exceptions import ServiceValidationError
@@ -95,7 +95,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
-        self._attr_unique_id: str = f"securitas_direct.{installation.number}"
+        self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self.installation: Installation = installation
@@ -120,8 +120,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             if sec_state == SecuritasState.NOT_USED:
                 continue
             self._command_map[ha_state] = STATE_TO_COMMAND[sec_state]
-            for code, state in PROTO_TO_STATE.items():
-                if state == sec_state and code not in self._status_map:
+            for code, proto_state in PROTO_TO_STATE.items():
+                if proto_state == sec_state and code not in self._status_map:
                     self._status_map[code] = ha_state
                     break
         self._update_interval: timedelta = timedelta(
@@ -140,7 +140,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             client.config.get(CONF_CODE_ARM_REQUIRED, False) if self._code else False
         )
 
-        self._attr_device_info: DeviceInfo = DeviceInfo(
+        self._attr_device_info: DeviceInfo | None = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
             model=installation.panel,
@@ -170,7 +170,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         )
 
     @property
-    def name(self) -> str:
+    def name(self) -> str:  # type: ignore[override]
         """Return the name of the device."""
         return self.installation.alias
 
@@ -363,7 +363,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             await self.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
     @property
-    def alarm_state(self) -> AlarmControlPanelState | None:
+    def alarm_state(self) -> AlarmControlPanelState | None:  # type: ignore[override]
         """Return the state of the alarm."""
         try:
             return getattr(AlarmControlPanelState, self._state.upper())
@@ -371,7 +371,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             return None
 
     @property
-    def supported_features(self) -> int:
+    def supported_features(self) -> int:  # type: ignore[override]
         """Return the list of supported features."""
         features = 0
         if AlarmControlPanelState.ARMED_HOME in self._command_map:

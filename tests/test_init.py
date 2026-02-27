@@ -277,7 +277,7 @@ class TestSecuritasHub:
         hub.session = AsyncMock()
         hub.session.validate_device = AsyncMock(return_value=("hash", []))
         result = await hub.validate_device()
-        hub.session.validate_device.assert_awaited_once_with(False, None, None)
+        hub.session.validate_device.assert_awaited_once_with(False, "", "")
         assert result == ("hash", [])
 
     async def test_send_sms_code_delegates(self):
