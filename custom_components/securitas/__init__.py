@@ -22,10 +22,10 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .securitas_direct_new_api import (
+    ALARM_STATUS_POLL_DELAY,
     ApiDomains,
     ApiManager,
     CheckAlarmStatus,
@@ -84,7 +84,9 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
                 vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
                 vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
-                vol.Optional(CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED): bool,
+                vol.Optional(
+                    CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED
+                ): bool,
                 vol.Optional(
                     CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
                 ): bool,
@@ -96,7 +98,7 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
-def add_device_information(config: OrderedDict) -> OrderedDict:
+def add_device_information(config: dict) -> dict:
     """Add device information to the configuration."""
     if CONF_DEVICE_ID not in config:
         config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
@@ -221,7 +223,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             return False
         except LoginError as err:
-            _notify_error(hass, "login_error", "Securitas Direct", err.args)
+            _notify_error(hass, "login_error", "Securitas Direct", str(err))
             config[CONF_ERROR] = "login"
             hass.async_create_task(
                 hass.config_entries.flow.async_init(
@@ -232,9 +234,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return False
         except SecuritasDirectError as err:
             _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
-            raise ConfigEntryNotReady(
-                "Unable to connect to Securitas Direct"
-            ) from None
+            raise ConfigEntryNotReady("Unable to connect to Securitas Direct") from None
         else:
             hass.data[DOMAIN][SecuritasHub.__name__] = client
             try:
@@ -277,6 +277,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
     return unload_ok
+
 
 def _notify_error(
     hass: HomeAssistant, notification_id, title: str, message: str
@@ -346,15 +347,15 @@ class SecuritasHub:
 
     def __init__(
         self,
-        domain_config: OrderedDict,
-        config_entry: ConfigEntry,
+        domain_config: dict,
+        config_entry: ConfigEntry | None,
         http_client: ClientSession,
         hass: HomeAssistant,
     ) -> None:
         """Initialize the Securitas hub."""
-        self.overview: CheckAlarmStatus = {}
+        self.overview: CheckAlarmStatus | dict = {}
         self.config = domain_config
-        self.config_entry: ConfigEntry = config_entry
+        self.config_entry: ConfigEntry | None = config_entry
         self.sentinel_services: list[Service] = []
         self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
         self.country: str = domain_config[CONF_COUNTRY].upper()
@@ -377,13 +378,13 @@ class SecuritasHub:
         """Login to Securitas."""
         await self.session.login()
 
-    async def validate_device(self) -> tuple[str, list[OtpPhone]]:
+    async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
         """Validate the current device."""
-        return await self.session.validate_device(False, None, None)
+        return await self.session.validate_device(False, "", "")
 
     async def send_sms_code(
         self, auth_otp_hash: str, sms_code: str
-    ) -> tuple[str, list[OtpPhone]]:
+    ) -> tuple[str | None, list[OtpPhone] | None]:
         """Send the SMS."""
         return await self.session.validate_device(True, auth_otp_hash, sms_code)
 
@@ -399,7 +400,7 @@ class SecuritasHub:
         """Get the list of services from the instalation."""
         return await self.session.get_all_services(instalation)
 
-    def get_authentication_token(self) -> str:
+    def get_authentication_token(self) -> str | None:
         """Get the authentication token."""
         return self.session.authentication_token
 
@@ -426,18 +427,18 @@ class SecuritasHub:
                 _LOGGER.warning("Error checking general status: %s", err.args)
 
             return CheckAlarmStatus(
-                status.status,
+                status.status or "",
                 "",
-                status.status,
+                status.status or "",
                 installation.number,
-                status.status,
-                status.timestampUpdate,
+                status.status or "",
+                status.timestampUpdate or "",
             )
 
         alarm_status = CheckAlarmStatus()
         try:
             reference_id: str = await self.session.check_alarm(installation)
-            await asyncio.sleep(1)
+            await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
             alarm_status = await self.session.check_alarm_status(
                 installation, reference_id
             )
@@ -447,5 +448,5 @@ class SecuritasHub:
         return alarm_status
 
     @property
-    def get_config_entry(self) -> ConfigEntry:
+    def get_config_entry(self) -> ConfigEntry | None:
         return self.config_entry

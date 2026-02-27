@@ -1,6 +1,5 @@
 """Securitas direct sentinel sensor."""
 
-from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -9,7 +8,7 @@ from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import CONF_INSTALLATION_KEY, DOMAIN, SecuritasDirectDevice, SecuritasHub
@@ -171,7 +170,7 @@ class SentinelAirQuality(SensorEntity):
         self._attr_native_value = air_quality.message
 
     @property
-    def extra_state_attributes(self) -> Mapping[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any] | None:  # type: ignore[override]
         """Return the state attributes."""
         sensor_attributes: dict[str, Any] = {}
         sensor_attributes["message"] = self._air_quality.message

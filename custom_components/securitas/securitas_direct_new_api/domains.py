@@ -16,7 +16,6 @@ class ApiDomains:
             "GB": "https://customers.verisure.co.uk/owa-api/graphql",
             "IE": "https://customers.verisure.ie/owa-api/graphql",
             "IT": "https://customers.verisure.it/owa-api/graphql",
-            "AR": "https://customers.verisure.com.ar/owa-api/graphql",
             "PT": "https://customers.verisure.pt/owa-api/graphql",
         }
 
