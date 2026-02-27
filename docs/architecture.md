@@ -294,7 +294,7 @@ async_track_time_interval fires every scan_interval seconds
 
 ### Overview
 
-The test suite has 400 tests achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
+The test suite has 430 tests (400 unit tests + 30 integration tests) achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
 
 ```bash
 # Run the full suite
@@ -318,6 +318,7 @@ Tests are organized by module, with a shared `conftest.py` providing fixtures an
 ```
 tests/
 ├── conftest.py              Shared fixtures (API client, JWT helpers, response factories)
+├── mock_graphql.py          Mock HTTP transport for integration tests (see below)
 ├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation
 ├── test_auth.py             Login, refresh, 2FA, token lifecycle
 ├── test_button.py           Refresh button entity
@@ -327,6 +328,7 @@ tests/
 ├── test_execute_request.py  HTTP request execution, headers, error handling
 ├── test_ha_platforms.py     Platform async_setup_entry for all entity types
 ├── test_init.py             Integration setup, SecuritasHub, device info, options
+├── test_integration.py      Integration tests using MockGraphQLServer (see below)
 ├── test_operations.py       Arm, disarm, check alarm, polling
 ├── test_services.py         Service discovery, Sentinel, air quality, smart lock
 └── test_smart_lock.py       Lock mode changes, status polling
@@ -374,6 +376,46 @@ assert result["type"] == FlowResultType.FORM
 ```
 
 **Integration setup tests** (test_init): Patch `SecuritasHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms.
+
+### Integration tests (`test_integration.py`, `mock_graphql.py`)
+
+Integration tests exercise the full stack from HA config-entry setup through to API behaviour, using a `MockGraphQLServer` that intercepts `aiohttp` POST calls at the HTTP transport level. Unlike unit tests, these let `_execute_request()` run fully — header construction, JSON parsing, and error handling are all exercised.
+
+**How the mock server works:**
+
+`MockGraphQLServer` (in `tests/mock_graphql.py`) replaces `http_client.post` on `ApiManager`. Each call reads the `X-APOLLO-OPERATION-NAME` header, records the call, and returns the next queued response for that operation:
+
+```python
+server = MockGraphQLServer()
+server.add_response("mkLoginToken", graphql_login())
+server.add_response("mkInstallationList", graphql_installations())
+server.set_default_response("CheckAlarm", graphql_check_alarm())
+
+mock_http = server.make_http_client()
+with patch("custom_components.securitas.async_get_clientsession", return_value=mock_http):
+    result = await async_setup_entry(hass, entry)
+
+assert server.call_count("mkLoginToken") == 1
+_, headers, _ = server.get_calls("CheckAlarm")[0]
+assert headers["numinst"] == "123456"
+```
+
+Key design choices:
+- **Queue-based**: each operation has a FIFO queue; `set_default_response()` provides a fallback when the queue is empty
+- **Records all calls**: tests can assert on operation name, request headers, and JSON body
+- **`queue_standard_setup()`**: convenience helper that queues login → list_installations → services and sets defaults for alarm status calls
+- **Response factories**: `graphql_login()`, `graphql_installations()`, `graphql_alarm_status()`, `graphql_arm()`, `graphql_disarm()`, `graphql_sentinel()`, etc. return dicts matching the real Securitas GraphQL schema
+
+**What integration tests cover:**
+- Full setup flow: login → list installations → get services → forward platforms
+- JWT parsing: authentication token expiry set correctly from `mkLoginToken` response
+- Error handling: `LoginError`, `Login2FAError`, connection errors → correct return values
+- Scoped request headers: `numinst`, `panel`, `X-Capabilities` present on installation-scoped calls
+- Operation routing: `X-APOLLO-OPERATION-NAME` header matches the operation name for every call
+- State from real API responses: `CheckAlarmStatus` proto codes map to correct HA states
+- Polling behaviour: `ArmStatus`/`DisarmStatus` WAIT responses are retried
+- Sensor data: `get_sentinel_data()` and `get_air_quality_data()` parse real response shapes
+- Unload: `async_unload_entry` cleans up `hass.data[DOMAIN]` correctly
 
 ### Coverage by module
 

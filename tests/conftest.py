@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
+from .mock_graphql import MockGraphQLServer
+
 from custom_components.securitas import (
     CONF_CHECK_ALARM_PANEL,
     CONF_CODE_ARM_REQUIRED,
@@ -256,6 +258,15 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     for key, val in overrides.items():
         setattr(hub, key, val)
     return hub
+
+
+# ── Integration mock server fixture ─────────────────────────────────────────
+
+
+@pytest.fixture
+def mock_server() -> MockGraphQLServer:
+    """Create a fresh MockGraphQLServer wired to a mock aiohttp ClientSession."""
+    return MockGraphQLServer()
 
 
 def setup_integration_data(
