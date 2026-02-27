@@ -290,19 +290,128 @@ async_track_time_interval fires every scan_interval seconds
     → async_write_ha_state()
 ```
 
+## Testing
+
+### Overview
+
+The test suite has 400 tests achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
+
+```bash
+# Run the full suite
+python -m pytest tests/ -v --tb=short
+
+# Run with coverage
+python -m pytest tests/ --cov=custom_components/securitas --cov-report=term-missing
+
+# Run a single test file
+python -m pytest tests/test_auth.py -v
+
+# Lint and type check
+ruff check . && ruff format --check .
+pyright custom_components/
+```
+
+### Test architecture
+
+Tests are organized by module, with a shared `conftest.py` providing fixtures and helpers.
+
+```
+tests/
+├── conftest.py              Shared fixtures (API client, JWT helpers, response factories)
+├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation
+├── test_auth.py             Login, refresh, 2FA, token lifecycle
+├── test_button.py           Refresh button entity
+├── test_config_flow.py      Config flow (setup + 2FA) and options flow
+├── test_constants.py        SecuritasState enum, mapping tables
+├── test_domains.py          Country-to-URL routing
+├── test_execute_request.py  HTTP request execution, headers, error handling
+├── test_ha_platforms.py     Platform async_setup_entry for all entity types
+├── test_init.py             Integration setup, SecuritasHub, device info, options
+├── test_operations.py       Arm, disarm, check alarm, polling
+├── test_services.py         Service discovery, Sentinel, air quality, smart lock
+└── test_smart_lock.py       Lock mode changes, status polling
+```
+
+### Key fixtures (`conftest.py`)
+
+**API client fixtures:**
+- `api` — A real `ApiManager` instance configured with test credentials (`test@example.com`, country `ES`). Uses a `MagicMock` for the HTTP client so no real network calls are made.
+- `mock_execute` — Patches `ApiManager._execute_request` so tests can set return values without going through HTTP. Most auth and operation tests use this.
+- `mock_post` / `mock_response` — Lower-level mocks for the `aiohttp` POST context manager, used by `test_execute_request.py` to test header construction and error handling.
+
+**JWT helpers:**
+- `make_jwt(exp_minutes=15)` — Creates a real HS256 JWT with a configurable expiry. Used to test token parsing, expiry detection, and refresh logic.
+- `FAKE_JWT` / `FAKE_REFRESH_TOKEN` — Pre-built JWTs for common test scenarios.
+
+**Response factories:**
+- `login_response()`, `refresh_response()`, `validate_device_response()` — Build realistic API response dicts with sensible defaults and overridable fields.
+
+**Integration fixtures:**
+- `make_installation(**overrides)` — Factory for `Installation` dataclass with defaults (number, panel, address, etc.).
+- `make_config_entry_data()` — Builds a complete config entry data dict with all required keys.
+- `make_securitas_hub_mock()` — Creates a `MagicMock` mimicking `SecuritasHub` with `AsyncMock` methods for login, validate_device, etc.
+- `setup_integration_data(hass, client, devices)` — Populates `hass.data[DOMAIN]` the same way `async_setup_entry` does.
+
+### Testing patterns
+
+**API client tests** (test_auth, test_operations, test_services, test_execute_request): Use the `api` + `mock_execute` fixtures. Tests call the real method (e.g. `api.login()`) with a mocked `_execute_request` return value, then assert on state changes (`api.authentication_token`, `api.authentication_token_exp`, etc.).
+
+**HA platform tests** (test_alarm_panel, test_button, test_ha_platforms): Create entity instances directly with `MagicMock` dependencies. Patch `async_track_time_interval` and HA state-writing methods to avoid needing a running HA event loop. Example:
+
+```python
+alarm = make_alarm(has_peri=True)  # Creates SecuritasAlarm with mocked hub
+alarm.client.session.arm_alarm = AsyncMock(return_value=arm_status)
+await alarm.async_alarm_arm_away()
+assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+```
+
+**Config flow tests** (test_config_flow): Use the `hass` fixture from `pytest-homeassistant-custom-component` and HA's flow manager API:
+
+```python
+result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input={...})
+assert result["type"] == FlowResultType.FORM
+```
+
+**Integration setup tests** (test_init): Patch `SecuritasHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms.
+
+### Coverage by module
+
+| Module | Coverage | Key gaps |
+|--------|----------|----------|
+| `__init__.py` | 97% | `get_config_entry` edge case |
+| `alarm_control_panel.py` | 95% | `async_setup_entry`, some HA callbacks |
+| `button.py` | 100% | — |
+| `config_flow.py` | 99% | One unreachable branch |
+| `apimanager.py` | 97% | Rare error paths, some polling branches |
+| `lock.py` | 85% | `async_setup_entry`, some state transitions |
+| `sensor.py` | 82% | `async_setup_entry`, sensor discovery |
+| `const.py` | 100% | — |
+| `dataTypes.py` | 100% | — |
+| `domains.py` | 100% | — |
+| `exceptions.py` | 100% | — |
+
+### CI workflow (`.github/workflows/tests.yaml`)
+
+Three parallel jobs run on every PR and push to main:
+
+1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
+2. **Pyright** — `pyright custom_components/` for static type checking
+3. **Tests** — `pytest` with `--cov-fail-under=90` to enforce minimum coverage
+
 ## File reference
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `__init__.py` | 452 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice` |
-| `config_flow.py` | 351 | Config flow (setup + 2FA) and options flow (settings + mappings) |
-| `alarm_control_panel.py` | 381 | Alarm entity with state mapping, arm/disarm, PIN validation |
-| `sensor.py` | 185 | Sentinel temperature, humidity, air quality sensors |
-| `lock.py` | 218 | Smart lock entity |
-| `button.py` | 80 | Manual refresh button |
+| `__init__.py` | 451 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice` |
+| `config_flow.py` | 362 | Config flow (setup + 2FA) and options flow (settings + mappings) |
+| `alarm_control_panel.py` | 385 | Alarm entity with state mapping, arm/disarm, PIN validation |
+| `sensor.py` | 184 | Sentinel temperature, humidity, air quality sensors |
+| `lock.py` | 211 | Smart lock entity |
+| `button.py` | 83 | Manual refresh button |
 | `constants.py` | 21 | `SentinelName` language mapping |
-| `securitas_direct_new_api/apimanager.py` | 1063 | GraphQL API client with auth, polling, all operations |
-| `securitas_direct_new_api/const.py` | 98 | `SecuritasState`, command/protocol mappings, defaults |
-| `securitas_direct_new_api/dataTypes.py` | 166 | Response dataclasses |
-| `securitas_direct_new_api/domains.py` | 51 | Country-to-URL routing |
-| `securitas_direct_new_api/exceptions.py` | 26 | Exception hierarchy |
+| `securitas_direct_new_api/apimanager.py` | 1076 | GraphQL API client with auth, polling, all operations |
+| `securitas_direct_new_api/const.py` | 100 | `SecuritasState`, command/protocol mappings, defaults |
+| `securitas_direct_new_api/dataTypes.py` | 168 | Response dataclasses |
+| `securitas_direct_new_api/domains.py` | 49 | Country-to-URL routing |
+| `securitas_direct_new_api/exceptions.py` | 25 | Exception hierarchy |
