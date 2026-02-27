@@ -28,7 +28,7 @@ Note: Partial Night (`Q` / `ARMNIGHT1`) exists in some countries but not all. Th
 
 ### Configuration Model
 
-Each HA alarm action (Home, Away, Night, Custom) maps to one Securitas state. Disarm always maps to Disarmed (`D`, command `DARM1` or `DARM1DARMPERI`). Each mapping can also be set to "Not used" to disable that button.
+Each HA alarm action (Home, Away, Night, Custom) maps to one Securitas **arm** state. Disarm is a separate action that is not configurable — it always sends `DARM1` (no perimeter) or `DARM1DARMPERI` (with perimeter) based on the perimeter checkbox. Each mapping can also be set to "Not used" to disable that button.
 
 ### Config Flow UI
 
@@ -37,8 +37,9 @@ The options flow (Configure button on integration page) presents:
 1. **Perimeter checkbox** (same as today): "My system has perimeter sensors"
 
 2. **Per-button dropdowns** for Home, Away, Night, Custom:
-   - If **no perimeter**, each dropdown offers: Not used, Disarmed, Partial Day, Partial Night, Total
-   - If **perimeter**, each dropdown offers: Not used, Disarmed, Disarmed + Perimeter, Partial Day, Partial Night, Total, Perimeter only, Partial Day + Perimeter, Partial Night + Perimeter, Total + Perimeter
+   - If **no perimeter**, each dropdown offers: Not used, Partial Day, Partial Night, Total
+   - If **perimeter**, each dropdown offers: Not used, Partial Day, Partial Night, Total, Perimeter only, Partial Day + Perimeter, Partial Night + Perimeter, Total + Perimeter
+   - Disarmed states are not offered — disarm is a separate non-configurable action
 
 ### Default Mappings
 
@@ -56,7 +57,7 @@ Defaults match current integration behavior to avoid breaking changes:
 
 The stored config drives both directions:
 
-**Outgoing (HA button press -> Securitas command):** Each Securitas state maps to a known API command (see table above). When the user presses "Away" and it's configured as "Total + Perimeter", send `ARM1PERI1`. Disarm always sends `DARM1DARMPERI` (safe: disarms everything regardless of current state).
+**Outgoing (HA button press -> Securitas command):** Each Securitas state maps to a known API command (see table above). When the user presses "Away" and it's configured as "Total + Perimeter", send `ARM1PERI1`. Disarm sends `DARM1` (no perimeter) or `DARM1DARMPERI` (with perimeter) based on the perimeter checkbox.
 
 **Incoming (status poll -> HA state):** Reverse lookup from the user's config. When `protomResponse` is `B`, find which HA button is configured as "Partial Day + Perimeter" and set that HA state. If a response code comes back that isn't mapped to any configured button, set the HA state to `ARMED_CUSTOM_BYPASS`.
 
