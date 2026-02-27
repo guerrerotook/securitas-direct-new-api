@@ -23,6 +23,7 @@ from . import (
     CONF_INSTALLATION_KEY,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    CONF_PERI_ALARM,
     SecuritasDirectDevice,
     SecuritasHub,
 )
@@ -97,6 +98,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_extra_state_attributes: dict[str, Any] = {}
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
+        self._disarm_state = SecuritasState.DISARMED_PERI if self.client.config.get(CONF_PERI_ALARM, False) else SecuritasState.DISARMED
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
@@ -256,7 +258,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             disarm_status: DisarmStatus = DisarmStatus()
             try:
                 disarm_status = await self.client.session.disarm_alarm(
-                    self.installation, STATE_TO_COMMAND[SecuritasState.DISARMED]
+                    self.installation, STATE_TO_COMMAND[self._disarm_state]
                 )
             except SecuritasDirectError as err:
                 self._notify_error("disarm_error", "Securitas: Error disarming", str(err.args))
@@ -295,7 +297,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             try:
                 await self.client.session.disarm_alarm(
                     self.installation,
-                    STATE_TO_COMMAND[SecuritasState.DISARMED],
+                    STATE_TO_COMMAND[self._disarm_state],
                 )
             except SecuritasDirectError as err:
                 _LOGGER.error("Failed to disarm before re-arming: %s", err.args)

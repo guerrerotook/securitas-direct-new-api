@@ -13,6 +13,7 @@ class SecuritasState(StrEnum):
     """Verisure alarm states - combinations of interior mode and perimeter."""
     NOT_USED = "not_used"
     DISARMED = "disarmed"
+    DISARMED_PERI = "disarmed_peri"
     PARTIAL_DAY = "partial_day"
     PARTIAL_NIGHT = "partial_night"
     TOTAL = "total"
@@ -24,7 +25,8 @@ class SecuritasState(StrEnum):
 
 # Map SecuritasState -> API arm command string
 STATE_TO_COMMAND: dict[SecuritasState, str] = {
-    SecuritasState.DISARMED: "DARM1DARMPERI",
+    SecuritasState.DISARMED: "DARM1",
+    SecuritasState.DISARMED_PERI: "DARM1DARMPERI",
     SecuritasState.PARTIAL_DAY: "ARMDAY1",
     SecuritasState.PARTIAL_NIGHT: "ARMNIGHT1",
     SecuritasState.TOTAL: "ARM1",
@@ -36,6 +38,7 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
 
 # Map protomResponse code -> SecuritasState
 PROTO_TO_STATE: dict[str, SecuritasState] = {
+    # Same as SecuritasState.SecuritasState.DISARMED_PERI but alarm_control_panel.py L.218 already handle the disarmed case without using this map
     "D": SecuritasState.DISARMED,
     "E": SecuritasState.PERI_ONLY,
     "P": SecuritasState.PARTIAL_DAY,
@@ -49,6 +52,7 @@ PROTO_TO_STATE: dict[str, SecuritasState] = {
 STATE_LABELS: dict[SecuritasState, str] = {
     SecuritasState.NOT_USED: "Not used",
     SecuritasState.DISARMED: "Disarmed",
+    SecuritasState.DISARMED_PERI: "Disarmed + Perimeter",
     SecuritasState.PARTIAL_DAY: "Partial Day",
     SecuritasState.PARTIAL_NIGHT: "Partial Night",
     SecuritasState.TOTAL: "Total",
@@ -71,6 +75,7 @@ STD_OPTIONS: list[SecuritasState] = [
 PERI_OPTIONS: list[SecuritasState] = [
     SecuritasState.NOT_USED,
     SecuritasState.DISARMED,
+    SecuritasState.DISARMED_PERI,
     SecuritasState.PARTIAL_DAY,
     SecuritasState.PARTIAL_NIGHT,
     SecuritasState.TOTAL,
