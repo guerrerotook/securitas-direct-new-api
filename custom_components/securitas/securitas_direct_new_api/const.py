@@ -52,7 +52,7 @@ PROTO_TO_STATE: dict[str, SecuritasState] = {
 STATE_LABELS: dict[SecuritasState, str] = {
     SecuritasState.NOT_USED: "Not used",
     SecuritasState.DISARMED: "Disarmed",
-    SecuritasState.DISARMED_PERI: "Disarmed + Perimeter",
+    SecuritasState.DISARMED_PERI: "Disarmed",
     SecuritasState.PARTIAL_DAY: "Partial Day",
     SecuritasState.PARTIAL_NIGHT: "Partial Night",
     SecuritasState.TOTAL: "Total",
@@ -65,7 +65,6 @@ STATE_LABELS: dict[SecuritasState, str] = {
 # Options available when perimeter is NOT configured
 STD_OPTIONS: list[SecuritasState] = [
     SecuritasState.NOT_USED,
-    SecuritasState.DISARMED,
     SecuritasState.PARTIAL_DAY,
     SecuritasState.PARTIAL_NIGHT,
     SecuritasState.TOTAL,
@@ -74,8 +73,6 @@ STD_OPTIONS: list[SecuritasState] = [
 # Options available when perimeter IS configured
 PERI_OPTIONS: list[SecuritasState] = [
     SecuritasState.NOT_USED,
-    SecuritasState.DISARMED,
-    SecuritasState.DISARMED_PERI,
     SecuritasState.PARTIAL_DAY,
     SecuritasState.PARTIAL_NIGHT,
     SecuritasState.TOTAL,
