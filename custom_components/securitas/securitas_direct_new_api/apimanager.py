@@ -436,13 +436,15 @@ class ApiManager:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
             result_json = err.args[1] if len(err.args) > 1 else None
-            if result_json and result_json.get("data"):
+            if result_json is not None and result_json.get("data"):
                 if result_json["data"].get("xSLoginToken"):
                     if result_json["data"]["xSLoginToken"].get("needDeviceAuthorization"):
                         # needs a 2FA
                         raise Login2FAError(err.args) from err
-
-            raise LoginError(err.args) from err
+                raise LoginError(err.args) from err
+            # No response data (connection/network error) — let
+            # SecuritasDirectError propagate so HA can retry setup
+            raise
 
         if "errors" in response:
             _LOGGER.error("Login error %s", response["errors"][0]["message"])
