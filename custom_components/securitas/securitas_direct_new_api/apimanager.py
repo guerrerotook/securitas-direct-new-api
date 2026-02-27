@@ -162,7 +162,7 @@ class ApiManager:
         _LOGGER.debug(response_text)
 
         try:
-            # error_login: bool = await self._check_errros(response_text)
+            # error_login: bool = await self._check_errors(response_text)
             # if error_login:
             # response_text: str = await self._execute_request(
             #     content, operation, installation
@@ -187,7 +187,7 @@ class ApiManager:
 
         return response_dict
 
-    async def _check_errros(self, value: str) -> bool:
+    async def _check_errors(self, value: str) -> bool:
         if value is not None:
             response = json.loads(value)
             if "errors" in response:

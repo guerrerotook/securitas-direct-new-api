@@ -241,11 +241,11 @@ class TestGenerateDeviceId:
         assert a != b
 
 
-# ── _check_errros tests ──────────────────────────────────────────────────────
+# ── _check_errors tests ──────────────────────────────────────────────────────
 
 
 class TestCheckErrors:
-    """Tests for ApiManager._check_errros (note: typo in method name matches source)."""
+    """Tests for ApiManager._check_errors."""
 
     async def test_invalid_session_error_triggers_relogin(self, api):
         """Response with 'Invalid session' error triggers re-login."""
@@ -254,7 +254,7 @@ class TestCheckErrors:
             {"errors": [{"message": "Invalid session. Please, try again later."}]}
         )
 
-        result = await api._check_errros(response_text)
+        result = await api._check_errors(response_text)
 
         assert result is True
         assert api.authentication_token is None
@@ -267,7 +267,7 @@ class TestCheckErrors:
             {"errors": [{"message": "Invalid token: Expired"}]}
         )
 
-        result = await api._check_errros(response_text)
+        result = await api._check_errors(response_text)
 
         assert result is True
         assert api.authentication_token is None
@@ -280,7 +280,7 @@ class TestCheckErrors:
             {"errors": [{"message": "Some other error"}]}
         )
 
-        result = await api._check_errros(response_text)
+        result = await api._check_errors(response_text)
 
         assert result is False
         api.login.assert_not_called()
@@ -290,7 +290,7 @@ class TestCheckErrors:
         api.login = AsyncMock()
         response_text = json.dumps({"data": {"test": "ok"}})
 
-        result = await api._check_errros(response_text)
+        result = await api._check_errors(response_text)
 
         assert result is False
         api.login.assert_not_called()
