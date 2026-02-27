@@ -31,6 +31,24 @@ from .exceptions import Login2FAError, LoginError, SecuritasDirectError
 
 _LOGGER = logging.getLogger(__name__)
 
+# API protocol constants
+API_CALLBY = "OWA_10"
+API_ID_PREFIX = "OWA_______________"
+
+# Smart-lock device identifiers expected by the Securitas API
+SMARTLOCK_DEVICE_TYPE = "DR"
+SMARTLOCK_DEVICE_ID = "01"
+SMARTLOCK_KEY_TYPE = "0"
+
+# Service ID used when polling CheckAlarmStatus
+ALARM_STATUS_SERVICE_ID = "11"
+
+# Default timeout (seconds) for check_alarm_status polling loop
+CHECK_ALARM_STATUS_TIMEOUT = 10
+
+# Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
+LOCK_MODE_SETTLE_MULTIPLIER = 7
+
 
 def generate_uuid() -> str:
     """Create a device id."""
@@ -110,7 +128,7 @@ class ApiManager:
                 "id": self._generate_id(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "hash": self.authentication_token,
             }
             headers["auth"] = json.dumps(authorization_value)
@@ -122,7 +140,7 @@ class ApiManager:
                 "id": self._generate_id(),
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "hash": "",
                 "refreshToken": "",
             }
@@ -248,7 +266,7 @@ class ApiManager:
     def _generate_id(self) -> str:
         current: datetime = datetime.now()
         return (
-            "OWA_______________"
+            API_ID_PREFIX
             + self.username
             + "_______________"
             + str(current.year)
@@ -345,7 +363,7 @@ class ApiManager:
                 "uuid": self.uuid,
                 "country": self.country,
                 "lang": self.language,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
                 "deviceType": self.device_type,
@@ -415,7 +433,7 @@ class ApiManager:
                 "password": self.password,
                 "id": self._generate_id(),
                 "country": self.country,
-                "callby": "OWA_10",
+                "callby": API_CALLBY,
                 "lang": self.language,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
@@ -726,7 +744,10 @@ class ApiManager:
         return SStatus(None, None)
 
     async def check_alarm_status(
-        self, installation: Installation, reference_id: str, timeout: int = 10
+        self,
+        installation: Installation,
+        reference_id: str,
+        timeout: int = CHECK_ALARM_STATUS_TIMEOUT,
     ) -> CheckAlarmStatus:
         """Return the status of the alarm."""
         await self._check_authentication_token()
@@ -762,7 +783,7 @@ class ApiManager:
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,
-                "idService": "11",
+                "idService": ALARM_STATUS_SERVICE_ID,
                 "counter": count,
             },
             "query": "query CheckAlarmStatus($numinst: String!, $idService: String!, $panel: String!, $referenceId: String!) {\n  xSCheckAlarmStatus(numinst: $numinst, idService: $idService, panel: $panel, referenceId: $referenceId) {\n    res\n    msg\n    status\n    numinst\n    protomResponse\n    protomResponseDate\n  }\n}\n",
@@ -944,7 +965,13 @@ class ApiManager:
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "devices": [{"deviceType": "DR", "deviceId": "01", "keytype": "0"}],
+                "devices": [
+                    {
+                        "deviceType": SMARTLOCK_DEVICE_TYPE,
+                        "deviceId": SMARTLOCK_DEVICE_ID,
+                        "keytype": SMARTLOCK_KEY_TYPE,
+                    }
+                ],
             },
             "query": "query xSGetSmartlockConfig($numinst: String!, $panel: String!, $devices: [SmartlockDevicesInfo]!) {\n  xSGetSmartlockConfig(numinst: $numinst, panel: $panel, devices: $devices) {\n    res\n    referenceId\n    zoneId\n    serialNumber\n    location\n    family\n    type\n    label\n    features {\n      holdBackLatchTime\n      calibrationType\n      autolock {\n        active\n        timeout\n      }\n    }\n  }\n}",
         }
@@ -1003,8 +1030,8 @@ class ApiManager:
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "deviceType": "DR",
-                "deviceId": "01",
+                "deviceType": SMARTLOCK_DEVICE_TYPE,
+                "deviceId": SMARTLOCK_DEVICE_ID,
                 "lock": lock,
             },
             "query": "mutation xSChangeSmartlockMode($numinst: String!, $panel: String!, $deviceId: String!, $deviceType: String!, $lock: Boolean!) {\n  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n  ) {\n    res\n    msg\n    referenceId\n  }\n}",
@@ -1038,7 +1065,7 @@ class ApiManager:
             )
             count = count + 1
 
-        await asyncio.sleep(self.delay_check_operation * 7)
+        await asyncio.sleep(self.delay_check_operation * LOCK_MODE_SETTLE_MULTIPLIER)
         self.protom_response = raw_data["protomResponse"]
         return SmartLockModeStatus(
             raw_data["res"],
@@ -1057,7 +1084,7 @@ class ApiManager:
             "operationName": "xSChangeSmartlockModeStatus",
             "variables": {
                 "counter": counter,
-                "deviceId": "01",
+                "deviceId": SMARTLOCK_DEVICE_ID,
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,

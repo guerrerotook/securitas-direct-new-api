@@ -10,7 +10,11 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import CONF_INSTALLATION_KEY, DOMAIN, SecuritasDirectDevice, SecuritasHub
-from .securitas_direct_new_api import Installation, SecuritasDirectError
+from .securitas_direct_new_api import (
+    ALARM_STATUS_POLL_DELAY,
+    Installation,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +60,7 @@ class SecuritasRefreshButton(ButtonEntity):
         """Update alarm status when button pressed."""
         try:
             reference_id = await self.client.session.check_alarm(self.installation)
-            await asyncio.sleep(1)
+            await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
             alarm_status = await self.client.session.check_alarm_status(
                 self.installation, reference_id
             )

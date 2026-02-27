@@ -38,6 +38,13 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
     SecuritasState.TOTAL_PERI: "ARM1PERI1",
 }
 
+# Proto response code for the disarmed state (handled separately from PROTO_TO_STATE
+# in alarm_control_panel.py because it applies unconditionally regardless of mapping)
+PROTO_DISARMED = "D"
+
+# Seconds to wait after triggering a status-check operation before polling the result
+ALARM_STATUS_POLL_DELAY: float = 1.0
+
 # Map protomResponse code -> SecuritasState
 PROTO_TO_STATE: dict[str, SecuritasState] = {
     # Same as SecuritasState.SecuritasState.DISARMED_PERI but alarm_control_panel.py L.218 already handle the disarmed case without using this map

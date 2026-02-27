@@ -25,6 +25,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .securitas_direct_new_api import (
+    ALARM_STATUS_POLL_DELAY,
     ApiDomains,
     ApiManager,
     CheckAlarmStatus,
@@ -437,7 +438,7 @@ class SecuritasHub:
         alarm_status = CheckAlarmStatus()
         try:
             reference_id: str = await self.session.check_alarm(installation)
-            await asyncio.sleep(1)
+            await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
             alarm_status = await self.session.check_alarm_status(
                 installation, reference_id
             )

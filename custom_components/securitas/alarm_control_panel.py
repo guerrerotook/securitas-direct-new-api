@@ -32,10 +32,12 @@ from . import (
     SecuritasHub,
 )
 from .securitas_direct_new_api import (
+    ALARM_STATUS_POLL_DELAY,
     ArmStatus,
     CheckAlarmStatus,
     DisarmStatus,
     Installation,
+    PROTO_DISARMED,
     PROTO_TO_STATE,
     SecuritasDirectError,
     SecuritasState,
@@ -177,7 +179,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def get_arm_state(self) -> CheckAlarmStatus:
         """Get alarm state."""
         reference_id: str = await self.client.session.check_alarm(self.installation)
-        await asyncio.sleep(1)
+        await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
         alarm_status: CheckAlarmStatus = await self.client.session.check_alarm_status(
             self.installation, reference_id
         )
@@ -215,7 +217,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             if not status.protomResponse:
                 _LOGGER.debug("Received empty protomResponse from Securitas, ignoring")
                 return
-            if status.protomResponse == "D":
+            if status.protomResponse == PROTO_DISARMED:
                 self._state = AlarmControlPanelState.DISARMED
             elif status.protomResponse in self._status_map:
                 self._state = self._status_map[status.protomResponse]
@@ -316,7 +318,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     err.args,
                 )
             else:
-                await asyncio.sleep(1)
+                await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
 
         arm_status: ArmStatus = ArmStatus()
         try:

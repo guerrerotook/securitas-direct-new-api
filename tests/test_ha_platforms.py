@@ -372,9 +372,9 @@ class TestSecuritasLockInit:
             lock._state = state
             assert lock.is_unlocking is False
 
-    def test_name_returns_puerta(self):
+    def test_name_returns_installation_alias(self):
         lock = make_lock()
-        assert lock.name == "Puerta"
+        assert lock.name == "Home"
 
 
 class TestSecuritasLockActions:
