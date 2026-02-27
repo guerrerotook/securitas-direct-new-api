@@ -8,6 +8,7 @@ from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelState,
     CodeFormat,
 )
+from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     ArmStatus,
@@ -191,7 +192,7 @@ class TestUpdateStatusAlarm:
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
         alarm._notify_error.assert_called_once()
         args = alarm._notify_error.call_args
-        assert args[0][0] == "unmapped_state"
+        assert args[0][0] == "Securitas: Unmapped alarm state"
 
     def test_empty_protom_response_ignored(self):
         """Empty protomResponse leaves state unchanged."""
@@ -299,39 +300,36 @@ class TestUpdateStatusAlarmPeri:
 
 
 class TestCheckCode:
-    """Tests for check_code()."""
+    """Tests for _check_code()."""
 
     def test_empty_code_config_allows_any(self):
         """Empty code config means any code passes."""
         alarm = make_alarm(code="")
-        assert alarm.check_code("1234") is True
-        assert alarm.check_code(None) is True
+        assert alarm._check_code("1234") is True
+        assert alarm._check_code(None) is True
 
     def test_none_code_config_allows_any(self):
         """None code config (no key) means any code passes."""
         alarm = make_alarm()
-        # config has no 'code' key at all
-        assert "code" not in alarm.client.config or alarm.client.config.get("code") in (
-            "",
-            None,
-        )
-        assert alarm.check_code("9999") is True
+        assert alarm._check_code("9999") is True
 
     def test_matching_code_returns_true(self):
         """Matching code returns True."""
         alarm = make_alarm(code="1234")
-        assert alarm.check_code("1234") is True
+        assert alarm._check_code("1234") is True
 
-    def test_non_matching_code_returns_false(self):
-        """Non-matching code returns False."""
+    def test_non_matching_code_raises_service_validation_error(self):
+        """Non-matching code raises ServiceValidationError."""
         alarm = make_alarm(code="1234")
-        assert alarm.check_code("0000") is False
+        with pytest.raises(ServiceValidationError):
+            alarm._check_code("0000")
 
-    def test_numeric_code_compared_as_string(self):
-        """Integer code in config is compared as string."""
-        alarm = make_alarm(code=1234)
-        assert alarm.check_code("1234") is True
-        assert alarm.check_code("5678") is False
+    def test_numeric_code_string_compared(self):
+        """Numeric code string in config is compared correctly."""
+        alarm = make_alarm(code="1234")
+        assert alarm._check_code("1234") is True
+        with pytest.raises(ServiceValidationError):
+            alarm._check_code("5678")
 
 
 # ===========================================================================
@@ -407,13 +405,14 @@ class TestAsyncAlarmDisarm:
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
-    async def test_wrong_code_does_not_call_disarm(self):
-        """Wrong code does not call disarm_alarm."""
+    async def test_wrong_code_raises_service_validation_error(self):
+        """Wrong code raises ServiceValidationError without calling disarm_alarm."""
         alarm = make_alarm(code="1234")
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm.client.session.disarm_alarm = AsyncMock()
 
-        await alarm.async_alarm_disarm("0000")
+        with pytest.raises(ServiceValidationError):
+            await alarm.async_alarm_disarm("0000")
 
         alarm.client.session.disarm_alarm.assert_not_called()
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
@@ -432,7 +431,7 @@ class TestAsyncAlarmDisarm:
 
         alarm._notify_error.assert_called_once()
         args = alarm._notify_error.call_args
-        assert args[0][0] == "disarm_error"
+        assert args[0][0] == "Securitas: Error disarming"
 
     async def test_disarm_with_peri_uses_disarmed_peri_command(self):
         """PERI config uses DISARMED_PERI command for disarm."""
@@ -492,7 +491,9 @@ class TestSetArmState:
     async def test_arm_from_armed_disarms_first(self):
         """When previously armed, disarms first then arms."""
         alarm = make_alarm()
+        # set_arm_state checks _last_status (set by __force_state) for prior state
         alarm._state = AlarmControlPanelState.ARMED_HOME
+        alarm._last_status = AlarmControlPanelState.ARMED_HOME
 
         alarm.client.session.disarm_alarm = AsyncMock(return_value=DisarmStatus())
         alarm.client.session.arm_alarm = AsyncMock(
@@ -530,20 +531,30 @@ class TestSetArmState:
         # so state stays at DISARMED
         assert alarm._state == AlarmControlPanelState.DISARMED
 
-    async def test_disarm_error_during_rearm_returns_early(self):
-        """Error from disarm_alarm during re-arm returns early without calling arm_alarm."""
+    async def test_disarm_error_during_rearm_continues_to_arm(self):
+        """Error from disarm_alarm during re-arm logs warning and continues to arm."""
         alarm = make_alarm()
         alarm._state = AlarmControlPanelState.ARMED_HOME
+        alarm._last_status = AlarmControlPanelState.ARMED_HOME
 
         alarm.client.session.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("connection lost")
         )
-        alarm.client.session.arm_alarm = AsyncMock()
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="T",
+                protomResponseData="",
+            )
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
-        alarm.client.session.arm_alarm.assert_not_called()
-        assert alarm._state == AlarmControlPanelState.ARMED_HOME
+        alarm.client.session.arm_alarm.assert_called_once()
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_unmapped_mode_returns_early(self):
         """If mode has no configured command, returns without calling API."""
@@ -577,14 +588,30 @@ class TestProperties:
         alarm = make_alarm()
         assert alarm.name == "Home"
 
-    def test_code_format_returns_number(self):
-        """code_format returns NUMBER."""
+    def test_code_format_none_when_no_code(self):
+        """code_format is None when no code is configured."""
         alarm = make_alarm()
+        assert alarm.code_format is None
+
+    def test_code_format_number_when_numeric_code(self):
+        """code_format is NUMBER when a numeric code is configured."""
+        alarm = make_alarm(code="1234")
         assert alarm.code_format == CodeFormat.NUMBER
 
-    def test_code_arm_required_returns_false(self):
-        """code_arm_required returns False."""
+    def test_code_format_text_when_alpha_code(self):
+        """code_format is TEXT when a non-numeric code is configured."""
+        alarm = make_alarm(code="abcd")
+        assert alarm.code_format == CodeFormat.TEXT
+
+    def test_code_arm_required_false_when_no_code(self):
+        """code_arm_required is False when no code is configured."""
         alarm = make_alarm()
+        assert alarm.code_arm_required is False
+
+    def test_code_arm_required_from_config(self):
+        """code_arm_required reflects CONF_CODE_ARM_REQUIRED config when code is set."""
+        alarm = make_alarm(code="1234")
+        # Default is False when not in config
         assert alarm.code_arm_required is False
 
     def test_alarm_state_returns_correct_enum(self):
@@ -608,13 +635,6 @@ class TestProperties:
         alarm = make_alarm()
         alarm._state = "totally_invalid_state"
         assert alarm.alarm_state is None
-
-    def test_changed_by(self):
-        """changed_by returns the stored value."""
-        alarm = make_alarm()
-        assert alarm.changed_by == ""
-        alarm._changed_by = "user123"
-        assert alarm.changed_by == "user123"
 
     def test_entity_id_and_unique_id(self):
         """entity_id and unique_id are derived from installation number."""

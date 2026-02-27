@@ -69,10 +69,11 @@ class TestLogin:
         with pytest.raises(LoginError):
             await api.login()
 
-    async def test_execute_request_error_raises_login_error(self, api, mock_execute):
+    async def test_execute_request_error_raises_securitas_error(self, api, mock_execute):
+        """Connection error (no response data) re-raises SecuritasDirectError."""
         mock_execute.side_effect = SecuritasDirectError("Connection failed", None)
 
-        with pytest.raises(LoginError):
+        with pytest.raises(SecuritasDirectError):
             await api.login()
 
     async def test_null_hash_sets_timestamp_for_2fa(self, api, mock_execute):
