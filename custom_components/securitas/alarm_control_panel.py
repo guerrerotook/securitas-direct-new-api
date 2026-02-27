@@ -24,6 +24,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     CONF_PERI_ALARM,
+    DEFAULT_PERI_ALARM,
     SecuritasDirectDevice,
     SecuritasHub,
 )
@@ -98,7 +99,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_extra_state_attributes: dict[str, Any] = {}
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
-        self._disarm_state = SecuritasState.DISARMED_PERI if self.client.config.get(CONF_PERI_ALARM, False) else SecuritasState.DISARMED
+        self._has_peri = self.client.config.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
+        self._disarm_state = SecuritasState.DISARMED_PERI if self._has_peri else SecuritasState.DISARMED
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
