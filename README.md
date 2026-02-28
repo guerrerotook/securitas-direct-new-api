@@ -121,9 +121,11 @@ When switching between armed modes (e.g. from "Armed Home" to "Armed Away"), the
 | Night     | Partial Night + Perimeter |
 | Custom    | Perimeter Only            |
 
-### Known Limitations
+### Unmapped Alarm States
 
-The status code for **Partial Night + Perimeter** is currently unknown. If your alarm is in this state, it will show as "Custom Bypass" in Home Assistant and you will see a persistent notification. If you encounter this, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) so we can identify the correct status code.
+If your alarm is put into a Securitas state that you have not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the alarm entity will show as **Custom Bypass**. This is not an error — enable perimeter support or adjust your alarm state mappings in the integration options to resolve it.
+
+To see which status code the alarm is reporting, [enable debug logging](#reporting-issues).
 
 ## Sentinel Sensors
 
@@ -148,4 +150,4 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
 2. **Country code** you are using.
 3. **Debug logs** — enable debug logging from the UI: go to **Settings → Integrations → Securitas Direct**, click the three-dot menu, and select **Enable debug logging**. Reproduce the issue, then click **Disable debug logging** to download the log file.
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
-5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code from the persistent notification or the `response_data` attribute on the alarm entity.
+5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Securitas Direct integration log messages (after enabling debug logging and reproducing the issue).

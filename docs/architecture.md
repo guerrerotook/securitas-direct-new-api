@@ -67,7 +67,7 @@ Securitas alarms have two independent axes: **interior mode** (disarmed, partial
 | `TOTAL` | full | off | `ARM1` | `T` |
 | `PERI_ONLY` | off | on | `PERI1` | `E` |
 | `PARTIAL_DAY_PERI` | day | on | `ARMDAY1PERI1` | `B` |
-| `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | — |
+| `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | `C` |
 | `TOTAL_PERI` | full | on | `ARM1PERI1` | `A` |
 
 Two mapping tables connect these:
@@ -75,6 +75,8 @@ Two mapping tables connect these:
 - `PROTO_TO_STATE` — single-letter protocol response code to `SecuritasState` (e.g. `"T"` -> `TOTAL`)
 
 Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that include perimeter states. The `Custom Bypass` button is hidden unless a mapping is configured for it (typically perimeter-only mode).
+
+If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Securitas state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
 ### Data types (`dataTypes.py`)
 

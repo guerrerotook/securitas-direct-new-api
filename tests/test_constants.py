@@ -144,12 +144,13 @@ class TestProtoToState:
         "P": SecuritasState.PARTIAL_DAY,
         "Q": SecuritasState.PARTIAL_NIGHT,
         "B": SecuritasState.PARTIAL_DAY_PERI,
+        "C": SecuritasState.PARTIAL_NIGHT_PERI,
         "T": SecuritasState.TOTAL,
         "A": SecuritasState.TOTAL_PERI,
     }
 
-    def test_has_seven_protocol_codes(self):
-        assert len(PROTO_TO_STATE) == 7
+    def test_has_eight_protocol_codes(self):
+        assert len(PROTO_TO_STATE) == 8
 
     @pytest.mark.parametrize(
         ("code", "expected_state"),
