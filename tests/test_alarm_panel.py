@@ -266,13 +266,29 @@ class TestUpdateStatusAlarmPeri:
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
 
     def test_partial_night_peri_maps_to_armed_night(self):
-        """protomResponse 'Q' still maps to ARMED_NIGHT (partial_night) with PERI defaults.
+        """protomResponse 'C' maps to ARMED_NIGHT with PERI defaults.
 
-        In PERI defaults map_night = partial_night_peri.  The 'Q' proto code
-        maps to partial_night (without peri).  With PERI defaults the night
-        slot is bound to partial_night_peri (proto 'B' is partial_day_peri).
-        Since 'Q' is partial_night and that is NOT the configured state for
-        any PERI mapping, 'Q' will fall through to the unknown handler.
+        In PERI defaults map_night = partial_night_peri.  The 'C' proto code
+        maps to partial_night_peri, so it resolves to ARMED_NIGHT.
+        """
+        alarm = make_alarm(has_peri=True)
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="C",
+            protomResponseData="",
+        )
+        alarm.update_status_alarm(status)
+        assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
+
+    def test_partial_night_without_peri_unmapped_in_peri_defaults(self):
+        """protomResponse 'Q' (partial_night without peri) is unmapped in PERI defaults.
+
+        With PERI defaults, map_night = partial_night_peri (proto 'C').
+        Plain partial_night ('Q') is not configured for any HA state,
+        so it falls through to the unknown handler.
         """
         alarm = make_alarm(has_peri=True)
         status = CheckAlarmStatus(
@@ -284,9 +300,6 @@ class TestUpdateStatusAlarmPeri:
             protomResponseData="",
         )
         alarm.update_status_alarm(status)
-        # With PERI defaults, partial_night (Q) is not mapped to any HA state
-        # (map_night is partial_night_peri which maps from a different proto code).
-        # So the unknown handler fires.
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
 
 

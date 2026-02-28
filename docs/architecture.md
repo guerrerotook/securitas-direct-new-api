@@ -67,7 +67,7 @@ Securitas alarms have two independent axes: **interior mode** (disarmed, partial
 | `TOTAL` | full | off | `ARM1` | `T` |
 | `PERI_ONLY` | off | on | `PERI1` | `E` |
 | `PARTIAL_DAY_PERI` | day | on | `ARMDAY1PERI1` | `B` |
-| `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | — |
+| `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | `C` |
 | `TOTAL_PERI` | full | on | `ARM1PERI1` | `A` |
 
 Two mapping tables connect these:
