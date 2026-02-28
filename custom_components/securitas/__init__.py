@@ -59,6 +59,7 @@ CONF_MAP_HOME = "map_home"
 CONF_MAP_AWAY = "map_away"
 CONF_MAP_NIGHT = "map_night"
 CONF_MAP_CUSTOM = "map_custom"
+CONF_NOTIFY_GROUP = "notify_group"
 
 DEFAULT_USE_2FA = True
 DEFAULT_SCAN_INTERVAL = 120
@@ -159,6 +160,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
     )
     config[CONF_ENTRY_ID] = entry.entry_id
+    config[CONF_NOTIFY_GROUP] = entry.data.get(CONF_NOTIFY_GROUP, "")
     config = add_device_information(config)
 
     # Read mapping config from entry data

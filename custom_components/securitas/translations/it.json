@@ -39,7 +39,8 @@
                     "PERI_alarm": "È presente un allarme perimetrale?",
                     "check_alarm_panel": "Controlla lo stato del pannello di allarme ad ogni richiesta (non consigliato)",
                     "scan_interval": "Intervallo di aggiornamento (sec)",
-                    "delay_check_operation": "Ritardo per verificare le operazioni di attivazione e disattivazione (sec)"
+                    "delay_check_operation": "Ritardo per verificare le operazioni di attivazione e disattivazione (sec)",
+                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)"
                 }
             },
             "mappings": {
@@ -52,6 +53,12 @@
                     "map_custom": "Personalizzato"
                 }
             }
+        }
+    },
+    "services": {
+        "force_arm": {
+            "name": "Forzare attivazione",
+            "description": "Forzare l'attivazione dell'allarme, ignorando le eccezioni non bloccanti (es. finestre aperte) da un precedente tentativo di attivazione fallito."
         }
     },
     "exceptions": {

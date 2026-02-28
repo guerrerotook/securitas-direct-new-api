@@ -17,7 +17,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+    async_get_current_platform,
+)
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.exceptions import ServiceValidationError
 
@@ -33,6 +36,7 @@ from . import (
 )
 from .securitas_direct_new_api import (
     ALARM_STATUS_POLL_DELAY,
+    ArmingExceptionError,
     ArmStatus,
     CheckAlarmStatus,
     DisarmStatus,
@@ -79,6 +83,13 @@ async def async_setup_entry(
             )
         )
     async_add_entities(alarms, True)
+
+    platform = async_get_current_platform()
+    platform.async_register_entity_service(
+        "force_arm",
+        {},
+        "async_force_arm",
+    )
 
 
 class SecuritasAlarm(alarm.AlarmControlPanelEntity):
@@ -143,6 +154,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             client.config.get(CONF_CODE_ARM_REQUIRED, False) if self._code else False
         )
 
+        # Force-arm context: stored when arming fails due to non-blocking
+        # exceptions (e.g. open window).  Consumed on the next arm attempt to
+        # override the exception.  Cleared on status refresh.
+        self._force_context: dict[str, Any] | None = None
+
         self._attr_device_info: DeviceInfo | None = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
             manufacturer="Securitas Direct",
@@ -200,6 +216,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         if self._operation_in_progress:
             _LOGGER.debug("Skipping status poll - arm/disarm operation in progress")
             return
+        self._clear_force_context()
         alarm_status: CheckAlarmStatus = CheckAlarmStatus()
         try:
             alarm_status = await self.client.update_overview(self.installation)
@@ -282,7 +299,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
             )
 
-    async def set_arm_state(self, mode: str) -> None:
+    async def set_arm_state(
+        self,
+        mode: str,
+        *,
+        force_arming_remote_id: str | None = None,
+        suid: str | None = None,
+    ) -> None:
         """Send set arm state command.
 
         If the alarm is already in an armed state, disarm first before
@@ -290,6 +313,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         interior and perimeter as independent axes — e.g. sending ARMDAY1
         while the perimeter is armed leaves the perimeter armed, so
         transitioning from Partial+Perimeter to Partial would silently fail.
+
+        When force_arming_remote_id and suid are provided (via the
+        force_arm service), the arm request overrides non-blocking
+        exceptions from a previous failed attempt.
         """
         command = self._command_map.get(mode)
         if command is None:
@@ -298,6 +325,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
         self._operation_in_progress = True
         try:
+            force_params: dict[str, str] = {}
+            if force_arming_remote_id is not None:
+                force_params = {
+                    "force_arming_remote_id": force_arming_remote_id,
+                    "suid": suid or "",
+                }
+
             # Disarm first if previously in a confirmed armed state.
             # Note: self._state is already ARMING (set by caller via
             # __force_state), so check _last_status for the actual prior state.
@@ -325,8 +359,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             arm_status: ArmStatus = ArmStatus()
             try:
                 arm_status = await self.client.session.arm_alarm(
-                    self.installation, command
+                    self.installation, command, **force_params
                 )
+            except ArmingExceptionError as exc:
+                self._set_force_context(exc, mode)
+                self._state = self._last_status
+                self.async_write_ha_state()
+                self._notify_arm_exceptions(exc)
+                return
             except SecuritasDirectError as err:
                 _LOGGER.error(err.args)
                 self._state = self._last_status
@@ -345,6 +385,91 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 arm_status.protomResponseData,
             )
         )
+
+    def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
+        """Store force-arm context from an arming exception."""
+        details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
+        self._force_context = {
+            "reference_id": exc.reference_id,
+            "suid": exc.suid,
+            "mode": mode,
+            "exceptions": exc.exceptions,
+            "created_at": datetime.datetime.now(),
+        }
+        self._attr_extra_state_attributes["arm_exceptions"] = [
+            e.get("alias", "unknown") for e in exc.exceptions
+        ]
+        self._attr_extra_state_attributes["force_arm_available"] = True
+        self._attr_changed_by = f"Exception: {details} (arm to force)"
+
+    def _clear_force_context(self, force: bool = False) -> None:
+        """Clear stored force-arm context and related attributes.
+
+        When called from async_update_status (force=False), only clears if
+        the context has aged past one scan interval.  HA triggers an immediate
+        status refresh after every service call, so without this guard the
+        context would be wiped before the user can re-arm.
+        """
+        if not force and self._force_context is not None:
+            age = datetime.datetime.now() - self._force_context["created_at"]
+            if age < self._update_interval:
+                return
+        self._force_context = None
+        self._attr_extra_state_attributes.pop("arm_exceptions", None)
+        self._attr_extra_state_attributes.pop("force_arm_available", None)
+        self._attr_changed_by = None
+
+    def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
+        """Send notifications about arming exceptions."""
+        details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
+        message = (
+            f"Arming blocked by: {details}. "
+            "Arm again to force, or resolve the issue first."
+        )
+        self._notify_error("Securitas: Arming Exception", message)
+
+        # Notify configured group if set
+        notify_group = self.client.config.get("notify_group")
+        if notify_group:
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="notify",
+                    service=notify_group,
+                    service_data={
+                        "title": "Securitas: Arming Exception",
+                        "message": message,
+                        "data": {
+                            "actions": [
+                                {
+                                    "action": "SECURITAS_FORCE_ARM",
+                                    "title": "Force Arm",
+                                }
+                            ],
+                        },
+                    },
+                )
+            )
+
+    async def async_force_arm(self) -> None:
+        """Force-arm using stored exception context.
+
+        Called by the securitas.force_arm service. Re-arms in the same mode
+        that previously failed, passing the stored referenceId and suid to
+        override non-blocking exceptions.
+        """
+        if self._force_context is None:
+            _LOGGER.warning("force_arm called but no force context available")
+            return
+        mode = self._force_context["mode"]
+        ref_id = self._force_context["reference_id"]
+        suid = self._force_context["suid"]
+        _LOGGER.info(
+            "Force-arming: overriding previous exceptions %s",
+            [e.get("alias") for e in self._force_context.get("exceptions", [])],
+        )
+        self._clear_force_context(force=True)
+        self.__force_state(AlarmControlPanelState.ARMING)
+        await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
     async def async_alarm_arm_home(self, code: str | None = None):
         """Send arm home command."""

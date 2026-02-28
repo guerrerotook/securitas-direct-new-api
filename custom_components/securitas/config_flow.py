@@ -34,6 +34,7 @@ from . import (
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
+    CONF_NOTIFY_GROUP,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
     CONFIG_SCHEMA,
@@ -296,6 +297,8 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         check_alarm_panel = self._get(CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL)
         peri_alarm = self._get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
 
+        notify_group = self._get(CONF_NOTIFY_GROUP, "")
+
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -309,6 +312,10 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_DELAY_CHECK_OPERATION, default=delay_check_operation
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=15.0)),
+                vol.Optional(
+                    CONF_NOTIFY_GROUP,
+                    description={"suggested_value": notify_group},
+                ): str,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
