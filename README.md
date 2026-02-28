@@ -150,4 +150,4 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
 2. **Country code** you are using.
 3. **Debug logs** — enable debug logging from the UI: go to **Settings → Integrations → Securitas Direct**, click the three-dot menu, and select **Enable debug logging**. Reproduce the issue, then click **Disable debug logging** to download the log file.
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
-5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code from the `response_data` attribute on the alarm entity.
+5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Securitas Direct integration log messages (after enabling debug logging and reproducing the issue).
