@@ -223,17 +223,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = self._status_map[status.protomResponse]
             else:
                 self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-                _LOGGER.warning(
+                _LOGGER.info(
                     "Unmapped alarm status code '%s' from Securitas. "
                     "Check your Alarm State Mappings in the integration options",
                     status.protomResponse,
-                )
-                self._notify_error(
-                    "Securitas: Unmapped alarm state",
-                    f"The alarm returned status code **{status.protomResponse}** "
-                    f"which is not mapped to any Home Assistant alarm state. "
-                    f"Please check your **Alarm State Mappings** in the "
-                    f"Securitas Direct integration options.",
                 )
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:

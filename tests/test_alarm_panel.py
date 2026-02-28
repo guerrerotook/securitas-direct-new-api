@@ -171,10 +171,9 @@ class TestUpdateStatusAlarm:
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
 
-    def test_unknown_code_sets_custom_bypass_and_notifies(self):
-        """Unknown protomResponse code sets ARMED_CUSTOM_BYPASS and calls _notify_error."""
+    def test_unknown_code_sets_custom_bypass(self):
+        """Unknown protomResponse code sets ARMED_CUSTOM_BYPASS."""
         alarm = make_alarm()
-        alarm._notify_error = MagicMock()
 
         status = CheckAlarmStatus(
             operation_status="OK",
@@ -186,9 +185,6 @@ class TestUpdateStatusAlarm:
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-        alarm._notify_error.assert_called_once()
-        args = alarm._notify_error.call_args
-        assert args[0][0] == "Securitas: Unmapped alarm state"
 
     def test_empty_protom_response_ignored(self):
         """Empty protomResponse leaves state unchanged."""
