@@ -28,6 +28,7 @@ from custom_components.securitas import (
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
+    CONF_NOTIFY_GROUP,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
     DOMAIN,
@@ -705,6 +706,7 @@ class TestAsyncUpdateOptions:
                 CONF_MAP_AWAY: data[CONF_MAP_AWAY],
                 CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
                 CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+                CONF_NOTIFY_GROUP: "",
             },
         )
         entry.add_to_hass(hass)
@@ -716,6 +718,23 @@ class TestAsyncUpdateOptions:
         ) as mock_reload:
             await async_update_options(hass, entry)
             mock_reload.assert_not_awaited()
+
+    async def test_reload_when_notify_group_changes(self, hass):
+        """Should reload when only notify_group changes."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=make_config_entry_data(),
+            options={CONF_NOTIFY_GROUP: "notify.mobile_app"},
+        )
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+            mock_reload.assert_awaited_once_with(entry.entry_id)
 
     async def test_reload_when_code_changes(self, hass):
         """Should reload when just the code option changes."""

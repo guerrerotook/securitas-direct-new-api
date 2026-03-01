@@ -127,6 +127,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_MAP_AWAY,
             CONF_MAP_NIGHT,
             CONF_MAP_CUSTOM,
+            CONF_NOTIFY_GROUP,
         )
     ):
         # update entry replacing data with new options
