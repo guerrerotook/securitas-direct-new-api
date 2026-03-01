@@ -1467,3 +1467,77 @@ class TestForceArmContext:
 
         alarm.client.session.arm_alarm.assert_not_called()
         assert alarm._state == AlarmControlPanelState.DISARMED
+
+    def test_mobile_action_force_arm_dispatches_task(self):
+        """SECURITAS_FORCE_ARM_<num> mobile action dispatches async_force_arm."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-mobile",
+            "suid": "suid-mobile",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        event = MagicMock()
+        event.data = {"action": f"SECURITAS_FORCE_ARM_{alarm.installation.number}"}
+
+        alarm._handle_mobile_action(event)
+
+        alarm.hass.async_create_task.assert_called_once()
+
+    def test_mobile_action_cancel_clears_context(self):
+        """SECURITAS_CANCEL_FORCE_ARM_<num> mobile action clears force context."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-mobile",
+            "suid": "suid-mobile",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        event = MagicMock()
+        event.data = {
+            "action": f"SECURITAS_CANCEL_FORCE_ARM_{alarm.installation.number}"
+        }
+
+        alarm._handle_mobile_action(event)
+
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        alarm.async_write_ha_state.assert_called()
+
+    def test_mobile_action_unknown_does_nothing(self):
+        """Unrecognised mobile action does not affect alarm state."""
+        alarm = make_alarm()
+        alarm._force_context = None
+
+        event = MagicMock()
+        event.data = {"action": "SOME_OTHER_APP_ACTION"}
+
+        alarm._handle_mobile_action(event)
+
+        alarm.hass.async_create_task.assert_not_called()
+        assert alarm._force_context is None
+
+    def test_mobile_action_wrong_installation_does_nothing(self):
+        """Mobile action for a different installation number is ignored."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-other",
+            "suid": "suid-other",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [],
+            "created_at": datetime.now(),
+        }
+
+        event = MagicMock()
+        event.data = {"action": "SECURITAS_FORCE_ARM_999999"}  # wrong installation
+
+        alarm._handle_mobile_action(event)
+
+        alarm.hass.async_create_task.assert_not_called()
+        assert alarm._force_context is not None  # untouched

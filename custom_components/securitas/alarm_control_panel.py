@@ -106,7 +106,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Initialize the Securitas alarm panel."""
         self._state: str = AlarmControlPanelState.DISARMED
         self._last_status: str = AlarmControlPanelState.DISARMED
-        self._changed_by: str = ""
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
         self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
@@ -411,7 +410,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store force-arm context from an arming exception."""
-        details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
         self._force_context = {
             "reference_id": exc.reference_id,
             "suid": exc.suid,
@@ -423,7 +421,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             e.get("alias", "unknown") for e in exc.exceptions
         ]
         self._attr_extra_state_attributes["force_arm_available"] = True
-        self._attr_changed_by = f"Exception: {details} (arm to force)"
 
     def _clear_force_context(self, force: bool = False) -> None:
         """Clear stored force-arm context and related attributes.
@@ -440,7 +437,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
-        self._attr_changed_by = None
 
     def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
         """Send notifications about arming exceptions."""
