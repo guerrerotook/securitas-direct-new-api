@@ -223,15 +223,27 @@ class ApiManager:
                     content,
                 )
             elif isinstance(errors, list) and errors and "data" in response_dict:
-                # Partial GraphQL response: errors list alongside a data key
-                # with a null operation result. Raise with the real API message
-                # so callers don't have to inspect the raw response.
-                raise SecuritasDirectError(
-                    errors[0].get("message", "Unknown GraphQL error"),
-                    response_dict,
-                    headers,
-                    content,
+                # Partial GraphQL response: errors list alongside a data key.
+                # Only raise automatically when the operation result is null/empty
+                # (all data values are None), so callers that handle partial data
+                # themselves are not affected.
+                data = response_dict["data"]
+                all_null = data is None or (
+                    isinstance(data, dict) and all(v is None for v in data.values())
                 )
+                if all_null:
+                    first = errors[0]
+                    message = (
+                        first.get("message", str(first))
+                        if isinstance(first, dict)
+                        else str(first)
+                    )
+                    raise SecuritasDirectError(
+                        message,
+                        response_dict,
+                        headers,
+                        content,
+                    )
 
         return response_dict
 

@@ -200,6 +200,26 @@ class TestExecuteRequest:
         result = await api._execute_request({"query": "test"}, "mkLoginToken")
         assert result == {"errors": [{"message": "Invalid credentials"}]}
 
+    async def test_graphql_errors_list_with_non_null_data_passes_through(self, api):
+        """GraphQL partial response with errors but non-null data is returned as-is for callers to handle."""
+        error_response = json.dumps(
+            {"errors": [{"message": "Partial failure"}], "data": {"test": "ok"}}
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        result = await api._execute_request({"query": "test"}, "TestOperation")
+        assert result == {
+            "errors": [{"message": "Partial failure"}],
+            "data": {"test": "ok"},
+        }
+
     @pytest.mark.parametrize("status_code", [409, 429, 500, 503])
     async def test_http_error_status_raises_securitas_error(self, api, status_code):
         """HTTP 4xx/5xx responses raise SecuritasDirectError before JSON parsing."""
