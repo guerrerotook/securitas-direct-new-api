@@ -59,6 +59,7 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=20)
+_ARMING_EXCEPTION_NOTIFICATION_ID = "securitas.securitas_arming_exception"
 
 
 async def async_setup_entry(
@@ -220,14 +221,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         elif action == f"SECURITAS_CANCEL_FORCE_ARM_{num}":
             self._clear_force_context(force=True)
             self.async_write_ha_state()
-            notification_id = re.sub(r"\W+", "_", "Securitas: Arming Exception".lower()).strip("_")
-            self.hass.async_create_task(
-                self.hass.services.async_call(
-                    domain="persistent_notification",
-                    service="dismiss",
-                    service_data={"notification_id": f"{DOMAIN}.{notification_id}"},
-                )
-            )
+            self._dismiss_arming_exception_notification()
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
@@ -480,6 +474,16 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
             )
 
+    def _dismiss_arming_exception_notification(self) -> None:
+        """Dismiss the persistent arming-exception notification."""
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                domain="persistent_notification",
+                service="dismiss",
+                service_data={"notification_id": _ARMING_EXCEPTION_NOTIFICATION_ID},
+            )
+        )
+
     async def async_force_arm(self) -> None:
         """Force-arm using stored exception context.
 
@@ -498,6 +502,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             [e.get("alias") for e in self._force_context.get("exceptions", [])],
         )
         self._clear_force_context(force=True)
+        self._dismiss_arming_exception_notification()
         self.__force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
