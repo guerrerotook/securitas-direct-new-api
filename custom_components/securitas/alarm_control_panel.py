@@ -422,10 +422,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
         """Send notifications about arming exceptions."""
         details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
-        message = (
-            f"Arming blocked by: {details}. "
-            "Use the securitas.force_arm service to force, or resolve the issue first."
-        )
+        message = f"Arming blocked by: {details}. Please resolve the issue and try again."
         self._notify_error("Securitas: Arming Exception", message)
 
         # Notify configured group if set
