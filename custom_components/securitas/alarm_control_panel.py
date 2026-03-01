@@ -212,9 +212,22 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     @callback
     def _handle_mobile_action(self, event: Event) -> None:
-        """Handle force-arm tap from mobile notification."""
-        if event.data.get("action") == f"SECURITAS_FORCE_ARM_{self.installation.number}":
+        """Handle Force Arm / Cancel taps from mobile notification."""
+        action = event.data.get("action")
+        num = self.installation.number
+        if action == f"SECURITAS_FORCE_ARM_{num}":
             self.hass.async_create_task(self.async_force_arm())
+        elif action == f"SECURITAS_CANCEL_FORCE_ARM_{num}":
+            self._clear_force_context(force=True)
+            self.async_write_ha_state()
+            notification_id = re.sub(r"\W+", "_", "Securitas: Arming Exception".lower()).strip("_")
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="persistent_notification",
+                    service="dismiss",
+                    service_data={"notification_id": f"{DOMAIN}.{notification_id}"},
+                )
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
@@ -456,7 +469,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                                 {
                                     "action": f"SECURITAS_FORCE_ARM_{self.installation.number}",
                                     "title": "Force Arm",
-                                }
+                                },
+                                {
+                                    "action": f"SECURITAS_CANCEL_FORCE_ARM_{self.installation.number}",
+                                    "title": "Cancel",
+                                },
                             ],
                         },
                     },
