@@ -17,7 +17,6 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
 )
 
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
