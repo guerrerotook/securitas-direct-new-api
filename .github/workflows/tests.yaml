@@ -62,7 +62,7 @@ jobs:
           HA_VERSION=$(curl -fsSL "https://pypi.org/pypi/homeassistant/json" \
             | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])")
           echo "Stable HA version: $HA_VERSION"
-          echo "HA_VERSION=$HA_VERSION" >> $GITHUB_ENV
+          echo "HA_VERSION=$HA_VERSION" >> "$GITHUB_ENV"
 
       - name: Install dependencies (stable)
         if: matrix.ha-channel == 'stable'
@@ -70,7 +70,6 @@ jobs:
           pip install --upgrade pip
           # Pin HA to the stable release via a constraint so phcc can't upgrade it
           echo "homeassistant==$HA_VERSION" > /tmp/ha_stable.txt
-          pip install "homeassistant==$HA_VERSION"
           pip install -r requirements_test.txt --constraint /tmp/ha_stable.txt
 
       - name: Install dependencies (dev)
