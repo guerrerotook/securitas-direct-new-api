@@ -959,6 +959,24 @@ class TestAsyncWillRemoveFromHass:
         # Should not raise
         await alarm.async_will_remove_from_hass()
 
+    async def test_unsubscribes_mobile_action_listener(self):
+        """Calls _mobile_action_unsub() when it is set."""
+        alarm = make_alarm()
+        mobile_unsub_mock = MagicMock()
+        alarm._mobile_action_unsub = mobile_unsub_mock
+
+        await alarm.async_will_remove_from_hass()
+
+        mobile_unsub_mock.assert_called_once()
+
+    async def test_handles_none_mobile_action_unsub_gracefully(self):
+        """Handles None _mobile_action_unsub gracefully (no crash)."""
+        alarm = make_alarm()
+        alarm._mobile_action_unsub = None
+
+        # Should not raise
+        await alarm.async_will_remove_from_hass()
+
 
 # ===========================================================================
 # async_update_status

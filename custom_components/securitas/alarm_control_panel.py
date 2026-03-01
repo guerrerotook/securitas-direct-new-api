@@ -25,12 +25,13 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.exceptions import ServiceValidationError
 
 from . import (
-    CONF_INSTALLATION_KEY,
-    DEFAULT_SCAN_INTERVAL,
     CONF_CODE_ARM_REQUIRED,
-    DOMAIN,
+    CONF_INSTALLATION_KEY,
+    CONF_NOTIFY_GROUP,
     CONF_PERI_ALARM,
     DEFAULT_PERI_ALARM,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
 )
@@ -59,7 +60,6 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=20)
-_ARMING_EXCEPTION_NOTIFICATION_ID = "securitas.securitas_arming_exception"
 
 
 async def async_setup_entry(
@@ -438,16 +438,31 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
 
+    @property
+    def _arming_exception_notification_id(self) -> str:
+        """Return a per-installation persistent-notification ID."""
+        return f"{DOMAIN}.arming_exception_{self.installation.number}"
+
     def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
         """Send notifications about arming exceptions."""
         details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
         message = (
             f"Arming blocked by: {details}. Please resolve the issue and try again."
         )
-        self._notify_error("Securitas: Arming Exception", message)
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                domain="persistent_notification",
+                service="create",
+                service_data={
+                    "title": "Securitas: Arming Exception",
+                    "message": message,
+                    "notification_id": self._arming_exception_notification_id,
+                },
+            )
+        )
 
         # Notify configured group if set
-        notify_group = self.client.config.get("notify_group")
+        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             self.hass.async_create_task(
                 self.hass.services.async_call(
@@ -478,7 +493,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.hass.services.async_call(
                 domain="persistent_notification",
                 service="dismiss",
-                service_data={"notification_id": _ARMING_EXCEPTION_NOTIFICATION_ID},
+                service_data={
+                    "notification_id": self._arming_exception_notification_id
+                },
             )
         )
 
