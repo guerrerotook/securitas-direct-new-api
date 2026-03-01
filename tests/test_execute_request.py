@@ -2,9 +2,10 @@
 
 import json
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from aiohttp import ClientConnectorError
-from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.securitas_direct_new_api.apimanager import (
     generate_device_id,
@@ -15,8 +16,6 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -26,6 +25,7 @@ def mock_response():
     """Create a mock aiohttp response."""
     response = AsyncMock()
     response.text = AsyncMock(return_value='{"data": {"test": "ok"}}')
+    response.status = 200
     return response
 
 
@@ -42,6 +42,7 @@ def mock_post(api, mock_response):
 # ── _execute_request tests ───────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestExecuteRequest:
     """Tests for ApiManager._execute_request."""
 
@@ -130,6 +131,7 @@ class TestExecuteRequest:
         """Invalid JSON response raises SecuritasDirectError."""
         response = AsyncMock()
         response.text = AsyncMock(return_value="not valid json {{{")
+        response.status = 200
 
         cm = AsyncMock()
         cm.__aenter__ = AsyncMock(return_value=response)
@@ -144,6 +146,7 @@ class TestExecuteRequest:
         error_response = json.dumps({"errors": {"data": {"reason": "Session expired"}}})
         response = AsyncMock()
         response.text = AsyncMock(return_value=error_response)
+        response.status = 200
 
         cm = AsyncMock()
         cm.__aenter__ = AsyncMock(return_value=response)
@@ -151,6 +154,21 @@ class TestExecuteRequest:
         api.http_client.post = MagicMock(return_value=cm)
 
         with pytest.raises(SecuritasDirectError, match="Session expired"):
+            await api._execute_request({"query": "test"}, "TestOperation")
+
+    @pytest.mark.parametrize("status_code", [409, 429, 500, 503])
+    async def test_http_error_status_raises_securitas_error(self, api, status_code):
+        """HTTP 4xx/5xx responses raise SecuritasDirectError before JSON parsing."""
+        response = AsyncMock()
+        response.text = AsyncMock(return_value='{"errors": "conflict"}')
+        response.status = status_code
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError, match=f"HTTP {status_code}"):
             await api._execute_request({"query": "test"}, "TestOperation")
 
     @pytest.mark.parametrize(
@@ -239,6 +257,7 @@ class TestGenerateDeviceId:
 # ── _check_errors tests ──────────────────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestCheckErrors:
     """Tests for ApiManager._check_errors."""
 
@@ -290,6 +309,7 @@ class TestCheckErrors:
 # ── _check_capabilities_token tests ──────────────────────────────────────────
 
 
+@pytest.mark.asyncio
 class TestCheckCapabilitiesToken:
     """Tests for ApiManager._check_capabilities_token."""
 
@@ -305,6 +325,7 @@ class TestCheckCapabilitiesToken:
     async def test_expired_capabilities_refreshes(self, api):
         """When installation.capabilities_exp is in the past, refreshes."""
         from datetime import datetime as dt
+
         from tests.conftest import make_jwt
 
         installation = Installation(
@@ -323,6 +344,7 @@ class TestCheckCapabilitiesToken:
     async def test_valid_capabilities_does_nothing(self, api):
         """When capabilities are valid and not expired, no refresh happens."""
         from datetime import datetime as dt, timedelta
+
         from tests.conftest import make_jwt
 
         installation = Installation(

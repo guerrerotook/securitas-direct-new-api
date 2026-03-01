@@ -132,6 +132,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._update_unsub = async_track_time_interval(
             hass, self.async_update_status, self._update_interval
         )
+        self._operation_in_progress: bool = False
         self._code: str | None = client.config.get(CONF_CODE, None)
         self._attr_code_format: CodeFormat | None = None
         if self._code:
@@ -196,6 +197,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_update_status(self, now=None) -> None:
         """Update the status of the alarm."""
+        if self._operation_in_progress:
+            _LOGGER.debug("Skipping status poll - arm/disarm operation in progress")
+            return
         alarm_status: CheckAlarmStatus = CheckAlarmStatus()
         try:
             alarm_status = await self.client.update_overview(self.installation)
@@ -254,6 +258,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.__force_state(AlarmControlPanelState.DISARMING)
             disarm_status: DisarmStatus = DisarmStatus()
             try:
+                self._operation_in_progress = True
                 disarm_status = await self.client.session.disarm_alarm(
                     self.installation, STATE_TO_COMMAND[self._disarm_state]
                 )
@@ -263,6 +268,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = self._last_status
                 self.async_write_ha_state()
                 return
+            finally:
+                self._operation_in_progress = False
 
             self.update_status_alarm(
                 CheckAlarmStatus(
@@ -289,38 +296,44 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             _LOGGER.error("No command configured for mode %s", mode)
             return
 
-        # Disarm first if previously in a confirmed armed state.
-        # Note: self._state is already ARMING (set by caller via
-        # __force_state), so check _last_status for the actual prior state.
-        if self._last_status in (
-            AlarmControlPanelState.ARMED_HOME,
-            AlarmControlPanelState.ARMED_AWAY,
-            AlarmControlPanelState.ARMED_NIGHT,
-            AlarmControlPanelState.ARMED_CUSTOM_BYPASS,
-        ):
+        self._operation_in_progress = True
+        try:
+            # Disarm first if previously in a confirmed armed state.
+            # Note: self._state is already ARMING (set by caller via
+            # __force_state), so check _last_status for the actual prior state.
+            if self._last_status in (
+                AlarmControlPanelState.ARMED_HOME,
+                AlarmControlPanelState.ARMED_AWAY,
+                AlarmControlPanelState.ARMED_NIGHT,
+                AlarmControlPanelState.ARMED_CUSTOM_BYPASS,
+            ):
+                try:
+                    await self.client.session.disarm_alarm(
+                        self.installation,
+                        STATE_TO_COMMAND[self._disarm_state],
+                    )
+                except SecuritasDirectError as err:
+                    _LOGGER.warning(
+                        "Failed to disarm before re-arming (last_status: %s, alarm "
+                        "may already be disarmed), continuing with arm: %s",
+                        self._last_status,
+                        err.args,
+                    )
+                else:
+                    await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
+
+            arm_status: ArmStatus = ArmStatus()
             try:
-                await self.client.session.disarm_alarm(
-                    self.installation,
-                    STATE_TO_COMMAND[self._disarm_state],
+                arm_status = await self.client.session.arm_alarm(
+                    self.installation, command
                 )
             except SecuritasDirectError as err:
-                _LOGGER.warning(
-                    "Failed to disarm before re-arming (last_status: %s, alarm "
-                    "may already be disarmed), continuing with arm: %s",
-                    self._last_status,
-                    err.args,
-                )
-            else:
-                await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
-
-        arm_status: ArmStatus = ArmStatus()
-        try:
-            arm_status = await self.client.session.arm_alarm(self.installation, command)
-        except SecuritasDirectError as err:
-            _LOGGER.error(err.args)
-            self._state = self._last_status
-            self.async_write_ha_state()
-            return
+                _LOGGER.error(err.args)
+                self._state = self._last_status
+                self.async_write_ha_state()
+                return
+        finally:
+            self._operation_in_progress = False
 
         self.update_status_alarm(
             CheckAlarmStatus(
