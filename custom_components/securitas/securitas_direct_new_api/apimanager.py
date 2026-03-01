@@ -209,18 +209,29 @@ class ApiManager:
             _LOGGER.error("Problems decoding response %s", response_text)
             raise SecuritasDirectError(err.msg, None, headers, content) from err
 
-        if (
-            "errors" in response_dict
-            and isinstance(response_dict["errors"], dict)
-            and "data" in response_dict["errors"]
-            and "reason" in response_dict["errors"]["data"]
-        ):
-            raise SecuritasDirectError(
-                response_dict["errors"]["data"]["reason"],
-                response_dict,
-                headers,
-                content,
-            )
+        if "errors" in response_dict:
+            errors = response_dict["errors"]
+            if (
+                isinstance(errors, dict)
+                and "data" in errors
+                and "reason" in errors["data"]
+            ):
+                raise SecuritasDirectError(
+                    errors["data"]["reason"],
+                    response_dict,
+                    headers,
+                    content,
+                )
+            elif isinstance(errors, list) and errors and "data" in response_dict:
+                # Partial GraphQL response: errors list alongside a data key
+                # with a null operation result. Raise with the real API message
+                # so callers don't have to inspect the raw response.
+                raise SecuritasDirectError(
+                    errors[0].get("message", "Unknown GraphQL error"),
+                    response_dict,
+                    headers,
+                    content,
+                )
 
         return response_dict
 

@@ -156,6 +156,50 @@ class TestExecuteRequest:
         with pytest.raises(SecuritasDirectError, match="Session expired"):
             await api._execute_request({"query": "test"}, "TestOperation")
 
+    async def test_graphql_errors_list_with_null_data_raises_securitas_error(self, api):
+        """GraphQL partial response (errors list + data key with null value) raises SecuritasDirectError."""
+        error_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "4: Requested data not found error.",
+                        "name": "ApiError",
+                        "data": {"res": "ERROR", "err": "4", "status": 404},
+                        "path": ["xSArmPanel"],
+                    }
+                ],
+                "data": {"xSArmPanel": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(
+            SecuritasDirectError, match="4: Requested data not found error."
+        ):
+            await api._execute_request({"query": "test"}, "xSArmPanel")
+
+    async def test_graphql_errors_list_without_data_key_passes_through(self, api):
+        """GraphQL errors-only response (no data key) is returned as-is so callers can handle it."""
+        error_response = json.dumps({"errors": [{"message": "Invalid credentials"}]})
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        result = await api._execute_request({"query": "test"}, "mkLoginToken")
+        assert result == {"errors": [{"message": "Invalid credentials"}]}
+
     @pytest.mark.parametrize("status_code", [409, 429, 500, 503])
     async def test_http_error_status_raises_securitas_error(self, api, status_code):
         """HTTP 4xx/5xx responses raise SecuritasDirectError before JSON parsing."""
