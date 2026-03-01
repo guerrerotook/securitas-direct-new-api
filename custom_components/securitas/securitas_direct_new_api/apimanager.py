@@ -209,18 +209,41 @@ class ApiManager:
             _LOGGER.error("Problems decoding response %s", response_text)
             raise SecuritasDirectError(err.msg, None, headers, content) from err
 
-        if (
-            "errors" in response_dict
-            and isinstance(response_dict["errors"], dict)
-            and "data" in response_dict["errors"]
-            and "reason" in response_dict["errors"]["data"]
-        ):
-            raise SecuritasDirectError(
-                response_dict["errors"]["data"]["reason"],
-                response_dict,
-                headers,
-                content,
-            )
+        if "errors" in response_dict:
+            errors = response_dict["errors"]
+            if (
+                isinstance(errors, dict)
+                and "data" in errors
+                and "reason" in errors["data"]
+            ):
+                raise SecuritasDirectError(
+                    errors["data"]["reason"],
+                    response_dict,
+                    headers,
+                    content,
+                )
+            elif isinstance(errors, list) and errors and "data" in response_dict:
+                # Partial GraphQL response: errors list alongside a data key.
+                # Only raise automatically when the operation result is null/empty
+                # (all data values are None), so callers that handle partial data
+                # themselves are not affected.
+                data = response_dict["data"]
+                all_null = data is None or (
+                    isinstance(data, dict) and all(v is None for v in data.values())
+                )
+                if all_null:
+                    first = errors[0]
+                    message = (
+                        first.get("message", str(first))
+                        if isinstance(first, dict)
+                        else str(first)
+                    )
+                    raise SecuritasDirectError(
+                        message,
+                        response_dict,
+                        headers,
+                        content,
+                    )
 
         return response_dict
 
