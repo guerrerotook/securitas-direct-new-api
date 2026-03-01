@@ -148,6 +148,23 @@ The force-arm context expires automatically at the next status refresh, so force
 
 > **Limitation:** The standard Home Assistant alarm panel card has no way to display exception details or a force-arm button. Exception information is only surfaced via the persistent notification and (if configured) the mobile notification.
 
+### Notifying multiple people
+
+The **Notify service** field accepts a single service name. To notify multiple people at once, create a notify group in your `configuration.yaml`:
+
+```yaml
+notify:
+  - platform: group
+    name: Mobiles
+    services:
+      - service: mobile_app_your_phone
+      - service: mobile_app_partner_phone
+```
+
+This registers a `notify.mobiles` service. After restarting Home Assistant, `mobiles` will appear in the **Notify service** dropdown in the integration options.
+
+> **Note:** Action buttons (Force Arm / Cancel) in the notification are tied to the installation number, so any household member who taps a button will trigger the correct action regardless of which device they use.
+
 ### `securitas.force_arm` service
 
 | Field | Description |
