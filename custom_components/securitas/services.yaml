@@ -1,0 +1,5 @@
+force_arm:
+  target:
+    entity:
+      integration: securitas
+      domain: alarm_control_panel

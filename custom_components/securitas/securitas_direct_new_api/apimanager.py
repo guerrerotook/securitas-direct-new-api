@@ -27,7 +27,12 @@ from .dataTypes import (
     SmartLockModeStatus,
 )
 from .domains import ApiDomains
-from .exceptions import Login2FAError, LoginError, SecuritasDirectError
+from .exceptions import (
+    ArmingExceptionError,
+    Login2FAError,
+    LoginError,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -812,17 +817,44 @@ class ApiManager:
             raise SecuritasDirectError("xSCheckAlarmStatus response is None", response)
         return check_data
 
-    async def arm_alarm(self, installation: Installation, command: str) -> ArmStatus:
-        """Arms the alarm in the specified mode."""
+    async def arm_alarm(
+        self,
+        installation: Installation,
+        command: str,
+        force_arming_remote_id: str | None = None,
+        suid: str | None = None,
+    ) -> ArmStatus:
+        """Arms the alarm in the specified mode.
+
+        When force_arming_remote_id and suid are provided, the arm request
+        overrides non-blocking exceptions (e.g. open windows) that were
+        reported in a previous attempt.
+        """
+        variables: dict[str, Any] = {
+            "request": command,
+            "numinst": installation.number,
+            "panel": installation.panel,
+            "currentStatus": self.protom_response,
+            "armAndLock": False,
+        }
+        if force_arming_remote_id is not None:
+            variables["forceArmingRemoteId"] = force_arming_remote_id
+        if suid is not None:
+            variables["suid"] = suid
+
         content = {
             "operationName": "xSArmPanel",
-            "variables": {
-                "request": command,
-                "numinst": installation.number,
-                "panel": installation.panel,
-                "currentStatus": self.protom_response,
-            },
-            "query": "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!, $panel: String!, $currentStatus: String) {\n  xSArmPanel(numinst: $numinst, request: $request, panel: $panel, currentStatus: $currentStatus) {\n    res\n    msg\n    referenceId\n  }\n}\n",
+            "variables": variables,
+            "query": (
+                "mutation xSArmPanel($numinst: String!, $request: ArmCodeRequest!,"
+                " $panel: String!, $currentStatus: String, $suid: String,"
+                " $forceArmingRemoteId: String, $armAndLock: Boolean) {\n"
+                "  xSArmPanel(numinst: $numinst, request: $request, panel: $panel,"
+                " currentStatus: $currentStatus, suid: $suid,"
+                " forceArmingRemoteId: $forceArmingRemoteId,"
+                " armAndLock: $armAndLock) {\n"
+                "    res\n    msg\n    referenceId\n  }\n}\n"
+            ),
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
@@ -837,11 +869,39 @@ class ApiManager:
 
         count = 1
         raw_data: dict[str, Any] = {}
+        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
         while (count == 1) or (raw_data.get("res") == "WAIT"):
+            if count > max_retries:
+                _LOGGER.warning(
+                    "Arm status check exceeded max retries (%d), last response: %s",
+                    max_retries,
+                    raw_data,
+                )
+                break
             await asyncio.sleep(self.delay_check_operation)
             raw_data = await self._check_arm_status(
-                installation, reference_id, command, count
+                installation,
+                reference_id,
+                command,
+                count,
+                force_arming_remote_id,
             )
+
+            # Detect non-blocking exception that allows forcing
+            error = raw_data.get("error")
+            if (
+                raw_data.get("res") == "ERROR"
+                and error
+                and error.get("type") == "NON_BLOCKING"
+                and error.get("allowForcing")
+            ):
+                error_ref = error.get("referenceId", reference_id)
+                error_suid = error.get("suid", "")
+                exceptions = await self._get_exceptions(
+                    installation, error_ref, error_suid
+                )
+                raise ArmingExceptionError(error_ref, error_suid, exceptions)
+
             count += 1
 
         self.protom_response = raw_data["protomResponse"]
@@ -862,19 +922,37 @@ class ApiManager:
         reference_id: str,
         command: str,
         counter: int,
+        force_arming_remote_id: str | None = None,
     ) -> dict[str, Any]:
-        """Check progress of the alarm."""
+        """Check progress of the arm operation."""
+        variables: dict[str, Any] = {
+            "request": command,
+            "numinst": installation.number,
+            "panel": installation.panel,
+            "referenceId": reference_id,
+            "counter": counter,
+            "armAndLock": False,
+        }
+        if force_arming_remote_id is not None:
+            variables["forceArmingRemoteId"] = force_arming_remote_id
+
         content = {
             "operationName": "ArmStatus",
-            "variables": {
-                "request": command,
-                "numinst": installation.number,
-                "panel": installation.panel,
-                "currentStatus": self.protom_response,
-                "referenceId": reference_id,
-                "counter": counter,
-            },
-            "query": "query ArmStatus($numinst: String!, $request: ArmCodeRequest, $panel: String!, $referenceId: String!, $counter: Int!) {\n  xSArmStatus(numinst: $numinst, panel: $panel, referenceId: $referenceId, counter: $counter, request: $request) {\n    res\n    msg\n    status\n    protomResponse\n    protomResponseDate\n    numinst\n    requestId\n    error {\n      code\n      type\n      allowForcing\n      exceptionsNumber\n      referenceId\n    }\n  }\n}\n",
+            "variables": variables,
+            "query": (
+                "query ArmStatus($numinst: String!, $request: ArmCodeRequest,"
+                " $panel: String!, $referenceId: String!, $counter: Int!,"
+                " $forceArmingRemoteId: String, $armAndLock: Boolean) {\n"
+                "  xSArmStatus(numinst: $numinst, panel: $panel,"
+                " referenceId: $referenceId, counter: $counter, request: $request,"
+                " forceArmingRemoteId: $forceArmingRemoteId,"
+                " armAndLock: $armAndLock) {\n"
+                "    res\n    msg\n    status\n    protomResponse\n"
+                "    protomResponseDate\n    numinst\n    requestId\n"
+                "    error {\n      code\n      type\n      allowForcing\n"
+                "      exceptionsNumber\n      referenceId\n      suid\n    }\n"
+                "  }\n}\n"
+            ),
         }
         response = await self._execute_request(content, "ArmStatus", installation)
 
@@ -882,6 +960,39 @@ class ApiManager:
         if raw_data is None:
             raise SecuritasDirectError("xSArmStatus response is None", response)
         return raw_data
+
+    async def _get_exceptions(
+        self,
+        installation: Installation,
+        reference_id: str,
+        suid: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch arming exception details (e.g. open windows/doors)."""
+        content = {
+            "operationName": "xSGetExceptions",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": reference_id,
+                "counter": 1,
+                "suid": suid,
+            },
+            "query": (
+                "query xSGetExceptions($numinst: String!, $panel: String!,"
+                " $referenceId: String!, $counter: Int!, $suid: String) {\n"
+                "  xSGetExceptions(numinst: $numinst, panel: $panel,"
+                " referenceId: $referenceId, counter: $counter, suid: $suid) {\n"
+                "    res\n    msg\n"
+                "    exceptions {\n      status\n      deviceType\n      alias\n    }\n"
+                "  }\n}\n"
+            ),
+        }
+        response = await self._execute_request(content, "xSGetExceptions", installation)
+        data = response.get("data", {}).get("xSGetExceptions", {})
+        if data and data.get("res") == "OK":
+            return data.get("exceptions") or []
+        _LOGGER.warning("Failed to fetch arming exceptions: %s", data)
+        return []
 
     async def disarm_alarm(
         self, installation: Installation, command: str

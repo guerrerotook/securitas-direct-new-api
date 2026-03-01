@@ -39,7 +39,8 @@
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
                     "scan_interval": "Update scan interval (sec)",
-                    "delay_check_operation": "Delay to check the arming and disarming operation (sec)"
+                    "delay_check_operation": "Delay to check the arming and disarming operation (sec)",
+                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)"
                 }
             },
             "mappings": {
@@ -52,6 +53,12 @@
                     "map_custom": "Custom"
                 }
             }
+        }
+    },
+    "services": {
+        "force_arm": {
+            "name": "Force arm",
+            "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt."
         }
     },
     "exceptions": {

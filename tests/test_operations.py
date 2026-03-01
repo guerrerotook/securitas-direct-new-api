@@ -12,6 +12,7 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     SStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
+    ArmingExceptionError,
     SecuritasDirectError,
 )
 
@@ -279,6 +280,177 @@ class TestArmAlarm:
         assert result.status == "ARMED_TOTAL"
         # 1 for xSArmPanel + 2 for _check_arm_status (WAIT then OK)
         assert mock_execute.call_count == 3
+
+    async def test_non_blocking_exception_raises_arming_exception_error(
+        self, authed_api, mock_execute, installation
+    ):
+        """When the API returns a NON_BLOCKING error with allowForcing, raise ArmingExceptionError."""
+        initial_response = {
+            "data": {
+                "xSArmPanel": {
+                    "res": "OK",
+                    "msg": "",
+                    "referenceId": "ref-arm-exc",
+                }
+            }
+        }
+        exception_response = {
+            "data": {
+                "xSArmStatus": {
+                    "res": "ERROR",
+                    "msg": "error_mpj_exception",
+                    "status": None,
+                    "protomResponse": None,
+                    "protomResponseDate": "2026-02-28T16:03:13Z",
+                    "numinst": None,
+                    "requestId": None,
+                    "error": {
+                        "code": "102",
+                        "type": "NON_BLOCKING",
+                        "allowForcing": True,
+                        "exceptionsNumber": 1,
+                        "referenceId": "ref-arm-exc",
+                        "suid": "123456VI4ucRGS5Q==",
+                    },
+                }
+            }
+        }
+        get_exceptions_response = {
+            "data": {
+                "xSGetExceptions": {
+                    "res": "OK",
+                    "msg": None,
+                    "exceptions": [
+                        {"status": "0", "deviceType": "MG", "alias": "Kitchen Door"},
+                    ],
+                }
+            }
+        }
+        mock_execute.side_effect = [
+            initial_response,
+            exception_response,
+            get_exceptions_response,
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await authed_api.arm_alarm(installation, "ARMDAY1")
+
+        assert exc_info.value.reference_id == "ref-arm-exc"
+        assert exc_info.value.suid == "123456VI4ucRGS5Q=="
+        assert len(exc_info.value.exceptions) == 1
+        assert exc_info.value.exceptions[0]["alias"] == "Kitchen Door"
+
+    async def test_force_arm_passes_force_params(
+        self, authed_api, mock_execute, installation
+    ):
+        """When force_arming_remote_id and suid are provided, they appear in the request."""
+        initial_response = {
+            "data": {
+                "xSArmPanel": {
+                    "res": "OK",
+                    "msg": "",
+                    "referenceId": "ref-force-arm",
+                }
+            }
+        }
+        status_response = {
+            "data": {
+                "xSArmStatus": {
+                    "res": "OK",
+                    "msg": "",
+                    "status": "ARMED",
+                    "numinst": "123456",
+                    "protomResponse": "P",
+                    "protomResponseDate": "2026-02-28",
+                    "requestId": "req-force",
+                    "error": None,
+                }
+            }
+        }
+        mock_execute.side_effect = [initial_response, status_response]
+
+        result = await authed_api.arm_alarm(
+            installation,
+            "ARMDAY1",
+            force_arming_remote_id="ref-original",
+            suid="123456VI4ucRGS5Q==",
+        )
+
+        assert result.operation_status == "OK"
+        assert result.protomResponse == "P"
+
+        # Check the xSArmPanel call included force params
+        arm_call = mock_execute.call_args_list[0]
+        arm_variables = arm_call[0][0]["variables"]
+        assert arm_variables["forceArmingRemoteId"] == "ref-original"
+        assert arm_variables["suid"] == "123456VI4ucRGS5Q=="
+
+        # Check the ArmStatus poll also included forceArmingRemoteId
+        status_call = mock_execute.call_args_list[1]
+        status_variables = status_call[0][0]["variables"]
+        assert status_variables["forceArmingRemoteId"] == "ref-original"
+
+    async def test_blocking_error_does_not_raise_arming_exception(
+        self, authed_api, mock_execute, installation
+    ):
+        """A BLOCKING error (allowForcing=false) should not raise ArmingExceptionError."""
+        initial_response = {
+            "data": {
+                "xSArmPanel": {
+                    "res": "OK",
+                    "msg": "",
+                    "referenceId": "ref-arm-block",
+                }
+            }
+        }
+        blocking_error_response = {
+            "data": {
+                "xSArmStatus": {
+                    "res": "ERROR",
+                    "msg": "error_blocking",
+                    "status": None,
+                    "protomResponse": None,
+                    "protomResponseDate": "2026-02-28",
+                    "numinst": None,
+                    "requestId": None,
+                    "error": {
+                        "code": "103",
+                        "type": "BLOCKING",
+                        "allowForcing": False,
+                        "exceptionsNumber": 0,
+                        "referenceId": "ref-arm-block",
+                        "suid": "",
+                    },
+                }
+            }
+        }
+        mock_execute.side_effect = [initial_response, blocking_error_response]
+
+        # Should exit the loop (not WAIT, not forceable) and return status
+        # with protomResponse=None — which is fine, the caller handles it
+        result = await authed_api.arm_alarm(installation, "ARM1")
+        assert result.protomResponse is None
+
+    async def test_get_exceptions_method(self, authed_api, mock_execute, installation):
+        """Test _get_exceptions returns parsed exception list."""
+        mock_execute.return_value = {
+            "data": {
+                "xSGetExceptions": {
+                    "res": "OK",
+                    "msg": None,
+                    "exceptions": [
+                        {"status": "0", "deviceType": "MG", "alias": "Front Door"},
+                        {"status": "0", "deviceType": "MG", "alias": "Window"},
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api._get_exceptions(installation, "ref-123", "suid-123")
+
+        assert len(result) == 2
+        assert result[0]["alias"] == "Front Door"
+        assert result[1]["alias"] == "Window"
 
 
 # ── disarm_alarm() ───────────────────────────────────────────────────────────

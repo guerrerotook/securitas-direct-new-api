@@ -39,7 +39,8 @@
                     "PERI_alarm": "¿Hay una alarma perimetral?",
                     "check_alarm_panel": "Comprobar el estado del panel de alarma en cada solicitud (no recomendado)",
                     "scan_interval": "Intervalo de actualización (seg)",
-                    "delay_check_operation": "Retardo para comprobar las operaciones de armado y desarmado (seg)"
+                    "delay_check_operation": "Retardo para comprobar las operaciones de armado y desarmado (seg)",
+                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)"
                 }
             },
             "mappings": {
@@ -52,6 +53,12 @@
                     "map_custom": "Personalizado"
                 }
             }
+        }
+    },
+    "services": {
+        "force_arm": {
+            "name": "Forzar armado",
+            "description": "Forzar el armado de la alarma, ignorando excepciones no bloqueantes (p. ej. ventanas abiertas) de un intento de armado fallido anterior."
         }
     },
     "exceptions": {

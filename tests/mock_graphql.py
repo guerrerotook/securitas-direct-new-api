@@ -380,6 +380,59 @@ def graphql_arm_status(
     }
 
 
+def graphql_arm_status_exception(
+    *,
+    error_code: str = "102",
+    error_type: str = "NON_BLOCKING",
+    allow_forcing: bool = True,
+    exceptions_number: int = 1,
+    reference_id: str = "ref-arm-123",
+    suid: str = "123456VI4ucRGS5Q==",
+) -> dict:
+    """ArmStatus polling response with a non-blocking exception error."""
+    return {
+        "data": {
+            "xSArmStatus": {
+                "res": "ERROR",
+                "msg": "error_mpj_exception",
+                "status": None,
+                "protomResponse": None,
+                "protomResponseDate": "2026-02-28T16:03:13Z",
+                "numinst": None,
+                "requestId": None,
+                "error": {
+                    "code": error_code,
+                    "type": error_type,
+                    "allowForcing": allow_forcing,
+                    "exceptionsNumber": exceptions_number,
+                    "referenceId": reference_id,
+                    "suid": suid,
+                },
+            }
+        }
+    }
+
+
+def graphql_get_exceptions(
+    *,
+    exceptions: list[dict] | None = None,
+) -> dict:
+    """xSGetExceptions response."""
+    if exceptions is None:
+        exceptions = [
+            {"status": "0", "deviceType": "MG", "alias": "Porta2cucin"},
+        ]
+    return {
+        "data": {
+            "xSGetExceptions": {
+                "res": "OK",
+                "msg": None,
+                "exceptions": exceptions,
+            }
+        }
+    }
+
+
 def graphql_disarm(*, reference_id: str = "ref-disarm-123") -> dict:
     """xSDisarmPanel response."""
     return {

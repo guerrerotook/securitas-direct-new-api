@@ -39,7 +39,8 @@
                     "PERI_alarm": "Y a-t-il une alarme périmétrique ?",
                     "check_alarm_panel": "Vérifier l'état du panneau d'alarme à chaque requête (non recommandé)",
                     "scan_interval": "Intervalle de mise à jour (sec)",
-                    "delay_check_operation": "Délai pour vérifier les opérations d'armement et de désarmement (sec)"
+                    "delay_check_operation": "Délai pour vérifier les opérations d'armement et de désarmement (sec)",
+                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)"
                 }
             },
             "mappings": {
@@ -52,6 +53,12 @@
                     "map_custom": "Personnalisé"
                 }
             }
+        }
+    },
+    "services": {
+        "force_arm": {
+            "name": "Forcer l'armement",
+            "description": "Forcer l'armement de l'alarme en ignorant les exceptions non bloquantes (ex. fenêtres ouvertes) d'une tentative d'armement précédente échouée."
         }
     },
     "exceptions": {

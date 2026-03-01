@@ -28,6 +28,11 @@ from .dataTypes import (  # noqa: F401
     SmartLockModeStatus,
 )
 from .domains import ApiDomains  # noqa: F401
-from .exceptions import Login2FAError, LoginError, SecuritasDirectError  # noqa: F401
+from .exceptions import (  # noqa: F401
+    ArmingExceptionError,
+    Login2FAError,
+    LoginError,
+    SecuritasDirectError,
+)
 
 _LOGGER = logging.getLogger(__name__)

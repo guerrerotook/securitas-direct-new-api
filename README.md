@@ -6,6 +6,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
 - **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Custom) to any Securitas alarm mode.
+- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you of the problem and lets you force-arm anyway via a mobile notification button or the `securitas.force_arm` service.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
 - **Smart locks** — lock and unlock smart door locks.
@@ -59,6 +60,7 @@ Go to **Settings → Integrations → Add Integration** and search for **Securit
 | Perimetral alarm | No | Enable if your installation has external/outdoor sensors. This determines which alarm modes are available and the correct disarm command. |
 | Check alarm panel | Yes | When enabled, the integration queries the physical alarm panel for its status. When disabled, it reads the last known status from the Securitas server (fewer requests, but may be out of sync if you use the Securitas app). |
 | Update interval | 120s | How often (in seconds) the integration checks the alarm status. |
+| Notify service | _(none)_ | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 
 ### Two-factor authentication
 
@@ -126,6 +128,56 @@ When switching between armed modes (e.g. from "Armed Home" to "Armed Away"), the
 If your alarm is put into a Securitas state that you have not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the alarm entity will show as **Custom Bypass**. This is not an error — enable perimeter support or adjust your alarm state mappings in the integration options to resolve it.
 
 To see which status code the alarm is reporting, [enable debug logging](#reporting-issues).
+
+## Force Arming
+
+When you arm the alarm and a sensor is in a fault state (e.g. a window is open), Securitas may block the arm and report a non-blocking exception. The integration handles this as follows:
+
+1. The alarm panel reverts to its previous state.
+2. A **persistent notification** appears in Home Assistant listing the affected sensors.
+3. If a **Notify service** is configured, a **mobile notification** is sent with two action buttons: **Force Arm** and **Cancel**.
+
+### Resolving the exception
+
+- **Fix the issue** (close the window, clear the fault) and arm again normally.
+- **Force arm** to arm despite the exception. You can do this from:
+  - The **Force Arm** button in the mobile notification.
+  - The `securitas.force_arm` service, targeted at the alarm panel entity.
+
+The force-arm context expires automatically at the next status refresh, so force-arming is only possible immediately after the exception occurs.
+
+> **Limitation:** The standard Home Assistant alarm panel card has no way to display exception details or a force-arm button. Exception information is only surfaced via the persistent notification and (if configured) the mobile notification.
+
+### Notifying multiple people
+
+The **Notify service** field accepts a single service name. To notify multiple people at once, create a notify group in your `configuration.yaml`:
+
+```yaml
+notify:
+  - platform: group
+    name: Mobiles
+    services:
+      - service: mobile_app_your_phone
+      - service: mobile_app_partner_phone
+```
+
+This registers a `notify.mobiles` service. After restarting Home Assistant, `mobiles` will appear in the **Notify service** dropdown in the integration options.
+
+> **Note:** Action buttons (Force Arm / Cancel) in the notification are tied to the installation number, so any household member who taps a button will trigger the correct action regardless of which device they use.
+
+### `securitas.force_arm` service
+
+| Field | Description |
+| ----- | ----------- |
+| Target entity | The Securitas alarm panel entity to force-arm. |
+
+Example automation action:
+
+```yaml
+action: securitas.force_arm
+target:
+  entity_id: alarm_control_panel.my_home
+```
 
 ## Sentinel Sensors
 

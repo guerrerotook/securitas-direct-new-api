@@ -1,5 +1,7 @@
 """Tests for alarm_control_panel entity logic."""
 
+from datetime import datetime, timedelta
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +25,7 @@ from custom_components.securitas.securitas_direct_new_api.const import (
     SecuritasState,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
+    ArmingExceptionError,
     SecuritasDirectError,
 )
 from custom_components.securitas.alarm_control_panel import (
@@ -956,6 +959,24 @@ class TestAsyncWillRemoveFromHass:
         # Should not raise
         await alarm.async_will_remove_from_hass()
 
+    async def test_unsubscribes_mobile_action_listener(self):
+        """Calls _mobile_action_unsub() when it is set."""
+        alarm = make_alarm()
+        mobile_unsub_mock = MagicMock()
+        alarm._mobile_action_unsub = mobile_unsub_mock
+
+        await alarm.async_will_remove_from_hass()
+
+        mobile_unsub_mock.assert_called_once()
+
+    async def test_handles_none_mobile_action_unsub_gracefully(self):
+        """Handles None _mobile_action_unsub gracefully (no crash)."""
+        alarm = make_alarm()
+        alarm._mobile_action_unsub = None
+
+        # Should not raise
+        await alarm.async_will_remove_from_hass()
+
 
 # ===========================================================================
 # async_update_status
@@ -1212,3 +1233,329 @@ class TestArmMethods:
         await alarm.async_alarm_arm_home()
 
         assert AlarmControlPanelState.ARMING in observed_states
+
+
+# ===========================================================================
+# Force-arm context
+# ===========================================================================
+
+
+class TestForceArmContext:
+    """Tests for the force-arm exception handling flow."""
+
+    def _make_arming_exception(
+        self,
+        ref_id: str = "ref-exc-123",
+        suid: str = "123456VI4ucRGS5Q==",
+        exceptions: list[dict] | None = None,
+    ) -> ArmingExceptionError:
+        if exceptions is None:
+            exceptions = [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}]
+        return ArmingExceptionError(ref_id, suid, exceptions)
+
+    async def test_arming_exception_stores_force_context(self):
+        """ArmingExceptionError during arm stores force context and reverts state."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = self._make_arming_exception()
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # State should revert
+        assert alarm._state == AlarmControlPanelState.DISARMED
+        # Force context should be stored
+        assert alarm._force_context is not None
+        assert alarm._force_context["reference_id"] == "ref-exc-123"
+        assert alarm._force_context["suid"] == "123456VI4ucRGS5Q=="
+        assert alarm._force_context["mode"] == AlarmControlPanelState.ARMED_HOME
+        # Attributes should expose exception info
+        assert alarm._attr_extra_state_attributes["force_arm_available"] is True
+        assert "Kitchen Door" in alarm._attr_extra_state_attributes["arm_exceptions"]
+
+    async def test_widget_re_arm_does_not_force(self):
+        """Re-arming via the widget does NOT auto-force — force context is ignored."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-exc-123",
+            "suid": "123456VI4ucRGS5Q==",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"status": "0", "deviceType": "MG", "alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="P",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Force params should NOT have been passed (widget doesn't force)
+        call_kwargs = alarm.client.session.arm_alarm.call_args[1]
+        assert "force_arming_remote_id" not in call_kwargs
+        assert "suid" not in call_kwargs
+
+    async def test_force_context_survives_immediate_status_refresh(self):
+        """async_update_status does NOT clear recently-set force context.
+
+        HA triggers an immediate status refresh after every service call.
+        The force context must survive until the user has a chance to re-arm.
+        """
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-123",
+            "suid": "suid-123",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [],
+            "created_at": datetime.now(),  # Just set — recent
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
+
+        alarm.client.update_overview = AsyncMock(
+            return_value=CheckAlarmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="D",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_update_status()
+
+        # Force context should STILL be present (age < scan interval)
+        assert alarm._force_context is not None
+        assert alarm._attr_extra_state_attributes.get("force_arm_available") is True
+
+    async def test_force_context_cleared_on_expired_status_refresh(self):
+        """async_update_status clears force context after scan interval expires."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-123",
+            "suid": "suid-123",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [],
+            "created_at": datetime.now() - timedelta(seconds=300),  # Old
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
+
+        alarm.client.update_overview = AsyncMock(
+            return_value=CheckAlarmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="D",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_update_status()
+
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        assert "arm_exceptions" not in alarm._attr_extra_state_attributes
+
+    async def test_force_context_cleared_on_successful_arm(self):
+        """Successful arm without force context does not leave stale context."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = None
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="T",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm._force_context is None
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+    async def test_arming_exception_sends_persistent_notification(self):
+        """ArmingExceptionError triggers persistent notification."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = self._make_arming_exception()
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Verify persistent notification was created
+        alarm.hass.async_create_task.assert_called()
+
+    async def test_arming_exception_notifies_configured_group(self):
+        """ArmingExceptionError sends to configured notify group."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = self._make_arming_exception()
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Should have two async_create_task calls: persistent_notification + notify
+        assert alarm.hass.async_create_task.call_count == 2
+
+    async def test_arming_exception_no_notify_group_only_persistent(self):
+        """Without notify_group configured, only persistent notification fires."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = self._make_arming_exception()
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Only persistent notification
+        assert alarm.hass.async_create_task.call_count == 1
+
+    async def test_async_force_arm_uses_stored_context(self):
+        """async_force_arm consumes stored context and passes force params."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-exc-456",
+            "suid": "suid-456",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"status": "0", "deviceType": "MG", "alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Window"]
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="T",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_force_arm()
+
+        # Should have called arm_alarm with force params
+        call_kwargs = alarm.client.session.arm_alarm.call_args[1]
+        assert call_kwargs["force_arming_remote_id"] == "ref-exc-456"
+        assert call_kwargs["suid"] == "suid-456"
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+        # Force context should be cleared after consumption
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        assert "arm_exceptions" not in alarm._attr_extra_state_attributes
+
+    async def test_async_force_arm_no_context_does_nothing(self):
+        """async_force_arm with no stored context does nothing."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = None
+
+        alarm.client.session.arm_alarm = AsyncMock()
+
+        await alarm.async_force_arm()
+
+        alarm.client.session.arm_alarm.assert_not_called()
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+    def test_mobile_action_force_arm_dispatches_task(self):
+        """SECURITAS_FORCE_ARM_<num> mobile action dispatches async_force_arm."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-mobile",
+            "suid": "suid-mobile",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        event = MagicMock()
+        event.data = {"action": f"SECURITAS_FORCE_ARM_{alarm.installation.number}"}
+
+        alarm._handle_mobile_action(event)
+
+        alarm.hass.async_create_task.assert_called_once()
+
+    def test_mobile_action_cancel_clears_context(self):
+        """SECURITAS_CANCEL_FORCE_ARM_<num> mobile action clears force context."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-mobile",
+            "suid": "suid-mobile",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        event = MagicMock()
+        event.data = {
+            "action": f"SECURITAS_CANCEL_FORCE_ARM_{alarm.installation.number}"
+        }
+
+        alarm._handle_mobile_action(event)
+
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        alarm.async_write_ha_state.assert_called()
+
+    def test_mobile_action_unknown_does_nothing(self):
+        """Unrecognised mobile action does not affect alarm state."""
+        alarm = make_alarm()
+        alarm._force_context = None
+
+        event = MagicMock()
+        event.data = {"action": "SOME_OTHER_APP_ACTION"}
+
+        alarm._handle_mobile_action(event)
+
+        alarm.hass.async_create_task.assert_not_called()
+        assert alarm._force_context is None
+
+    def test_mobile_action_wrong_installation_does_nothing(self):
+        """Mobile action for a different installation number is ignored."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-other",
+            "suid": "suid-other",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [],
+            "created_at": datetime.now(),
+        }
+
+        event = MagicMock()
+        event.data = {"action": "SECURITAS_FORCE_ARM_999999"}  # wrong installation
+
+        alarm._handle_mobile_action(event)
+
+        alarm.hass.async_create_task.assert_not_called()
+        assert alarm._force_context is not None  # untouched
