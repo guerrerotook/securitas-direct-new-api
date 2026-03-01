@@ -299,6 +299,16 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
 
         notify_group = self._get(CONF_NOTIFY_GROUP, "")
 
+        _NOTIFY_EXCLUDE = {"notify", "send_message", "persistent_notification"}
+        notify_services = sorted(
+            svc
+            for svc in self.hass.services.async_services().get("notify", {}).keys()
+            if svc not in _NOTIFY_EXCLUDE
+        )
+        notify_options = [{"value": "", "label": "(disabled)"}] + [
+            {"value": svc, "label": svc} for svc in notify_services
+        ]
+
         schema = vol.Schema(
             {
                 vol.Optional(
@@ -312,10 +322,15 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_DELAY_CHECK_OPERATION, default=delay_check_operation
                 ): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=15.0)),
-                vol.Optional(
-                    CONF_NOTIFY_GROUP,
-                    description={"suggested_value": notify_group},
-                ): str,
+                vol.Optional(CONF_NOTIFY_GROUP, default=notify_group): selector(
+                    {
+                        "select": {
+                            "options": notify_options,
+                            "custom_value": True,
+                            "mode": "dropdown",
+                        }
+                    }
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
