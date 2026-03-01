@@ -851,6 +851,17 @@ class TestForceState:
 
         assert alarm._operation_in_progress is False
 
+    async def test_operation_in_progress_cleared_after_arm_error(self):
+        """_operation_in_progress is cleared even when arm raises SecuritasDirectError."""
+        alarm = make_alarm()
+        alarm.client.session.arm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("API error")
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm._operation_in_progress is False
+
 
 # ===========================================================================
 # get_arm_state

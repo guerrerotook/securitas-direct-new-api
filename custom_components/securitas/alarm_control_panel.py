@@ -262,10 +262,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
         if self._check_code(code):
-            self._operation_in_progress = True
             self.__force_state(AlarmControlPanelState.DISARMING)
             disarm_status: DisarmStatus = DisarmStatus()
             try:
+                self._operation_in_progress = True
                 disarm_status = await self.client.session.disarm_alarm(
                     self.installation, STATE_TO_COMMAND[self._disarm_state]
                 )

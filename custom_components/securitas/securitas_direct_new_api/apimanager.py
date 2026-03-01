@@ -169,8 +169,8 @@ class ApiManager:
             async with self.http_client.post(
                 self.api_url, headers=headers, json=content
             ) as response:
-                response_text: str = await response.text()
                 http_status: int = response.status
+                response_text: str = await response.text()
         except ClientConnectorError as err:
             raise SecuritasDirectError(
                 f"Connection error with URL {self.api_url}", None, headers, content
