@@ -2,9 +2,10 @@
 
 import json
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from aiohttp import ClientConnectorError
-from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.securitas_direct_new_api.apimanager import (
     generate_device_id,
@@ -325,6 +326,7 @@ class TestCheckCapabilitiesToken:
     async def test_expired_capabilities_refreshes(self, api):
         """When installation.capabilities_exp is in the past, refreshes."""
         from datetime import datetime as dt
+
         from tests.conftest import make_jwt
 
         installation = Installation(
@@ -343,6 +345,7 @@ class TestCheckCapabilitiesToken:
     async def test_valid_capabilities_does_nothing(self, api):
         """When capabilities are valid and not expired, no refresh happens."""
         from datetime import datetime as dt, timedelta
+
         from tests.conftest import make_jwt
 
         installation = Installation(
