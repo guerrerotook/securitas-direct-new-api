@@ -776,6 +776,81 @@ class TestForceState:
         assert AlarmControlPanelState.ARMING in observed_states
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
+    async def test_disarm_sets_operation_in_progress_during_api_call(self):
+        """async_alarm_disarm sets _operation_in_progress=True while the API call runs."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+
+        observed_flags = []
+
+        original_disarm = AsyncMock(
+            return_value=DisarmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                numinst="123456",
+                protomResponse="D",
+                protomResponseData="",
+            )
+        )
+
+        async def capture_flag(*args, **kwargs):
+            observed_flags.append(alarm._operation_in_progress)
+            return await original_disarm(*args, **kwargs)
+
+        alarm.client.session.disarm_alarm = capture_flag
+
+        assert alarm._operation_in_progress is False
+        await alarm.async_alarm_disarm()
+
+        assert True in observed_flags, (
+            "_operation_in_progress was never True during API call"
+        )
+        assert alarm._operation_in_progress is False
+
+    async def test_arm_sets_operation_in_progress_during_api_call(self):
+        """set_arm_state sets _operation_in_progress=True while the API call runs."""
+        alarm = make_alarm()
+
+        observed_flags = []
+
+        original_arm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="T",
+                protomResponseData="",
+            )
+        )
+
+        async def capture_flag(*args, **kwargs):
+            observed_flags.append(alarm._operation_in_progress)
+            return await original_arm(*args, **kwargs)
+
+        alarm.client.session.arm_alarm = capture_flag
+
+        assert alarm._operation_in_progress is False
+        await alarm.async_alarm_arm_away()
+
+        assert True in observed_flags, (
+            "_operation_in_progress was never True during API call"
+        )
+        assert alarm._operation_in_progress is False
+
+    async def test_operation_in_progress_cleared_after_disarm_error(self):
+        """_operation_in_progress is cleared even when disarm raises SecuritasDirectError."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm.client.session.disarm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("API error")
+        )
+
+        await alarm.async_alarm_disarm()
+
+        assert alarm._operation_in_progress is False
+
 
 # ===========================================================================
 # get_arm_state
@@ -923,6 +998,35 @@ class TestAsyncUpdateStatus:
         alarm.async_write_ha_state.assert_not_called()
         # State should remain at initial DISARMED
         assert alarm._state == AlarmControlPanelState.DISARMED
+
+    async def test_skips_poll_when_operation_in_progress(self):
+        """Status poll is skipped when _operation_in_progress is True."""
+        alarm = make_alarm()
+        alarm.client.update_overview = AsyncMock()
+        alarm._operation_in_progress = True
+
+        await alarm.async_update_status()
+
+        alarm.client.update_overview.assert_not_called()
+        alarm.async_write_ha_state.assert_not_called()
+
+    async def test_polls_when_operation_not_in_progress(self):
+        """Status poll proceeds normally when _operation_in_progress is False."""
+        alarm = make_alarm()
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="D",
+            protomResponseData="",
+        )
+        alarm.client.update_overview = AsyncMock(return_value=status)
+        alarm._operation_in_progress = False
+
+        await alarm.async_update_status()
+
+        alarm.client.update_overview.assert_called_once()
 
 
 # ===========================================================================

@@ -170,6 +170,7 @@ class ApiManager:
                 self.api_url, headers=headers, json=content
             ) as response:
                 response_text: str = await response.text()
+                http_status: int = response.status
         except ClientConnectorError as err:
             raise SecuritasDirectError(
                 f"Connection error with URL {self.api_url}", None, headers, content
@@ -177,6 +178,20 @@ class ApiManager:
 
         _LOGGER.debug("--------------Response--------------")
         _LOGGER.debug(response_text)
+
+        if http_status >= 400:
+            _LOGGER.debug(
+                "HTTP %d from Securitas API for operation '%s': %s",
+                http_status,
+                operation,
+                response_text[:500],
+            )
+            raise SecuritasDirectError(
+                f"HTTP {http_status} from Securitas API ({operation})",
+                None,
+                headers,
+                content,
+            )
 
         try:
             # error_login: bool = await self._check_errors(response_text)
