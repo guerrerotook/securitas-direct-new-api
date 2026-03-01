@@ -424,7 +424,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
         message = (
             f"Arming blocked by: {details}. "
-            "Arm again to force, or resolve the issue first."
+            "Use the securitas.force_arm service to force, or resolve the issue first."
         )
         self._notify_error("Securitas: Arming Exception", message)
 
