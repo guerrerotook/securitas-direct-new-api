@@ -15,7 +15,7 @@ from homeassistant.components.alarm_control_panel import (
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
@@ -158,6 +158,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         # exceptions (e.g. open window).  Consumed on the next arm attempt to
         # override the exception.  Cleared on status refresh.
         self._force_context: dict[str, Any] | None = None
+        self._mobile_action_unsub = None
 
         self._attr_device_info: DeviceInfo | None = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
@@ -202,10 +203,25 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         )
         return alarm_status
 
+    async def async_added_to_hass(self) -> None:
+        """Register mobile notification action listener when added to HA."""
+        self._mobile_action_unsub = self.hass.bus.async_listen(
+            "mobile_app_notification_action",
+            self._handle_mobile_action,
+        )
+
+    @callback
+    def _handle_mobile_action(self, event: Event) -> None:
+        """Handle force-arm tap from mobile notification."""
+        if event.data.get("action") == f"SECURITAS_FORCE_ARM_{self.installation.number}":
+            self.hass.async_create_task(self.async_force_arm())
+
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
         if self._update_unsub:
-            self._update_unsub()  # Unsubscribe from updates
+            self._update_unsub()
+        if self._mobile_action_unsub:
+            self._mobile_action_unsub()
 
     async def async_update(self) -> None:
         """Update the status of the alarm based on the configuration. This is called when HA reloads."""
@@ -438,7 +454,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         "data": {
                             "actions": [
                                 {
-                                    "action": "SECURITAS_FORCE_ARM",
+                                    "action": f"SECURITAS_FORCE_ARM_{self.installation.number}",
                                     "title": "Force Arm",
                                 }
                             ],
