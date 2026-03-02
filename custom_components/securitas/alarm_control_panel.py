@@ -390,6 +390,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     disarm_status.protomResponseData,
                 )
             )
+            self.async_write_ha_state()
 
     async def set_arm_state(
         self,
@@ -495,6 +496,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 arm_status.protomResponseData,
             )
         )
+        self.async_write_ha_state()
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store force-arm context from an arming exception."""
