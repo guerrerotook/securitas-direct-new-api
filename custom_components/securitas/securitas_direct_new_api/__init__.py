@@ -8,7 +8,6 @@ from .const import (  # noqa: F401
     CommandType,
     MULTI_STEP_ARM_COMMANDS,
     PERI_DEFAULTS,
-    PERI_TO_BASE,
     PERI_OPTIONS,
     PROTO_DISARMED,
     PROTO_TO_STATE,

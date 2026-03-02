@@ -38,15 +38,6 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
     SecuritasState.TOTAL_PERI: "ARM1PERI1",
 }
 
-# Map peri variant → base (non-peri) variant.  When a peri state is
-# configured for an HA button, the base variant should also be recognised
-# in the status map so that intermediate/partial states display correctly.
-PERI_TO_BASE: dict[SecuritasState, SecuritasState] = {
-    SecuritasState.PARTIAL_DAY_PERI: SecuritasState.PARTIAL_DAY,
-    SecuritasState.PARTIAL_NIGHT_PERI: SecuritasState.PARTIAL_NIGHT,
-    SecuritasState.TOTAL_PERI: SecuritasState.TOTAL,
-}
-
 # Commands that the Securitas API does not support as a single value.
 # These must be sent as sequential API calls.
 MULTI_STEP_ARM_COMMANDS: dict[str, tuple[str, ...]] = {
@@ -118,6 +109,6 @@ STD_DEFAULTS: dict[str, str] = {
 PERI_DEFAULTS: dict[str, str] = {
     "map_home": SecuritasState.PARTIAL_DAY.value,
     "map_away": SecuritasState.TOTAL_PERI.value,
-    "map_night": SecuritasState.PARTIAL_NIGHT_PERI.value,
+    "map_night": SecuritasState.PARTIAL_NIGHT.value,
     "map_custom": SecuritasState.PERI_ONLY.value,
 }

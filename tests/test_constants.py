@@ -296,15 +296,18 @@ class TestPeriDefaults:
     def test_specific_defaults(self):
         assert PERI_DEFAULTS["map_home"] == "partial_day"
         assert PERI_DEFAULTS["map_away"] == "total_peri"
-        assert PERI_DEFAULTS["map_night"] == "partial_night_peri"
+        assert PERI_DEFAULTS["map_night"] == "partial_night"
         assert PERI_DEFAULTS["map_custom"] == "peri_only"
 
     def test_peri_defaults_differ_from_std_for_peri_states(self):
-        """PERI_DEFAULTS should use peri-enhanced states for away/night/custom."""
+        """PERI_DEFAULTS should use peri-enhanced states for away and custom."""
         assert PERI_DEFAULTS["map_away"] != STD_DEFAULTS["map_away"]
-        assert PERI_DEFAULTS["map_night"] != STD_DEFAULTS["map_night"]
         assert PERI_DEFAULTS["map_custom"] != STD_DEFAULTS["map_custom"]
 
     def test_home_mapping_is_same_as_std(self):
         """map_home is the same in both STD and PERI defaults."""
         assert PERI_DEFAULTS["map_home"] == STD_DEFAULTS["map_home"]
+
+    def test_night_mapping_is_same_as_std(self):
+        """map_night uses partial_night in both STD and PERI defaults."""
+        assert PERI_DEFAULTS["map_night"] == STD_DEFAULTS["map_night"]

@@ -264,11 +264,13 @@ class TestUpdateStatusAlarmPeri:
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
 
-    def test_partial_night_peri_maps_to_armed_night(self):
-        """protomResponse 'C' maps to ARMED_NIGHT with PERI defaults.
+    def test_partial_night_peri_unmapped_in_peri_defaults(self):
+        """protomResponse 'C' (partial_night_peri) is unmapped in PERI defaults.
 
-        In PERI defaults map_night = partial_night_peri.  The 'C' proto code
-        maps to partial_night_peri, so it resolves to ARMED_NIGHT.
+        In PERI defaults map_night = partial_night (proto 'Q').
+        Proto 'C' (partial_night_peri) is not assigned to any HA button
+        by default, so it falls through to ARMED_CUSTOM_BYPASS.
+        Users can explicitly map it to a button via the options flow.
         """
         alarm = make_alarm(has_peri=True)
         status = CheckAlarmStatus(
@@ -280,14 +282,12 @@ class TestUpdateStatusAlarmPeri:
             protomResponseData="",
         )
         alarm.update_status_alarm(status)
-        assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
 
-    def test_partial_night_without_peri_maps_via_base_in_peri_defaults(self):
+    def test_partial_night_maps_to_armed_night_in_peri_defaults(self):
         """protomResponse 'Q' (partial_night) maps to ARMED_NIGHT in PERI defaults.
 
-        With PERI defaults, map_night = partial_night_peri (proto 'C').
-        PERI_TO_BASE also maps the base variant partial_night ('Q') to
-        the same HA state so partial/intermediate states are recognised.
+        With PERI defaults, map_night = partial_night (proto 'Q').
         """
         alarm = make_alarm(has_peri=True)
         status = CheckAlarmStatus(
@@ -698,7 +698,7 @@ class TestMappingTables:
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_NIGHT]
-            == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT_PERI]
+            == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT]
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
@@ -713,10 +713,14 @@ class TestMappingTables:
         assert alarm._status_map["Q"] == AlarmControlPanelState.ARMED_NIGHT
 
     def test_peri_status_map(self):
-        """PERI defaults build status_map with perimeter-specific proto codes."""
+        """PERI defaults build status_map with correct proto code mappings."""
         alarm = make_alarm(has_peri=True)
-        assert alarm._status_map["E"] == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        assert alarm._status_map["P"] == AlarmControlPanelState.ARMED_HOME
         assert alarm._status_map["A"] == AlarmControlPanelState.ARMED_AWAY
+        assert alarm._status_map["Q"] == AlarmControlPanelState.ARMED_NIGHT
+        assert alarm._status_map["E"] == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        # "C" (partial_night_peri) is not mapped by default
+        assert "C" not in alarm._status_map
 
 
 # ===========================================================================
@@ -1566,13 +1570,25 @@ class TestForceArmContext:
 # ===========================================================================
 
 
+def _night_peri_config():
+    """Config with map_night = partial_night_peri (triggers multi-step arm)."""
+    return {
+        "PERI_alarm": True,
+        "map_home": PERI_DEFAULTS["map_home"],
+        "map_away": PERI_DEFAULTS["map_away"],
+        "map_night": SecuritasState.PARTIAL_NIGHT_PERI.value,
+        "map_custom": PERI_DEFAULTS["map_custom"],
+        "scan_interval": 120,
+    }
+
+
 @pytest.mark.asyncio
 class TestMultiStepArm:
     """Tests for multi-step arm commands (e.g. night+peri)."""
 
     async def test_arm_night_peri_sends_two_commands(self):
-        """With PERI config, arm night sends ARMNIGHT1 then PERI1."""
-        alarm = make_alarm(has_peri=True)
+        """With map_night=partial_night_peri, arm night sends ARMNIGHT1 then PERI1."""
+        alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.DISARMED
 
         calls = []
@@ -1596,12 +1612,12 @@ class TestMultiStepArm:
         assert len(calls) == 2
         assert calls[0][0] == "ARMNIGHT1"
         assert calls[1][0] == "PERI1"
-        # Final state should reflect the last protomResponse ("C" = night+peri)
+        # Final state reflects last protomResponse ("C" = night+peri)
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
 
     async def test_arm_night_peri_force_params_only_first_step(self):
         """Force arming params are only passed to the first step."""
-        alarm = make_alarm(has_peri=True)
+        alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.DISARMED
 
         calls = []
@@ -1636,7 +1652,7 @@ class TestMultiStepArm:
 
     async def test_arm_night_peri_first_step_error_aborts_and_notifies(self):
         """If the first step fails, the second step is not attempted and user is notified."""
-        alarm = make_alarm(has_peri=True)
+        alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_status = AlarmControlPanelState.DISARMED
         alarm._notify_error = MagicMock()
@@ -1658,7 +1674,7 @@ class TestMultiStepArm:
 
     async def test_arm_unsupported_enum_shows_specific_message(self):
         """GraphQL enum validation error shows 'does not support' message."""
-        alarm = make_alarm(has_peri=True)
+        alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_status = AlarmControlPanelState.DISARMED
         alarm._notify_error = MagicMock()
@@ -1678,7 +1694,7 @@ class TestMultiStepArm:
 
     async def test_arm_night_peri_second_step_fails_reflects_partial_state(self):
         """If step 1 succeeds but step 2 fails, state reflects partial arming."""
-        alarm = make_alarm(has_peri=True)
+        alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_status = AlarmControlPanelState.DISARMED
         alarm._notify_error = MagicMock()
@@ -1704,14 +1720,37 @@ class TestMultiStepArm:
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
         assert call_count == 2
-        # State reflects partial arming from step 1.  Proto "Q"
-        # (night-only) maps to ARMED_NIGHT via PERI_TO_BASE.
-        assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
+        # State reflects partial arming from step 1.  With
+        # map_night=partial_night_peri, proto "Q" (night-only)
+        # is not mapped → ARMED_CUSTOM_BYPASS.
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
         # Notification sent
         alarm._notify_error.assert_called_once()
         assert "Arming failed" in alarm._notify_error.call_args[0][0]
 
-    async def test_arm_night_no_peri_single_command(self):
+    async def test_peri_default_arm_night_single_command(self):
+        """With PERI defaults (map_night=partial_night), arm night sends only ARMNIGHT1."""
+        alarm = make_alarm(has_peri=True)
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="Q",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_alarm_arm_night()
+
+        alarm.client.session.arm_alarm.assert_called_once()
+        call_args = alarm.client.session.arm_alarm.call_args
+        assert call_args[0][1] == "ARMNIGHT1"
+
+    async def test_std_arm_night_single_command(self):
         """Without PERI config, arm night sends only ARMNIGHT1."""
         alarm = make_alarm(has_peri=False)
         alarm._state = AlarmControlPanelState.DISARMED
