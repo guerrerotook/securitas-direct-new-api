@@ -93,6 +93,11 @@ async def async_setup_entry(
         {},
         "async_force_arm",
     )
+    platform.async_register_entity_service(
+        "force_arm_cancel",
+        {},
+        "async_force_arm_cancel",
+    )
 
 
 class SecuritasAlarm(alarm.AlarmControlPanelEntity):
@@ -616,6 +621,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 },
             )
         )
+
+    async def async_force_arm_cancel(self) -> None:
+        """Cancel a pending force-arm context.
+
+        Called by the securitas.force_arm_cancel service. Clears the stored
+        exception context and dismisses the arming-exception notification.
+        """
+        if self._force_context is None:
+            _LOGGER.warning("force_arm_cancel called but no force context available")
+            return
+        _LOGGER.info("Force-arm cancelled by user")
+        self._clear_force_context(force=True)
+        self._dismiss_arming_exception_notification()
+        self.async_write_ha_state()
 
     async def async_force_arm(self) -> None:
         """Force-arm using stored exception context.
