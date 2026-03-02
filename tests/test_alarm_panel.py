@@ -1693,8 +1693,12 @@ class TestCompoundArmCommands:
         assert calls[0][0] == "ARMNIGHT1"
         assert calls[1][0] == "PERI1"
 
-    async def test_force_params_only_first_step(self):
-        """Force arming params are only passed to the first step."""
+    async def test_force_params_passed_to_all_steps(self):
+        """Force arming params are passed to every step.
+
+        Both interior and perimeter sensors can trigger ArmingExceptionError,
+        so force params must reach whichever step originally failed.
+        """
         alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._use_multi_step = True
@@ -1720,12 +1724,13 @@ class TestCompoundArmCommands:
             suid="suid-456",
         )
 
-        assert len(calls) == 2
-        assert calls[0][1] == {
+        expected_params = {
             "force_arming_remote_id": "ref-123",
             "suid": "suid-456",
         }
-        assert calls[1][1] == {}
+        assert len(calls) == 2
+        assert calls[0][1] == expected_params
+        assert calls[1][1] == expected_params
 
     async def test_multi_step_second_step_fails_reflects_partial_state(self):
         """If step 1 succeeds but step 2 fails, state reflects partial arming."""

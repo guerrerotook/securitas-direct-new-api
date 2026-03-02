@@ -363,13 +363,15 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     command,
                 )
 
-        # Multi-step: send each step sequentially
+        # Multi-step: send each step sequentially.
+        # Force params (forceArmingRemoteId / suid) are passed to every step
+        # because we don't know which step produced the original exception —
+        # both interior and perimeter sensors can trigger ArmingExceptionError.
+        # The API ignores force params that don't match a prior exception.
         for step in COMPOUND_COMMAND_STEPS[command]:
             self._last_arm_result = await self.client.session.arm_alarm(
                 self.installation, step, **kwargs
             )
-            # Only pass force params to the first step
-            kwargs = {}
         return self._last_arm_result
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
