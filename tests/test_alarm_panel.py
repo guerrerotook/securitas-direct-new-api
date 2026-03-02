@@ -1724,6 +1724,8 @@ class TestMultiStepArm:
         # map_night=partial_night_peri, proto "Q" (night-only)
         # is not mapped → ARMED_CUSTOM_BYPASS.
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        # HA state written after partial state update
+        alarm.async_write_ha_state.assert_called()
         # Notification sent
         alarm._notify_error.assert_called_once()
         assert "Arming failed" in alarm._notify_error.call_args[0][0]
@@ -1904,3 +1906,23 @@ class TestDisarmFallback:
         ]
         # Arm proceeded
         alarm.client.session.arm_alarm.assert_called_once()
+
+
+# ===========================================================================
+# _notify_error per-installation notification_id
+# ===========================================================================
+
+
+class TestNotifyError:
+    """Tests for _notify_error helper."""
+
+    def test_notification_id_includes_installation_number(self):
+        """notification_id includes installation number for multi-installation setups."""
+        alarm = make_alarm()
+        alarm._notify_error("Securitas: Arming failed", "test body")
+
+        alarm.hass.async_create_task.assert_called_once()
+        call_args = alarm.hass.services.async_call.call_args
+        service_data = call_args[1]["service_data"]
+        assert "123456" in service_data["notification_id"]
+        assert service_data["notification_id"] == "securitas.securitas_arming_failed_123456"

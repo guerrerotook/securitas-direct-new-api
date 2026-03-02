@@ -185,7 +185,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 service_data={
                     "title": title,
                     "message": message,
-                    "notification_id": f"{DOMAIN}.{notification_id}",
+                    "notification_id": f"{DOMAIN}.{notification_id}_{self.installation.number}",
                 },
             )
         )
@@ -430,6 +430,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                             arm_status.protomResponseData,
                         )
                     )
+                    self.async_write_ha_state()
                 else:
                     self._state = self._last_status
                     self.async_write_ha_state()
