@@ -1925,4 +1925,7 @@ class TestNotifyError:
         call_args = alarm.hass.services.async_call.call_args
         service_data = call_args[1]["service_data"]
         assert "123456" in service_data["notification_id"]
-        assert service_data["notification_id"] == "securitas.securitas_arming_failed_123456"
+        assert (
+            service_data["notification_id"]
+            == "securitas.securitas_arming_failed_123456"
+        )
