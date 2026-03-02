@@ -35,7 +35,7 @@ The core API client. All communication with Securitas happens through GraphQL PO
 **Request execution:** Every API call goes through `_execute_request()`, which:
 1. Builds HTTP headers including `app`, `auth` (JSON with JWT hash, user, country), `X-APOLLO-OPERATION-NAME`, and optionally `numinst`/`panel`/`X-Capabilities` for installation-scoped requests
 2. POSTs the GraphQL payload as JSON
-3. Parses the response and raises `SecuritasDirectError` on connection or API errors
+3. Parses the response and raises `SecuritasDirectError` on connection or API errors. Note: `_execute_request` passes through GraphQL error responses (no top-level `data` key) without raising — callers like `arm_alarm()` and `disarm_alarm()` check for this and raise `SecuritasDirectError` with the error message
 
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Securitas mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
@@ -70,11 +70,38 @@ Securitas alarms have two independent axes: **interior mode** (disarmed, partial
 | `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | `C` |
 | `TOTAL_PERI` | full | on | `ARM1PERI1` | `A` |
 
-Two mapping tables connect these:
+Most compound commands (`ARMDAY1PERI1`, `ARM1PERI1`) are accepted by all known panels. However, `ARMNIGHT1PERI1` and `DARM1DARMPERI` are rejected by some panels (e.g. SDVFAST in Spain). The integration auto-detects which mode the panel supports (see [Compound command auto-detection](#compound-command-auto-detection) below).
+
+**Panel-specific `DARM1` behavior:** On SDVFAST (Spain), `DARM1` disarms everything (interior + perimeter). On SDVECU (Italy), `DARM1` only disarms the interior — `DARMPERI` disarms only the perimeter, and `DARM1DARMPERI` disarms both. This difference is safe because the `DARM1` fallback only triggers on panels that reject `DARM1DARMPERI` (i.e. SDVFAST, where `DARM1` disarms everything).
+
+Four mapping tables connect these:
 - `STATE_TO_COMMAND` — `SecuritasState` to API command string (e.g. `TOTAL` -> `"ARM1"`)
 - `PROTO_TO_STATE` — single-letter protocol response code to `SecuritasState` (e.g. `"T"` -> `TOTAL`)
+- `COMPOUND_COMMAND_STEPS` — commands known to fail on some panels, mapped to multi-step fallbacks (e.g. `"ARMNIGHT1PERI1"` -> `("ARMNIGHT1", "PERI1")`, `"DARM1DARMPERI"` -> `("DARM1",)`)
+- `PERI_ARMED_PROTO_CODES` — protocol codes where the perimeter is armed (`{"E", "B", "C", "A"}`), used to decide whether a combined disarm command is needed
 
-Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that include perimeter states. The `Custom Bypass` button is hidden unless a mapping is configured for it (typically perimeter-only mode).
+#### Compound command auto-detection
+
+Most compound commands work on all known panels, but two are rejected by SDVFAST (Spain):
+
+| Command | SDVFAST (Spain) | SDVECU (Italy) | In `COMPOUND_COMMAND_STEPS`? |
+|---------|----------------|----------------|------------------------------|
+| `ARMDAY1PERI1` | Works | Works | No |
+| `ARMNIGHT1PERI1` | Rejected | Works | Yes |
+| `ARM1PERI1` | Works | Works | No |
+| `DARM1DARMPERI` | Rejected (404) | Works | Yes |
+
+Only the two failing commands are listed in `COMPOUND_COMMAND_STEPS`. For these, the integration detects support at runtime:
+
+1. **First compound command**: Try the single call (e.g. `ARMNIGHT1PERI1`)
+2. **If it fails** (`SecuritasDirectError`): Set `_use_multi_step = True`, execute the fallback steps (`ARMNIGHT1` then `PERI1`), and log the switch
+3. **Subsequent commands**: Skip the single-call attempt and go straight to multi-step
+
+The `_use_multi_step` flag is per-installation (resets on HA restart). Commands not in the table (`ARMDAY1PERI1`, `ARM1PERI1`) are always sent as-is regardless of the flag.
+
+For disarm, an additional check applies: `DARM1DARMPERI` is only attempted when the perimeter is actually armed (`_last_proto_code` in `PERI_ARMED_PROTO_CODES`). If only the interior is armed, `DARM1` is sent directly.
+
+Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Custom Bypass` button is hidden unless a mapping is configured for it.
 
 If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Securitas state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
@@ -162,19 +189,35 @@ The main entity. One `SecuritasAlarm` per installation.
 2. __force_state(ARMING) — set transitional state, save previous in _last_status
 3. set_arm_state(target_mode):
    a. Look up command from _command_map
-   b. If _last_status was an armed state → disarm first (required because
-      Securitas treats interior and perimeter as independent axes)
+   b. If _last_status was an armed state → _send_disarm_command() first
+      (required because Securitas treats interior and perimeter as independent)
       - Disarm error? Log warning, continue anyway
-   c. Call session.arm_alarm(command)
-   d. update_status_alarm() with the response
+   c. _send_arm_command(command, **force_params):
+      - Not in COMPOUND_COMMAND_STEPS? → single API call
+      - In table and _use_multi_step is False? → try single call first
+        - SecuritasDirectError? → set _use_multi_step = True, fall back to steps
+      - In table and _use_multi_step is True? → send steps sequentially
+      - Force params only passed to first step; cleared for subsequent steps
+      - _last_arm_result tracks the most recent successful step for partial state
+   d. On error:
+      - Notify user via persistent notification
+      - If a prior step succeeded (_last_arm_result), reflect that partial state
+      - If no steps succeeded, revert to _last_status
+   e. update_status_alarm() with the final response
 ```
 
 **Disarm flow** (`async_alarm_disarm`):
 ```
 1. _check_code(code) — raises ServiceValidationError if wrong
 2. __force_state(DISARMING)
-3. Call session.disarm_alarm(disarm_command)
-   - Error? → _notify_error(), restore _last_status
+3. _send_disarm_command():
+   a. If no perimeter config OR perimeter not armed (_last_proto_code not in
+      PERI_ARMED_PROTO_CODES) → send DARM1 directly
+   b. If _use_multi_step is True → send DARM1 directly (known that combined
+      doesn't work on this panel)
+   c. Otherwise → try DARM1DARMPERI; on SecuritasDirectError, set
+      _use_multi_step = True and retry with DARM1
+   d. Error on all attempts? → _notify_error(), restore _last_status
 4. update_status_alarm() with the response
 ```
 
@@ -257,18 +300,25 @@ User presses "Arm Away" in HA UI
     → _check_code_for_arm_if_required(code)  # PIN check if configured
     → __force_state(ARMING)                  # UI shows "Arming..."
     → set_arm_state(ARMED_AWAY)
-      → _command_map[ARMED_AWAY] = "ARM1"
-      → _last_status == ARMED_HOME?          # Currently armed?
-        → session.disarm_alarm("DARM1")      #   Disarm first
+      → _command_map[ARMED_AWAY] = "ARM1PERI1"  (example with peri)
+      → _last_status == ARMED_HOME?             # Currently armed?
+        → _send_disarm_command()                #   Disarm first
+          → _last_proto_code in PERI_ARMED_PROTO_CODES?
+            → try DARM1DARMPERI (or DARM1 if _use_multi_step)
+          → else → DARM1
         → asyncio.sleep(1)
-      → session.arm_alarm("ARM1")
-        → _execute_request(GraphQL mutation)
-        → API returns referenceId
-        → Poll _check_arm_status() until res != "WAIT"
-        → Return ArmStatus with protomResponse="T"
+      → _send_arm_command("ARM1PERI1")
+        → _use_multi_step == False?
+          → try session.arm_alarm("ARM1PERI1")    # Single compound call
+          → SecuritasDirectError? → _use_multi_step = True, fall back ↓
+        → _use_multi_step == True?
+          → session.arm_alarm("ARM1")             # Step 1: interior
+          → session.arm_alarm("PERI1")            # Step 2: perimeter
+        → Return ArmStatus with protomResponse="A"
       → update_status_alarm(status)
-        → _status_map["T"] = ARMED_AWAY
-        → _state = ARMED_AWAY                # UI shows "Armed Away"
+        → _last_proto_code = "A"
+        → _status_map["A"] = ARMED_AWAY
+        → _state = ARMED_AWAY                   # UI shows "Armed Away"
 ```
 
 ### Periodic status poll
@@ -286,6 +336,7 @@ async_track_time_interval fires every scan_interval seconds
         → session.check_general_status(installation)  # Cloud-only, no panel wake
         → Return CheckAlarmStatus from SStatus
     → update_status_alarm(status)
+      → _last_proto_code = status.protomResponse  # Track for disarm decisions
       → protomResponse "D" → DISARMED
       → protomResponse in _status_map → mapped HA state
       → protomResponse unknown → ARMED_CUSTOM_BYPASS + notification

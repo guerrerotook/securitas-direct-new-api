@@ -232,6 +232,22 @@ class TestArmAlarm:
         with pytest.raises(SecuritasDirectError, match="xSArmPanel response is None"):
             await authed_api.arm_alarm(installation, "ARM1")
 
+    async def test_errors_only_response_raises_error(
+        self, authed_api, mock_execute, installation
+    ):
+        """GraphQL validation error (no data key) raises SecuritasDirectError instead of KeyError."""
+        mock_execute.return_value = {
+            "errors": [
+                {
+                    "message": 'Value "ARMNIGHT1PERI1" does not exist in "ArmCodeRequest" enum.',
+                    "extensions": {"code": "BAD_USER_INPUT"},
+                }
+            ]
+        }
+
+        with pytest.raises(SecuritasDirectError, match="does not exist"):
+            await authed_api.arm_alarm(installation, "ARMNIGHT1PERI1")
+
     async def test_polls_check_arm_status_on_wait(
         self, authed_api, mock_execute, installation
     ):
@@ -516,6 +532,23 @@ class TestDisarmAlarm:
 
         with pytest.raises(SecuritasDirectError, match="Disarm response is None"):
             await authed_api.disarm_alarm(installation, "DARM1")
+
+    async def test_errors_only_response_raises_error(
+        self, authed_api, mock_execute, installation
+    ):
+        """GraphQL validation error (no data key) raises SecuritasDirectError instead of KeyError."""
+        mock_execute.return_value = {
+            "errors": [
+                {
+                    "message": "4: Requested data not found error.",
+                    "name": "ApiError",
+                    "data": {"res": "ERROR", "err": "4", "status": 404},
+                }
+            ]
+        }
+
+        with pytest.raises(SecuritasDirectError, match="data not found"):
+            await authed_api.disarm_alarm(installation, "DARM1DARMPERI")
 
     async def test_polls_check_disarm_status_on_wait(
         self, authed_api, mock_execute, installation

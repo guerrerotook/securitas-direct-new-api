@@ -882,6 +882,17 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel", installation)
+        if "data" not in response or response["data"] is None:
+            errors = response.get("errors", [])
+            first = errors[0] if errors else {}
+            msg = (
+                first.get("message", str(first))
+                if isinstance(first, dict)
+                else str(first)
+            )
+            raise SecuritasDirectError(
+                msg or "xSArmPanel: no data in response", response
+            )
         arm_data = response["data"]["xSArmPanel"]
         if arm_data is None:
             raise SecuritasDirectError("xSArmPanel response is None", response)
@@ -1034,6 +1045,17 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel", installation)
+        if "data" not in response or response["data"] is None:
+            errors = response.get("errors", [])
+            first = errors[0] if errors else {}
+            msg = (
+                first.get("message", str(first))
+                if isinstance(first, dict)
+                else str(first)
+            )
+            raise SecuritasDirectError(
+                msg or "xSDisarmPanel: no data in response", response
+            )
         disarm_data = response["data"]["xSDisarmPanel"]
         if disarm_data is None:
             raise SecuritasDirectError("Disarm response is None", response)

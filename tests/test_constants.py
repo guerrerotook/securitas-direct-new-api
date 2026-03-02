@@ -4,7 +4,9 @@ import pytest
 
 from custom_components.securitas.constants import SentinelName
 from custom_components.securitas.securitas_direct_new_api.const import (
+    COMPOUND_COMMAND_STEPS,
     CommandType,
+    PERI_ARMED_PROTO_CODES,
     PERI_DEFAULTS,
     PERI_OPTIONS,
     PROTO_TO_STATE,
@@ -296,15 +298,74 @@ class TestPeriDefaults:
     def test_specific_defaults(self):
         assert PERI_DEFAULTS["map_home"] == "partial_day"
         assert PERI_DEFAULTS["map_away"] == "total_peri"
-        assert PERI_DEFAULTS["map_night"] == "partial_night_peri"
+        assert PERI_DEFAULTS["map_night"] == "partial_night"
         assert PERI_DEFAULTS["map_custom"] == "peri_only"
 
     def test_peri_defaults_differ_from_std_for_peri_states(self):
-        """PERI_DEFAULTS should use peri-enhanced states for away/night/custom."""
+        """PERI_DEFAULTS should use peri-enhanced states for away and custom."""
         assert PERI_DEFAULTS["map_away"] != STD_DEFAULTS["map_away"]
-        assert PERI_DEFAULTS["map_night"] != STD_DEFAULTS["map_night"]
         assert PERI_DEFAULTS["map_custom"] != STD_DEFAULTS["map_custom"]
 
     def test_home_mapping_is_same_as_std(self):
         """map_home is the same in both STD and PERI defaults."""
         assert PERI_DEFAULTS["map_home"] == STD_DEFAULTS["map_home"]
+
+    def test_night_mapping_is_same_as_std(self):
+        """map_night uses partial_night in both STD and PERI defaults."""
+        assert PERI_DEFAULTS["map_night"] == STD_DEFAULTS["map_night"]
+
+
+# ── COMPOUND_COMMAND_STEPS ─────────────────────────────────────────────────
+
+
+class TestCompoundCommandSteps:
+    """Tests for COMPOUND_COMMAND_STEPS mapping."""
+
+    def test_known_failing_compounds_present(self):
+        """Only commands known to fail on some panels have step definitions."""
+        assert "ARMNIGHT1PERI1" in COMPOUND_COMMAND_STEPS
+        assert "DARM1DARMPERI" in COMPOUND_COMMAND_STEPS
+
+    def test_universally_accepted_commands_not_in_table(self):
+        """Commands accepted by all known panels should NOT be in the table."""
+        assert "ARMDAY1PERI1" not in COMPOUND_COMMAND_STEPS
+        assert "ARM1PERI1" not in COMPOUND_COMMAND_STEPS
+
+    def test_disarm_compound_present(self):
+        assert "DARM1DARMPERI" in COMPOUND_COMMAND_STEPS
+
+    def test_arm_steps_end_with_peri1(self):
+        """All arm compound steps end with PERI1."""
+        for cmd, steps in COMPOUND_COMMAND_STEPS.items():
+            if cmd.startswith("ARM"):
+                assert steps[-1] == "PERI1"
+
+    def test_disarm_fallback_is_darm1(self):
+        """DARM1DARMPERI fallback is just DARM1."""
+        assert COMPOUND_COMMAND_STEPS["DARM1DARMPERI"] == ("DARM1",)
+
+    def test_all_compound_commands_are_in_state_to_command(self):
+        """Every compound command string appears as a value in STATE_TO_COMMAND."""
+        all_commands = set(STATE_TO_COMMAND.values())
+        for cmd in COMPOUND_COMMAND_STEPS:
+            assert cmd in all_commands
+
+
+# ── PERI_ARMED_PROTO_CODES ─────────────────────────────────────────────────
+
+
+class TestPeriArmedProtoCodes:
+    """Tests for PERI_ARMED_PROTO_CODES set."""
+
+    def test_contains_expected_codes(self):
+        assert PERI_ARMED_PROTO_CODES == {"E", "B", "C", "A"}
+
+    def test_non_peri_codes_not_included(self):
+        for code in ("D", "P", "Q", "T"):
+            assert code not in PERI_ARMED_PROTO_CODES
+
+    def test_all_codes_map_to_peri_states(self):
+        """Every code in the set maps to a state with 'peri' in its name."""
+        for code in PERI_ARMED_PROTO_CODES:
+            state = PROTO_TO_STATE[code]
+            assert "peri" in state.value or state == SecuritasState.PERI_ONLY
