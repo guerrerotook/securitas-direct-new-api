@@ -282,12 +282,12 @@ class TestUpdateStatusAlarmPeri:
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
 
-    def test_partial_night_without_peri_unmapped_in_peri_defaults(self):
-        """protomResponse 'Q' (partial_night without peri) is unmapped in PERI defaults.
+    def test_partial_night_without_peri_maps_via_base_in_peri_defaults(self):
+        """protomResponse 'Q' (partial_night) maps to ARMED_NIGHT in PERI defaults.
 
         With PERI defaults, map_night = partial_night_peri (proto 'C').
-        Plain partial_night ('Q') is not configured for any HA state,
-        so it falls through to the unknown handler.
+        PERI_TO_BASE also maps the base variant partial_night ('Q') to
+        the same HA state so partial/intermediate states are recognised.
         """
         alarm = make_alarm(has_peri=True)
         status = CheckAlarmStatus(
@@ -299,7 +299,7 @@ class TestUpdateStatusAlarmPeri:
             protomResponseData="",
         )
         alarm.update_status_alarm(status)
-        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
 
 
 # ===========================================================================
@@ -1704,9 +1704,9 @@ class TestMultiStepArm:
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
         assert call_count == 2
-        # State reflects partial arming from step 1.  With peri config,
-        # proto "Q" (night-only) is unmapped → ARMED_CUSTOM_BYPASS.
-        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        # State reflects partial arming from step 1.  Proto "Q"
+        # (night-only) maps to ARMED_NIGHT via PERI_TO_BASE.
+        assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
         # Notification sent
         alarm._notify_error.assert_called_once()
         assert "Arming failed" in alarm._notify_error.call_args[0][0]

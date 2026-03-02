@@ -43,6 +43,7 @@ from .securitas_direct_new_api import (
     DisarmStatus,
     Installation,
     MULTI_STEP_ARM_COMMANDS,
+    PERI_TO_BASE,
     PROTO_DISARMED,
     PROTO_TO_STATE,
     SecuritasDirectError,
@@ -134,10 +135,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             if sec_state == SecuritasState.NOT_USED:
                 continue
             self._command_map[ha_state] = STATE_TO_COMMAND[sec_state]
+            # Map the primary proto code for this state
             for code, proto_state in PROTO_TO_STATE.items():
                 if proto_state == sec_state and code not in self._status_map:
                     self._status_map[code] = ha_state
                     break
+            # When a peri variant is configured, also map the base
+            # (non-peri) proto code so partial/intermediate states
+            # are recognised correctly.
+            base_state = PERI_TO_BASE.get(sec_state)
+            if base_state:
+                for code, proto_state in PROTO_TO_STATE.items():
+                    if proto_state == base_state and code not in self._status_map:
+                        self._status_map[code] = ha_state
+                        break
         self._update_interval: timedelta = timedelta(
             seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         )
