@@ -38,11 +38,19 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
     SecuritasState.TOTAL_PERI: "ARM1PERI1",
 }
 
-# Commands that the Securitas API does not support as a single value.
-# These must be sent as sequential API calls.
-MULTI_STEP_ARM_COMMANDS: dict[str, tuple[str, ...]] = {
+# Compound commands and their multi-step equivalents.  Some panels (e.g.
+# SDVECU in Italy) accept these as a single API call; others (e.g. SDVFAST
+# in Spain) do not.  The integration tries the single call first and falls
+# back to the multi-step sequence, remembering the result for the session.
+COMPOUND_COMMAND_STEPS: dict[str, tuple[str, ...]] = {
+    "ARMDAY1PERI1": ("ARMDAY1", "PERI1"),
     "ARMNIGHT1PERI1": ("ARMNIGHT1", "PERI1"),
+    "ARM1PERI1": ("ARM1", "PERI1"),
+    "DARM1DARMPERI": ("DARM1",),  # DARM1 alone disarms everything
 }
+
+# Proto response codes where the perimeter is armed.
+PERI_ARMED_PROTO_CODES: frozenset[str] = frozenset({"E", "B", "C", "A"})
 
 # Proto response code for the disarmed state (handled separately from PROTO_TO_STATE
 # in alarm_control_panel.py because it applies unconditionally regardless of mapping)
