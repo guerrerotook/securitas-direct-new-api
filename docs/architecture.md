@@ -70,30 +70,34 @@ Securitas alarms have two independent axes: **interior mode** (disarmed, partial
 | `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | `C` |
 | `TOTAL_PERI` | full | on | `ARM1PERI1` | `A` |
 
-Some panels (e.g. SDVECU in Italy) accept compound commands (`ARMDAY1PERI1`, `ARMNIGHT1PERI1`, `ARM1PERI1`, `DARM1DARMPERI`) as a single API call. Others (e.g. SDVFAST in Spain) reject them and require multi-step execution. The integration auto-detects which mode the panel supports (see [Compound command auto-detection](#compound-command-auto-detection) below).
+Most compound commands (`ARMDAY1PERI1`, `ARM1PERI1`) are accepted by all known panels. However, `ARMNIGHT1PERI1` and `DARM1DARMPERI` are rejected by some panels (e.g. SDVFAST in Spain). The integration auto-detects which mode the panel supports (see [Compound command auto-detection](#compound-command-auto-detection) below).
+
+**Panel-specific `DARM1` behavior:** On SDVFAST (Spain), `DARM1` disarms everything (interior + perimeter). On SDVECU (Italy), `DARM1` only disarms the interior — `DARMPERI` disarms only the perimeter, and `DARM1DARMPERI` disarms both. This difference is safe because the `DARM1` fallback only triggers on panels that reject `DARM1DARMPERI` (i.e. SDVFAST, where `DARM1` disarms everything).
 
 Four mapping tables connect these:
 - `STATE_TO_COMMAND` — `SecuritasState` to API command string (e.g. `TOTAL` -> `"ARM1"`)
 - `PROTO_TO_STATE` — single-letter protocol response code to `SecuritasState` (e.g. `"T"` -> `TOTAL`)
-- `COMPOUND_COMMAND_STEPS` — compound commands mapped to their multi-step fallback sequences (e.g. `"ARMNIGHT1PERI1"` -> `("ARMNIGHT1", "PERI1")`, `"DARM1DARMPERI"` -> `("DARM1",)`)
+- `COMPOUND_COMMAND_STEPS` — commands known to fail on some panels, mapped to multi-step fallbacks (e.g. `"ARMNIGHT1PERI1"` -> `("ARMNIGHT1", "PERI1")`, `"DARM1DARMPERI"` -> `("DARM1",)`)
 - `PERI_ARMED_PROTO_CODES` — protocol codes where the perimeter is armed (`{"E", "B", "C", "A"}`), used to decide whether a combined disarm command is needed
 
 #### Compound command auto-detection
 
-Compound commands combine an interior arm/disarm with a perimeter arm/disarm in a single API call. Whether these work depends on the panel type:
+Most compound commands work on all known panels, but two are rejected by SDVFAST (Spain):
 
-| Panel type | Example country | Single compound call | Multi-step required |
-|------------|----------------|---------------------|---------------------|
-| SDVECU     | Italy          | Yes                 | No                  |
-| SDVFAST    | Spain          | No (rejects enum)   | Yes                 |
+| Command | SDVFAST (Spain) | SDVECU (Italy) | In `COMPOUND_COMMAND_STEPS`? |
+|---------|----------------|----------------|------------------------------|
+| `ARMDAY1PERI1` | Works | Works | No |
+| `ARMNIGHT1PERI1` | Rejected | Works | Yes |
+| `ARM1PERI1` | Works | Works | No |
+| `DARM1DARMPERI` | Rejected (404) | Works | Yes |
 
-Rather than hardcoding panel types, the integration detects support at runtime:
+Only the two failing commands are listed in `COMPOUND_COMMAND_STEPS`. For these, the integration detects support at runtime:
 
 1. **First compound command**: Try the single call (e.g. `ARMNIGHT1PERI1`)
 2. **If it fails** (`SecuritasDirectError`): Set `_use_multi_step = True`, execute the fallback steps (`ARMNIGHT1` then `PERI1`), and log the switch
 3. **Subsequent commands**: Skip the single-call attempt and go straight to multi-step
 
-The `_use_multi_step` flag is instance-level (resets on HA restart). This applies to all compound commands: `ARMDAY1PERI1`, `ARMNIGHT1PERI1`, `ARM1PERI1`, and `DARM1DARMPERI`.
+The `_use_multi_step` flag is per-installation (resets on HA restart). Commands not in the table (`ARMDAY1PERI1`, `ARM1PERI1`) are always sent as-is regardless of the flag.
 
 For disarm, an additional check applies: `DARM1DARMPERI` is only attempted when the perimeter is actually armed (`_last_proto_code` in `PERI_ARMED_PROTO_CODES`). If only the interior is armed, `DARM1` is sent directly.
 

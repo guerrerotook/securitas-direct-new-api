@@ -2007,10 +2007,10 @@ class TestDynamicDisarm:
 
         assert disarm_calls == ["DARM1DARMPERI", "DARM1"]
         assert alarm._use_multi_step is True
-        # _use_multi_step was set during disarm, so arm splits ARM1PERI1
-        assert alarm.client.session.arm_alarm.call_count == 2
-        arm_commands = [c[0][1] for c in alarm.client.session.arm_alarm.call_args_list]
-        assert arm_commands == ["ARM1", "PERI1"]
+        # ARM1PERI1 is not in COMPOUND_COMMAND_STEPS (accepted by all panels),
+        # so it is sent as a single command regardless of _use_multi_step.
+        assert alarm.client.session.arm_alarm.call_count == 1
+        assert alarm.client.session.arm_alarm.call_args[0][1] == "ARM1PERI1"
 
 
 # ===========================================================================
