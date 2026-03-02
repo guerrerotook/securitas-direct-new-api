@@ -11,9 +11,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+import logging
+
 from . import CONF_INSTALLATION_KEY, DOMAIN, SecuritasDirectDevice, SecuritasHub
 from .constants import SentinelName
+from .securitas_direct_new_api import SecuritasDirectError
 from .securitas_direct_new_api.dataTypes import AirQuality, Sentinel, Service
+
+_LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(minutes=30)
 
@@ -47,14 +52,21 @@ async def async_setup_entry(
                 )
                 sensors.append(SentinelHumidity(sentinel_data, service, client, device))
 
-                air_quality: AirQuality = await client.session.get_air_quality_data(
-                    service.installation, service
-                )
-                sensors.append(
-                    SentinelAirQuality(
-                        air_quality, sentinel_data, service, client, device
+                try:
+                    air_quality: AirQuality = await client.session.get_air_quality_data(
+                        service.installation, service
                     )
-                )
+                except SecuritasDirectError:
+                    _LOGGER.warning(
+                        "Air quality data not available for installation %s",
+                        service.installation.number,
+                    )
+                else:
+                    sensors.append(
+                        SentinelAirQuality(
+                            air_quality, sentinel_data, service, client, device
+                        )
+                    )
     async_add_entities(sensors, True)
 
 
