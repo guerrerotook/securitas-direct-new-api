@@ -116,12 +116,14 @@ When switching between armed modes (e.g. from "Armed Home" to "Armed Away"), the
 
 **Perimeter installations** (external sensors enabled):
 
-| HA Button | Securitas Mode            |
-| --------- | ------------------------- |
-| Home      | Partial Day               |
-| Away      | Total + Perimeter         |
-| Night     | Partial Night + Perimeter |
-| Custom    | Perimeter Only            |
+| HA Button | Securitas Mode    |
+| --------- | ----------------- |
+| Home      | Partial Day       |
+| Away      | Total + Perimeter |
+| Night     | Partial Night     |
+| Custom    | Perimeter Only    |
+
+> **Note:** Perimeter variants (e.g. "Partial Night + Perimeter") are available as options and can be assigned to any button via the integration options. Some compound commands (like "Partial Night + Perimeter") are sent to the API as two sequential requests.
 
 ### Unmapped Alarm States
 

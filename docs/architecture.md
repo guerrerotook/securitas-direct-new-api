@@ -35,7 +35,7 @@ The core API client. All communication with Securitas happens through GraphQL PO
 **Request execution:** Every API call goes through `_execute_request()`, which:
 1. Builds HTTP headers including `app`, `auth` (JSON with JWT hash, user, country), `X-APOLLO-OPERATION-NAME`, and optionally `numinst`/`panel`/`X-Capabilities` for installation-scoped requests
 2. POSTs the GraphQL payload as JSON
-3. Parses the response and raises `SecuritasDirectError` on connection or API errors
+3. Parses the response and raises `SecuritasDirectError` on connection or API errors. Note: `_execute_request` passes through GraphQL error responses (no top-level `data` key) without raising — callers like `arm_alarm()` and `disarm_alarm()` check for this and raise `SecuritasDirectError` with the error message
 
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Securitas mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
@@ -67,14 +67,17 @@ Securitas alarms have two independent axes: **interior mode** (disarmed, partial
 | `TOTAL` | full | off | `ARM1` | `T` |
 | `PERI_ONLY` | off | on | `PERI1` | `E` |
 | `PARTIAL_DAY_PERI` | day | on | `ARMDAY1PERI1` | `B` |
-| `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | `C` |
+| `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` ¹ | `C` |
 | `TOTAL_PERI` | full | on | `ARM1PERI1` | `A` |
 
-Two mapping tables connect these:
+¹ `ARMNIGHT1PERI1` is not a valid single API command. The integration splits it into two sequential calls: `ARMNIGHT1` then `PERI1`. This is defined in `MULTI_STEP_ARM_COMMANDS`.
+
+Three mapping tables connect these:
 - `STATE_TO_COMMAND` — `SecuritasState` to API command string (e.g. `TOTAL` -> `"ARM1"`)
 - `PROTO_TO_STATE` — single-letter protocol response code to `SecuritasState` (e.g. `"T"` -> `TOTAL`)
+- `MULTI_STEP_ARM_COMMANDS` — commands the API rejects as a single value, mapped to a tuple of sequential commands (e.g. `"ARMNIGHT1PERI1"` -> `("ARMNIGHT1", "PERI1")`)
 
-Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that include perimeter states. The `Custom Bypass` button is hidden unless a mapping is configured for it (typically perimeter-only mode).
+Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Custom Bypass` button is hidden unless a mapping is configured for it.
 
 If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Securitas state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
@@ -162,19 +165,30 @@ The main entity. One `SecuritasAlarm` per installation.
 2. __force_state(ARMING) — set transitional state, save previous in _last_status
 3. set_arm_state(target_mode):
    a. Look up command from _command_map
-   b. If _last_status was an armed state → disarm first (required because
-      Securitas treats interior and perimeter as independent axes)
+   b. If _last_status was an armed state → _disarm_with_fallback() first
+      (required because Securitas treats interior and perimeter as independent)
       - Disarm error? Log warning, continue anyway
-   c. Call session.arm_alarm(command)
-   d. update_status_alarm() with the response
+   c. Look up command in MULTI_STEP_ARM_COMMANDS:
+      - Found? Split into sequential steps (e.g. ARMNIGHT1 then PERI1)
+      - Not found? Single-step command
+   d. Call session.arm_alarm() for each step
+      - Force params (from force_arm) only passed to the first step
+      - If a step fails with SecuritasDirectError:
+        - Notify user via persistent notification
+        - If a prior step succeeded, reflect that partial state
+        - If no steps succeeded, revert to _last_status
+   e. update_status_alarm() with the final response
 ```
 
 **Disarm flow** (`async_alarm_disarm`):
 ```
 1. _check_code(code) — raises ServiceValidationError if wrong
 2. __force_state(DISARMING)
-3. Call session.disarm_alarm(disarm_command)
-   - Error? → _notify_error(), restore _last_status
+3. _disarm_with_fallback():
+   a. Call session.disarm_alarm(disarm_command)
+   b. If perimeter config and combined disarm (DARM1DARMPERI) fails:
+      → retry with simple disarm (DARM1)
+   c. Error on both? → _notify_error(), restore _last_status
 4. update_status_alarm() with the response
 ```
 
@@ -257,18 +271,20 @@ User presses "Arm Away" in HA UI
     → _check_code_for_arm_if_required(code)  # PIN check if configured
     → __force_state(ARMING)                  # UI shows "Arming..."
     → set_arm_state(ARMED_AWAY)
-      → _command_map[ARMED_AWAY] = "ARM1"
-      → _last_status == ARMED_HOME?          # Currently armed?
-        → session.disarm_alarm("DARM1")      #   Disarm first
+      → _command_map[ARMED_AWAY] = "ARM1PERI1"  (example with peri)
+      → _last_status == ARMED_HOME?             # Currently armed?
+        → _disarm_with_fallback()               #   Disarm first
+          → try DARM1DARMPERI, fall back to DARM1 if needed
         → asyncio.sleep(1)
-      → session.arm_alarm("ARM1")
+      → MULTI_STEP_ARM_COMMANDS["ARM1PERI1"]?   # Not in table → single step
+      → session.arm_alarm("ARM1PERI1")
         → _execute_request(GraphQL mutation)
         → API returns referenceId
         → Poll _check_arm_status() until res != "WAIT"
-        → Return ArmStatus with protomResponse="T"
+        → Return ArmStatus with protomResponse="A"
       → update_status_alarm(status)
-        → _status_map["T"] = ARMED_AWAY
-        → _state = ARMED_AWAY                # UI shows "Armed Away"
+        → _status_map["A"] = ARMED_AWAY
+        → _state = ARMED_AWAY                   # UI shows "Armed Away"
 ```
 
 ### Periodic status poll
