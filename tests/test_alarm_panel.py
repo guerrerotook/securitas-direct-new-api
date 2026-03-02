@@ -1650,12 +1650,66 @@ class TestMultiStepArm:
         # Only one call made (failed on first step)
         alarm.client.session.arm_alarm.assert_called_once()
         assert alarm._state == AlarmControlPanelState.DISARMED
-        # Persistent notification sent
+        # Persistent notification sent with generic message
         alarm._notify_error.assert_called_once()
         assert "Arming failed" in alarm._notify_error.call_args[0][0]
         assert "ARMNIGHT1PERI1" in alarm._notify_error.call_args[0][1]
-        # No raw error details in the message
-        assert "API error" not in alarm._notify_error.call_args[0][1]
+        assert "API error" in alarm._notify_error.call_args[0][1]
+
+    async def test_arm_unsupported_enum_shows_specific_message(self):
+        """GraphQL enum validation error shows 'does not support' message."""
+        alarm = make_alarm(has_peri=True)
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_status = AlarmControlPanelState.DISARMED
+        alarm._notify_error = MagicMock()
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError(
+                'Value "ARMNIGHT1PERI1" does not exist in "ArmCodeRequest" enum.'
+            )
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        alarm._notify_error.assert_called_once()
+        assert "does not support" in alarm._notify_error.call_args[0][1]
+        # No raw API error in the user-facing message
+        assert "enum" not in alarm._notify_error.call_args[0][1]
+
+    async def test_arm_night_peri_second_step_fails_reflects_partial_state(self):
+        """If step 1 succeeds but step 2 fails, state reflects partial arming."""
+        alarm = make_alarm(has_peri=True)
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_status = AlarmControlPanelState.DISARMED
+        alarm._notify_error = MagicMock()
+
+        call_count = 0
+
+        async def arm_side_effect(installation, command, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if command == "ARMNIGHT1":
+                return ArmStatus(
+                    operation_status="OK",
+                    message="",
+                    status="",
+                    InstallationNumer="123456",
+                    protomResponse="Q",
+                    protomResponseData="",
+                )
+            raise SecuritasDirectError("PERI1 failed")
+
+        alarm.client.session.arm_alarm = arm_side_effect
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        assert call_count == 2
+        # State reflects partial arming from step 1.  With peri config,
+        # proto "Q" (night-only) is unmapped → ARMED_CUSTOM_BYPASS.
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        # Notification sent
+        alarm._notify_error.assert_called_once()
+        assert "Arming failed" in alarm._notify_error.call_args[0][0]
 
     async def test_arm_night_no_peri_single_command(self):
         """Without PERI config, arm night sends only ARMNIGHT1."""

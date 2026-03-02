@@ -409,13 +409,32 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 return
             except SecuritasDirectError as err:
                 _LOGGER.error(err.args)
-                self._notify_error(
-                    "Securitas: Arming failed",
-                    f"The alarm panel does not support the requested"
-                    f" state (command {command})",
-                )
-                self._state = self._last_status
-                self.async_write_ha_state()
+                err_msg = str(err.args[0]) if err.args else ""
+                if "does not exist" in err_msg:
+                    body = (
+                        "The alarm panel does not support the requested"
+                        f" state (command {command})"
+                    )
+                else:
+                    body = (
+                        f"Error sending arm command ({command}): {err_msg}"
+                    )
+                self._notify_error("Securitas: Arming failed", body)
+                if arm_status.protomResponse:
+                    # A prior step succeeded — reflect the partial state.
+                    self.update_status_alarm(
+                        CheckAlarmStatus(
+                            arm_status.operation_status,
+                            arm_status.message,
+                            arm_status.status,
+                            arm_status.InstallationNumer,
+                            arm_status.protomResponse,
+                            arm_status.protomResponseData,
+                        )
+                    )
+                else:
+                    self._state = self._last_status
+                    self.async_write_ha_state()
                 return
         finally:
             self._operation_in_progress = False
