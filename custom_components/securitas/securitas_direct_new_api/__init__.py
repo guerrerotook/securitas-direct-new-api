@@ -6,6 +6,7 @@ from .apimanager import ApiManager, generate_device_id, generate_uuid  # noqa: F
 from .const import (  # noqa: F401
     ALARM_STATUS_POLL_DELAY,
     CommandType,
+    MULTI_STEP_ARM_COMMANDS,
     PERI_DEFAULTS,
     PERI_OPTIONS,
     PROTO_DISARMED,

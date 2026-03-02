@@ -42,6 +42,7 @@ from .securitas_direct_new_api import (
     CheckAlarmStatus,
     DisarmStatus,
     Installation,
+    MULTI_STEP_ARM_COMMANDS,
     PROTO_DISARMED,
     PROTO_TO_STATE,
     SecuritasDirectError,
@@ -291,6 +292,22 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
         return result
 
+    async def _disarm_with_fallback(self) -> DisarmStatus:
+        """Disarm the alarm, falling back to simple disarm if combined fails."""
+        command = STATE_TO_COMMAND[self._disarm_state]
+        try:
+            return await self.client.session.disarm_alarm(self.installation, command)
+        except SecuritasDirectError:
+            if self._disarm_state != SecuritasState.DISARMED_PERI:
+                raise
+            fallback = STATE_TO_COMMAND[SecuritasState.DISARMED]
+            _LOGGER.warning(
+                "Combined disarm (%s) failed, retrying with simple disarm (%s)",
+                command,
+                fallback,
+            )
+            return await self.client.session.disarm_alarm(self.installation, fallback)
+
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
         if self._check_code(code):
@@ -298,9 +315,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             disarm_status: DisarmStatus = DisarmStatus()
             try:
                 self._operation_in_progress = True
-                disarm_status = await self.client.session.disarm_alarm(
-                    self.installation, STATE_TO_COMMAND[self._disarm_state]
-                )
+                disarm_status = await self._disarm_with_fallback()
             except SecuritasDirectError as err:
                 self._notify_error("Securitas: Error disarming", str(err.args))
                 _LOGGER.error(err.args)
@@ -364,10 +379,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 AlarmControlPanelState.ARMED_CUSTOM_BYPASS,
             ):
                 try:
-                    await self.client.session.disarm_alarm(
-                        self.installation,
-                        STATE_TO_COMMAND[self._disarm_state],
-                    )
+                    await self._disarm_with_fallback()
                 except SecuritasDirectError as err:
                     _LOGGER.warning(
                         "Failed to disarm before re-arming (last_status: %s, alarm "
@@ -379,10 +391,16 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
 
             arm_status: ArmStatus = ArmStatus()
+            # Split compound commands that the API doesn't accept as
+            # a single value (e.g. ARMNIGHT1PERI1 → ARMNIGHT1 + PERI1).
+            steps = MULTI_STEP_ARM_COMMANDS.get(command, (command,))
             try:
-                arm_status = await self.client.session.arm_alarm(
-                    self.installation, command, **force_params
-                )
+                for step in steps:
+                    arm_status = await self.client.session.arm_alarm(
+                        self.installation, step, **force_params
+                    )
+                    # Only pass force params to the first step
+                    force_params = {}
             except ArmingExceptionError as exc:
                 self._set_force_context(exc, mode)
                 self._state = self._last_status
@@ -391,6 +409,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 return
             except SecuritasDirectError as err:
                 _LOGGER.error(err.args)
+                self._notify_error(
+                    "Securitas: Arming failed",
+                    f"The alarm panel does not support the requested"
+                    f" state (command {command})",
+                )
                 self._state = self._last_status
                 self.async_write_ha_state()
                 return

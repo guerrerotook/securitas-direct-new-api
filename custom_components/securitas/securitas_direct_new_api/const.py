@@ -38,6 +38,12 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
     SecuritasState.TOTAL_PERI: "ARM1PERI1",
 }
 
+# Commands that the Securitas API does not support as a single value.
+# These must be sent as sequential API calls.
+MULTI_STEP_ARM_COMMANDS: dict[str, tuple[str, ...]] = {
+    "ARMNIGHT1PERI1": ("ARMNIGHT1", "PERI1"),
+}
+
 # Proto response code for the disarmed state (handled separately from PROTO_TO_STATE
 # in alarm_control_panel.py because it applies unconditionally regardless of mapping)
 PROTO_DISARMED = "D"
