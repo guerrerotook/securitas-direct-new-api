@@ -261,7 +261,16 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             if not status.protomResponse:
                 _LOGGER.debug("Received empty protomResponse from Securitas, ignoring")
                 return
-            self._last_proto_code = status.protomResponse
+            # Only update _last_proto_code when protomResponse is a known proto
+            # code.  When check_alarm_panel is disabled, protomResponse may
+            # contain non-proto values like "ARMED_TOTAL" from xSStatus; those
+            # must not overwrite the last proto code or the perimeter-armed
+            # detection in _send_disarm_command() will break.
+            if (
+                status.protomResponse == PROTO_DISARMED
+                or status.protomResponse in PROTO_TO_STATE
+            ):
+                self._last_proto_code = status.protomResponse
             if status.protomResponse == PROTO_DISARMED:
                 self._state = AlarmControlPanelState.DISARMED
             elif status.protomResponse in self._status_map:

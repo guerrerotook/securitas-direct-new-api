@@ -2065,6 +2065,26 @@ class TestLastProtoCode:
         alarm.update_status_alarm(status)
         assert alarm._last_proto_code == "T"
 
+    def test_non_proto_string_not_stored(self):
+        """Non-proto strings (e.g. from xSStatus) don't overwrite proto code.
+
+        When check_alarm_panel is disabled, protomResponse carries the
+        xSStatus.status string (e.g. "ARMED_TOTAL") instead of a single-char
+        proto code.  This must not pollute _last_proto_code.
+        """
+        alarm = make_alarm()
+        alarm._last_proto_code = "A"
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="ARMED_TOTAL",
+            InstallationNumer="123456",
+            protomResponse="ARMED_TOTAL",
+            protomResponseData="",
+        )
+        alarm.update_status_alarm(status)
+        assert alarm._last_proto_code == "A"
+
 
 # ===========================================================================
 # _notify_error per-installation notification_id
