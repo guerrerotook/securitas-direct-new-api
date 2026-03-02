@@ -123,7 +123,7 @@ When switching between armed modes (e.g. from "Armed Home" to "Armed Away"), the
 | Night     | Partial Night     |
 | Custom    | Perimeter Only    |
 
-> **Note:** Perimeter variants (e.g. "Partial Night + Perimeter") are available as options and can be assigned to any button via the integration options. Some compound commands (like "Partial Night + Perimeter") are sent to the API as two sequential requests.
+> **Note:** Perimeter variants (e.g. "Partial Night + Perimeter") are available as options and can be assigned to any button via the integration options. Some panels (e.g. SDVECU in Italy) accept compound commands like `ARMNIGHT1PERI1` as a single API call, while others (e.g. SDVFAST in Spain) require two sequential requests (`ARMNIGHT1` then `PERI1`). The integration auto-detects which mode your panel supports: it tries the single command first and, on failure, falls back to multi-step — remembering the result for the rest of the session.
 
 ### Unmapped Alarm States
 
