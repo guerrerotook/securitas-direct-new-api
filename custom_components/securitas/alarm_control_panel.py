@@ -546,23 +546,40 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
         """Send notifications about arming exceptions."""
-        details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
-        message = (
-            f"Arming blocked by: {details}. Please resolve the issue and try again."
+        if exc.exceptions:
+            sensor_list = "\n".join(
+                f"- {e.get('alias', 'unknown')}" for e in exc.exceptions
+            )
+            short_details = ", ".join(
+                e.get("alias", "unknown") for e in exc.exceptions
+            )
+        else:
+            sensor_list = "- (unknown sensor)"
+            short_details = "open sensor"
+
+        persistent_message = (
+            f"Arming was blocked because the following sensor(s) are open:\n"
+            f"{sensor_list}\n\n"
+            f"To arm anyway, call the **securitas.force_arm** service, "
+            f"or tap **Force Arm** on your mobile notification."
         )
+        mobile_message = (
+            f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
+        )
+
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
                 service="create",
                 service_data={
-                    "title": "Securitas: Arming Exception",
-                    "message": message,
+                    "title": "Securitas: Arm blocked — open sensor(s)",
+                    "message": persistent_message,
                     "notification_id": self._arming_exception_notification_id,
                 },
             )
         )
 
-        # Notify configured group if set
+        # Notify configured group if set (Companion App with action buttons)
         notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             self.hass.async_create_task(
@@ -570,8 +587,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     domain="notify",
                     service=notify_group,
                     service_data={
-                        "title": "Securitas: Arming Exception",
-                        "message": message,
+                        "title": "Securitas: Arm blocked — open sensor(s)",
+                        "message": mobile_message,
                         "data": {
                             "actions": [
                                 {
