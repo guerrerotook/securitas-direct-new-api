@@ -59,6 +59,10 @@
         "force_arm": {
             "name": "Forzar armado",
             "description": "Forzar el armado de la alarma, ignorando excepciones no bloqueantes (p. ej. ventanas abiertas) de un intento de armado fallido anterior."
+        },
+        "force_arm_cancel": {
+            "name": "Cancelar armado forzado",
+            "description": "Cancelar un armado forzado pendiente y descartar la notificación de excepción de armado."
         }
     },
     "exceptions": {

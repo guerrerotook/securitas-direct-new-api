@@ -59,6 +59,10 @@
         "force_arm": {
             "name": "Force arm",
             "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt."
+        },
+        "force_arm_cancel": {
+            "name": "Cancel force arm",
+            "description": "Cancel a pending force-arm and dismiss the arming-exception notification."
         }
     },
     "exceptions": {

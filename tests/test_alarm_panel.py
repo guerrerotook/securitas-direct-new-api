@@ -1590,6 +1590,47 @@ class TestForceArmContext:
 
 
 # ===========================================================================
+# force_arm_cancel service
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestForceArmCancel:
+    """Tests for the securitas.force_arm_cancel entity service."""
+
+    async def test_cancel_clears_context_and_dismisses_notification(self):
+        """force_arm_cancel clears context, dismisses notification, writes state."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-cancel",
+            "suid": "suid-cancel",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Window"]
+
+        await alarm.async_force_arm_cancel()
+
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        assert "arm_exceptions" not in alarm._attr_extra_state_attributes
+        alarm.async_write_ha_state.assert_called()
+
+    async def test_cancel_no_context_does_nothing(self):
+        """force_arm_cancel with no stored context logs warning and returns."""
+        alarm = make_alarm()
+        alarm._force_context = None
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        await alarm.async_force_arm_cancel()
+
+        assert alarm._force_context is None
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+# ===========================================================================
 # Multi-step arm commands (ARMNIGHT1PERI1 → ARMNIGHT1 + PERI1)
 # ===========================================================================
 
