@@ -64,6 +64,7 @@ def make_alarm(
             "map_away": defaults["map_away"],
             "map_night": defaults["map_night"],
             "map_custom": defaults["map_custom"],
+            "map_vacation": defaults["map_vacation"],
             "scan_interval": 120,
         }
 
