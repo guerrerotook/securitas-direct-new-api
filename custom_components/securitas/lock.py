@@ -202,7 +202,9 @@ class SecuritasLock(lock.LockEntity):
     async def async_lock(self, **kwargs):
         self.__force_state(LOCK_STATUS_LOCKING)
         try:
-            await self.client.session.change_lock_mode(self.installation, True, self._device_id)
+            await self.client.session.change_lock_mode(
+                self.installation, True, self._device_id
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
@@ -212,7 +214,9 @@ class SecuritasLock(lock.LockEntity):
     async def async_unlock(self, **kwargs):
         self.__force_state(LOCK_STATUS_OPENING)
         try:
-            await self.client.session.change_lock_mode(self.installation, False, self._device_id)
+            await self.client.session.change_lock_mode(
+                self.installation, False, self._device_id
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return

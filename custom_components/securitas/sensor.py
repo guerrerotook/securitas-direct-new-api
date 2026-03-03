@@ -81,9 +81,7 @@ async def async_setup_entry(
             continue
 
         if status.keep_alive_day is not None:
-            sensors.append(
-                DiagnosticKeepAliveDay(device.installation, client, status)
-            )
+            sensors.append(DiagnosticKeepAliveDay(device.installation, client, status))
         if status.confort_message is not None:
             sensors.append(
                 DiagnosticComfortMessage(device.installation, client, status)
@@ -228,9 +226,7 @@ class DiagnosticKeepAliveDay(SensorEntity):
         status: SStatus,
     ) -> None:
         self._attr_name = f"Keep Alive Day {installation.alias}"
-        self._attr_unique_id = (
-            f"securitas_direct.{installation.number}_keep_alive_day"
-        )
+        self._attr_unique_id = f"securitas_direct.{installation.number}_keep_alive_day"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_native_value = status.keep_alive_day
         self._installation = installation
@@ -245,9 +241,7 @@ class DiagnosticKeepAliveDay(SensorEntity):
 
     async def async_update(self) -> None:
         try:
-            status = await self._client.session.check_general_status(
-                self._installation
-            )
+            status = await self._client.session.check_general_status(self._installation)
             self._attr_native_value = status.keep_alive_day
         except SecuritasDirectError as err:
             _LOGGER.error("Error updating keep alive day: %s", err)
@@ -263,9 +257,7 @@ class DiagnosticComfortMessage(SensorEntity):
         status: SStatus,
     ) -> None:
         self._attr_name = f"Comfort {installation.alias}"
-        self._attr_unique_id = (
-            f"securitas_direct.{installation.number}_comfort_message"
-        )
+        self._attr_unique_id = f"securitas_direct.{installation.number}_comfort_message"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_native_value = status.confort_message
         self._installation = installation
@@ -280,9 +272,7 @@ class DiagnosticComfortMessage(SensorEntity):
 
     async def async_update(self) -> None:
         try:
-            status = await self._client.session.check_general_status(
-                self._installation
-            )
+            status = await self._client.session.check_general_status(self._installation)
             self._attr_native_value = status.confort_message
         except SecuritasDirectError as err:
             _LOGGER.error("Error updating comfort message: %s", err)

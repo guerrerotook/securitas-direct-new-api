@@ -742,7 +742,10 @@ class ApiManager:
         )
 
     async def get_air_quality_data(
-        self, installation: Installation, service: Service, zone: str | None = None,
+        self,
+        installation: Installation,
+        service: Service,
+        zone: str | None = None,
     ) -> AirQuality:
         """Get sentinel status."""
         if zone:
@@ -750,9 +753,7 @@ class ApiManager:
         elif service.attributes and isinstance(service.attributes, list):
             zone_val = str(service.attributes[0].value)
         else:
-            _LOGGER.warning(
-                "No zone found for air quality service %s", service.id
-            )
+            _LOGGER.warning("No zone found for air quality service %s", service.id)
             zone_val = "0"
 
         content = {
@@ -1237,7 +1238,10 @@ class ApiManager:
         return SmartLockMode(None, "0")
 
     async def change_lock_mode(
-        self, installation: Installation, lock: bool, device_id: str = SMARTLOCK_DEVICE_ID,
+        self,
+        installation: Installation,
+        lock: bool,
+        device_id: str = SMARTLOCK_DEVICE_ID,
     ) -> SmartLockModeStatus:
         content = {
             "operationName": "xSChangeSmartlockMode",

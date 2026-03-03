@@ -3,9 +3,17 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from homeassistant.const import EntityCategory
+
+from custom_components.securitas import SecuritasHub
+from custom_components.securitas.binary_sensor import SecuritasWifiConnected
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     Installation,
     SStatus,
+)
+from custom_components.securitas.sensor import (
+    DiagnosticComfortMessage,
+    DiagnosticKeepAliveDay,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -78,16 +86,6 @@ class TestCheckGeneralStatusDiagnostics:
         assert result.wifi_connected is None
         assert result.keep_alive_day is None
         assert result.confort_message is None
-
-
-from homeassistant.const import EntityCategory
-
-from custom_components.securitas import SecuritasHub
-from custom_components.securitas.binary_sensor import SecuritasWifiConnected
-from custom_components.securitas.sensor import (
-    DiagnosticKeepAliveDay,
-    DiagnosticComfortMessage,
-)
 
 
 class TestDiagnosticEntities:

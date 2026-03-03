@@ -40,9 +40,7 @@ async def async_setup_entry(
             continue
 
         if status.wifi_connected is not None:
-            entities.append(
-                SecuritasWifiConnected(device.installation, client, status)
-            )
+            entities.append(SecuritasWifiConnected(device.installation, client, status))
 
     if entities:
         async_add_entities(entities, True)
@@ -74,9 +72,7 @@ class SecuritasWifiConnected(BinarySensorEntity):
 
     async def async_update(self) -> None:
         try:
-            status = await self._client.session.check_general_status(
-                self._installation
-            )
+            status = await self._client.session.check_general_status(self._installation)
             self._attr_is_on = status.wifi_connected
         except SecuritasDirectError as err:
             _LOGGER.error("Error updating WiFi status: %s", err)

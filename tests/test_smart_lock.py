@@ -224,7 +224,9 @@ class TestChangeLockMode:
             },
         ]
 
-        result = await authed_api.change_lock_mode(installation, lock=True, device_id="01")
+        result = await authed_api.change_lock_mode(
+            installation, lock=True, device_id="01"
+        )
 
         assert isinstance(result, SmartLockModeStatus)
         assert result.requestId == "OK"
@@ -257,7 +259,9 @@ class TestChangeLockMode:
             },
         ]
 
-        result = await authed_api.change_lock_mode(installation, lock=False, device_id="01")
+        result = await authed_api.change_lock_mode(
+            installation, lock=False, device_id="01"
+        )
 
         assert isinstance(result, SmartLockModeStatus)
         assert result.requestId == "OK"
@@ -344,7 +348,9 @@ class TestChangeLockMode:
             },
         ]
 
-        result = await authed_api.change_lock_mode(installation, lock=True, device_id="01")
+        result = await authed_api.change_lock_mode(
+            installation, lock=True, device_id="01"
+        )
 
         assert isinstance(result, SmartLockModeStatus)
         assert result.requestId == "OK"

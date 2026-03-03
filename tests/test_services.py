@@ -680,7 +680,9 @@ class TestDataclassFields:
         assert mode.deviceId == ""
 
     def test_sentinel_has_zone(self):
-        sentinel = Sentinel(alias="Room", air_quality="", humidity=50, temperature=22, zone="JZ01")
+        sentinel = Sentinel(
+            alias="Room", air_quality="", humidity=50, temperature=22, zone="JZ01"
+        )
         assert sentinel.zone == "JZ01"
 
     def test_sentinel_zone_defaults_empty(self):
