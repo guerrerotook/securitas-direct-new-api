@@ -426,7 +426,13 @@ class ApiManager:
             "variables": {},
             "query": "mutation Logout {\n  xSLogout\n}\n",
         }
-        await self._execute_request(content, "Logout")
+        try:
+            await self._execute_request(content, "Logout")
+        finally:
+            self.authentication_token = None
+            self.refresh_token_value = ""
+            self.authentication_token_exp = datetime.min
+            self.login_timestamp = 0
 
     def _extract_otp_data(self, data) -> tuple[str | None, list[OtpPhone]]:
         if not data:
