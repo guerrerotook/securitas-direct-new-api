@@ -200,6 +200,7 @@ class SentinelAirQuality(SensorEntity):
         self._update_sensor_data(air_quality)
 
     def _update_sensor_data(self, air_quality: AirQuality):
+        self._air_quality = air_quality
         self._attr_native_value = air_quality.message
 
     @property
