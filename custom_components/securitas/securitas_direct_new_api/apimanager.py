@@ -374,12 +374,13 @@ class ApiManager:
             TimeoutError: If wall-clock timeout is exceeded.
             SecuritasDirectError: If a non-transient error occurs.
         """
-        deadline = asyncio.get_event_loop().time() + timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         result: dict[str, Any] = {}
         first = True
 
         while True:
-            if not first and asyncio.get_event_loop().time() > deadline:
+            if not first and loop.time() > deadline:
                 raise TimeoutError(
                     f"Poll operation timed out after {timeout}s, "
                     f"last response: {result}"
