@@ -1001,31 +1001,50 @@ class ApiManager:
         reference_id: str,
         suid: str,
     ) -> list[dict[str, Any]]:
-        """Fetch arming exception details (e.g. open windows/doors)."""
-        content = {
-            "operationName": "xSGetExceptions",
-            "variables": {
-                "numinst": installation.number,
-                "panel": installation.panel,
-                "referenceId": reference_id,
-                "counter": 1,
-                "suid": suid,
-            },
-            "query": (
-                "query xSGetExceptions($numinst: String!, $panel: String!,"
-                " $referenceId: String!, $counter: Int!, $suid: String) {\n"
-                "  xSGetExceptions(numinst: $numinst, panel: $panel,"
-                " referenceId: $referenceId, counter: $counter, suid: $suid) {\n"
-                "    res\n    msg\n"
-                "    exceptions {\n      status\n      deviceType\n      alias\n    }\n"
-                "  }\n}\n"
-            ),
-        }
-        response = await self._execute_request(content, "xSGetExceptions", installation)
-        data = response.get("data", {}).get("xSGetExceptions", {})
-        if data and data.get("res") == "OK":
-            return data.get("exceptions") or []
-        _LOGGER.warning("Failed to fetch arming exceptions: %s", data)
+        """Fetch arming exception details (e.g. open windows/doors).
+
+        The API returns WAIT on the first poll (counter=1) and OK on a
+        subsequent poll once the panel has reported the open sensors.
+        We must keep incrementing the counter until we get a non-WAIT
+        response, matching the behaviour of the official app.
+        """
+        query = (
+            "query xSGetExceptions($numinst: String!, $panel: String!,"
+            " $referenceId: String!, $counter: Int!, $suid: String) {\n"
+            "  xSGetExceptions(numinst: $numinst, panel: $panel,"
+            " referenceId: $referenceId, counter: $counter, suid: $suid) {\n"
+            "    res\n    msg\n"
+            "    exceptions {\n      status\n      deviceType\n      alias\n    }\n"
+            "  }\n}\n"
+        )
+        count = 1
+        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
+        data: dict[str, Any] = {}
+        while count <= max_retries:
+            content = {
+                "operationName": "xSGetExceptions",
+                "variables": {
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "referenceId": reference_id,
+                    "counter": count,
+                    "suid": suid,
+                },
+                "query": query,
+            }
+            response = await self._execute_request(
+                content, "xSGetExceptions", installation
+            )
+            data = response.get("data", {}).get("xSGetExceptions", {}) or {}
+            if data.get("res") == "OK":
+                return data.get("exceptions") or []
+            if data.get("res") != "WAIT":
+                break
+            await asyncio.sleep(self.delay_check_operation)
+            count += 1
+        _LOGGER.warning(
+            "Failed to fetch arming exceptions after %d attempts: %s", count, data
+        )
         return []
 
     async def disarm_alarm(

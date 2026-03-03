@@ -59,6 +59,10 @@
         "force_arm": {
             "name": "Forcer l'armement",
             "description": "Forcer l'armement de l'alarme en ignorant les exceptions non bloquantes (ex. fenêtres ouvertes) d'une tentative d'armement précédente échouée."
+        },
+        "force_arm_cancel": {
+            "name": "Annuler l'armement forcé",
+            "description": "Annuler un armement forcé en attente et fermer la notification d'exception d'armement."
         }
     },
     "exceptions": {

@@ -93,6 +93,11 @@ async def async_setup_entry(
         {},
         "async_force_arm",
     )
+    platform.async_register_entity_service(
+        "force_arm_cancel",
+        {},
+        "async_force_arm_cancel",
+    )
 
 
 class SecuritasAlarm(alarm.AlarmControlPanelEntity):
@@ -546,23 +551,37 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
         """Send notifications about arming exceptions."""
-        details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
-        message = (
-            f"Arming blocked by: {details}. Please resolve the issue and try again."
+        if exc.exceptions:
+            sensor_list = "\n".join(
+                f"- {e.get('alias', 'unknown')}" for e in exc.exceptions
+            )
+            short_details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
+        else:
+            sensor_list = "- (unknown sensor)"
+            short_details = "open sensor"
+
+        title = "Securitas: Arm blocked — open sensor(s)"
+        persistent_message = (
+            f"Arming was blocked because the following sensor(s) are open:\n"
+            f"{sensor_list}\n\n"
+            f"To arm anyway, call the **securitas.force_arm** service, "
+            f"or tap **Force Arm** on your mobile notification."
         )
+        mobile_message = f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
+
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
                 service="create",
                 service_data={
-                    "title": "Securitas: Arming Exception",
-                    "message": message,
+                    "title": title,
+                    "message": persistent_message,
                     "notification_id": self._arming_exception_notification_id,
                 },
             )
         )
 
-        # Notify configured group if set
+        # Notify configured group if set (Companion App with action buttons)
         notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             self.hass.async_create_task(
@@ -570,8 +589,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     domain="notify",
                     service=notify_group,
                     service_data={
-                        "title": "Securitas: Arming Exception",
-                        "message": message,
+                        "title": title,
+                        "message": mobile_message,
                         "data": {
                             "actions": [
                                 {
@@ -599,6 +618,20 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 },
             )
         )
+
+    async def async_force_arm_cancel(self) -> None:
+        """Cancel a pending force-arm context.
+
+        Called by the securitas.force_arm_cancel service. Clears the stored
+        exception context and dismisses the arming-exception notification.
+        """
+        if self._force_context is None:
+            _LOGGER.warning("force_arm_cancel called but no force context available")
+            return
+        _LOGGER.info("Force-arm cancelled by user")
+        self._clear_force_context(force=True)
+        self._dismiss_arming_exception_notification()
+        self.async_write_ha_state()
 
     async def async_force_arm(self) -> None:
         """Force-arm using stored exception context.

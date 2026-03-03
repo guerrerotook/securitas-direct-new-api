@@ -49,7 +49,7 @@ The core API client. All communication with Securitas happens through GraphQL PO
 
 **Token lifecycle:** Before every API operation, `_check_authentication_token()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Similarly, `_check_capabilities_token()` checks a per-installation capabilities JWT that's obtained from `get_all_services()`.
 
-**Polling pattern:** Arm, disarm, and status-check operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint in a loop (sleeping `delay_check_operation` seconds between attempts) until the response changes from `"WAIT"` to `"OK"` or a timeout is reached.
+**Polling pattern:** Arm, disarm, status-check, and exception-fetch operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint in a loop (sleeping `delay_check_operation` seconds between attempts) until the response changes from `"WAIT"` to `"OK"` or a timeout is reached. All polling loops use the same dynamic `max_retries` formula: `max(10, round(30 / delay_check_operation))`, giving a consistent ~30-second total timeout.
 
 ### Country routing (`domains.py`)
 
@@ -197,7 +197,8 @@ The main entity. One `SecuritasAlarm` per installation.
       - In table and _use_multi_step is False? → try single call first
         - SecuritasDirectError? → set _use_multi_step = True, fall back to steps
       - In table and _use_multi_step is True? → send steps sequentially
-      - Force params only passed to first step; cleared for subsequent steps
+      - Force params passed to all steps (both interior and perimeter sensors
+        can trigger ArmingExceptionError; API ignores irrelevant force params)
       - _last_arm_result tracks the most recent successful step for partial state
    d. On error:
       - Notify user via persistent notification
@@ -220,6 +221,39 @@ The main entity. One `SecuritasAlarm` per installation.
    d. Error on all attempts? → _notify_error(), restore _last_status
 4. update_status_alarm() with the response
 ```
+
+**Arming exception flow** (open sensors blocking arm):
+```
+1. set_arm_state() catches ArmingExceptionError from _send_arm_command()
+2. _set_force_context(exc, mode) — stores reference_id, suid, mode, exceptions
+3. _notify_arm_exceptions(exc):
+   a. Persistent notification: lists each open sensor by name (from _get_exceptions
+      polling), explains how to force-arm
+   b. Mobile notification (if notify_group configured): short message with
+      Force Arm / Cancel action buttons
+4. State reverts to _last_status
+```
+
+**Force arm flow** (`securitas.force_arm` / `securitas.force_arm_cancel` services):
+```
+force_arm:
+  1. Read stored reference_id, suid, mode from _force_context
+  2. _clear_force_context(force=True)
+  3. _dismiss_arming_exception_notification()
+  4. set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
+     → API accepts force params and overrides the open-sensor exceptions
+
+force_arm_cancel:
+  1. _clear_force_context(force=True)
+  2. _dismiss_arming_exception_notification()
+  3. async_write_ha_state()
+
+Mobile notification actions:
+  - SECURITAS_FORCE_ARM_<num> → async_force_arm()
+  - SECURITAS_CANCEL_FORCE_ARM_<num> → _clear_force_context() + write state
+```
+
+The `_get_exceptions()` API call uses the same polling pattern as arm/disarm — the server returns `WAIT` on the first poll while the panel reports the open sensors, then `OK` with the full exception list on a subsequent poll.
 
 **Why disarm-before-rearm?** The Securitas API treats interior and perimeter as independent axes. Sending `ARMDAY1` while the perimeter is armed leaves the perimeter armed. Transitioning from `Partial+Perimeter` to `Partial` (no perimeter) would silently fail without disarming first.
 
@@ -500,12 +534,12 @@ Three parallel jobs run on every PR and push to main:
 |------|-------|---------|
 | `__init__.py` | 451 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice` |
 | `config_flow.py` | 362 | Config flow (setup + 2FA) and options flow (settings + mappings) |
-| `alarm_control_panel.py` | 385 | Alarm entity with state mapping, arm/disarm, PIN validation |
-| `sensor.py` | 184 | Sentinel temperature, humidity, air quality sensors |
+| `alarm_control_panel.py` | 701 | Alarm entity with state mapping, arm/disarm, force arm, PIN validation |
+| `sensor.py` | 195 | Sentinel temperature, humidity, air quality sensors |
 | `lock.py` | 211 | Smart lock entity |
 | `button.py` | 83 | Manual refresh button |
 | `constants.py` | 21 | `SentinelName` language mapping |
-| `securitas_direct_new_api/apimanager.py` | 1076 | GraphQL API client with auth, polling, all operations |
+| `securitas_direct_new_api/apimanager.py` | 1293 | GraphQL API client with auth, polling, all operations |
 | `securitas_direct_new_api/const.py` | 100 | `SecuritasState`, command/protocol mappings, defaults |
 | `securitas_direct_new_api/dataTypes.py` | 168 | Response dataclasses |
 | `securitas_direct_new_api/domains.py` | 49 | Country-to-URL routing |

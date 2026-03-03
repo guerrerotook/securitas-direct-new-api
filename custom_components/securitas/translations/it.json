@@ -59,6 +59,10 @@
         "force_arm": {
             "name": "Forzare attivazione",
             "description": "Forzare l'attivazione dell'allarme, ignorando le eccezioni non bloccanti (es. finestre aperte) da un precedente tentativo di attivazione fallito."
+        },
+        "force_arm_cancel": {
+            "name": "Annullare attivazione forzata",
+            "description": "Annullare un'attivazione forzata in sospeso e chiudere la notifica di eccezione di attivazione."
         }
     },
     "exceptions": {

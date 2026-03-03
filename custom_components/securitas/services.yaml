@@ -3,3 +3,9 @@ force_arm:
     entity:
       integration: securitas
       domain: alarm_control_panel
+
+force_arm_cancel:
+  target:
+    entity:
+      integration: securitas
+      domain: alarm_control_panel
