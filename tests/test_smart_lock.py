@@ -224,7 +224,7 @@ class TestChangeLockMode:
             },
         ]
 
-        result = await authed_api.change_lock_mode(installation, lock=True)
+        result = await authed_api.change_lock_mode(installation, lock=True, device_id="01")
 
         assert isinstance(result, SmartLockModeStatus)
         assert result.requestId == "OK"
@@ -257,7 +257,7 @@ class TestChangeLockMode:
             },
         ]
 
-        result = await authed_api.change_lock_mode(installation, lock=False)
+        result = await authed_api.change_lock_mode(installation, lock=False, device_id="01")
 
         assert isinstance(result, SmartLockModeStatus)
         assert result.requestId == "OK"
@@ -279,7 +279,7 @@ class TestChangeLockMode:
         }
 
         with pytest.raises(SecuritasDirectError, match="Lock unavailable"):
-            await authed_api.change_lock_mode(installation, lock=True)
+            await authed_api.change_lock_mode(installation, lock=True, device_id="01")
 
     async def test_none_initial_response_raises_error(
         self, authed_api, mock_execute, installation
@@ -289,7 +289,7 @@ class TestChangeLockMode:
         with pytest.raises(
             SecuritasDirectError, match="xSChangeSmartlockMode response is None"
         ):
-            await authed_api.change_lock_mode(installation, lock=True)
+            await authed_api.change_lock_mode(installation, lock=True, device_id="01")
 
     async def test_missing_reference_id_raises_error(
         self, authed_api, mock_execute, installation
@@ -304,7 +304,7 @@ class TestChangeLockMode:
         }
 
         with pytest.raises(SecuritasDirectError, match="No referenceId"):
-            await authed_api.change_lock_mode(installation, lock=True)
+            await authed_api.change_lock_mode(installation, lock=True, device_id="01")
 
     async def test_polls_when_status_is_wait(
         self, authed_api, mock_execute, installation
@@ -344,7 +344,7 @@ class TestChangeLockMode:
             },
         ]
 
-        result = await authed_api.change_lock_mode(installation, lock=True)
+        result = await authed_api.change_lock_mode(installation, lock=True, device_id="01")
 
         assert isinstance(result, SmartLockModeStatus)
         assert result.requestId == "OK"
@@ -352,3 +352,38 @@ class TestChangeLockMode:
         assert result.status == "locked"
         # 1 initial request + 2 status polls = 3 calls total
         assert mock_execute.call_count == 3
+
+    async def test_device_id_passed_to_mutation(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.side_effect = [
+            {
+                "data": {
+                    "xSChangeSmartlockMode": {
+                        "res": "OK",
+                        "msg": "",
+                        "referenceId": "ref123",
+                    }
+                }
+            },
+            {
+                "data": {
+                    "xSChangeSmartlockModeStatus": {
+                        "res": "OK",
+                        "msg": "",
+                        "protomResponse": "D",
+                        "status": "locked",
+                    }
+                }
+            },
+        ]
+
+        await authed_api.change_lock_mode(installation, lock=True, device_id="02")
+
+        # First call is the mutation
+        mutation_content = mock_execute.call_args_list[0][0][0]
+        assert mutation_content["variables"]["deviceId"] == "02"
+
+        # Second call is the status poll
+        status_content = mock_execute.call_args_list[1][0][0]
+        assert status_content["variables"]["deviceId"] == "02"
