@@ -390,6 +390,7 @@ class SecuritasHub:
             domain_config[CONF_UNIQUE_ID],
             domain_config[CONF_DEVICE_INDIGITALL],
             domain_config[CONF_DELAY_CHECK_OPERATION],
+            log_filter=self.log_filter,
         )
         self.installations: list[Installation] = []
 

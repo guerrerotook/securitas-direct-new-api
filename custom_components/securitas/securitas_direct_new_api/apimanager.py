@@ -5,7 +5,10 @@ from datetime import datetime, timedelta
 import json
 import logging
 import secrets
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from custom_components.securitas.log_filter import SensitiveDataFilter
 from uuid import uuid4
 
 from aiohttp import ClientConnectorError, ClientSession
@@ -78,6 +81,7 @@ class ApiManager:
         uuid: str,
         id_device_indigitall: str,
         delay_check_operation: int = 2,
+        log_filter: SensitiveDataFilter | None = None,
     ) -> None:
         """Create the object."""
         self.username = username
@@ -107,6 +111,17 @@ class ApiManager:
         self.device_type = ""
         self.device_version = "10.102.0"
         self.apollo_operation_id: str = secrets.token_hex(64)
+        self._log_filter = log_filter
+
+    def _register_secret(self, key: str, value: str | None) -> None:
+        """Register a secret with the log filter if available."""
+        if self._log_filter and value:
+            self._log_filter.update_secret(key, value)
+
+    def _register_installation(self, installation: Installation) -> None:
+        """Register an installation number with the log filter."""
+        if self._log_filter and installation.number:
+            self._log_filter.add_installation(installation.number)
 
     async def _execute_request(
         self, content, operation: str, installation: Optional[Installation] = None
@@ -358,6 +373,8 @@ class ApiManager:
 
         if otp_succeed:
             self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
+            self._register_secret("otp_hash", auth_otp_hash)
+            self._register_secret("otp_token", sms_code)
         try:
             response = await self._execute_request(content, "mkValidateDevice")
             self.authentication_otp_challenge_value = None
@@ -378,6 +395,7 @@ class ApiManager:
         if validate_data is None:
             raise SecuritasDirectError("xSValidateDevice response is None", response)
         self.authentication_token = validate_data["hash"]
+        self._register_secret("auth_token", self.authentication_token)
         try:
             assert self.authentication_token is not None
             token = jwt.decode(
@@ -394,6 +412,7 @@ class ApiManager:
                 self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
         if validate_data.get("refreshToken"):
             self.refresh_token_value = validate_data["refreshToken"]
+            self._register_secret("refresh_token", self.refresh_token_value)
         return (None, None)
 
     async def refresh_token(self) -> bool:
@@ -429,6 +448,7 @@ class ApiManager:
 
         if refresh_data.get("hash"):
             self.authentication_token = refresh_data["hash"]
+            self._register_secret("auth_token", self.authentication_token)
             try:
                 assert self.authentication_token is not None
                 token = jwt.decode(
@@ -446,6 +466,7 @@ class ApiManager:
             return False
         if refresh_data.get("refreshToken"):
             self.refresh_token_value = refresh_data["refreshToken"]
+            self._register_secret("refresh_token", self.refresh_token_value)
 
         return True
 
@@ -522,9 +543,11 @@ class ApiManager:
 
         if login_data.get("refreshToken"):
             self.refresh_token_value = login_data["refreshToken"]
+            self._register_secret("refresh_token", self.refresh_token_value)
 
         if login_data["hash"] is not None:
             self.authentication_token = login_data["hash"]
+            self._register_secret("auth_token", self.authentication_token)
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
             try:
@@ -614,6 +637,8 @@ class ApiManager:
                 "API returned no installation data for %s", installation.number
             )
             return []
+
+        self._register_installation(installation)
 
         result: list[Service] = []
         raw_data = installation_data.get("services")
