@@ -356,6 +356,32 @@ class TestGetSentinelData:
 
         assert result == Sentinel("", "", 0, 0)
 
+    async def test_returns_sentinel_with_zone(
+        self, authed_api, mock_execute, installation, mock_service
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSComfort": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "alias": "Living",
+                            "status": {
+                                "temperature": 22,
+                                "humidity": 45,
+                                "airQualityCode": "GOOD",
+                            },
+                            "zone": "1",
+                        }
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_sentinel_data(installation, mock_service)
+
+        assert result.zone == "1"
+
     async def test_device_not_found_returns_empty_sentinel(
         self, authed_api, mock_execute, installation, mock_service
     ):
@@ -421,6 +447,26 @@ class TestGetAirQualityData:
         result = await authed_api.get_air_quality_data(installation, mock_service)
 
         assert result == AirQuality(0, "")
+
+    async def test_zone_override_used_when_provided(
+        self, authed_api, mock_execute, installation, mock_service
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSAirQ": {
+                    "graphData": {"status": {"current": 92, "currentMsg": "Moderate"}}
+                }
+            }
+        }
+
+        result = await authed_api.get_air_quality_data(
+            installation, mock_service, zone="JZ01"
+        )
+
+        assert result.value == 92
+        call_args = mock_execute.call_args
+        content = call_args[0][0]
+        assert content["variables"]["zone"] == "JZ01"
 
 
 # ── send_otp() ────────────────────────────────────────────────────────────────

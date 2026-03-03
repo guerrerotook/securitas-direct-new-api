@@ -54,7 +54,7 @@ async def async_setup_entry(
 
                 try:
                     air_quality: AirQuality = await client.session.get_air_quality_data(
-                        service.installation, service
+                        service.installation, service, zone=sentinel_data.zone
                     )
                 except SecuritasDirectError:
                     _LOGGER.warning(
@@ -162,6 +162,7 @@ class SentinelAirQuality(SensorEntity):
         self._attr_unique_id = sentinel.alias + "airquality_" + str(service.id)
         self._attr_name = "Air Quality " + sentinel.alias.lower().capitalize()
         self._air_quality: AirQuality = air_quality
+        self._zone: str = sentinel.zone
         self._service: Service = service
         self._client: SecuritasHub = client
         self._attr_device_info = DeviceInfo(
@@ -172,9 +173,9 @@ class SentinelAirQuality(SensorEntity):
         )
 
     async def async_update(self):
-        """Update the status of the alarm based on the configuration."""
+        """Update the air quality sensor."""
         air_quality: AirQuality = await self._client.session.get_air_quality_data(
-            self._service.installation, self._service
+            self._service.installation, self._service, zone=self._zone
         )
         self._update_sensor_data(air_quality)
 

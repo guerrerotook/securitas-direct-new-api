@@ -738,19 +738,22 @@ class ApiManager:
             "",
             int(target_device["status"]["humidity"]),
             int(target_device["status"]["temperature"]),
+            zone,
         )
 
     async def get_air_quality_data(
-        self, installation: Installation, service: Service
+        self, installation: Installation, service: Service, zone: str | None = None,
     ) -> AirQuality:
         """Get sentinel status."""
-        zone_val = "0"
-        if service.attributes and isinstance(service.attributes, list):
+        if zone:
+            zone_val = zone
+        elif service.attributes and isinstance(service.attributes, list):
             zone_val = str(service.attributes[0].value)
         else:
             _LOGGER.warning(
-                "No attributes found for air quality service %s", service.id
+                "No zone found for air quality service %s", service.id
             )
+            zone_val = "0"
 
         content = {
             "operationName": "AirQualityGraph",
