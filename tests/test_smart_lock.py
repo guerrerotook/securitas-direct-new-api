@@ -161,6 +161,39 @@ class TestGetLockCurrentMode:
         assert result.res is None
         assert result.lockStatus == "0"
 
+    async def test_success_extracts_device_id(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": [{"lockStatus": "2", "deviceId": "02"}],
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert result.deviceId == "02"
+
+    async def test_no_smartlock_info_returns_empty_device_id(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": None,
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert result.deviceId == ""
+        assert result.lockStatus == "0"
+
 
 # ── change_lock_mode() ──────────────────────────────────────────────────────
 

@@ -1219,9 +1219,11 @@ class ApiManager:
             if raw_data is None:
                 return SmartLockMode(None, "0")
             lock_status = "0"
+            device_id = ""
             if raw_data.get("smartlockInfo"):
                 lock_status = raw_data["smartlockInfo"][0]["lockStatus"]
-            return SmartLockMode(raw_data["res"], lock_status)
+                device_id = raw_data["smartlockInfo"][0].get("deviceId", "")
+            return SmartLockMode(raw_data["res"], lock_status, device_id)
 
         return SmartLockMode(None, "0")
 
