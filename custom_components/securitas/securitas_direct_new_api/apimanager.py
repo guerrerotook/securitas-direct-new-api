@@ -559,7 +559,7 @@ class ApiManager:
                 )
             except jwt.exceptions.DecodeError as err:
                 raise SecuritasDirectError(
-                    f"Failed to decode authentication token {self.authentication_token}"
+                    "Failed to decode authentication token"
                 ) from err
 
             if "exp" in token:
@@ -660,7 +660,7 @@ class ApiManager:
             )
         except jwt.exceptions.DecodeError as err:
             raise SecuritasDirectError(
-                f"Failed to decode capabilities token {installation.capabilities}"
+                "Failed to decode capabilities token"
             ) from err
 
         if "exp" in token:
