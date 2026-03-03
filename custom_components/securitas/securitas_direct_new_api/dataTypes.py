@@ -78,6 +78,9 @@ class SStatus:
 
     status: str | None = ""
     timestampUpdate: str | None = ""
+    wifi_connected: bool | None = None
+    keep_alive_day: int | None = None
+    confort_message: str | None = None
 
 
 @dataclass
