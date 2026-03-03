@@ -263,7 +263,13 @@ class TestPeriOptions:
 # ── STD_DEFAULTS / PERI_DEFAULTS ────────────────────────────────────────────
 
 
-EXPECTED_DEFAULT_KEYS = {"map_home", "map_away", "map_night", "map_custom", "map_vacation"}
+EXPECTED_DEFAULT_KEYS = {
+    "map_home",
+    "map_away",
+    "map_night",
+    "map_custom",
+    "map_vacation",
+}
 
 
 class TestStdDefaults:
