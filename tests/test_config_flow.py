@@ -16,6 +16,7 @@ from custom_components.securitas import (
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
+    CONF_MAP_VACATION,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
     DEFAULT_CHECK_ALARM_PANEL,
@@ -699,6 +700,7 @@ async def test_options_mappings_std_options_when_peri_false(hass):
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
             CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -721,6 +723,7 @@ async def test_options_mappings_peri_options_when_peri_true(hass):
             CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
             CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: PERI_DEFAULTS[CONF_MAP_VACATION],
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -746,6 +749,7 @@ async def test_options_mappings_invalid_mapping_falls_back(hass):
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
             CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -769,6 +773,7 @@ async def test_options_mappings_submitting_creates_entry(hass):
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
             CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
         },
     )
 
@@ -777,6 +782,7 @@ async def test_options_mappings_submitting_creates_entry(hass):
     assert result["data"][CONF_MAP_AWAY] == STD_DEFAULTS[CONF_MAP_AWAY]
     assert result["data"][CONF_MAP_NIGHT] == STD_DEFAULTS[CONF_MAP_NIGHT]
     assert result["data"][CONF_MAP_CUSTOM] == STD_DEFAULTS[CONF_MAP_CUSTOM]
+    assert result["data"][CONF_MAP_VACATION] == STD_DEFAULTS[CONF_MAP_VACATION]
 
 
 async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
@@ -797,6 +803,7 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
             CONF_MAP_AWAY: SecuritasState.TOTAL.value,
             CONF_MAP_NIGHT: SecuritasState.PARTIAL_NIGHT.value,
             CONF_MAP_CUSTOM: SecuritasState.NOT_USED.value,
+            CONF_MAP_VACATION: SecuritasState.NOT_USED.value,
         },
     )
 

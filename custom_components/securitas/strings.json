@@ -50,7 +50,8 @@
                     "map_home": "Home",
                     "map_away": "Away",
                     "map_night": "Night",
-                    "map_custom": "Custom"
+                    "map_custom": "Custom",
+                    "map_vacation": "Vacation"
                 }
             }
         }
