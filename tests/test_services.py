@@ -11,6 +11,7 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     Installation,
     Sentinel,
     Service,
+    SmartLockMode,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
@@ -355,6 +356,32 @@ class TestGetSentinelData:
 
         assert result == Sentinel("", "", 0, 0)
 
+    async def test_returns_sentinel_with_zone(
+        self, authed_api, mock_execute, installation, mock_service
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSComfort": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "alias": "Living",
+                            "status": {
+                                "temperature": 22,
+                                "humidity": 45,
+                                "airQualityCode": "GOOD",
+                            },
+                            "zone": "1",
+                        }
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_sentinel_data(installation, mock_service)
+
+        assert result.zone == "1"
+
     async def test_device_not_found_returns_empty_sentinel(
         self, authed_api, mock_execute, installation, mock_service
     ):
@@ -420,6 +447,26 @@ class TestGetAirQualityData:
         result = await authed_api.get_air_quality_data(installation, mock_service)
 
         assert result == AirQuality(0, "")
+
+    async def test_zone_override_used_when_provided(
+        self, authed_api, mock_execute, installation, mock_service
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSAirQ": {
+                    "graphData": {"status": {"current": 92, "currentMsg": "Moderate"}}
+                }
+            }
+        }
+
+        result = await authed_api.get_air_quality_data(
+            installation, mock_service, zone="JZ01"
+        )
+
+        assert result.value == 92
+        call_args = mock_execute.call_args
+        content = call_args[0][0]
+        assert content["variables"]["zone"] == "JZ01"
 
 
 # ── send_otp() ────────────────────────────────────────────────────────────────
@@ -618,3 +665,26 @@ class TestCheckAlarmStatus:
         assert result.status == "ARM1"
         assert result.InstallationNumer == "123456"
         assert result.protomResponse == "PROT_RESP"
+
+
+# ── Dataclass field tests ────────────────────────────────────────────────────
+
+
+class TestDataclassFields:
+    def test_smart_lock_mode_has_device_id(self):
+        mode = SmartLockMode(res="OK", lockStatus="2", deviceId="02")
+        assert mode.deviceId == "02"
+
+    def test_smart_lock_mode_device_id_defaults_empty(self):
+        mode = SmartLockMode(res="OK", lockStatus="2")
+        assert mode.deviceId == ""
+
+    def test_sentinel_has_zone(self):
+        sentinel = Sentinel(
+            alias="Room", air_quality="", humidity=50, temperature=22, zone="JZ01"
+        )
+        assert sentinel.zone == "JZ01"
+
+    def test_sentinel_zone_defaults_empty(self):
+        sentinel = Sentinel(alias="Room", air_quality="", humidity=50, temperature=22)
+        assert sentinel.zone == ""

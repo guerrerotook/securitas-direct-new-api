@@ -738,19 +738,23 @@ class ApiManager:
             "",
             int(target_device["status"]["humidity"]),
             int(target_device["status"]["temperature"]),
+            zone,
         )
 
     async def get_air_quality_data(
-        self, installation: Installation, service: Service
+        self,
+        installation: Installation,
+        service: Service,
+        zone: str | None = None,
     ) -> AirQuality:
         """Get sentinel status."""
-        zone_val = "0"
-        if service.attributes and isinstance(service.attributes, list):
+        if zone:
+            zone_val = zone
+        elif service.attributes and isinstance(service.attributes, list):
             zone_val = str(service.attributes[0].value)
         else:
-            _LOGGER.warning(
-                "No attributes found for air quality service %s", service.id
-            )
+            _LOGGER.warning("No zone found for air quality service %s", service.id)
+            zone_val = "0"
 
         content = {
             "operationName": "AirQualityGraph",
@@ -781,7 +785,7 @@ class ApiManager:
         content = {
             "operationName": "Status",
             "variables": {"numinst": installation.number},
-            "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
+            "query": "query Status($numinst: String!) {\n  xSStatus(numinst: $numinst) {\n    status\n    timestampUpdate\n    wifiConnected\n    keepAliveDay\n    confort_message\n    exceptions {\n      status\n      deviceType\n      alias\n    }\n  }\n}",
         }
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
@@ -795,7 +799,13 @@ class ApiManager:
             raw_data = response["data"]["xSStatus"]
             if raw_data is None:
                 return SStatus(None, None)
-            return SStatus(raw_data["status"], raw_data["timestampUpdate"])
+            return SStatus(
+                raw_data["status"],
+                raw_data["timestampUpdate"],
+                raw_data.get("wifiConnected"),
+                raw_data.get("keepAliveDay"),
+                raw_data.get("confort_message"),
+            )
 
         return SStatus(None, None)
 
@@ -1219,14 +1229,19 @@ class ApiManager:
             if raw_data is None:
                 return SmartLockMode(None, "0")
             lock_status = "0"
+            device_id = ""
             if raw_data.get("smartlockInfo"):
                 lock_status = raw_data["smartlockInfo"][0]["lockStatus"]
-            return SmartLockMode(raw_data["res"], lock_status)
+                device_id = raw_data["smartlockInfo"][0].get("deviceId", "")
+            return SmartLockMode(raw_data["res"], lock_status, device_id)
 
         return SmartLockMode(None, "0")
 
     async def change_lock_mode(
-        self, installation: Installation, lock: bool
+        self,
+        installation: Installation,
+        lock: bool,
+        device_id: str = SMARTLOCK_DEVICE_ID,
     ) -> SmartLockModeStatus:
         content = {
             "operationName": "xSChangeSmartlockMode",
@@ -1234,7 +1249,7 @@ class ApiManager:
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "deviceType": SMARTLOCK_DEVICE_TYPE,
-                "deviceId": SMARTLOCK_DEVICE_ID,
+                "deviceId": device_id,
                 "lock": lock,
             },
             "query": "mutation xSChangeSmartlockMode($numinst: String!, $panel: String!, $deviceId: String!, $deviceType: String!, $lock: Boolean!) {\n  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n  ) {\n    res\n    msg\n    referenceId\n  }\n}",
@@ -1265,6 +1280,7 @@ class ApiManager:
                 installation,
                 reference_id,
                 count,
+                device_id,
             )
             count = count + 1
 
@@ -1282,12 +1298,13 @@ class ApiManager:
         installation: Installation,
         reference_id: str,
         counter: int,
+        device_id: str = SMARTLOCK_DEVICE_ID,
     ) -> dict[str, Any]:
         content = {
             "operationName": "xSChangeSmartlockModeStatus",
             "variables": {
                 "counter": counter,
-                "deviceId": SMARTLOCK_DEVICE_ID,
+                "deviceId": device_id,
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,

@@ -264,7 +264,7 @@ class TestSentinelAirQuality:
         await sensor.async_update()
 
         client.session.get_air_quality_data.assert_awaited_once_with(
-            service.installation, service
+            service.installation, service, zone=""
         )
         assert sensor._attr_native_value == "Poor"
 
@@ -441,7 +441,7 @@ class TestSecuritasLockActions:
         original_schedule = MagicMock()
         lock.async_schedule_update_ha_state = original_schedule
 
-        async def capture_state(installation, lock_mode):
+        async def capture_state(installation, lock_mode, device_id=None):
             """Capture state at the moment the API call is made."""
             observed_states.append(lock._state)
             return SmartLockModeStatus()
@@ -462,7 +462,7 @@ class TestSecuritasLockActions:
 
         lock.async_schedule_update_ha_state = MagicMock()
 
-        async def capture_state(installation, lock_mode):
+        async def capture_state(installation, lock_mode, device_id=None):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 

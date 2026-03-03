@@ -332,16 +332,22 @@ def graphql_general_status(
     *,
     status: str = "D",
     timestamp: str = "2024-01-01 12:00:00",
+    wifi_connected: bool | None = None,
+    keep_alive_day: int | None = None,
+    confort_message: str | None = None,
 ) -> dict:
     """Status (check_general_status) response."""
-    return {
-        "data": {
-            "xSStatus": {
-                "status": status,
-                "timestampUpdate": timestamp,
-            }
-        }
+    data: dict = {
+        "status": status,
+        "timestampUpdate": timestamp,
     }
+    if wifi_connected is not None:
+        data["wifiConnected"] = wifi_connected
+    if keep_alive_day is not None:
+        data["keepAliveDay"] = keep_alive_day
+    if confort_message is not None:
+        data["confort_message"] = confort_message
+    return {"data": {"xSStatus": data}}
 
 
 def graphql_arm(*, reference_id: str = "ref-arm-123") -> dict:
@@ -534,13 +540,13 @@ def graphql_air_quality(
     }
 
 
-def graphql_lock_current_mode(*, lock_status: str = "2") -> dict:
+def graphql_lock_current_mode(*, lock_status: str = "2", device_id: str = "01") -> dict:
     """xSGetLockCurrentMode response."""
     return {
         "data": {
             "xSGetLockCurrentMode": {
                 "res": "OK",
-                "smartlockInfo": [{"lockStatus": lock_status, "deviceId": "01"}],
+                "smartlockInfo": [{"lockStatus": lock_status, "deviceId": device_id}],
             }
         }
     }

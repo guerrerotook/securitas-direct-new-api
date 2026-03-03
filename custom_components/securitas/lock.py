@@ -24,6 +24,7 @@ from .securitas_direct_new_api import (
     SecuritasDirectError,
     SmartLockMode,
 )
+from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
 
 from .securitas_direct_new_api.dataTypes import Service
 
@@ -89,6 +90,7 @@ class SecuritasLock(lock.LockEntity):
         self._message: str = ""
         self.installation: Installation = installation
         self._attr_extra_state_attributes: dict[str, Any] = {}
+        self._device_id: str = SMARTLOCK_DEVICE_ID
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
         self._update_interval: timedelta = timedelta(
@@ -157,6 +159,8 @@ class SecuritasLock(lock.LockEntity):
         smartlock_status: SmartLockMode = (
             await self.client.session.get_lock_current_mode(self.installation)
         )
+        if smartlock_status.deviceId:
+            self._device_id = smartlock_status.deviceId
         return smartlock_status.lockStatus
 
     @property
@@ -198,7 +202,9 @@ class SecuritasLock(lock.LockEntity):
     async def async_lock(self, **kwargs):
         self.__force_state(LOCK_STATUS_LOCKING)
         try:
-            await self.client.session.change_lock_mode(self.installation, True)
+            await self.client.session.change_lock_mode(
+                self.installation, True, self._device_id
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
@@ -208,7 +214,9 @@ class SecuritasLock(lock.LockEntity):
     async def async_unlock(self, **kwargs):
         self.__force_state(LOCK_STATUS_OPENING)
         try:
-            await self.client.session.change_lock_mode(self.installation, False)
+            await self.client.session.change_lock_mode(
+                self.installation, False, self._device_id
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(err.args)
             return
