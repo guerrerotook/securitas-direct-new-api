@@ -318,58 +318,6 @@ class TestGenerateDeviceId:
         assert a != b
 
 
-# ── _check_errors tests ──────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-class TestCheckErrors:
-    """Tests for ApiManager._check_errors."""
-
-    async def test_invalid_session_error_triggers_relogin(self, api):
-        """Response with 'Invalid session' error triggers re-login."""
-        api.login = AsyncMock()
-        response_text = json.dumps(
-            {"errors": [{"message": "Invalid session. Please, try again later."}]}
-        )
-
-        result = await api._check_errors(response_text)
-
-        assert result is True
-        assert api.authentication_token is None
-        api.login.assert_awaited_once()
-
-    async def test_expired_token_error_triggers_relogin(self, api):
-        """Response with 'Invalid token: Expired' error triggers re-login."""
-        api.login = AsyncMock()
-        response_text = json.dumps({"errors": [{"message": "Invalid token: Expired"}]})
-
-        result = await api._check_errors(response_text)
-
-        assert result is True
-        assert api.authentication_token is None
-        api.login.assert_awaited_once()
-
-    async def test_other_errors_dont_trigger_relogin(self, api):
-        """Other error messages don't trigger re-login."""
-        api.login = AsyncMock()
-        response_text = json.dumps({"errors": [{"message": "Some other error"}]})
-
-        result = await api._check_errors(response_text)
-
-        assert result is False
-        api.login.assert_not_called()
-
-    async def test_no_errors_does_nothing(self, api):
-        """Response without errors field does nothing."""
-        api.login = AsyncMock()
-        response_text = json.dumps({"data": {"test": "ok"}})
-
-        result = await api._check_errors(response_text)
-
-        assert result is False
-        api.login.assert_not_called()
-
-
 # ── _check_capabilities_token tests ──────────────────────────────────────────
 
 

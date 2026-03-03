@@ -255,27 +255,6 @@ class ApiManager:
 
         return response_dict
 
-    async def _check_errors(self, value: str) -> bool:
-        if value is not None:
-            response = json.loads(value)
-            if "errors" in response:
-                for error_item in response["errors"]:
-                    if "message" in error_item:
-                        if (
-                            error_item["message"]
-                            == "Invalid session. Please, try again later."
-                            or error_item["message"] == "Invalid token: Expired"
-                            or error_item["message"]
-                            == "Required request header 'x-installationNumber' for method parameter type String is not present"
-                        ):
-                            self.authentication_token = None
-                            _LOGGER.info("Login is expired. Login again")
-                            await self.login()
-                            return True
-                        else:
-                            _LOGGER.error(error_item["message"])
-        return False
-
     async def _check_capabilities_token(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""
 
