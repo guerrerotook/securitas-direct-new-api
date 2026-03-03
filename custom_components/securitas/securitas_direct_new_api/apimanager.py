@@ -209,6 +209,7 @@ class ApiManager:
                 None,
                 headers,
                 content,
+                http_status=http_status,
             )
 
         try:
@@ -246,11 +247,16 @@ class ApiManager:
                         if isinstance(first, dict)
                         else str(first)
                     )
+                    # Extract HTTP-like status from GraphQL error data
+                    error_status = None
+                    if isinstance(first, dict) and isinstance(first.get("data"), dict):
+                        error_status = first["data"].get("status")
                     raise SecuritasDirectError(
                         message,
                         response_dict,
                         headers,
                         content,
+                        http_status=error_status,
                     )
 
         return response_dict
@@ -385,6 +391,12 @@ class ApiManager:
                 _LOGGER.warning("Transient error during poll, retrying: %s", err)
                 first = False
                 continue
+            except SecuritasDirectError as err:
+                if err.http_status == 409:
+                    _LOGGER.warning("Server busy (409) during poll, retrying: %s", err)
+                    first = False
+                    continue
+                raise
 
             first = False
 

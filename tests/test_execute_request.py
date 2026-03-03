@@ -185,6 +185,73 @@ class TestExecuteRequest:
         ):
             await api._execute_request({"query": "test"}, "xSArmPanel")
 
+    async def test_graphql_error_with_status_sets_http_status(self, api):
+        """GraphQL error with data.status should set http_status on exception."""
+        error_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "alarm-manager.alarm_process_error",
+                        "name": "ApiError",
+                        "data": {"res": "ERROR", "err": "11", "status": 409},
+                        "path": ["xSDisarmPanel"],
+                    }
+                ],
+                "data": {"xSDisarmPanel": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSDisarmPanel")
+
+        assert exc_info.value.http_status == 409
+
+    async def test_graphql_error_without_status_has_none_http_status(self, api):
+        """GraphQL error without data.status should have http_status=None."""
+        error_response = json.dumps(
+            {
+                "errors": [{"message": "Something went wrong"}],
+                "data": {"xSFoo": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSFoo")
+
+        assert exc_info.value.http_status is None
+
+    async def test_http_error_sets_http_status(self, api):
+        """HTTP error responses should set http_status on exception."""
+        response = AsyncMock()
+        response.text = AsyncMock(return_value="Server Error")
+        response.status = 500
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "TestOp")
+
+        assert exc_info.value.http_status == 500
+
     async def test_graphql_errors_list_without_data_key_passes_through(self, api):
         """GraphQL errors-only response (no data key) is returned as-is so callers can handle it."""
         error_response = json.dumps({"errors": [{"message": "Invalid credentials"}]})

@@ -249,7 +249,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             alarm_status = await self.client.update_overview(self.installation)
         except SecuritasDirectError as err:
-            _LOGGER.warning("Error updating alarm status: %s", err.args)
+            _LOGGER.warning(
+                "Error updating alarm status: %s",
+                err.args[0] if err.args else err,
+            )
         else:
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
@@ -325,7 +328,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             return await self.client.session.disarm_alarm(
                 self.installation, "DARM1DARMPERI"
             )
-        except SecuritasDirectError:
+        except SecuritasDirectError as err:
+            if err.http_status == 409:
+                raise
             self._use_multi_step = True
             _LOGGER.info(
                 "Combined disarm (DARM1DARMPERI) not supported by panel, "
@@ -360,7 +365,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
                 self._last_arm_result = result
                 return result
-            except SecuritasDirectError:
+            except SecuritasDirectError as err:
+                if err.http_status == 409:
+                    raise
                 self._use_multi_step = True
                 _LOGGER.info(
                     "Compound arm command (%s) not supported by panel, "
@@ -388,8 +395,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._operation_in_progress = True
                 disarm_status = await self._send_disarm_command()
             except SecuritasDirectError as err:
-                self._notify_error("Securitas: Error disarming", str(err.args))
-                _LOGGER.error(err.args)
+                err_msg = str(err.args[0]) if err.args else str(err)
+                self._notify_error("Securitas: Error disarming", err_msg)
+                _LOGGER.error("Disarm failed: %s", err_msg)
                 self._state = self._last_status
                 self.async_write_ha_state()
                 return
@@ -457,7 +465,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         "Failed to disarm before re-arming (last_status: %s, alarm "
                         "may already be disarmed), continuing with arm: %s",
                         self._last_status,
-                        err.args,
+                        err.args[0] if err.args else err,
                     )
                 else:
                     await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
@@ -471,8 +479,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._notify_arm_exceptions(exc)
                 return
             except SecuritasDirectError as err:
-                _LOGGER.error(err.args)
-                err_msg = str(err.args[0]) if err.args else ""
+                err_msg = str(err.args[0]) if err.args else str(err)
+                _LOGGER.error("Arm failed: %s", err_msg)
                 if "does not exist" in err_msg:
                     body = (
                         "The alarm panel does not support the requested"

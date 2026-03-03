@@ -8,6 +8,10 @@ from typing import Any
 class SecuritasDirectError(Exception):
     """Base class for Securitas Direct errors."""
 
+    def __init__(self, *args, http_status: int | None = None) -> None:
+        super().__init__(*args)
+        self.http_status = http_status
+
 
 class APIError(SecuritasDirectError):
     """Exception raised when API fails."""
