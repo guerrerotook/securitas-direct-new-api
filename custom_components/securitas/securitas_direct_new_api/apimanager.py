@@ -308,9 +308,13 @@ class ApiManager:
                 try:
                     if await self.refresh_token():
                         return
-                    _LOGGER.debug("Refresh token failed, falling back to login")
-                except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Refresh token error, falling back to login")
+                    _LOGGER.warning("Refresh token failed, falling back to login")
+                except (
+                    SecuritasDirectError,
+                    asyncio.TimeoutError,
+                    ClientConnectorError,
+                ) as err:
+                    _LOGGER.warning("Refresh token error, falling back to login: %s", err)
             _LOGGER.debug("Authentication token expired, logging in again")
             await self.login()
 

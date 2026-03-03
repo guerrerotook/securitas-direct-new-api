@@ -220,7 +220,9 @@ class TestCheckAuthenticationToken:
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=Exception("boom"))
+        api.refresh_token = AsyncMock(
+            side_effect=SecuritasDirectError("boom", None)
+        )
         api.login = AsyncMock()
 
         await api._check_authentication_token()

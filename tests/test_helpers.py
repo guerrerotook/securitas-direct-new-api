@@ -164,3 +164,53 @@ class TestPollOperation:
         )
         assert result["res"] == "OK"
         assert check_fn.call_count == 2
+
+
+# ── _check_authentication_token() error handling ────────────────────────────
+
+
+class TestCheckAuthenticationTokenErrorHandling:
+    async def test_falls_back_to_login_on_securitas_error(self, api):
+        """Should fall back to login() when refresh raises SecuritasDirectError."""
+        api.authentication_token = None
+        api.refresh_token_value = "some-refresh-token"
+        api.refresh_token = AsyncMock(
+            side_effect=SecuritasDirectError("refresh failed", None)
+        )
+        api.login = AsyncMock()
+
+        await api._check_authentication_token()
+        api.login.assert_called_once()
+
+    async def test_falls_back_to_login_on_timeout(self, api):
+        """Should fall back to login() when refresh raises asyncio.TimeoutError."""
+        api.authentication_token = None
+        api.refresh_token_value = "some-refresh-token"
+        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.login = AsyncMock()
+
+        await api._check_authentication_token()
+        api.login.assert_called_once()
+
+    async def test_falls_back_to_login_on_connection_error(self, api):
+        """Should fall back to login() when refresh raises ClientConnectorError."""
+        api.authentication_token = None
+        api.refresh_token_value = "some-refresh-token"
+        conn_err = ClientConnectorError(
+            connection_key=MagicMock(), os_error=OSError("fail")
+        )
+        api.refresh_token = AsyncMock(side_effect=conn_err)
+        api.login = AsyncMock()
+
+        await api._check_authentication_token()
+        api.login.assert_called_once()
+
+    async def test_does_not_catch_unexpected_exceptions(self, api):
+        """Should NOT catch unexpected exceptions like ValueError."""
+        api.authentication_token = None
+        api.refresh_token_value = "some-refresh-token"
+        api.refresh_token = AsyncMock(side_effect=ValueError("unexpected"))
+        api.login = AsyncMock()
+
+        with pytest.raises(ValueError, match="unexpected"):
+            await api._check_authentication_token()
