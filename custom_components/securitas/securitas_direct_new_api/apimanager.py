@@ -293,7 +293,9 @@ class ApiManager:
                     asyncio.TimeoutError,
                     ClientConnectorError,
                 ) as err:
-                    _LOGGER.warning("Refresh token error, falling back to login: %s", err)
+                    _LOGGER.warning(
+                        "Refresh token error, falling back to login: %s", err
+                    )
             _LOGGER.debug("Authentication token expired, logging in again")
             await self.login()
 
@@ -338,14 +340,10 @@ class ApiManager:
         """
         data = response.get("data")
         if data is None:
-            raise SecuritasDirectError(
-                f"{field_name}: no data in response", response
-            )
+            raise SecuritasDirectError(f"{field_name}: no data in response", response)
         result = data.get(field_name)
         if result is None:
-            raise SecuritasDirectError(
-                f"{field_name} response is None", response
-            )
+            raise SecuritasDirectError(f"{field_name} response is None", response)
         return result
 
     async def _poll_operation(
@@ -589,9 +587,7 @@ class ApiManager:
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
             if self._decode_auth_token(self.authentication_token) is None:
-                raise SecuritasDirectError(
-                    "Failed to decode authentication token"
-                )
+                raise SecuritasDirectError("Failed to decode authentication token")
         else:
             # Token is null, this is expected for 2FA
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
@@ -1282,5 +1278,7 @@ class ApiManager:
             content, "xSChangeSmartlockModeStatus", installation
         )
 
-        lock_status_data = self._extract_response_data(response, "xSChangeSmartlockModeStatus")
+        lock_status_data = self._extract_response_data(
+            response, "xSChangeSmartlockModeStatus"
+        )
         return lock_status_data

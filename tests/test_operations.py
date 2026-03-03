@@ -530,7 +530,9 @@ class TestDisarmAlarm:
     ):
         mock_execute.return_value = {"data": {"xSDisarmPanel": None}}
 
-        with pytest.raises(SecuritasDirectError, match="xSDisarmPanel response is None"):
+        with pytest.raises(
+            SecuritasDirectError, match="xSDisarmPanel response is None"
+        ):
             await authed_api.disarm_alarm(installation, "DARM1")
 
     async def test_errors_only_response_raises_error(
