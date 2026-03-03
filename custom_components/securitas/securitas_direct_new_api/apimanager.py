@@ -181,10 +181,6 @@ class ApiManager:
             self.uuid,
             self.id_device_indigitall,
         )
-        # _LOGGER.debug("--------------Content---------------")
-        # _LOGGER.debug(content)
-        # _LOGGER.debug("--------------Headers---------------")
-        # _LOGGER.debug(headers)
         try:
             async with self.http_client.post(
                 self.api_url, headers=headers, json=content
@@ -214,11 +210,6 @@ class ApiManager:
             )
 
         try:
-            # error_login: bool = await self._check_errors(response_text)
-            # if error_login:
-            # response_text: str = await self._execute_request(
-            #     content, operation, installation
-            # )
             response_dict = json.loads(response_text)
         except json.JSONDecodeError as err:
             _LOGGER.error("Problems decoding response %s", response_text)
@@ -666,8 +657,6 @@ class ApiManager:
         if "exp" in token:
             installation.capabilities_exp = datetime.fromtimestamp(token["exp"])
 
-        # json_services = json.dumps(raw_data)
-        # result = json.loads(json_services)
         item: dict = {}
         for item in raw_data:
             attribute_list: list[Attribute] = []
