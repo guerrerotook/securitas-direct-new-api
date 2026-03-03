@@ -1,5 +1,7 @@
 """Securitas Direct API implementation."""
 
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta
 import json
