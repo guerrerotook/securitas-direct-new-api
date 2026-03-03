@@ -131,11 +131,37 @@ class TestPollOperation:
         assert check_fn.call_count == 2
 
     async def test_raises_on_non_transient_error(self, api):
-        """Should immediately raise non-transient errors."""
+        """Should immediately raise non-transient errors (no http_status)."""
         check_fn = AsyncMock(side_effect=SecuritasDirectError("bad request", None))
         api.delay_check_operation = 0
 
         with pytest.raises(SecuritasDirectError, match="bad request"):
+            await api._poll_operation(check_fn)
+
+    async def test_retries_on_409_conflict(self, api):
+        """Should retry on SecuritasDirectError with http_status=409 (server busy)."""
+        err_409 = SecuritasDirectError(
+            "alarm-manager.alarm_process_error", http_status=409
+        )
+        check_fn = AsyncMock(
+            side_effect=[
+                err_409,
+                {"res": "OK", "msg": "done"},
+            ]
+        )
+        api.delay_check_operation = 0
+
+        result = await api._poll_operation(check_fn)
+        assert result["res"] == "OK"
+        assert check_fn.call_count == 2
+
+    async def test_raises_on_non_409_securitas_error(self, api):
+        """Should immediately raise SecuritasDirectError with non-409 http_status."""
+        err_500 = SecuritasDirectError("server error", http_status=500)
+        check_fn = AsyncMock(side_effect=err_500)
+        api.delay_check_operation = 0
+
+        with pytest.raises(SecuritasDirectError, match="server error"):
             await api._poll_operation(check_fn)
 
     async def test_timeout_raises(self, api):
