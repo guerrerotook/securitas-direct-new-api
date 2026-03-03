@@ -238,3 +238,36 @@ def test_filter_attached_to_logger():
     finally:
         logger.removeFilter(f)
         logger.removeHandler(handler)
+
+
+def test_filter_on_handler_covers_child_loggers():
+    """Filter on handler redacts records from child loggers (not just the parent).
+
+    Logger-level filters don't apply to child logger records during propagation.
+    The integration attaches the filter to root handlers instead to cover all
+    sub-module loggers (apimanager, alarm_control_panel, etc.).
+    """
+    import io
+
+    f = SensitiveDataFilter()
+    f.update_secret("auth_token", "eyJhbGciOiJIUzI1NiJ9.secret")
+
+    handler = logging.StreamHandler(io.StringIO())
+    handler.setLevel(logging.DEBUG)
+    handler.addFilter(f)
+
+    parent = logging.getLogger("test.securitas.handler_parent")
+    parent.setLevel(logging.DEBUG)
+    parent.addHandler(handler)
+    parent.propagate = False
+
+    child = logging.getLogger("test.securitas.handler_parent.apimanager")
+
+    try:
+        child.debug("Token: eyJhbGciOiJIUzI1NiJ9.secret")
+        output = handler.stream.getvalue()
+        assert "eyJhbGciOiJIUzI1NiJ9.secret" not in output
+        assert "[AUTH_TOKEN]" in output
+    finally:
+        handler.removeFilter(f)
+        parent.removeHandler(handler)

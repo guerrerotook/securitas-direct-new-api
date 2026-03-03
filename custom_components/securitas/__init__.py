@@ -205,9 +205,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN] = {}
 
-    # Set up log sanitization filter
+    # Set up log sanitization filter — must be on handlers, not the logger,
+    # because logger-level filters don't apply to child logger records.
     log_filter = SensitiveDataFilter()
-    logging.getLogger("custom_components.securitas").addFilter(log_filter)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(log_filter)
     hass.data[DOMAIN]["log_filter"] = log_filter
 
     # Register credentials immediately
@@ -286,7 +288,8 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     """Unload a config entry."""
     log_filter = hass.data[DOMAIN].get("log_filter")
     if log_filter:
-        logging.getLogger("custom_components.securitas").removeFilter(log_filter)
+        for handler in logging.getLogger().handlers:
+            handler.removeFilter(log_filter)
 
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
