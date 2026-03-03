@@ -3,6 +3,11 @@
 from datetime import datetime
 
 import jwt
+import pytest
+
+from custom_components.securitas.securitas_direct_new_api.exceptions import (
+    SecuritasDirectError,
+)
 
 from .conftest import make_jwt
 
@@ -40,3 +45,38 @@ class TestDecodeAuthToken:
         """None input should return None gracefully."""
         result = api._decode_auth_token(None)
         assert result is None
+
+
+# ── _extract_response_data() ────────────────────────────────────────────────
+
+
+class TestExtractResponseData:
+    def test_extracts_nested_data(self, api):
+        """Should return response['data'][field_name] when present."""
+        response = {"data": {"xSFoo": {"res": "OK", "msg": ""}}}
+        result = api._extract_response_data(response, "xSFoo")
+        assert result == {"res": "OK", "msg": ""}
+
+    def test_raises_when_data_key_missing(self, api):
+        """Should raise SecuritasDirectError when 'data' key is absent."""
+        response = {"errors": [{"message": "bad"}]}
+        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+            api._extract_response_data(response, "xSFoo")
+
+    def test_raises_when_data_is_none(self, api):
+        """Should raise SecuritasDirectError when response['data'] is None."""
+        response = {"data": None}
+        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+            api._extract_response_data(response, "xSFoo")
+
+    def test_raises_when_field_is_none(self, api):
+        """Should raise SecuritasDirectError when the named field is None."""
+        response = {"data": {"xSFoo": None}}
+        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+            api._extract_response_data(response, "xSFoo")
+
+    def test_raises_when_field_missing(self, api):
+        """Should raise SecuritasDirectError when the named field doesn't exist."""
+        response = {"data": {"xSBar": {"res": "OK"}}}
+        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+            api._extract_response_data(response, "xSFoo")
