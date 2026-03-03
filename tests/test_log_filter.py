@@ -202,3 +202,27 @@ def test_add_installation_in_format_args():
     f.filter(record)
     assert "9876543" not in str(record.args)
     assert "***6543" in str(record.args)
+
+
+def test_filter_attached_to_logger():
+    """Verify the filter can be attached to a logger and intercepts records."""
+    import io
+
+    f = SensitiveDataFilter()
+    f.update_secret("password", "hunter2")
+
+    logger = logging.getLogger("test.securitas.filter_attach")
+    logger.addFilter(f)
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler(io.StringIO())
+    handler.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+
+    try:
+        logger.debug("Password is hunter2")
+        output = handler.stream.getvalue()
+        assert "hunter2" not in output
+        assert "[PASSWORD]" in output
+    finally:
+        logger.removeFilter(f)
+        logger.removeHandler(handler)

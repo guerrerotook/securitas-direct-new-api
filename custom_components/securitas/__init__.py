@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 
+from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
     ALARM_STATUS_POLL_DELAY,
     ApiDomains,
@@ -203,6 +204,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         need_sign_in = True
 
     hass.data[DOMAIN] = {}
+
+    # Set up log sanitization filter
+    log_filter = SensitiveDataFilter()
+    logging.getLogger("custom_components.securitas").addFilter(log_filter)
+    hass.data[DOMAIN]["log_filter"] = log_filter
+
+    # Register credentials immediately
+    log_filter.update_secret("username", config[CONF_USERNAME])
+    log_filter.update_secret("password", config[CONF_PASSWORD])
+
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:
         client: SecuritasHub = SecuritasHub(
@@ -273,6 +284,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    log_filter = hass.data[DOMAIN].get("log_filter")
+    if log_filter:
+        logging.getLogger("custom_components.securitas").removeFilter(log_filter)
+
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )
@@ -365,6 +380,7 @@ class SecuritasHub:
         self.lang: str = ApiDomains().get_language(self.country)
         self.hass: HomeAssistant = hass
         self.services: dict[int, list[Service]] = {1: []}
+        self.log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get("log_filter")
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
