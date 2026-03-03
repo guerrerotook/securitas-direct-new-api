@@ -6,7 +6,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -15,7 +15,7 @@ import logging
 
 from . import CONF_INSTALLATION_KEY, DOMAIN, SecuritasDirectDevice, SecuritasHub
 from .constants import SentinelName
-from .securitas_direct_new_api import SecuritasDirectError
+from .securitas_direct_new_api import Installation, SecuritasDirectError, SStatus
 from .securitas_direct_new_api.dataTypes import AirQuality, Sentinel, Service
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,6 +67,28 @@ async def async_setup_entry(
                             air_quality, sentinel_data, service, client, device
                         )
                     )
+    # Add diagnostic sensors for each installation
+    for device in securitas_devices:
+        try:
+            status: SStatus = await client.session.check_general_status(
+                device.installation
+            )
+        except SecuritasDirectError:
+            _LOGGER.warning(
+                "Could not get diagnostic data for installation %s",
+                device.installation.number,
+            )
+            continue
+
+        if status.keep_alive_day is not None:
+            sensors.append(
+                DiagnosticKeepAliveDay(device.installation, client, status)
+            )
+        if status.confort_message is not None:
+            sensors.append(
+                DiagnosticComfortMessage(device.installation, client, status)
+            )
+
     async_add_entities(sensors, True)
 
 
@@ -194,3 +216,73 @@ class SentinelAirQuality(SensorEntity):
             for key, value in sensor_attributes.items()
             if key in _AIR_QUALITY_INDEX_SENSOR_ATTRIBUTES_MAP
         }
+
+
+class DiagnosticKeepAliveDay(SensorEntity):
+    """Keep-alive day diagnostic sensor."""
+
+    def __init__(
+        self,
+        installation: Installation,
+        client: SecuritasHub,
+        status: SStatus,
+    ) -> None:
+        self._attr_name = f"Keep Alive Day {installation.alias}"
+        self._attr_unique_id = (
+            f"securitas_direct.{installation.number}_keep_alive_day"
+        )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_native_value = status.keep_alive_day
+        self._installation = installation
+        self._client = client
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"securitas_direct.{installation.number}")},
+            manufacturer="Securitas Direct",
+            model=installation.panel,
+            name=installation.alias,
+            hw_version=installation.type,
+        )
+
+    async def async_update(self) -> None:
+        try:
+            status = await self._client.session.check_general_status(
+                self._installation
+            )
+            self._attr_native_value = status.keep_alive_day
+        except SecuritasDirectError as err:
+            _LOGGER.error("Error updating keep alive day: %s", err)
+
+
+class DiagnosticComfortMessage(SensorEntity):
+    """Comfort message diagnostic sensor."""
+
+    def __init__(
+        self,
+        installation: Installation,
+        client: SecuritasHub,
+        status: SStatus,
+    ) -> None:
+        self._attr_name = f"Comfort {installation.alias}"
+        self._attr_unique_id = (
+            f"securitas_direct.{installation.number}_comfort_message"
+        )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_native_value = status.confort_message
+        self._installation = installation
+        self._client = client
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"securitas_direct.{installation.number}")},
+            manufacturer="Securitas Direct",
+            model=installation.panel,
+            name=installation.alias,
+            hw_version=installation.type,
+        )
+
+    async def async_update(self) -> None:
+        try:
+            status = await self._client.session.check_general_status(
+                self._installation
+            )
+            self._attr_native_value = status.confort_message
+        except SecuritasDirectError as err:
+            _LOGGER.error("Error updating comfort message: %s", err)

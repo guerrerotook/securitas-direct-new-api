@@ -78,3 +78,75 @@ class TestCheckGeneralStatusDiagnostics:
         assert result.wifi_connected is None
         assert result.keep_alive_day is None
         assert result.confort_message is None
+
+
+from homeassistant.const import EntityCategory
+
+from custom_components.securitas import SecuritasHub
+from custom_components.securitas.binary_sensor import SecuritasWifiConnected
+from custom_components.securitas.sensor import (
+    DiagnosticKeepAliveDay,
+    DiagnosticComfortMessage,
+)
+
+
+class TestDiagnosticEntities:
+    def test_wifi_connected_entity_properties(self):
+        installation = Installation(
+            number="123456", alias="Home", panel="SDVFAST", type="PLUS"
+        )
+        client = MagicMock(spec=SecuritasHub)
+        client.session = AsyncMock()
+        status = SStatus(
+            status="D",
+            timestampUpdate="2024-01-01",
+            wifi_connected=True,
+            keep_alive_day=42,
+            confort_message="Stable",
+        )
+
+        entity = SecuritasWifiConnected(installation, client, status)
+
+        assert entity._attr_entity_category == EntityCategory.DIAGNOSTIC
+        assert entity._attr_unique_id == "securitas_direct.123456_wifi_connected"
+        assert entity.is_on is True
+
+    def test_keep_alive_day_entity_properties(self):
+        installation = Installation(
+            number="123456", alias="Home", panel="SDVFAST", type="PLUS"
+        )
+        client = MagicMock(spec=SecuritasHub)
+        client.session = AsyncMock()
+        status = SStatus(
+            status="D",
+            timestampUpdate="2024-01-01",
+            wifi_connected=True,
+            keep_alive_day=42,
+            confort_message="Stable",
+        )
+
+        entity = DiagnosticKeepAliveDay(installation, client, status)
+
+        assert entity._attr_entity_category == EntityCategory.DIAGNOSTIC
+        assert entity._attr_unique_id == "securitas_direct.123456_keep_alive_day"
+        assert entity._attr_native_value == 42
+
+    def test_comfort_message_entity_properties(self):
+        installation = Installation(
+            number="123456", alias="Home", panel="SDVFAST", type="PLUS"
+        )
+        client = MagicMock(spec=SecuritasHub)
+        client.session = AsyncMock()
+        status = SStatus(
+            status="D",
+            timestampUpdate="2024-01-01",
+            wifi_connected=True,
+            keep_alive_day=42,
+            confort_message="Stable",
+        )
+
+        entity = DiagnosticComfortMessage(installation, client, status)
+
+        assert entity._attr_entity_category == EntityCategory.DIAGNOSTIC
+        assert entity._attr_unique_id == "securitas_direct.123456_comfort_message"
+        assert entity._attr_native_value == "Stable"
