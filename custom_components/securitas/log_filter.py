@@ -26,6 +26,16 @@ class SensitiveDataFilter(logging.Filter):
         # Maps secret key -> current raw value (for replacement on update)
         self._keys: dict[str, str] = {}
 
+    def add_installation(self, number: str) -> None:
+        """Register an installation number for partial masking."""
+        if not number:
+            return
+        if len(number) <= 4:
+            masked = "***"
+        else:
+            masked = "***" + number[-4:]
+        self._secrets[number] = masked
+
     def update_secret(self, key: str, value: str | None) -> None:
         """Register or update a sensitive value for redaction."""
         # Remove old value for this key if it exists
