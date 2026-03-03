@@ -35,7 +35,15 @@ The core API client. All communication with Securitas happens through GraphQL PO
 **Request execution:** Every API call goes through `_execute_request()`, which:
 1. Builds HTTP headers including `app`, `auth` (JSON with JWT hash, user, country), `X-APOLLO-OPERATION-NAME`, and optionally `numinst`/`panel`/`X-Capabilities` for installation-scoped requests
 2. POSTs the GraphQL payload as JSON
-3. Parses the response and raises `SecuritasDirectError` on connection or API errors. Note: `_execute_request` passes through GraphQL error responses (no top-level `data` key) without raising — callers like `arm_alarm()` and `disarm_alarm()` check for this and raise `SecuritasDirectError` with the error message
+3. Parses the response and raises `SecuritasDirectError` on connection or API errors. For HTTP errors (status >= 400), `http_status` is set on the exception. For GraphQL-level errors (HTTP 200 but errors in payload), the `data.status` field from the first error is extracted and set as `http_status` — this is how 409 "server busy" errors are surfaced, since the Securitas API returns them as HTTP 200 with a GraphQL error containing `"data": {"status": 409}`
+
+**DRY helpers:** Three internal helpers reduce code duplication across API methods:
+
+- `_decode_auth_token(token_str)` — Decodes a JWT (HS256, no signature verification), updates `authentication_token_exp` from the `exp` claim. Returns the decoded claims dict or `None` on failure. Used by `login()`, `refresh_token()`, and `validate_device()`.
+
+- `_extract_response_data(response, field_name)` — Extracts `response["data"][field_name]`, raising `SecuritasDirectError` if the data is missing or `None`. Used by all operation methods to validate responses consistently.
+
+- `_poll_operation(check_fn, *, timeout, continue_on_msg)` — Polls `check_fn()` in a loop until the result is no longer `"WAIT"`. Handles transient errors (connection errors, timeouts, 409 "server busy") by retrying. Raises `TimeoutError` after `timeout` seconds (default 60). Used by arm, disarm, status check, exception fetch, and lock operations.
 
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Securitas mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
@@ -47,9 +55,23 @@ The core API client. All communication with Securitas happens through GraphQL PO
 
 3. **2FA device validation** (`validate_device()`) — For new devices: calls `validate_device()` which returns a list of phone numbers. The user picks one, `send_otp()` sends the SMS, then `validate_device()` is called again with the OTP code to complete registration.
 
-**Token lifecycle:** Before every API operation, `_check_authentication_token()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Similarly, `_check_capabilities_token()` checks a per-installation capabilities JWT that's obtained from `get_all_services()`.
+**Token lifecycle:** Before every API operation, `_check_authentication_token()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Errors during refresh are caught with specific exception types (`SecuritasDirectError`, `asyncio.TimeoutError`, `ClientConnectorError`) rather than bare `except`. Similarly, `_check_capabilities_token()` checks a per-installation capabilities JWT that's obtained from `get_all_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
 
-**Polling pattern:** Arm, disarm, status-check, and exception-fetch operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint in a loop (sleeping `delay_check_operation` seconds between attempts) until the response changes from `"WAIT"` to `"OK"` or a timeout is reached. All polling loops use the same dynamic `max_retries` formula: `max(10, round(30 / delay_check_operation))`, giving a consistent ~30-second total timeout.
+**Polling pattern:** Arm, disarm, status-check, and exception-fetch operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint via `_poll_operation()` (sleeping `delay_check_operation` seconds between attempts) until the response changes from `"WAIT"` to a final state or a wall-clock timeout (default 60 seconds) is reached. Transient errors during polling — connection failures, timeouts, and 409 "server busy" responses — are automatically retried rather than failing the operation.
+
+### Log sanitization (`log_filter.py`)
+
+`SensitiveDataFilter` is a `logging.Filter` attached to all root logger handlers during integration setup. It redacts sensitive values (auth tokens, refresh tokens, usernames, passwords, OTP data) from log messages and arguments before they reach any handler (console, file, remote).
+
+**How it works:**
+- `update_secret(key, value)` registers a raw secret value with its redaction label (e.g. `"auth_token"` → `[AUTH_TOKEN]`). Updating a key replaces the old value.
+- `add_installation(number)` registers an installation number for partial masking (last 4 digits visible, e.g. `123456` → `***3456`).
+- The `filter()` method scans `record.msg` and `record.args` (including nested dicts/lists/tuples), replacing any known secret with its label.
+- Registration happens in `ApiManager` via `_register_secret()` — called whenever tokens are obtained or refreshed (login, refresh, validate_device).
+- Credentials (username, password) are registered at setup time in `async_setup_entry()`.
+- The filter is removed from handlers on `async_unload_entry()`.
+
+**Error notifications:** When operations fail, error notifications shown to the user use only the short error message (`err.args[0]`), never the full error tuple which could contain headers, tokens, or response bodies.
 
 ### Country routing (`domains.py`)
 
@@ -78,7 +100,7 @@ Four mapping tables connect these:
 - `STATE_TO_COMMAND` — `SecuritasState` to API command string (e.g. `TOTAL` -> `"ARM1"`)
 - `PROTO_TO_STATE` — single-letter protocol response code to `SecuritasState` (e.g. `"T"` -> `TOTAL`)
 - `COMPOUND_COMMAND_STEPS` — commands known to fail on some panels, mapped to multi-step fallbacks (e.g. `"ARMNIGHT1PERI1"` -> `("ARMNIGHT1", "PERI1")`, `"DARM1DARMPERI"` -> `("DARM1",)`)
-- `PERI_ARMED_PROTO_CODES` — protocol codes where the perimeter is armed (`{"E", "B", "C", "A"}`), used to decide whether a combined disarm command is needed
+- `PERI_ARMED_PROTO_CODES` — protocol codes where the perimeter is armed (`{"E", "B", "C", "A"}`)
 
 #### Compound command auto-detection
 
@@ -94,12 +116,12 @@ Most compound commands work on all known panels, but two are rejected by SDVFAST
 Only the two failing commands are listed in `COMPOUND_COMMAND_STEPS`. For these, the integration detects support at runtime:
 
 1. **First compound command**: Try the single call (e.g. `ARMNIGHT1PERI1`)
-2. **If it fails** (`SecuritasDirectError`): Set `_use_multi_step = True`, execute the fallback steps (`ARMNIGHT1` then `PERI1`), and log the switch
+2. **If it fails** (`SecuritasDirectError` with non-409 status): Set `_use_multi_step = True`, execute the fallback steps (`ARMNIGHT1` then `PERI1`), and log the switch. A 409 error (server busy) is re-raised rather than triggering the fallback, since 409 means "busy" not "unsupported".
 3. **Subsequent commands**: Skip the single-call attempt and go straight to multi-step
 
-The `_use_multi_step` flag is per-installation (resets on HA restart). Commands not in the table (`ARMDAY1PERI1`, `ARM1PERI1`) are always sent as-is regardless of the flag.
+The `_use_multi_step` flag is per-installation (resets on HA restart) and is **only set by arm failures**. Disarm failures do not set this flag, since a disarm-specific failure (e.g. `DARM1DARMPERI` rejected) shouldn't disable compound arm commands (`ARMNIGHT1PERI1`, etc.). Commands not in the table (`ARMDAY1PERI1`, `ARM1PERI1`) are always sent as-is regardless of the flag.
 
-For disarm, an additional check applies: `DARM1DARMPERI` is only attempted when the perimeter is actually armed (`_last_proto_code` in `PERI_ARMED_PROTO_CODES`). If only the interior is armed, `DARM1` is sent directly.
+For disarm, `DARM1DARMPERI` is always attempted when perimeter is configured (`_has_peri`), regardless of the current alarm state. This ensures both interior and perimeter are disarmed even during an in-progress arm operation where `_last_proto_code` may be stale. If an arm command has already set `_use_multi_step`, disarm skips straight to `DARM1`.
 
 Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Custom Bypass` button is hidden unless a mapping is configured for it.
 
@@ -119,15 +141,18 @@ Dataclasses for API responses. The most important ones:
 ### Exceptions (`exceptions.py`)
 
 ```
-SecuritasDirectError          Base class
-├── APIError                  API failures
-└── LoginError                Login failures
-    ├── AuthError             Access denied
-    ├── TokenRefreshError     Token refresh issues
-    └── Login2FAError         2FA required
+SecuritasDirectError              Base class (http_status attribute)
+├── APIError                      API failures
+├── ArmingExceptionError          Open sensors blocking arm (carries force-arm context)
+└── LoginError                    Login failures
+    ├── AuthError                 Access denied
+    ├── TokenRefreshError         Token refresh issues
+    └── Login2FAError             2FA required
 ```
 
-`SecuritasDirectError` is thrown with up to 4 args: `(message, response_dict, headers, content)`. The `login()` method distinguishes between errors that have response data (wrapped in `LoginError` or `Login2FAError`) and connection errors (re-raised as `SecuritasDirectError` to trigger HA's `ConfigEntryNotReady` retry).
+`SecuritasDirectError` is thrown with up to 4 args: `(message, response_dict, headers, content)` and an optional `http_status` keyword argument. The `http_status` attribute carries the HTTP status code (for HTTP errors) or the GraphQL error `data.status` value (e.g. 409 for "server busy"). This allows callers to distinguish transient concurrency errors from permanent failures. The `login()` method distinguishes between errors that have response data (wrapped in `LoginError` or `Login2FAError`) and connection errors (re-raised as `SecuritasDirectError` to trigger HA's `ConfigEntryNotReady` retry).
+
+`ArmingExceptionError` is raised when arming fails due to non-blocking exceptions (e.g. open window/door). It carries `reference_id`, `suid`, and the list of exceptions, providing the context needed to retry with `forceArmingRemoteId`.
 
 ## Integration hub layer
 
@@ -195,13 +220,15 @@ The main entity. One `SecuritasAlarm` per installation.
    c. _send_arm_command(command, **force_params):
       - Not in COMPOUND_COMMAND_STEPS? → single API call
       - In table and _use_multi_step is False? → try single call first
-        - SecuritasDirectError? → set _use_multi_step = True, fall back to steps
+        - SecuritasDirectError with http_status 409? → re-raise (server busy)
+        - SecuritasDirectError (other)? → set _use_multi_step = True, fall back
       - In table and _use_multi_step is True? → send steps sequentially
       - Force params passed to all steps (both interior and perimeter sensors
         can trigger ArmingExceptionError; API ignores irrelevant force params)
       - _last_arm_result tracks the most recent successful step for partial state
    d. On error:
-      - Notify user via persistent notification
+      - Notify user via persistent notification (short message only, never
+        full error tuples with headers/tokens)
       - If a prior step succeeded (_last_arm_result), reflect that partial state
       - If no steps succeeded, revert to _last_status
    e. update_status_alarm() with the final response
@@ -212,13 +239,14 @@ The main entity. One `SecuritasAlarm` per installation.
 1. _check_code(code) — raises ServiceValidationError if wrong
 2. __force_state(DISARMING)
 3. _send_disarm_command():
-   a. If no perimeter config OR perimeter not armed (_last_proto_code not in
-      PERI_ARMED_PROTO_CODES) → send DARM1 directly
-   b. If _use_multi_step is True → send DARM1 directly (known that combined
-      doesn't work on this panel)
-   c. Otherwise → try DARM1DARMPERI; on SecuritasDirectError, set
-      _use_multi_step = True and retry with DARM1
-   d. Error on all attempts? → _notify_error(), restore _last_status
+   a. If no perimeter config (_has_peri is False) → send DARM1 directly
+   b. If _use_multi_step is True (set by a prior arm failure) → send DARM1
+      directly (known that combined doesn't work on this panel)
+   c. Otherwise → try DARM1DARMPERI; on SecuritasDirectError:
+      - If http_status == 409 → re-raise (server busy, not unsupported)
+      - Otherwise → fall back to DARM1 (does NOT set _use_multi_step)
+   d. Error on all attempts? → _notify_error() with short message, restore
+      _last_status
 4. update_status_alarm() with the response
 ```
 
@@ -381,7 +409,7 @@ async_track_time_interval fires every scan_interval seconds
 
 ### Overview
 
-The test suite has 430 tests (400 unit tests + 30 integration tests) achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
+The test suite has 539 tests achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
 
 ```bash
 # Run the full suite
@@ -412,10 +440,12 @@ tests/
 ├── test_config_flow.py      Config flow (setup + 2FA) and options flow
 ├── test_constants.py        SecuritasState enum, mapping tables
 ├── test_domains.py          Country-to-URL routing
-├── test_execute_request.py  HTTP request execution, headers, error handling
+├── test_execute_request.py  HTTP request execution, headers, error handling, http_status
 ├── test_ha_platforms.py     Platform async_setup_entry for all entity types
+├── test_helpers.py          DRY helpers: _poll_operation (409 retry, transient errors)
 ├── test_init.py             Integration setup, SecuritasHub, device info, options
 ├── test_integration.py      Integration tests using MockGraphQLServer (see below)
+├── test_log_filter.py       SensitiveDataFilter: secret redaction, installation masking
 ├── test_operations.py       Arm, disarm, check alarm, polling
 ├── test_services.py         Service discovery, Sentinel, air quality, smart lock
 └── test_smart_lock.py       Lock mode changes, status polling
@@ -532,15 +562,16 @@ Three parallel jobs run on every PR and push to main:
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `__init__.py` | 451 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice` |
+| `__init__.py` | 478 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice`, log filter setup |
 | `config_flow.py` | 362 | Config flow (setup + 2FA) and options flow (settings + mappings) |
-| `alarm_control_panel.py` | 701 | Alarm entity with state mapping, arm/disarm, force arm, PIN validation |
+| `alarm_control_panel.py` | 713 | Alarm entity with state mapping, arm/disarm, force arm, PIN validation |
 | `sensor.py` | 195 | Sentinel temperature, humidity, air quality sensors |
 | `lock.py` | 211 | Smart lock entity |
 | `button.py` | 83 | Manual refresh button |
 | `constants.py` | 21 | `SentinelName` language mapping |
-| `securitas_direct_new_api/apimanager.py` | 1293 | GraphQL API client with auth, polling, all operations |
+| `log_filter.py` | 86 | `SensitiveDataFilter` — log sanitization for secrets |
+| `securitas_direct_new_api/apimanager.py` | 1296 | GraphQL API client with auth, polling, DRY helpers, all operations |
 | `securitas_direct_new_api/const.py` | 100 | `SecuritasState`, command/protocol mappings, defaults |
 | `securitas_direct_new_api/dataTypes.py` | 168 | Response dataclasses |
 | `securitas_direct_new_api/domains.py` | 49 | Country-to-URL routing |
-| `securitas_direct_new_api/exceptions.py` | 25 | Exception hierarchy |
+| `securitas_direct_new_api/exceptions.py` | 53 | Exception hierarchy with `http_status` and `ArmingExceptionError` |
