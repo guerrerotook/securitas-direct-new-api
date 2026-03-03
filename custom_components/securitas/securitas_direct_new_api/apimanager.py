@@ -1,11 +1,16 @@
 """Securitas Direct API implementation."""
 
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timedelta
 import json
 import logging
 import secrets
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from custom_components.securitas.log_filter import SensitiveDataFilter
 from uuid import uuid4
 
 from aiohttp import ClientConnectorError, ClientSession
@@ -78,6 +83,7 @@ class ApiManager:
         uuid: str,
         id_device_indigitall: str,
         delay_check_operation: int = 2,
+        log_filter: SensitiveDataFilter | None = None,
     ) -> None:
         """Create the object."""
         self.username = username
@@ -107,6 +113,17 @@ class ApiManager:
         self.device_type = ""
         self.device_version = "10.102.0"
         self.apollo_operation_id: str = secrets.token_hex(64)
+        self._log_filter = log_filter
+
+    def _register_secret(self, key: str, value: str | None) -> None:
+        """Register a secret with the log filter if available."""
+        if self._log_filter and value:
+            self._log_filter.update_secret(key, value)
+
+    def _register_installation(self, installation: Installation) -> None:
+        """Register an installation number with the log filter."""
+        if self._log_filter and installation.number:
+            self._log_filter.add_installation(installation.number)
 
     async def _execute_request(
         self, content, operation: str, installation: Optional[Installation] = None
@@ -166,10 +183,6 @@ class ApiManager:
             self.uuid,
             self.id_device_indigitall,
         )
-        # _LOGGER.debug("--------------Content---------------")
-        # _LOGGER.debug(content)
-        # _LOGGER.debug("--------------Headers---------------")
-        # _LOGGER.debug(headers)
         try:
             async with self.http_client.post(
                 self.api_url, headers=headers, json=content
@@ -199,11 +212,6 @@ class ApiManager:
             )
 
         try:
-            # error_login: bool = await self._check_errors(response_text)
-            # if error_login:
-            # response_text: str = await self._execute_request(
-            #     content, operation, installation
-            # )
             response_dict = json.loads(response_text)
         except json.JSONDecodeError as err:
             _LOGGER.error("Problems decoding response %s", response_text)
@@ -358,6 +366,8 @@ class ApiManager:
 
         if otp_succeed:
             self.authentication_otp_challenge_value = (auth_otp_hash, sms_code)
+            self._register_secret("otp_hash", auth_otp_hash)
+            self._register_secret("otp_token", sms_code)
         try:
             response = await self._execute_request(content, "mkValidateDevice")
             self.authentication_otp_challenge_value = None
@@ -378,6 +388,7 @@ class ApiManager:
         if validate_data is None:
             raise SecuritasDirectError("xSValidateDevice response is None", response)
         self.authentication_token = validate_data["hash"]
+        self._register_secret("auth_token", self.authentication_token)
         try:
             assert self.authentication_token is not None
             token = jwt.decode(
@@ -394,6 +405,7 @@ class ApiManager:
                 self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
         if validate_data.get("refreshToken"):
             self.refresh_token_value = validate_data["refreshToken"]
+            self._register_secret("refresh_token", self.refresh_token_value)
         return (None, None)
 
     async def refresh_token(self) -> bool:
@@ -429,6 +441,7 @@ class ApiManager:
 
         if refresh_data.get("hash"):
             self.authentication_token = refresh_data["hash"]
+            self._register_secret("auth_token", self.authentication_token)
             try:
                 assert self.authentication_token is not None
                 token = jwt.decode(
@@ -446,6 +459,7 @@ class ApiManager:
             return False
         if refresh_data.get("refreshToken"):
             self.refresh_token_value = refresh_data["refreshToken"]
+            self._register_secret("refresh_token", self.refresh_token_value)
 
         return True
 
@@ -522,9 +536,11 @@ class ApiManager:
 
         if login_data.get("refreshToken"):
             self.refresh_token_value = login_data["refreshToken"]
+            self._register_secret("refresh_token", self.refresh_token_value)
 
         if login_data["hash"] is not None:
             self.authentication_token = login_data["hash"]
+            self._register_secret("auth_token", self.authentication_token)
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
             try:
@@ -536,7 +552,7 @@ class ApiManager:
                 )
             except jwt.exceptions.DecodeError as err:
                 raise SecuritasDirectError(
-                    f"Failed to decode authentication token {self.authentication_token}"
+                    "Failed to decode authentication token"
                 ) from err
 
             if "exp" in token:
@@ -605,6 +621,7 @@ class ApiManager:
             "variables": {"numinst": installation.number, "uuid": self.uuid},
             "query": "query Srv($numinst: String!, $uuid: String) {\n  xSSrv(numinst: $numinst, uuid: $uuid) {\n    res\n    msg\n    language\n    installation {\n      numinst\n      role\n      alias\n      status\n      panel\n      sim\n      instIbs\n      services {\n        idService\n        active\n        visible\n        bde\n        isPremium\n        codOper\n        request\n        minWrapperVersion\n        unprotectActive\n        unprotectDeviceStatus\n        instDate\n        genericConfig {\n          total\n          attributes {\n            key\n            value\n          }\n        }\n        attributes {\n          attributes {\n            name\n            value\n            active\n          }\n        }\n      }\n      configRepoUser {\n        alarmPartitions {\n          id\n          enterStates\n          leaveStates\n        }\n      }\n      capabilities\n    }\n  }\n}",
         }
+        self._register_installation(installation)
         response = await self._execute_request(content, "Srv")
 
         installation_data = (response.get("data") or {}).get("xSSrv") or {}
@@ -634,15 +651,11 @@ class ApiManager:
                 options={"verify_signature": False},
             )
         except jwt.exceptions.DecodeError as err:
-            raise SecuritasDirectError(
-                f"Failed to decode capabilities token {installation.capabilities}"
-            ) from err
+            raise SecuritasDirectError("Failed to decode capabilities token") from err
 
         if "exp" in token:
             installation.capabilities_exp = datetime.fromtimestamp(token["exp"])
 
-        # json_services = json.dumps(raw_data)
-        # result = json.loads(json_services)
         item: dict = {}
         for item in raw_data:
             attribute_list: list[Attribute] = []
