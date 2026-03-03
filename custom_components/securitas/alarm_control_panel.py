@@ -57,6 +57,7 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
     AlarmControlPanelState.ARMED_AWAY: "map_away",
     AlarmControlPanelState.ARMED_NIGHT: "map_night",
     AlarmControlPanelState.ARMED_CUSTOM_BYPASS: "map_custom",
+    AlarmControlPanelState.ARMED_VACATION: "map_vacation",
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -449,6 +450,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 AlarmControlPanelState.ARMED_AWAY,
                 AlarmControlPanelState.ARMED_NIGHT,
                 AlarmControlPanelState.ARMED_CUSTOM_BYPASS,
+                AlarmControlPanelState.ARMED_VACATION,
             ):
                 try:
                     await self._send_disarm_command()
@@ -679,6 +681,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.__force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
+    async def async_alarm_arm_vacation(self, code: str | None = None):
+        """Send arm vacation command."""
+        if self._check_code_for_arm_if_required(code):
+            self.__force_state(AlarmControlPanelState.ARMING)
+            await self.set_arm_state(AlarmControlPanelState.ARMED_VACATION)
+
     @property
     def alarm_state(self) -> AlarmControlPanelState | None:  # type: ignore[override]
         """Return the state of the alarm."""
@@ -699,4 +707,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             features |= AlarmControlPanelEntityFeature.ARM_NIGHT
         if AlarmControlPanelState.ARMED_CUSTOM_BYPASS in self._command_map:
             features |= AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
+        if AlarmControlPanelState.ARMED_VACATION in self._command_map:
+            features |= AlarmControlPanelEntityFeature.ARM_VACATION
         return features
