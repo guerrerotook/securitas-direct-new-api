@@ -101,7 +101,7 @@ The `_use_multi_step` flag is per-installation (resets on HA restart). Commands 
 
 For disarm, an additional check applies: `DARM1DARMPERI` is only attempted when the perimeter is actually armed (`_last_proto_code` in `PERI_ARMED_PROTO_CODES`). If only the interior is armed, `DARM1` is sent directly.
 
-Home Assistant has only four alarm buttons (Home, Away, Night, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Custom Bypass` button is hidden unless a mapping is configured for it.
+Home Assistant has five alarm buttons (Home, Away, Night, Custom Bypass, Vacation). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Custom Bypass` and `Vacation` buttons are hidden unless a mapping is configured for them.
 
 If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Securitas state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
@@ -319,6 +319,7 @@ Step 2 (mappings): Alarm state mappings
   - Map Away button → Securitas state
   - Map Night button → Securitas state
   - Map Custom Bypass button → Securitas state
+  - Map Vacation button → Securitas state
   Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
 ```
 
