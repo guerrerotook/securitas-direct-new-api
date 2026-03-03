@@ -650,9 +650,7 @@ class ApiManager:
                 options={"verify_signature": False},
             )
         except jwt.exceptions.DecodeError as err:
-            raise SecuritasDirectError(
-                "Failed to decode capabilities token"
-            ) from err
+            raise SecuritasDirectError("Failed to decode capabilities token") from err
 
         if "exp" in token:
             installation.capabilities_exp = datetime.fromtimestamp(token["exp"])

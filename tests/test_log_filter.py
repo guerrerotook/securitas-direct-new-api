@@ -165,9 +165,13 @@ def test_add_installation_masks_number():
     f.add_installation("1234567")
 
     record = logging.LogRecord(
-        name="test", level=logging.DEBUG, pathname="", lineno=0,
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
         msg="No services for 1234567",
-        args=(), exc_info=None,
+        args=(),
+        exc_info=None,
     )
     f.filter(record)
     assert "1234567" not in record.msg
@@ -180,9 +184,13 @@ def test_add_installation_short_number():
     f.add_installation("1234")
 
     record = logging.LogRecord(
-        name="test", level=logging.DEBUG, pathname="", lineno=0,
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
         msg="Installation 1234",
-        args=(), exc_info=None,
+        args=(),
+        exc_info=None,
     )
     f.filter(record)
     assert "1234" not in record.msg
@@ -195,9 +203,13 @@ def test_add_installation_in_format_args():
     f.add_installation("9876543")
 
     record = logging.LogRecord(
-        name="test", level=logging.DEBUG, pathname="", lineno=0,
+        name="test",
+        level=logging.DEBUG,
+        pathname="",
+        lineno=0,
         msg="No services for %s",
-        args=("9876543",), exc_info=None,
+        args=("9876543",),
+        exc_info=None,
     )
     f.filter(record)
     assert "9876543" not in str(record.args)

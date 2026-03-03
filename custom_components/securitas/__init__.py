@@ -380,7 +380,9 @@ class SecuritasHub:
         self.lang: str = ApiDomains().get_language(self.country)
         self.hass: HomeAssistant = hass
         self.services: dict[int, list[Service]] = {1: []}
-        self.log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get("log_filter")
+        self.log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get(
+            "log_filter"
+        )
         self.session: ApiManager = ApiManager(
             domain_config[CONF_USERNAME],
             domain_config[CONF_PASSWORD],
