@@ -263,7 +263,7 @@ class TestPeriOptions:
 # ── STD_DEFAULTS / PERI_DEFAULTS ────────────────────────────────────────────
 
 
-EXPECTED_DEFAULT_KEYS = {"map_home", "map_away", "map_night", "map_custom"}
+EXPECTED_DEFAULT_KEYS = {"map_home", "map_away", "map_night", "map_custom", "map_vacation"}
 
 
 class TestStdDefaults:
@@ -282,6 +282,7 @@ class TestStdDefaults:
         assert STD_DEFAULTS["map_away"] == "total"
         assert STD_DEFAULTS["map_night"] == "partial_night"
         assert STD_DEFAULTS["map_custom"] == "not_used"
+        assert STD_DEFAULTS["map_vacation"] == "not_used"
 
 
 class TestPeriDefaults:
@@ -300,6 +301,7 @@ class TestPeriDefaults:
         assert PERI_DEFAULTS["map_away"] == "total_peri"
         assert PERI_DEFAULTS["map_night"] == "partial_night"
         assert PERI_DEFAULTS["map_custom"] == "peri_only"
+        assert PERI_DEFAULTS["map_vacation"] == "not_used"
 
     def test_peri_defaults_differ_from_std_for_peri_states(self):
         """PERI_DEFAULTS should use peri-enhanced states for away and custom."""

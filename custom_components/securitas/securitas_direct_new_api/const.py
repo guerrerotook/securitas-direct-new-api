@@ -115,6 +115,7 @@ STD_DEFAULTS: dict[str, str] = {
     "map_away": SecuritasState.TOTAL.value,
     "map_night": SecuritasState.PARTIAL_NIGHT.value,
     "map_custom": SecuritasState.NOT_USED.value,
+    "map_vacation": SecuritasState.NOT_USED.value,
 }
 
 PERI_DEFAULTS: dict[str, str] = {
@@ -122,4 +123,5 @@ PERI_DEFAULTS: dict[str, str] = {
     "map_away": SecuritasState.TOTAL_PERI.value,
     "map_night": SecuritasState.PARTIAL_NIGHT.value,
     "map_custom": SecuritasState.PERI_ONLY.value,
+    "map_vacation": SecuritasState.NOT_USED.value,
 }
