@@ -3,11 +3,13 @@
 import asyncio
 from collections import OrderedDict
 import logging
+from pathlib import Path
 from uuid import uuid4
 
 from aiohttp import ClientSession
 import voluptuous as vol
 
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import (
@@ -275,6 +277,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+            await _async_register_card(hass)
             return True
     else:
         config = add_device_information(entry.data.copy())
@@ -287,6 +290,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         )
         return False
+
+
+_CARD_URL = f"/securitas_direct/securitas-alarm-card.js"
+_CARD_REGISTERED = False
+
+
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Register the Securitas alarm custom Lovelace card as a static resource.
+
+    Serves the JS file from inside the integration package so no manual
+    file copying or Lovelace resource entry is required.  The path is
+    idempotent — HA silently ignores duplicate registrations.
+    """
+    global _CARD_REGISTERED  # noqa: PLW0603
+    if _CARD_REGISTERED:
+        return
+    card_path = Path(__file__).parent / "www" / "securitas-alarm-card.js"
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(_CARD_URL, str(card_path), cache_headers=True)]
+    )
+    hass.components.frontend.add_extra_js_url(hass, _CARD_URL)
+    _CARD_REGISTERED = True
+    _LOGGER.debug("Securitas alarm card registered at %s", _CARD_URL)
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
