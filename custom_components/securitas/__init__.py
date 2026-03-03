@@ -292,6 +292,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         config_entry, PLATFORMS
     )
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
+    hass.data[DOMAIN].pop("log_filter", None)
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
     return unload_ok

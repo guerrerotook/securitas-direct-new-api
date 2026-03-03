@@ -52,7 +52,7 @@ class SensitiveDataFilter(logging.Filter):
 
     def _redact(self, text: str) -> str:
         """Replace all known secret values in a string."""
-        for secret, label in self._secrets.items():
+        for secret, label in list(self._secrets.items()):
             text = text.replace(secret, label)
         return text
 
