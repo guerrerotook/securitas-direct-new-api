@@ -365,6 +365,56 @@ class ApiManager:
             )
         return result
 
+    async def _poll_operation(
+        self,
+        check_fn,
+        *,
+        timeout: float = 60.0,
+        continue_on_msg: str | None = None,
+    ) -> dict[str, Any]:
+        """Poll check_fn until result is no longer WAIT.
+
+        Args:
+            check_fn: Async callable that returns a dict with at least 'res' key.
+            timeout: Wall-clock timeout in seconds (default 60).
+            continue_on_msg: If set, also continue polling when response 'msg'
+                matches this value (used by disarm for error_no_response_to_request).
+
+        Returns:
+            The final poll result dict.
+
+        Raises:
+            TimeoutError: If wall-clock timeout is exceeded.
+            SecuritasDirectError: If a non-transient error occurs.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout
+        result: dict[str, Any] = {}
+        first = True
+
+        while True:
+            if not first and asyncio.get_event_loop().time() > deadline:
+                raise TimeoutError(
+                    f"Poll operation timed out after {timeout}s, "
+                    f"last response: {result}"
+                )
+            await asyncio.sleep(self.delay_check_operation)
+            try:
+                result = await check_fn()
+            except (ClientConnectorError, asyncio.TimeoutError) as err:
+                _LOGGER.warning("Transient error during poll, retrying: %s", err)
+                first = False
+                continue
+
+            first = False
+
+            if result.get("res") == "WAIT":
+                continue
+            if continue_on_msg and result.get("msg") == continue_on_msg:
+                continue
+            break
+
+        return result
+
     async def logout(self):
         """Logout."""
         content = {
@@ -891,30 +941,22 @@ class ApiManager:
 
         reference_id = arm_data["referenceId"]
 
-        count = 1
-        raw_data: dict[str, Any] = {}
-        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
-        while (count == 1) or (raw_data.get("res") == "WAIT"):
-            if count > max_retries:
-                _LOGGER.warning(
-                    "Arm status check exceeded max retries (%d), last response: %s",
-                    max_retries,
-                    raw_data,
-                )
-                break
-            await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_arm_status(
+        count = 0
+
+        async def _check():
+            nonlocal count
+            count += 1
+            data = await self._check_arm_status(
                 installation,
                 reference_id,
                 command,
                 count,
                 force_arming_remote_id,
             )
-
             # Detect non-blocking exception that allows forcing
-            error = raw_data.get("error")
+            error = data.get("error")
             if (
-                raw_data.get("res") == "ERROR"
+                data.get("res") == "ERROR"
                 and error
                 and error.get("type") == "NON_BLOCKING"
                 and error.get("allowForcing")
@@ -925,8 +967,9 @@ class ApiManager:
                     installation, error_ref, error_suid
                 )
                 raise ArmingExceptionError(error_ref, error_suid, exceptions)
+            return data
 
-            count += 1
+        raw_data = await self._poll_operation(_check)
 
         self.protom_response = raw_data["protomResponse"]
         return ArmStatus(
@@ -1061,28 +1104,22 @@ class ApiManager:
 
         reference_id = disarm_data["referenceId"]
 
-        count = 1
-        raw_data: dict[str, Any] = {}
-        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
-        while (count == 1) or (
-            raw_data.get("res") == "WAIT"
-            or raw_data.get("msg") == "alarm-manager.error_no_response_to_request"
-        ):
-            if count > max_retries:
-                _LOGGER.warning(
-                    "Disarm status check exceeded max retries (%d), last response: %s",
-                    max_retries,
-                    raw_data,
-                )
-                break
-            await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_disarm_status(
+        count = 0
+
+        async def _check():
+            nonlocal count
+            count += 1
+            return await self._check_disarm_status(
                 installation,
                 reference_id,
                 command,
                 count,
             )
-            count = count + 1
+
+        raw_data = await self._poll_operation(
+            _check,
+            continue_on_msg="alarm-manager.error_no_response_to_request",
+        )
 
         if raw_data.get("protomResponse"):
             self.protom_response = raw_data["protomResponse"]
@@ -1213,16 +1250,18 @@ class ApiManager:
 
         reference_id = lock_data["referenceId"]
 
-        count = 1
-        raw_data: dict[str, Any] = {}
-        while (count == 1) or raw_data.get("res") == "WAIT":
-            await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_change_lock_mode(
+        count = 0
+
+        async def _check():
+            nonlocal count
+            count += 1
+            return await self._check_change_lock_mode(
                 installation,
                 reference_id,
                 count,
             )
-            count = count + 1
+
+        raw_data = await self._poll_operation(_check)
 
         await asyncio.sleep(self.delay_check_operation * LOCK_MODE_SETTLE_MULTIPLIER)
         self.protom_response = raw_data["protomResponse"]

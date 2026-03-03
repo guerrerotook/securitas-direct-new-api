@@ -1,7 +1,10 @@
 """Tests for ApiManager helper methods."""
 
+import asyncio
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
+from aiohttp import ClientConnectorError
 import jwt
 import pytest
 
@@ -80,3 +83,84 @@ class TestExtractResponseData:
         response = {"data": {"xSBar": {"res": "OK"}}}
         with pytest.raises(SecuritasDirectError, match="xSFoo"):
             api._extract_response_data(response, "xSFoo")
+
+
+# ── _poll_operation() ────────────────────────────────────────────────────────
+
+
+class TestPollOperation:
+    async def test_returns_result_on_first_non_wait(self, api):
+        """Should return immediately when check_fn returns non-WAIT result."""
+        check_fn = AsyncMock(return_value={"res": "OK", "msg": "done"})
+        api.delay_check_operation = 0
+
+        result = await api._poll_operation(check_fn)
+        assert result == {"res": "OK", "msg": "done"}
+        assert check_fn.call_count == 1
+
+    async def test_polls_until_non_wait(self, api):
+        """Should keep polling while result is WAIT, then return final result."""
+        check_fn = AsyncMock(
+            side_effect=[
+                {"res": "WAIT", "msg": ""},
+                {"res": "WAIT", "msg": ""},
+                {"res": "OK", "msg": "done"},
+            ]
+        )
+        api.delay_check_operation = 0
+
+        result = await api._poll_operation(check_fn)
+        assert result["res"] == "OK"
+        assert check_fn.call_count == 3
+
+    async def test_retries_on_transient_error(self, api):
+        """Should catch transient errors and continue polling."""
+        conn_err = ClientConnectorError(
+            connection_key=MagicMock(), os_error=OSError("connection reset")
+        )
+        check_fn = AsyncMock(
+            side_effect=[
+                conn_err,
+                {"res": "OK", "msg": "done"},
+            ]
+        )
+        api.delay_check_operation = 0
+
+        result = await api._poll_operation(check_fn)
+        assert result["res"] == "OK"
+        assert check_fn.call_count == 2
+
+    async def test_raises_on_non_transient_error(self, api):
+        """Should immediately raise non-transient errors."""
+        check_fn = AsyncMock(
+            side_effect=SecuritasDirectError("bad request", None)
+        )
+        api.delay_check_operation = 0
+
+        with pytest.raises(SecuritasDirectError, match="bad request"):
+            await api._poll_operation(check_fn)
+
+    async def test_timeout_raises(self, api):
+        """Should raise TimeoutError when wall-clock timeout is exceeded."""
+        check_fn = AsyncMock(return_value={"res": "WAIT", "msg": ""})
+        api.delay_check_operation = 0
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            await api._poll_operation(check_fn, timeout=0.05)
+
+    async def test_also_polls_on_specific_message(self, api):
+        """Should continue polling when continue_on_msg matches response msg."""
+        check_fn = AsyncMock(
+            side_effect=[
+                {"res": "ERROR", "msg": "alarm-manager.error_no_response_to_request"},
+                {"res": "OK", "msg": "done"},
+            ]
+        )
+        api.delay_check_operation = 0
+
+        result = await api._poll_operation(
+            check_fn,
+            continue_on_msg="alarm-manager.error_no_response_to_request",
+        )
+        assert result["res"] == "OK"
+        assert check_fn.call_count == 2
