@@ -132,9 +132,7 @@ class TestPollOperation:
 
     async def test_raises_on_non_transient_error(self, api):
         """Should immediately raise non-transient errors."""
-        check_fn = AsyncMock(
-            side_effect=SecuritasDirectError("bad request", None)
-        )
+        check_fn = AsyncMock(side_effect=SecuritasDirectError("bad request", None))
         api.delay_check_operation = 0
 
         with pytest.raises(SecuritasDirectError, match="bad request"):
