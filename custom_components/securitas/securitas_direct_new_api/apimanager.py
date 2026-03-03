@@ -1018,7 +1018,7 @@ class ApiManager:
             "  }\n}\n"
         )
         count = 1
-        max_retries = 10
+        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
         data: dict[str, Any] = {}
         while count <= max_retries:
             content = {
@@ -1042,7 +1042,9 @@ class ApiManager:
                 break
             await asyncio.sleep(self.delay_check_operation)
             count += 1
-        _LOGGER.warning("Failed to fetch arming exceptions: %s", data)
+        _LOGGER.warning(
+            "Failed to fetch arming exceptions after %d attempts: %s", count, data
+        )
         return []
 
     async def disarm_alarm(
