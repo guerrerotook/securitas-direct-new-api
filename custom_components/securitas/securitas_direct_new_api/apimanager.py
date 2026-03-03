@@ -328,6 +328,26 @@ class ApiManager:
             + str(current.microsecond)
         )
 
+    def _decode_auth_token(self, token_str: str | None) -> dict | None:
+        """Decode a JWT auth token and update the token expiry.
+
+        Returns the decoded claims dict, or None on failure.
+        """
+        if not token_str:
+            return None
+        try:
+            decoded = jwt.decode(
+                token_str,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
+            )
+        except jwt.exceptions.DecodeError:
+            _LOGGER.warning("Failed to decode authentication token")
+            return None
+        if "exp" in decoded:
+            self.authentication_token_exp = datetime.fromtimestamp(decoded["exp"])
+        return decoded
+
     async def logout(self):
         """Logout."""
         content = {
@@ -389,20 +409,7 @@ class ApiManager:
             raise SecuritasDirectError("xSValidateDevice response is None", response)
         self.authentication_token = validate_data["hash"]
         self._register_secret("auth_token", self.authentication_token)
-        try:
-            assert self.authentication_token is not None
-            token = jwt.decode(
-                self.authentication_token,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
-        except jwt.exceptions.DecodeError:
-            _LOGGER.warning(
-                "Failed to decode authentication token after device validation"
-            )
-        else:
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
+        self._decode_auth_token(self.authentication_token)
         if validate_data.get("refreshToken"):
             self.refresh_token_value = validate_data["refreshToken"]
             self._register_secret("refresh_token", self.refresh_token_value)
@@ -442,18 +449,8 @@ class ApiManager:
         if refresh_data.get("hash"):
             self.authentication_token = refresh_data["hash"]
             self._register_secret("auth_token", self.authentication_token)
-            try:
-                assert self.authentication_token is not None
-                token = jwt.decode(
-                    self.authentication_token,
-                    algorithms=["HS256"],
-                    options={"verify_signature": False},
-                )
-            except jwt.exceptions.DecodeError:
-                _LOGGER.warning("Failed to decode refreshed authentication token")
+            if self._decode_auth_token(self.authentication_token) is None:
                 return False
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
         else:
             return False
@@ -543,20 +540,10 @@ class ApiManager:
             self._register_secret("auth_token", self.authentication_token)
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
-            try:
-                assert self.authentication_token is not None
-                token = jwt.decode(
-                    self.authentication_token,
-                    algorithms=["HS256"],
-                    options={"verify_signature": False},
-                )
-            except jwt.exceptions.DecodeError as err:
+            if self._decode_auth_token(self.authentication_token) is None:
                 raise SecuritasDirectError(
                     "Failed to decode authentication token"
-                ) from err
-
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
+                )
         else:
             # Token is null, this is expected for 2FA
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
