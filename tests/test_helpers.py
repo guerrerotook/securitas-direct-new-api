@@ -214,3 +214,38 @@ class TestCheckAuthenticationTokenErrorHandling:
 
         with pytest.raises(ValueError, match="unexpected"):
             await api._check_authentication_token()
+
+
+# ── logout() token cleanup ──────────────────────────────────────────────────
+
+
+class TestLogoutTokenCleanup:
+    async def test_clears_tokens_on_successful_logout(self, api, mock_execute):
+        """Logout should clear all stored tokens."""
+        api.authentication_token = "some-token"
+        api.refresh_token_value = "some-refresh"
+        api.authentication_token_exp = datetime.now()
+        api.login_timestamp = 12345
+
+        mock_execute.return_value = {"data": {"xSLogout": True}}
+        await api.logout()
+
+        assert api.authentication_token is None
+        assert api.refresh_token_value == ""
+        assert api.authentication_token_exp == datetime.min
+        assert api.login_timestamp == 0
+
+    async def test_clears_tokens_even_on_failed_logout(self, api, mock_execute):
+        """Tokens should be cleared even if the logout API call fails."""
+        api.authentication_token = "some-token"
+        api.refresh_token_value = "some-refresh"
+        api.authentication_token_exp = datetime.now()
+        api.login_timestamp = 12345
+
+        mock_execute.side_effect = SecuritasDirectError("logout failed", None)
+
+        with pytest.raises(SecuritasDirectError):
+            await api.logout()
+
+        assert api.authentication_token is None
+        assert api.refresh_token_value == ""
