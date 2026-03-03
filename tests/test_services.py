@@ -11,6 +11,7 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     Installation,
     Sentinel,
     Service,
+    SmartLockMode,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
@@ -618,3 +619,24 @@ class TestCheckAlarmStatus:
         assert result.status == "ARM1"
         assert result.InstallationNumer == "123456"
         assert result.protomResponse == "PROT_RESP"
+
+
+# ── Dataclass field tests ────────────────────────────────────────────────────
+
+
+class TestDataclassFields:
+    def test_smart_lock_mode_has_device_id(self):
+        mode = SmartLockMode(res="OK", lockStatus="2", deviceId="02")
+        assert mode.deviceId == "02"
+
+    def test_smart_lock_mode_device_id_defaults_empty(self):
+        mode = SmartLockMode(res="OK", lockStatus="2")
+        assert mode.deviceId == ""
+
+    def test_sentinel_has_zone(self):
+        sentinel = Sentinel(alias="Room", air_quality="", humidity=50, temperature=22, zone="JZ01")
+        assert sentinel.zone == "JZ01"
+
+    def test_sentinel_zone_defaults_empty(self):
+        sentinel = Sentinel(alias="Room", air_quality="", humidity=50, temperature=22)
+        assert sentinel.zone == ""

@@ -129,6 +129,7 @@ class Sentinel:
     air_quality: str
     humidity: int
     temperature: int
+    zone: str = ""
 
 
 @dataclass
@@ -158,6 +159,7 @@ class SmartLock:
 class SmartLockMode:
     res: str | None = None
     lockStatus: str = ""
+    deviceId: str = ""
 
 
 @dataclass
