@@ -555,29 +555,26 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             sensor_list = "\n".join(
                 f"- {e.get('alias', 'unknown')}" for e in exc.exceptions
             )
-            short_details = ", ".join(
-                e.get("alias", "unknown") for e in exc.exceptions
-            )
+            short_details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
         else:
             sensor_list = "- (unknown sensor)"
             short_details = "open sensor"
 
+        title = "Securitas: Arm blocked — open sensor(s)"
         persistent_message = (
             f"Arming was blocked because the following sensor(s) are open:\n"
             f"{sensor_list}\n\n"
             f"To arm anyway, call the **securitas.force_arm** service, "
             f"or tap **Force Arm** on your mobile notification."
         )
-        mobile_message = (
-            f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
-        )
+        mobile_message = f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
 
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
                 service="create",
                 service_data={
-                    "title": "Securitas: Arm blocked — open sensor(s)",
+                    "title": title,
                     "message": persistent_message,
                     "notification_id": self._arming_exception_notification_id,
                 },
@@ -592,7 +589,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     domain="notify",
                     service=notify_group,
                     service_data={
-                        "title": "Securitas: Arm blocked — open sensor(s)",
+                        "title": title,
                         "message": mobile_message,
                         "data": {
                             "actions": [
