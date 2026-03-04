@@ -204,6 +204,8 @@ The integration ships with a custom Lovelace card (`securitas-alarm-card`) that 
 
 ### Setup
 
+The card is registered automatically when the integration loads — no manual file copying or Lovelace resource configuration required.
+
 To add the card to your dashboard, click **Add Card → Search for "Securitas Alarm Card"** and pick your alarm panel entity from the dropdown.
 
 ### Badge
