@@ -463,7 +463,7 @@ class ApiManager:
             if len(err.args) > 1 and err.args[1] is not None:
                 try:
                     return self._extract_otp_data(err.args[1]["errors"][0]["data"])
-                except (KeyError, IndexError, TypeError):
+                except KeyError, IndexError, TypeError:
                     pass
             raise
 

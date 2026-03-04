@@ -119,7 +119,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             list_index = int(index_str)
             if 0 <= list_index < len(otp_phones):
                 phone_index = otp_phones[list_index].id
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             for phone_item in otp_phones:
                 if phone_item.phone in selected_phone_key:
                     phone_index = phone_item.id
