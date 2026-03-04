@@ -278,11 +278,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
             # Serve the custom alarm card JS automatically
-            card_url = "/securitas_panel/securitas-alarm-card.js"
-            url_manager = hass.data.get("frontend_extra_module_url")
-            if hass.http and (
-                url_manager is None or card_url not in url_manager.urls
-            ):
+            if hass.http:
                 await hass.http.async_register_static_paths(
                     [
                         StaticPathConfig(
@@ -292,7 +288,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         )
                     ]
                 )
-                frontend.add_extra_js_url(hass, card_url)
+                frontend.add_extra_js_url(
+                    hass, "/securitas_panel/securitas-alarm-card.js"
+                )
 
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             return True

@@ -5,7 +5,7 @@
  *
  * Features:
  *  - Reads `supported_features` from the entity — only shows arm buttons
- *    for modes that are actually configured (Away, Home, Night, Custom)
+ *    for modes that are actually configured (Away, Home, Night, Vacation, Custom)
  *  - PIN / code support: numeric keypad for digit codes, text input for
  *    alphanumeric codes; respects `code_arm_required` and always asks for
  *    code on Disarm when a code is configured
@@ -258,7 +258,7 @@ class SecuritasAlarmCard extends HTMLElement {
     const availableArmActions = ARM_ACTIONS.filter(a => features & a.feature);
     const isArmed   = !INACTIVE_STATES.has(state);
     // Show Disarm during arming/pending too — alarm is already committed
-    const canDisarm = isArmed || state === "arming" || state === "pending";
+    const canDisarm = isArmed || state === "arming" || state === "pending" || state === "triggered";
     const canArm    = state === "disarmed";
 
     this.shadowRoot.innerHTML = `
@@ -330,7 +330,6 @@ class SecuritasAlarmCard extends HTMLElement {
 
   // ── PIN entry section ───────────────────────────────────────────────────────
   _renderPin(codeFormat, lang) {
-    const masked = "●".repeat(this._pin.length) || " ";
     const actionLabel = this._pendingAction?.labelKey
       ? _t(lang, this._pendingAction.labelKey)
       : (this._pendingAction?.label || "");
