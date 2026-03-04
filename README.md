@@ -227,7 +227,7 @@ If your installation includes smart door locks, the integration creates lock ent
 - **Securitas calls about suspicious activity** — If you have **Check alarm panel** enabled, Securitas may notice the periodic status checks in your account. You can disable this option to use server-side status instead (less accurate but fewer requests).
 - **Alarm shows wrong state after using the Securitas app** — This happens when **Check alarm panel** is disabled. The integration only sees the last server-side status, which may not reflect changes made via the app.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
-- **2FA issues** — If 2FA fails, remove and re-add the integration. You will be prompted for a new SMS code.
+- **2FA issues** — If 2FA fails, remove and re-add the integration. You will be prompted for a new SMS code. If the error persists, try creating a new user via the Securitas/Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using the new credentials in Home Assistant.
 
 ## Reporting Issues
 
