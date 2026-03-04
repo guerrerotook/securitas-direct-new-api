@@ -1953,6 +1953,72 @@ class TestCompoundArmCommands:
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
         assert alarm._use_multi_step is True
 
+    async def test_arm1peri1_fallback(self):
+        """ARM1PERI1 falls back to ARM1 + PERI1 on panel rejection."""
+        alarm = make_alarm(has_peri=True)  # map_away = total_peri → ARM1PERI1
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        calls = []
+
+        async def track_arm(installation, command, **kwargs):
+            calls.append(command)
+            if command == "ARM1PERI1":
+                raise SecuritasDirectError("does not exist")
+            proto = "T" if command == "ARM1" else "A"
+            return ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse=proto,
+                protomResponseData="",
+            )
+
+        alarm.client.session.arm_alarm = track_arm
+
+        await alarm.async_alarm_arm_away()
+
+        assert calls == ["ARM1PERI1", "ARM1", "PERI1"]
+        assert alarm._use_multi_step is True
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+    async def test_armday1peri1_fallback(self):
+        """ARMDAY1PERI1 falls back to ARMDAY1 + PERI1 on panel rejection."""
+        config = {
+            "PERI_alarm": True,
+            "map_home": SecuritasState.PARTIAL_DAY_PERI.value,
+            "map_away": PERI_DEFAULTS["map_away"],
+            "map_night": PERI_DEFAULTS["map_night"],
+            "map_custom": PERI_DEFAULTS["map_custom"],
+            "scan_interval": 120,
+        }
+        alarm = make_alarm(config=config)
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        calls = []
+
+        async def track_arm(installation, command, **kwargs):
+            calls.append(command)
+            if command == "ARMDAY1PERI1":
+                raise SecuritasDirectError("does not exist")
+            proto = "P" if command == "ARMDAY1" else "B"
+            return ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse=proto,
+                protomResponseData="",
+            )
+
+        alarm.client.session.arm_alarm = track_arm
+
+        await alarm.async_alarm_arm_home()
+
+        assert calls == ["ARMDAY1PERI1", "ARMDAY1", "PERI1"]
+        assert alarm._use_multi_step is True
+        assert alarm._state == AlarmControlPanelState.ARMED_HOME
+
 
 # ===========================================================================
 # Dynamic disarm command (based on current state and auto-detection)
@@ -2185,8 +2251,8 @@ class TestDynamicDisarm:
         assert disarm_calls == ["DARM1DARMPERI", "DARM1"]
         # Disarm does NOT set _use_multi_step — only arm failures should
         assert alarm._use_multi_step is False
-        # ARM1PERI1 is not in COMPOUND_COMMAND_STEPS (accepted by all panels),
-        # so it is sent as a single command regardless of _use_multi_step.
+        # ARM1PERI1 is in COMPOUND_COMMAND_STEPS but _use_multi_step is False,
+        # so the compound command is tried first and succeeds.
         assert alarm.client.session.arm_alarm.call_count == 1
         assert alarm.client.session.arm_alarm.call_args[0][1] == "ARM1PERI1"
 

@@ -334,7 +334,6 @@ class TestCompoundCommandSteps:
         assert "ARM1PERI1" in COMPOUND_COMMAND_STEPS
         assert "ARMDAY1PERI1" in COMPOUND_COMMAND_STEPS
         assert "ARMNIGHT1PERI1" in COMPOUND_COMMAND_STEPS
-        assert "DARM1DARMPERI" in COMPOUND_COMMAND_STEPS
 
     def test_disarm_compound_present(self):
         assert "DARM1DARMPERI" in COMPOUND_COMMAND_STEPS
