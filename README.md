@@ -5,7 +5,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 ## Features
 
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
-- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Custom, Vacation) to any Securitas alarm mode.
+- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Securitas alarm mode.
 - **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you and lets you force-arm via mobile notification, the `securitas.force_arm` service, or the custom alarm card.
 - **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
