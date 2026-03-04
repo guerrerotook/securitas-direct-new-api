@@ -682,7 +682,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.__force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
-
     async def async_alarm_arm_home(self, code: str | None = None):
         """Send arm home command."""
         if self._check_code_for_arm_if_required(code):
