@@ -224,6 +224,11 @@ If your installation includes smart door locks, the integration creates lock ent
 
 ## Troubleshooting
 
+- **HTTP 403 errors / rate limiting** — Securitas uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries once automatically, but if you see repeated 403 errors in the logs:
+  - **Increase the update interval** — Go to **Settings → Integrations → Securitas Direct → Configure** and increase the **Update scan interval** (default: 120 seconds). Try 180 or 300 seconds.
+  - **Increase the arm/disarm poll delay** — The **Delay to check arming and disarming operations** (default: 2 seconds) controls how frequently the integration polls during arm/disarm operations. Increasing this to 4–5 seconds reduces request bursts.
+  - **Disable Check alarm panel** — This cuts the number of requests roughly in half by reading the last known status from the Securitas server instead of querying the physical panel.
+  - If you have **multiple installations** on one account, each one polls independently, multiplying the request rate.
 - **Securitas calls about suspicious activity** — If you have **Check alarm panel** enabled, Securitas may notice the periodic status checks in your account. You can disable this option to use server-side status instead (less accurate but fewer requests).
 - **Alarm shows wrong state after using the Securitas app** — This happens when **Check alarm panel** is disabled. The integration only sees the last server-side status, which may not reflect changes made via the app.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
