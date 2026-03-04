@@ -178,7 +178,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     def __force_state(self, state: str) -> None:
         self._last_status = self._state
         self._state = state
-        self.async_schedule_update_ha_state()
+        if self.hass is not None:
+            self.async_schedule_update_ha_state()
 
     def _notify_error(self, title: str, message: str) -> None:
         """Notify user with persistent notification."""
@@ -239,6 +240,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
 
     async def async_update_status(self, now=None) -> None:
         """Update the status of the alarm."""
+        if self.hass is None:
+            return
         if self._operation_in_progress:
             _LOGGER.debug("Skipping status poll - arm/disarm operation in progress")
             return

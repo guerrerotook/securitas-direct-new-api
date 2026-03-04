@@ -259,3 +259,22 @@ class TestAsyncSetupEntry:
 
         # Second positional arg or keyword arg should be True
         assert async_add_entities.call_args[0][1] is True
+
+
+# ===========================================================================
+# hass-is-None guard tests (issue #323)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestHassNoneGuardsButton:
+    """Verify button entity bails out when hass is None (after removal)."""
+
+    async def test_async_press_skips_when_hass_is_none(self):
+        button = make_button()
+        button.hass = None
+
+        # Should not raise or call any API methods
+        await button.async_press()
+
+        button.client.session.check_alarm.assert_not_called()
