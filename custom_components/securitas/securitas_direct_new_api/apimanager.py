@@ -222,7 +222,10 @@ class ApiManager:
                         http_status=http_status,
                     )
                 retry_after = response.headers.get("Retry-After")
-                delay = int(retry_after) if retry_after else 2
+                try:
+                    delay = int(retry_after) if retry_after else 2
+                except (ValueError, TypeError):
+                    delay = 2
                 _LOGGER.warning(
                     "HTTP 403 from Securitas API for '%s', retrying in %ds",
                     operation,

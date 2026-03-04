@@ -2,7 +2,7 @@
 
 import json
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientConnectorError
@@ -326,7 +326,12 @@ class TestExecuteRequest:
 
         api.http_client.post = MagicMock(side_effect=lambda *a, **kw: _make_cm())
 
-        result = await api._execute_request({"query": "test"}, "TestOp")
+        with patch(
+            "custom_components.securitas.securitas_direct_new_api.apimanager.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            result = await api._execute_request({"query": "test"}, "TestOp")
+            mock_sleep.assert_awaited_once_with(2)
         assert result == {"data": {"test": "ok"}}
         assert call_count == 2
 
@@ -342,8 +347,12 @@ class TestExecuteRequest:
         cm.__aexit__ = AsyncMock(return_value=False)
         api.http_client.post = MagicMock(return_value=cm)
 
-        with pytest.raises(SecuritasDirectError, match="HTTP 403"):
-            await api._execute_request({"query": "test"}, "TestOp")
+        with patch(
+            "custom_components.securitas.securitas_direct_new_api.apimanager.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            with pytest.raises(SecuritasDirectError, match="HTTP 403"):
+                await api._execute_request({"query": "test"}, "TestOp")
 
     async def test_http_403_waf_block_skips_retry(self, api):
         """Incapsula WAF block (HTML with _Incapsula_Resource) skips retry."""
@@ -391,7 +400,12 @@ class TestExecuteRequest:
 
         api.http_client.post = MagicMock(side_effect=lambda *a, **kw: _make_cm())
 
-        result = await api._execute_request({"query": "test"}, "TestOp")
+        with patch(
+            "custom_components.securitas.securitas_direct_new_api.apimanager.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            result = await api._execute_request({"query": "test"}, "TestOp")
+            mock_sleep.assert_awaited_once_with(5)
         assert result == {"data": {"ok": True}}
         assert call_count == 2
 
