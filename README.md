@@ -187,7 +187,13 @@ target:
 
 The integration ships with a custom Lovelace card (`securitas-alarm-card`) that is purpose-built for Securitas Direct. It goes beyond the standard HA alarm panel card by integrating the force-arm flow directly into the dashboard.
 
-![Securitas Alarm Card states](./docs/images/securitas-alarm-card.png)
+| Disarmed | Armed (Home) | All Modes |
+|:---:|:---:|:---:|
+| ![Disarmed](./docs/images/card-disarmed.png) | ![Armed Home](./docs/images/card-armed-home.png) | ![All Modes](./docs/images/card-all-modes.png) |
+
+| PIN Keypad | Force Arm |
+|:---:|:---:|
+| ![PIN Keypad](./docs/images/card-pin.png) | ![Force Arm](./docs/images/card-force-arm.png) |
 
 ### Features
 
