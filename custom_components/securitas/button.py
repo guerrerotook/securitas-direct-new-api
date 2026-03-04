@@ -58,6 +58,8 @@ class SecuritasRefreshButton(ButtonEntity):
 
     async def async_press(self) -> None:
         """Update alarm status when button pressed."""
+        if self.hass is None:
+            return
         try:
             reference_id = await self.client.session.check_alarm(self.installation)
             await asyncio.sleep(ALARM_STATUS_POLL_DELAY)

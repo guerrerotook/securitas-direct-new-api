@@ -148,6 +148,7 @@ class TestSentinelTemperature:
         sensor = SentinelTemperature(
             make_sentinel(temp=22), service, client, make_device()
         )
+        sensor.hass = MagicMock()
         assert sensor._attr_native_value == 22
 
         updated_sentinel = make_sentinel(temp=30)
@@ -212,6 +213,7 @@ class TestSentinelHumidity:
         sensor = SentinelHumidity(
             make_sentinel(humidity=45), service, client, make_device()
         )
+        sensor.hass = MagicMock()
         assert sensor._attr_native_value == 45
 
         updated_sentinel = make_sentinel(humidity=60)
@@ -254,6 +256,7 @@ class TestSentinelAirQuality:
         sensor = SentinelAirQuality(
             air_quality, make_sentinel(), service, client, make_device()
         )
+        sensor.hass = MagicMock()
         assert sensor._attr_native_value == "Good"
 
         updated_air_quality = make_air_quality(value=40, message="Poor")
@@ -542,3 +545,67 @@ class TestSecuritasLockRemoval:
 
         # Should not raise
         await lock.async_will_remove_from_hass()
+
+
+# ===========================================================================
+# hass-is-None guard tests (issue #323)
+# ===========================================================================
+
+
+class TestHassNoneGuards:
+    """Verify entities bail out when hass is None (after removal)."""
+
+    async def test_lock_update_status_skips_when_hass_is_none(self):
+        lock = make_lock()
+        lock.hass = None
+        lock.client.session.get_lock_current_mode = AsyncMock()
+
+        await lock.async_update_status()
+
+        lock.client.session.get_lock_current_mode.assert_not_awaited()
+
+    def test_lock_force_state_skips_schedule_when_hass_is_none(self):
+        lock = make_lock()
+        lock.async_schedule_update_ha_state = MagicMock()
+        lock.hass = None
+
+        lock._SecuritasLock__force_state("1")
+
+        assert lock._state == "1"
+        lock.async_schedule_update_ha_state.assert_not_called()
+
+    async def test_temperature_update_skips_when_hass_is_none(self):
+        client = make_client()
+        sensor = SentinelTemperature(
+            make_sentinel(temp=22), make_service(), client, make_device()
+        )
+        sensor.hass = None
+        client.session.get_sentinel_data = AsyncMock()
+
+        await sensor.async_update()
+
+        client.session.get_sentinel_data.assert_not_awaited()
+
+    async def test_humidity_update_skips_when_hass_is_none(self):
+        client = make_client()
+        sensor = SentinelHumidity(
+            make_sentinel(humidity=45), make_service(), client, make_device()
+        )
+        sensor.hass = None
+        client.session.get_sentinel_data = AsyncMock()
+
+        await sensor.async_update()
+
+        client.session.get_sentinel_data.assert_not_awaited()
+
+    async def test_air_quality_update_skips_when_hass_is_none(self):
+        client = make_client()
+        sensor = SentinelAirQuality(
+            make_air_quality(), make_sentinel(), make_service(), client, make_device()
+        )
+        sensor.hass = None
+        client.session.get_air_quality_data = AsyncMock()
+
+        await sensor.async_update()
+
+        client.session.get_air_quality_data.assert_not_awaited()
