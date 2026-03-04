@@ -254,7 +254,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     DOMAIN, context={"source": SOURCE_IMPORT}, data=config
                 )
             )
-            _LOGGER.error("Could not log in to Securitas %s", err.args)
+            _LOGGER.error(
+                "Could not log in to Securitas: %s",
+                err.args[0] if err.args else err,
+            )
             return False
         except SecuritasDirectError as err:
             _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
@@ -473,7 +476,10 @@ class SecuritasHub:
             try:
                 status = await self.session.check_general_status(installation)
             except SecuritasDirectError as err:
-                _LOGGER.warning("Error checking general status: %s", err.args)
+                _LOGGER.warning(
+                    "Error checking general status: %s",
+                    err.args[0] if err.args else err,
+                )
 
             return CheckAlarmStatus(
                 status.status or "",
@@ -492,7 +498,9 @@ class SecuritasHub:
                 installation, reference_id
             )
         except SecuritasDirectError as err:
-            _LOGGER.error(err.args)
+            _LOGGER.error(
+                "Error checking alarm status: %s", err.args[0] if err.args else err
+            )
 
         return alarm_status
 
