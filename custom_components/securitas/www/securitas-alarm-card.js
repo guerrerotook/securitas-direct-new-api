@@ -27,17 +27,19 @@ const FEATURE = {
   ARM_AWAY: 2,
   ARM_NIGHT: 4,
   ARM_CUSTOM_BYPASS: 16,
+  ARM_VACATION: 32,
 };
 
 // ── Translations ─────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
   en: {
     disarmed: "Disarmed", armed_away: "Armed Away", armed_home: "Armed Home",
-    armed_night: "Armed Night", armed_custom: "Armed Custom",
+    armed_night: "Armed Night", armed_vacation: "Armed Vacation",
+    armed_custom: "Armed Custom",
     arming: "Arming\u2026", pending: "Pending", triggered: "TRIGGERED",
     unavailable: "Unavailable", unknown: "Unknown",
     arm_away: "Arm Away", arm_home: "Arm Home", arm_night: "Arm Night",
-    arm_custom: "Arm Custom", disarm: "Disarm",
+    arm_vacation: "Arm Vacation", arm_custom: "Arm Custom", disarm: "Disarm",
     force_arm: "Force Arm", cancel: "Cancel",
     open_sensors: "Open sensor(s) \u2014 arm anyway?",
     enter_pin: "Enter PIN to {action}", enter_code: "Enter code to {action}",
@@ -50,11 +52,12 @@ const TRANSLATIONS = {
   },
   es: {
     disarmed: "Desarmado", armed_away: "Armado (fuera)", armed_home: "Armado (casa)",
-    armed_night: "Armado (noche)", armed_custom: "Armado (personalizado)",
+    armed_night: "Armado (noche)", armed_vacation: "Armado (vacaciones)",
+    armed_custom: "Armado (personalizado)",
     arming: "Armando\u2026", pending: "Pendiente", triggered: "ACTIVADA",
     unavailable: "No disponible", unknown: "Desconocido",
     arm_away: "Armar fuera", arm_home: "Armar casa", arm_night: "Armar noche",
-    arm_custom: "Armar personalizado", disarm: "Desarmar",
+    arm_vacation: "Armar vacaciones", arm_custom: "Armar personalizado", disarm: "Desarmar",
     force_arm: "Forzar armado", cancel: "Cancelar",
     open_sensors: "Sensor(es) abierto(s) \u2014 \u00bfarmar igualmente?",
     enter_pin: "Introduzca PIN para {action}", enter_code: "Introduzca c\u00f3digo para {action}",
@@ -67,11 +70,12 @@ const TRANSLATIONS = {
   },
   fr: {
     disarmed: "D\u00e9sarm\u00e9", armed_away: "Arm\u00e9 (absent)", armed_home: "Arm\u00e9 (domicile)",
-    armed_night: "Arm\u00e9 (nuit)", armed_custom: "Arm\u00e9 (personnalis\u00e9)",
+    armed_night: "Arm\u00e9 (nuit)", armed_vacation: "Arm\u00e9 (vacances)",
+    armed_custom: "Arm\u00e9 (personnalis\u00e9)",
     arming: "Armement\u2026", pending: "En attente", triggered: "D\u00c9CLENCH\u00c9E",
     unavailable: "Indisponible", unknown: "Inconnu",
     arm_away: "Armer absent", arm_home: "Armer domicile", arm_night: "Armer nuit",
-    arm_custom: "Armer personnalis\u00e9", disarm: "D\u00e9sarmer",
+    arm_vacation: "Armer vacances", arm_custom: "Armer personnalis\u00e9", disarm: "D\u00e9sarmer",
     force_arm: "Forcer l\u2019armement", cancel: "Annuler",
     open_sensors: "Capteur(s) ouvert(s) \u2014 armer quand m\u00eame\u00a0?",
     enter_pin: "Entrez le PIN pour {action}", enter_code: "Entrez le code pour {action}",
@@ -84,11 +88,12 @@ const TRANSLATIONS = {
   },
   it: {
     disarmed: "Disarmato", armed_away: "Armato (fuori)", armed_home: "Armato (casa)",
-    armed_night: "Armato (notte)", armed_custom: "Armato (personalizzato)",
+    armed_night: "Armato (notte)", armed_vacation: "Armato (vacanza)",
+    armed_custom: "Armato (personalizzato)",
     arming: "Armamento\u2026", pending: "In attesa", triggered: "ATTIVATO",
     unavailable: "Non disponibile", unknown: "Sconosciuto",
     arm_away: "Arma fuori", arm_home: "Arma casa", arm_night: "Arma notte",
-    arm_custom: "Arma personalizzato", disarm: "Disarma",
+    arm_vacation: "Arma vacanza", arm_custom: "Arma personalizzato", disarm: "Disarma",
     force_arm: "Forza armamento", cancel: "Annulla",
     open_sensors: "Sensore/i aperto/i \u2014 armare comunque?",
     enter_pin: "Inserisci PIN per {action}", enter_code: "Inserisci codice per {action}",
@@ -101,11 +106,12 @@ const TRANSLATIONS = {
   },
   pt: {
     disarmed: "Desarmado", armed_away: "Armado (aus\u00eancia)", armed_home: "Armado (casa)",
-    armed_night: "Armado (noite)", armed_custom: "Armado (personalizado)",
+    armed_night: "Armado (noite)", armed_vacation: "Armado (f\u00e9rias)",
+    armed_custom: "Armado (personalizado)",
     arming: "A armar\u2026", pending: "Pendente", triggered: "DISPARADO",
     unavailable: "Indispon\u00edvel", unknown: "Desconhecido",
     arm_away: "Armar aus\u00eancia", arm_home: "Armar casa", arm_night: "Armar noite",
-    arm_custom: "Armar personalizado", disarm: "Desarmar",
+    arm_vacation: "Armar f\u00e9rias", arm_custom: "Armar personalizado", disarm: "Desarmar",
     force_arm: "For\u00e7ar armamento", cancel: "Cancelar",
     open_sensors: "Sensor(es) aberto(s) \u2014 armar na mesma?",
     enter_pin: "Introduza PIN para {action}", enter_code: "Introduza c\u00f3digo para {action}",
@@ -134,6 +140,7 @@ const STATE_CFG = {
   armed_away:         { icon: "mdi:shield-lock",         color: "var(--error-color,#F44336)" },
   armed_home:         { icon: "mdi:shield-home",         color: "var(--warning-color,#FF9800)" },
   armed_night:        { icon: "mdi:shield-moon",         color: "#9C27B0" },
+  armed_vacation:     { icon: "mdi:shield-airplane",     color: "#2196F3" },
   armed_custom_bypass:{ icon: "mdi:shield-star",         color: "#00BCD4" },
   arming:             { icon: "mdi:shield-sync-outline", color: "var(--warning-color,#FF9800)" },
   pending:            { icon: "mdi:shield-alert-outline",color: "var(--warning-color,#FF9800)" },
@@ -144,7 +151,8 @@ const STATE_CFG = {
 
 const STATE_LABEL_KEYS = {
   disarmed: "disarmed", armed_away: "armed_away", armed_home: "armed_home",
-  armed_night: "armed_night", armed_custom_bypass: "armed_custom",
+  armed_night: "armed_night", armed_vacation: "armed_vacation",
+  armed_custom_bypass: "armed_custom",
   arming: "arming", pending: "pending", triggered: "triggered",
   unavailable: "unavailable", unknown: "unknown",
 };
@@ -156,8 +164,9 @@ const INACTIVE_STATES = new Set(["disarmed", "arming", "pending", "triggered", "
 const ARM_ACTIONS = [
   { key: "arm_away",          labelKey: "arm_away",    feature: FEATURE.ARM_AWAY,         service: "alarm_arm_away" },
   { key: "arm_home",          labelKey: "arm_home",    feature: FEATURE.ARM_HOME,         service: "alarm_arm_home" },
-  { key: "arm_night",         labelKey: "arm_night",   feature: FEATURE.ARM_NIGHT,        service: "alarm_arm_night" },
-  { key: "arm_custom_bypass", labelKey: "arm_custom",  feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
+  { key: "arm_night",         labelKey: "arm_night",    feature: FEATURE.ARM_NIGHT,        service: "alarm_arm_night" },
+  { key: "arm_vacation",      labelKey: "arm_vacation", feature: FEATURE.ARM_VACATION,     service: "alarm_arm_vacation" },
+  { key: "arm_custom_bypass", labelKey: "arm_custom",   feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +190,7 @@ class SecuritasAlarmCard extends HTMLElement {
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -273,7 +282,10 @@ class SecuritasAlarmCard extends HTMLElement {
           ${isUnavailable ? `<div class="unavailable-msg">Entity is ${cfg.label.toLowerCase()}.</div>` : ""}
 
           <!-- ── Force arm section ── -->
-          ${!isUnavailable && forceArmAvailable ? this._renderForceArm(openSensors, lang) : ""}
+          ${!isUnavailable && forceArmAvailable ? `
+            ${this._renderForceArm(openSensors, lang)}
+            ${canDisarm ? `<div class="btn-grid"><button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button></div>` : ""}
+          ` : ""}
 
           <!-- ── PIN entry ── -->
           ${!isUnavailable && this._uiState === "pin" ? this._renderPin(codeFormat, lang) : ""}
@@ -327,16 +339,16 @@ class SecuritasAlarmCard extends HTMLElement {
       return `
         <div class="pin-section">
           <div class="pin-label">${_t(lang, "enter_pin", { action: actionLabel })}</div>
-          <div class="pin-display">${masked}</div>
-          <input id="pin-keyboard-input" class="pin-keyboard-input" type="tel"
-                 inputmode="numeric" autocomplete="off" />
+          <input id="pin-keyboard-input" class="pin-input" type="password"
+                 inputmode="numeric" autocomplete="off" value="${this._pin}"
+                 placeholder="\u2022\u2022\u2022\u2022" />
           <div class="keypad">
             ${[1,2,3,4,5,6,7,8,9].map(n =>
               `<button class="key" data-key="${n}">${n}</button>`
             ).join("")}
-            <button class="key key-cancel" data-key="cancel">✕</button>
+            <button class="key key-cancel" data-key="cancel" aria-label="Cancel" title="Cancel">✕</button>
             <button class="key" data-key="0">0</button>
-            <button class="key key-del" data-key="del">⌫</button>
+            <button class="key key-del" data-key="del" aria-label="Backspace" title="Backspace">⌫</button>
           </div>
           <button class="btn btn-arm pin-confirm" data-action="confirm-pin">${_t(lang, "confirm")}</button>
         </div>`;
@@ -367,36 +379,36 @@ class SecuritasAlarmCard extends HTMLElement {
       });
     });
 
-    // Numeric keypad
+    // Numeric keypad + visible input
+    const pinInput = this.shadowRoot.getElementById("pin-keyboard-input");
+    const syncInput = () => {
+      if (pinInput) { pinInput.value = this._pin; pinInput.focus(); }
+    };
     this.shadowRoot.querySelectorAll("[data-key]").forEach(key => {
       key.addEventListener("click", () => {
         const k = key.dataset.key;
         if (k === "cancel") { this._resetUI(); this._render(); return; }
-        if (k === "del")    { this._pin = this._pin.slice(0, -1); this._render(); return; }
+        if (k === "del")    { this._pin = this._pin.slice(0, -1); syncInput(); return; }
         this._pin += k;
-        this._render();
+        syncInput();
       });
     });
-
-    // Numeric keypad — hidden input captures physical keyboard typing
-    const pinKeyboard = this.shadowRoot.getElementById("pin-keyboard-input");
-    if (pinKeyboard) {
-      pinKeyboard.focus();
-      pinKeyboard.addEventListener("keydown", e => {
-        if (e.key === "Backspace") { this._pin = this._pin.slice(0, -1); this._render(); return; }
-        if (e.key === "Enter")     { this._submitPin(entity); return; }
-        if (e.key === "Escape")    { this._resetUI(); this._render(); return; }
+    if (pinInput) {
+      requestAnimationFrame(() => pinInput.focus());
+      pinInput.addEventListener("input", e => {
+        this._pin = e.target.value.replace(/\D/g, "");
+        e.target.value = this._pin;
       });
-      pinKeyboard.addEventListener("input", e => {
-        const digits = e.target.value.replace(/\D/g, "");
-        if (digits) { this._pin += digits; e.target.value = ""; this._render(); }
+      pinInput.addEventListener("keydown", e => {
+        if (e.key === "Enter") this._submitPin(entity);
+        if (e.key === "Escape") { this._resetUI(); this._render(); }
       });
     }
 
     // Text code input
     const codeInput = this.shadowRoot.getElementById("code-input");
     if (codeInput) {
-      codeInput.focus();
+      requestAnimationFrame(() => codeInput.focus());
       codeInput.addEventListener("input", e => { this._pin = e.target.value; });
       codeInput.addEventListener("keydown", e => {
         if (e.key === "Enter") this._submitPin(entity);
@@ -407,9 +419,7 @@ class SecuritasAlarmCard extends HTMLElement {
   _handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity) {
     // Force-arm / cancel
     if (action === "force_arm") {
-      const serviceData = { entity_id: entity };
-      if (this._pin) serviceData.code = this._pin;
-      this._hass.callService("securitas", "force_arm", serviceData);
+      this._hass.callService("securitas", "force_arm", { entity_id: entity });
       return;
     }
     if (action === "cancel_force") {
@@ -597,17 +607,6 @@ class SecuritasAlarmCard extends HTMLElement {
         margin-bottom: 8px;
         text-align: center;
       }
-      .pin-display {
-        text-align: center;
-        font-size: 1.6em;
-        letter-spacing: 0.25em;
-        min-height: 2em;
-        padding: 6px;
-        background: var(--secondary-background-color);
-        border-radius: 8px;
-        margin-bottom: 12px;
-        color: var(--primary-text-color);
-      }
       .keypad {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -630,10 +629,15 @@ class SecuritasAlarmCard extends HTMLElement {
       .key:active  { transform: scale(0.94); }
       .key-cancel  { color: var(--error-color, #F44336); }
       .key-del     { color: var(--primary-color); }
-      /* hidden input that captures physical keyboard for numeric PIN */
-      .pin-keyboard-input {
-        position: absolute; opacity: 0;
-        width: 1px; height: 1px; pointer-events: none;
+      .pin-input {
+        display: block; width: 100%; box-sizing: border-box;
+        text-align: center; font-size: 1.5em; letter-spacing: 0.3em;
+        padding: 8px; margin-bottom: 8px;
+        border: 1px solid var(--divider-color, #e0e0e0);
+        border-radius: 8px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color);
+        outline: none;
       }
       .pin-confirm {
         display: block;
@@ -932,9 +936,9 @@ class SecuritasAlarmBadge extends HTMLElement {
   }
 }
 
-customElements.define("securitas-alarm-card", SecuritasAlarmCard);
-customElements.define("securitas-alarm-card-editor", SecuritasAlarmCardEditor);
-customElements.define("securitas-alarm-badge", SecuritasAlarmBadge);
+if (!customElements.get("securitas-alarm-card"))   customElements.define("securitas-alarm-card", SecuritasAlarmCard);
+if (!customElements.get("securitas-alarm-card-editor")) customElements.define("securitas-alarm-card-editor", SecuritasAlarmCardEditor);
+if (!customElements.get("securitas-alarm-badge"))  customElements.define("securitas-alarm-badge", SecuritasAlarmBadge);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
