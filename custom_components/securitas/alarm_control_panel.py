@@ -113,6 +113,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         """Initialize the Securitas alarm panel."""
         self._state: str = AlarmControlPanelState.DISARMED
         self._last_status: str = AlarmControlPanelState.DISARMED
+        self._was_force_armed: bool = False
         self._device: str = installation.address
         self.entity_id: str = f"securitas_direct.{installation.number}"
         self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
@@ -281,9 +282,17 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             ):
                 self._last_proto_code = status.protomResponse
             if status.protomResponse == PROTO_DISARMED:
+                self._was_force_armed = False
                 self._state = AlarmControlPanelState.DISARMED
             elif status.protomResponse in self._status_map:
-                self._state = self._status_map[status.protomResponse]
+                # If this arm was initiated via force_arm (sensor bypass), keep
+                # ARMED_CUSTOM_BYPASS even when the Securitas API returns the
+                # normal arm proto code — the API does not distinguish a
+                # force-armed state from a regular arm in its response.
+                if self._was_force_armed:
+                    self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+                else:
+                    self._state = self._status_map[status.protomResponse]
             else:
                 self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
                 _LOGGER.info(
@@ -684,6 +693,19 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._dismiss_arming_exception_notification()
         self.__force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
+        # Securitas API returns the same proto code for a force-armed state as
+        # for a normal arm, so set_arm_state will have mapped the state to the
+        # normal armed mode (e.g. ARMED_HOME).  Override it to
+        # ARMED_CUSTOM_BYPASS and set the flag so future status polls don't
+        # silently revert it until the alarm is disarmed.
+        if self._state in (
+            AlarmControlPanelState.ARMED_HOME,
+            AlarmControlPanelState.ARMED_AWAY,
+            AlarmControlPanelState.ARMED_NIGHT,
+        ):
+            self._was_force_armed = True
+            self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+            self.async_write_ha_state()
 
     async def async_alarm_arm_home(self, code: str | None = None):
         """Send arm home command."""
