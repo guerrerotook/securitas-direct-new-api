@@ -7,7 +7,7 @@
     "config_flow": true,
     "dependencies": [],
     "documentation": "https://github.com/guerrerotook/securitas-direct-new-api",
-    "homeassistant": "2024.11.0",
+    "homeassistant": "2025.2.0",
     "iot_class": "cloud_polling",
     "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
     "requirements": [],

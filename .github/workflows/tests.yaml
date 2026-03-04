@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ha-channel: [dev, stable]
+        ha-channel: [dev, stable, minimum]
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +71,13 @@ jobs:
           # Pin HA to the stable release via a constraint so phcc can't upgrade it
           echo "homeassistant==$HA_VERSION" > /tmp/ha_stable.txt
           pip install -r requirements_test.txt --constraint /tmp/ha_stable.txt
+
+      - name: Install dependencies (minimum)
+        if: matrix.ha-channel == 'minimum'
+        run: |
+          pip install --upgrade pip
+          echo "homeassistant==2025.2.0" > /tmp/ha_minimum.txt
+          pip install -r requirements_test.txt --constraint /tmp/ha_minimum.txt
 
       - name: Install dependencies (dev)
         if: matrix.ha-channel == 'dev'
