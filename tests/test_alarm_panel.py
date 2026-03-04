@@ -2594,8 +2594,9 @@ class TestForceArmWorkflow:
         assert "force_arm_available" not in alarm._attr_extra_state_attributes
         assert "arm_exceptions" not in alarm._attr_extra_state_attributes
 
-        # State should reflect successful arm
-        assert alarm._state == AlarmControlPanelState.ARMED_HOME
+        # State should reflect bypass arm — force_arm always bypasses sensors
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        assert alarm._was_force_armed is True
 
         # Dismiss notifications should have been called
         dismiss_calls = alarm.hass.services.async_call.call_args_list
@@ -2712,9 +2713,10 @@ class TestForceArmWorkflow:
         assert call_kwargs["force_arming_remote_id"] == "ref-refresh-123"
         assert call_kwargs["suid"] == "suid-refresh-123"
 
-        # Context cleared, state reflects success
+        # Context cleared, state reflects bypass arm
         assert alarm._force_context is None
-        assert alarm._state == AlarmControlPanelState.ARMED_HOME
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        assert alarm._was_force_armed is True
 
 
 # ===========================================================================
