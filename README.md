@@ -202,26 +202,15 @@ The integration ships with a custom Lovelace card (`securitas-alarm-card`) that 
 - **Force-arm UI** — when arming is blocked by an open sensor, the card automatically shows a warning with the sensor name(s) and **Force Arm** / **Cancel** buttons. No Template Binary Sensor helper required.
 - **Theme-aware** — uses Home Assistant CSS variables and works correctly in both light and dark mode.
 
-### Installation
+### Setup
 
-1. Copy `securitas-alarm-card.js` from the integration's `www/` folder to `/config/www/` on your Home Assistant instance:
+To add the card to your dashboard, click **Add Card → Search for "Securitas Alarm Card"** and pick your alarm panel entity from the dropdown.
 
-```bash
-curl -o /config/www/securitas-alarm-card.js \
-  "https://raw.githubusercontent.com/guerrerotook/securitas-direct-new-api/main/custom_components/securitas/www/securitas-alarm-card.js"
-```
+### Badge
 
-2. Add it as a Lovelace resource: **Settings → Dashboards → (⋮ menu) → Resources → Add resource**
-   - URL: `/local/securitas-alarm-card.js`
-   - Type: **JavaScript module**
+A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails. Click the badge to open the full alarm card in a popup overlay.
 
-3. Add the card to your dashboard:
-
-```yaml
-type: custom:securitas-alarm-card
-entity: alarm_control_panel.YOUR_PANEL_ID
-name: My Alarm   # optional — overrides friendly_name
-```
+To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and pick your alarm panel entity from the dropdown.
 
 ## Sentinel Sensors
 

@@ -3,11 +3,14 @@
 import asyncio
 from collections import OrderedDict
 import logging
+from pathlib import Path
 from uuid import uuid4
 
 from aiohttp import ClientSession
 import voluptuous as vol
 
+from homeassistant.components import frontend
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import (
@@ -274,6 +277,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
+            # Serve the custom alarm card JS automatically
+            card_url = "/securitas_panel/securitas-alarm-card.js"
+            if hass.http and card_url not in (
+                hass.data.get("frontend_extra_module_url") or ()
+            ):
+                await hass.http.async_register_static_paths(
+                    [
+                        StaticPathConfig(
+                            "/securitas_panel",
+                            str(Path(__file__).parent / "www"),
+                            cache_headers=False,
+                        )
+                    ]
+                )
+                frontend.add_extra_js_url(hass, card_url)
+
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             return True
     else:
