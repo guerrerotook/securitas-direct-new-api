@@ -29,18 +29,124 @@ const FEATURE = {
   ARM_CUSTOM_BYPASS: 16,
 };
 
+// ── Translations ─────────────────────────────────────────────────────────────
+const TRANSLATIONS = {
+  en: {
+    disarmed: "Disarmed", armed_away: "Armed Away", armed_home: "Armed Home",
+    armed_night: "Armed Night", armed_custom: "Armed Custom",
+    arming: "Arming\u2026", pending: "Pending", triggered: "TRIGGERED",
+    unavailable: "Unavailable", unknown: "Unknown",
+    arm_away: "Arm Away", arm_home: "Arm Home", arm_night: "Arm Night",
+    arm_custom: "Arm Custom", disarm: "Disarm",
+    force_arm: "Force Arm", cancel: "Cancel",
+    open_sensors: "Open sensor(s) \u2014 arm anyway?",
+    enter_pin: "Enter PIN to {action}", enter_code: "Enter code to {action}",
+    code: "Code", confirm: "Confirm",
+    entity_not_found: "Entity not found: {entity}",
+    editor_entity: "Entity", editor_select: "\u2014 Select alarm panel \u2014",
+    editor_name: "Name (optional)", editor_name_placeholder: "Override friendly name",
+    card_name: "Securitas Alarm Card",
+    card_description: "Alarm card for Securitas Direct: dynamic arm modes, PIN support, force-arm for open sensors.",
+  },
+  es: {
+    disarmed: "Desarmado", armed_away: "Armado (fuera)", armed_home: "Armado (casa)",
+    armed_night: "Armado (noche)", armed_custom: "Armado (personalizado)",
+    arming: "Armando\u2026", pending: "Pendiente", triggered: "ACTIVADA",
+    unavailable: "No disponible", unknown: "Desconocido",
+    arm_away: "Armar fuera", arm_home: "Armar casa", arm_night: "Armar noche",
+    arm_custom: "Armar personalizado", disarm: "Desarmar",
+    force_arm: "Forzar armado", cancel: "Cancelar",
+    open_sensors: "Sensor(es) abierto(s) \u2014 \u00bfarmar igualmente?",
+    enter_pin: "Introduzca PIN para {action}", enter_code: "Introduzca c\u00f3digo para {action}",
+    code: "C\u00f3digo", confirm: "Confirmar",
+    entity_not_found: "Entidad no encontrada: {entity}",
+    editor_entity: "Entidad", editor_select: "\u2014 Seleccionar panel de alarma \u2014",
+    editor_name: "Nombre (opcional)", editor_name_placeholder: "Nombre personalizado",
+    card_name: "Tarjeta de Alarma Securitas",
+    card_description: "Tarjeta de alarma para Securitas Direct: modos de armado, PIN y armado forzado.",
+  },
+  fr: {
+    disarmed: "D\u00e9sarm\u00e9", armed_away: "Arm\u00e9 (absent)", armed_home: "Arm\u00e9 (domicile)",
+    armed_night: "Arm\u00e9 (nuit)", armed_custom: "Arm\u00e9 (personnalis\u00e9)",
+    arming: "Armement\u2026", pending: "En attente", triggered: "D\u00c9CLENCH\u00c9E",
+    unavailable: "Indisponible", unknown: "Inconnu",
+    arm_away: "Armer absent", arm_home: "Armer domicile", arm_night: "Armer nuit",
+    arm_custom: "Armer personnalis\u00e9", disarm: "D\u00e9sarmer",
+    force_arm: "Forcer l\u2019armement", cancel: "Annuler",
+    open_sensors: "Capteur(s) ouvert(s) \u2014 armer quand m\u00eame\u00a0?",
+    enter_pin: "Entrez le PIN pour {action}", enter_code: "Entrez le code pour {action}",
+    code: "Code", confirm: "Confirmer",
+    entity_not_found: "Entit\u00e9 introuvable\u00a0: {entity}",
+    editor_entity: "Entit\u00e9", editor_select: "\u2014 S\u00e9lectionner le panneau d\u2019alarme \u2014",
+    editor_name: "Nom (facultatif)", editor_name_placeholder: "Remplacer le nom",
+    card_name: "Carte d\u2019alarme Securitas",
+    card_description: "Carte d\u2019alarme Securitas Direct\u00a0: modes d\u2019armement, PIN et armement forc\u00e9.",
+  },
+  it: {
+    disarmed: "Disarmato", armed_away: "Armato (fuori)", armed_home: "Armato (casa)",
+    armed_night: "Armato (notte)", armed_custom: "Armato (personalizzato)",
+    arming: "Armamento\u2026", pending: "In attesa", triggered: "ATTIVATO",
+    unavailable: "Non disponibile", unknown: "Sconosciuto",
+    arm_away: "Arma fuori", arm_home: "Arma casa", arm_night: "Arma notte",
+    arm_custom: "Arma personalizzato", disarm: "Disarma",
+    force_arm: "Forza armamento", cancel: "Annulla",
+    open_sensors: "Sensore/i aperto/i \u2014 armare comunque?",
+    enter_pin: "Inserisci PIN per {action}", enter_code: "Inserisci codice per {action}",
+    code: "Codice", confirm: "Conferma",
+    entity_not_found: "Entit\u00e0 non trovata: {entity}",
+    editor_entity: "Entit\u00e0", editor_select: "\u2014 Seleziona pannello allarme \u2014",
+    editor_name: "Nome (facoltativo)", editor_name_placeholder: "Nome personalizzato",
+    card_name: "Scheda Allarme Securitas",
+    card_description: "Scheda allarme Securitas Direct: modalit\u00e0 di armamento, PIN e armamento forzato.",
+  },
+  pt: {
+    disarmed: "Desarmado", armed_away: "Armado (aus\u00eancia)", armed_home: "Armado (casa)",
+    armed_night: "Armado (noite)", armed_custom: "Armado (personalizado)",
+    arming: "A armar\u2026", pending: "Pendente", triggered: "DISPARADO",
+    unavailable: "Indispon\u00edvel", unknown: "Desconhecido",
+    arm_away: "Armar aus\u00eancia", arm_home: "Armar casa", arm_night: "Armar noite",
+    arm_custom: "Armar personalizado", disarm: "Desarmar",
+    force_arm: "For\u00e7ar armamento", cancel: "Cancelar",
+    open_sensors: "Sensor(es) aberto(s) \u2014 armar na mesma?",
+    enter_pin: "Introduza PIN para {action}", enter_code: "Introduza c\u00f3digo para {action}",
+    code: "C\u00f3digo", confirm: "Confirmar",
+    entity_not_found: "Entidade n\u00e3o encontrada: {entity}",
+    editor_entity: "Entidade", editor_select: "\u2014 Selecionar painel de alarme \u2014",
+    editor_name: "Nome (opcional)", editor_name_placeholder: "Nome personalizado",
+    card_name: "Cart\u00e3o de Alarme Securitas",
+    card_description: "Cart\u00e3o de alarme Securitas Direct: modos de armar, PIN e armamento for\u00e7ado.",
+  },
+};
+
+// pt-BR falls back to pt
+TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
+
+function _t(lang, key, vars) {
+  const l = TRANSLATIONS[lang] || TRANSLATIONS[lang?.split("-")[0]] || TRANSLATIONS.en;
+  let s = l[key] || TRANSLATIONS.en[key] || key;
+  if (vars) Object.entries(vars).forEach(([k, v]) => { s = s.replace(`{${k}}`, v); });
+  return s;
+}
+
 // ── Per-state visual config ───────────────────────────────────────────────────
 const STATE_CFG = {
-  disarmed:           { icon: "mdi:shield-off-outline",  color: "var(--success-color,#4CAF50)",   label: "Disarmed" },
-  armed_away:         { icon: "mdi:shield-lock",         color: "var(--error-color,#F44336)",     label: "Armed Away" },
-  armed_home:         { icon: "mdi:shield-home",         color: "var(--warning-color,#FF9800)",   label: "Armed Home" },
-  armed_night:        { icon: "mdi:shield-moon",         color: "#9C27B0",                        label: "Armed Night" },
-  armed_custom_bypass:{ icon: "mdi:shield-star",         color: "#00BCD4",                        label: "Armed Custom" },
-  arming:             { icon: "mdi:shield-sync-outline", color: "var(--warning-color,#FF9800)",   label: "Arming…" },
-  pending:            { icon: "mdi:shield-alert-outline",color: "var(--warning-color,#FF9800)",   label: "Pending" },
-  triggered:          { icon: "mdi:shield-alert",        color: "var(--error-color,#F44336)",     label: "TRIGGERED" },
-  unavailable:        { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)",  label: "Unavailable" },
-  unknown:            { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)",  label: "Unknown" },
+  disarmed:           { icon: "mdi:shield-off-outline",  color: "var(--success-color,#4CAF50)" },
+  armed_away:         { icon: "mdi:shield-lock",         color: "var(--error-color,#F44336)" },
+  armed_home:         { icon: "mdi:shield-home",         color: "var(--warning-color,#FF9800)" },
+  armed_night:        { icon: "mdi:shield-moon",         color: "#9C27B0" },
+  armed_custom_bypass:{ icon: "mdi:shield-star",         color: "#00BCD4" },
+  arming:             { icon: "mdi:shield-sync-outline", color: "var(--warning-color,#FF9800)" },
+  pending:            { icon: "mdi:shield-alert-outline",color: "var(--warning-color,#FF9800)" },
+  triggered:          { icon: "mdi:shield-alert",        color: "var(--error-color,#F44336)" },
+  unavailable:        { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)" },
+  unknown:            { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)" },
+};
+
+const STATE_LABEL_KEYS = {
+  disarmed: "disarmed", armed_away: "armed_away", armed_home: "armed_home",
+  armed_night: "armed_night", armed_custom_bypass: "armed_custom",
+  arming: "arming", pending: "pending", triggered: "triggered",
+  unavailable: "unavailable", unknown: "unknown",
 };
 
 // States where the alarm is considered armed (not disarmed/transitioning)
@@ -48,10 +154,10 @@ const INACTIVE_STATES = new Set(["disarmed", "arming", "pending", "triggered", "
 
 // ── Arm action definitions ────────────────────────────────────────────────────
 const ARM_ACTIONS = [
-  { key: "arm_away",          label: "Arm Away",    feature: FEATURE.ARM_AWAY,         service: "alarm_arm_away" },
-  { key: "arm_home",          label: "Arm Home",    feature: FEATURE.ARM_HOME,         service: "alarm_arm_home" },
-  { key: "arm_night",         label: "Arm Night",   feature: FEATURE.ARM_NIGHT,        service: "alarm_arm_night" },
-  { key: "arm_custom_bypass", label: "Arm Custom",  feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
+  { key: "arm_away",          labelKey: "arm_away",    feature: FEATURE.ARM_AWAY,         service: "alarm_arm_away" },
+  { key: "arm_home",          labelKey: "arm_home",    feature: FEATURE.ARM_HOME,         service: "alarm_arm_home" },
+  { key: "arm_night",         labelKey: "arm_night",   feature: FEATURE.ARM_NIGHT,        service: "alarm_arm_night" },
+  { key: "arm_custom_bypass", labelKey: "arm_custom",  feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,15 +221,17 @@ class SecuritasAlarmCard extends HTMLElement {
   _render() {
     if (!this._hass || !this._config) return;
 
+    const lang = this._hass.language || "en";
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) {
-      this.shadowRoot.innerHTML = `<ha-card><div class="missing">Entity not found: ${this._esc(this._config.entity)}</div></ha-card>`;
+      this.shadowRoot.innerHTML = `<ha-card><div class="missing">${_t(lang, "entity_not_found", { entity: this._esc(this._config.entity) })}</div></ha-card>`;
       return;
     }
 
     const state    = stateObj.state;
     const attrs    = stateObj.attributes;
-    const cfg      = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)", label: this._esc(state) };
+    const stateCfg = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
+    const cfg      = { ...stateCfg, label: _t(lang, STATE_LABEL_KEYS[state] || state) };
     const name     = this._config.name || attrs.friendly_name || this._config.entity;
     const features = attrs.supported_features || 0;
 
@@ -139,7 +247,10 @@ class SecuritasAlarmCard extends HTMLElement {
 
     // Determine which arm buttons to show
     const availableArmActions = ARM_ACTIONS.filter(a => features & a.feature);
-    const isArmed = !INACTIVE_STATES.has(state);
+    const isArmed   = !INACTIVE_STATES.has(state);
+    // Show Disarm during arming/pending too — alarm is already committed
+    const canDisarm = isArmed || state === "arming" || state === "pending";
+    const canArm    = state === "disarmed";
 
     this.shadowRoot.innerHTML = `
       <style>${this._styles(cfg)}</style>
@@ -162,19 +273,21 @@ class SecuritasAlarmCard extends HTMLElement {
           ${isUnavailable ? `<div class="unavailable-msg">Entity is ${cfg.label.toLowerCase()}.</div>` : ""}
 
           <!-- ── Force arm section ── -->
-          ${!isUnavailable && forceArmAvailable ? this._renderForceArm(openSensors) : ""}
+          ${!isUnavailable && forceArmAvailable ? this._renderForceArm(openSensors, lang) : ""}
 
           <!-- ── PIN entry ── -->
-          ${!isUnavailable && this._uiState === "pin" ? this._renderPin(codeFormat) : ""}
+          ${!isUnavailable && this._uiState === "pin" ? this._renderPin(codeFormat, lang) : ""}
 
           <!-- ── Normal buttons (hidden during pin entry / force arm / unavailable) ── -->
           ${!isUnavailable && this._uiState === "normal" && !forceArmAvailable ? `
             <div class="btn-grid">
-              ${isArmed
-                ? `<button class="btn btn-disarm" data-action="disarm">Disarm</button>`
-                : availableArmActions.map(a =>
-                    `<button class="btn btn-arm" data-action="${a.key}">${a.label}</button>`
-                  ).join("")
+              ${canDisarm
+                ? `<button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button>`
+                : canArm
+                  ? availableArmActions.map(a =>
+                      `<button class="btn btn-arm" data-action="${a.key}">${_t(lang, a.labelKey)}</button>`
+                    ).join("")
+                  : ""
               }
             </div>` : ""}
 
@@ -185,7 +298,7 @@ class SecuritasAlarmCard extends HTMLElement {
   }
 
   // ── Force arm section ───────────────────────────────────────────────────────
-  _renderForceArm(sensors) {
+  _renderForceArm(sensors, lang) {
     const list = sensors.length
       ? `<ul class="sensor-list">${sensors.map(s => `<li>${this._esc(s)}</li>`).join("")}</ul>`
       : "";
@@ -193,26 +306,30 @@ class SecuritasAlarmCard extends HTMLElement {
       <div class="force-section">
         <div class="force-title">
           <ha-icon icon="mdi:alert"></ha-icon>
-          Open sensor(s) — arm anyway?
+          ${_t(lang, "open_sensors")}
         </div>
         ${list}
         <div class="force-btns">
-          <button class="btn btn-force" data-action="force_arm">Force Arm</button>
-          <button class="btn btn-cancel-force" data-action="cancel_force">Cancel</button>
+          <button class="btn btn-cancel-force" data-action="cancel_force">${_t(lang, "cancel")}</button>
+          <button class="btn btn-force" data-action="force_arm">${_t(lang, "force_arm")}</button>
         </div>
       </div>`;
   }
 
   // ── PIN entry section ───────────────────────────────────────────────────────
-  _renderPin(codeFormat) {
+  _renderPin(codeFormat, lang) {
     const masked = "●".repeat(this._pin.length) || " ";
-    const label  = this._pendingAction?.label || "action";
+    const actionLabel = this._pendingAction?.labelKey
+      ? _t(lang, this._pendingAction.labelKey)
+      : (this._pendingAction?.label || "");
 
     if (codeFormat === "number") {
       return `
         <div class="pin-section">
-          <div class="pin-label">Enter PIN to ${this._esc(label)}</div>
+          <div class="pin-label">${_t(lang, "enter_pin", { action: actionLabel })}</div>
           <div class="pin-display">${masked}</div>
+          <input id="pin-keyboard-input" class="pin-keyboard-input" type="tel"
+                 inputmode="numeric" autocomplete="off" />
           <div class="keypad">
             ${[1,2,3,4,5,6,7,8,9].map(n =>
               `<button class="key" data-key="${n}">${n}</button>`
@@ -221,19 +338,19 @@ class SecuritasAlarmCard extends HTMLElement {
             <button class="key" data-key="0">0</button>
             <button class="key key-del" data-key="del">⌫</button>
           </div>
-          <button class="btn btn-arm pin-confirm" data-action="confirm-pin">Confirm</button>
+          <button class="btn btn-arm pin-confirm" data-action="confirm-pin">${_t(lang, "confirm")}</button>
         </div>`;
     }
 
     // Text code
     return `
       <div class="pin-section">
-        <div class="pin-label">Enter code to ${this._esc(label)}</div>
+        <div class="pin-label">${_t(lang, "enter_code", { action: actionLabel })}</div>
         <input class="code-input" type="password" autocomplete="off"
-               placeholder="Code" value="${this._esc(this._pin)}" id="code-input" />
+               placeholder="${_t(lang, "code")}" value="${this._esc(this._pin)}" id="code-input" />
         <div class="text-pin-btns">
-          <button class="btn btn-arm" data-action="confirm-pin">Confirm</button>
-          <button class="btn btn-cancel-force" data-action="cancel-pin">Cancel</button>
+          <button class="btn btn-cancel-force" data-action="cancel-pin">${_t(lang, "cancel")}</button>
+          <button class="btn btn-arm" data-action="confirm-pin">${_t(lang, "confirm")}</button>
         </div>
       </div>`;
   }
@@ -260,6 +377,21 @@ class SecuritasAlarmCard extends HTMLElement {
         this._render();
       });
     });
+
+    // Numeric keypad — hidden input captures physical keyboard typing
+    const pinKeyboard = this.shadowRoot.getElementById("pin-keyboard-input");
+    if (pinKeyboard) {
+      pinKeyboard.focus();
+      pinKeyboard.addEventListener("keydown", e => {
+        if (e.key === "Backspace") { this._pin = this._pin.slice(0, -1); this._render(); return; }
+        if (e.key === "Enter")     { this._submitPin(entity); return; }
+        if (e.key === "Escape")    { this._resetUI(); this._render(); return; }
+      });
+      pinKeyboard.addEventListener("input", e => {
+        const digits = e.target.value.replace(/\D/g, "");
+        if (digits) { this._pin += digits; e.target.value = ""; this._render(); }
+      });
+    }
 
     // Text code input
     const codeInput = this.shadowRoot.getElementById("code-input");
@@ -290,7 +422,7 @@ class SecuritasAlarmCard extends HTMLElement {
     // Disarm
     if (action === "disarm") {
       if (hasCode) {
-        this._startPinEntry({ service: "alarm_disarm", label: "Disarm" });
+        this._startPinEntry({ service: "alarm_disarm", labelKey: "disarm" });
       } else {
         this._hass.callService("alarm_control_panel", "alarm_disarm", { entity_id: entity });
       }
@@ -301,7 +433,7 @@ class SecuritasAlarmCard extends HTMLElement {
     const armDef = ARM_ACTIONS.find(a => a.key === action);
     if (armDef) {
       if (hasCode && codeArmRequired) {
-        this._startPinEntry({ service: armDef.service, label: armDef.label });
+        this._startPinEntry({ service: armDef.service, labelKey: armDef.labelKey });
       } else {
         this._hass.callService("alarm_control_panel", armDef.service, { entity_id: entity });
       }
@@ -498,6 +630,11 @@ class SecuritasAlarmCard extends HTMLElement {
       .key:active  { transform: scale(0.94); }
       .key-cancel  { color: var(--error-color, #F44336); }
       .key-del     { color: var(--primary-color); }
+      /* hidden input that captures physical keyboard for numeric PIN */
+      .pin-keyboard-input {
+        position: absolute; opacity: 0;
+        width: 1px; height: 1px; pointer-events: none;
+      }
       .pin-confirm {
         display: block;
         width: 100%;
@@ -531,17 +668,274 @@ class SecuritasAlarmCard extends HTMLElement {
     return 3;
   }
 
-  static getStubConfig() {
-    return { entity: "alarm_control_panel.your_panel_id" };
+  static getConfigElement() {
+    return document.createElement("securitas-alarm-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const entities = Object.keys(hass.states).filter(e => e.startsWith("alarm_control_panel."));
+    return { entity: entities[0] || "" };
+  }
+}
+
+// ── Config editor ─────────────────────────────────────────────────────────────
+
+class SecuritasAlarmCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    if (!this._initialized) {
+      this._initialized = true;
+      this._render();
+    }
+  }
+
+  set hass(hass) {
+    const alarmEntities = Object.keys(hass.states)
+      .filter(e => e.startsWith("alarm_control_panel."))
+      .sort()
+      .join(",");
+    const changed = alarmEntities !== this._lastEntities;
+    this._hass = hass;
+    if (changed || !this._lastEntities) {
+      this._lastEntities = alarmEntities;
+      this._render();
+    }
+  }
+
+  _render() {
+    if (!this._hass) return;
+
+    const lang = this._hass.language || "en";
+    const entities = Object.keys(this._hass.states)
+      .filter(e => e.startsWith("alarm_control_panel."))
+      .sort();
+
+    const selected = this._config.entity || "";
+    const name = this._config.name || "";
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        .editor { padding: 16px; }
+        .row { margin-bottom: 16px; }
+        label {
+          display: block;
+          font-weight: 500;
+          font-size: 0.85em;
+          color: var(--secondary-text-color);
+          margin-bottom: 4px;
+        }
+        select, input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 8px 12px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          font-size: 1em;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+        }
+        select:focus, input:focus {
+          outline: none;
+          border-color: var(--primary-color);
+        }
+      </style>
+      <div class="editor">
+        <div class="row">
+          <label>${_t(lang, "editor_entity")}</label>
+          <select id="entity">
+            <option value="" ${!selected ? "selected" : ""}>${_t(lang, "editor_select")}</option>
+            ${entities.map(e =>
+              `<option value="${e}" ${e === selected ? "selected" : ""}>${this._hass.states[e].attributes.friendly_name || e}</option>`
+            ).join("")}
+          </select>
+        </div>
+        <div class="row">
+          <label>${_t(lang, "editor_name")}</label>
+          <input id="name" type="text" value="${this._escapeAttr(name)}" placeholder="${_t(lang, "editor_name_placeholder")}" />
+        </div>
+      </div>`;
+
+    this.shadowRoot.getElementById("entity").addEventListener("change", (e) => {
+      this._config = { ...this._config, entity: e.target.value };
+      this._fireChanged();
+    });
+
+    this.shadowRoot.getElementById("name").addEventListener("input", (e) => {
+      const val = e.target.value.trim();
+      if (val) {
+        this._config = { ...this._config, name: val };
+      } else {
+        const { name: _, ...rest } = this._config;
+        this._config = rest;
+      }
+      this._fireChanged();
+    });
+  }
+
+  _escapeAttr(s) {
+    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  _fireChanged() {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: this._config },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+}
+
+// ── Badge card ────────────────────────────────────────────────────────────────
+
+class SecuritasAlarmBadge extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._dialogOpen = false;
+  }
+
+  setConfig(config) {
+    if (!config.entity) throw new Error("Please define an entity");
+    this._config = config;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    const stateObj = hass.states[this._config.entity];
+    const newKey = stateObj
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}`
+      : "missing";
+    if (newKey !== this._lastKey) {
+      this._lastKey = newKey;
+      this._renderBadge();
+    }
+    // Forward hass to the dialog card if open
+    if (this._dialogCard) this._dialogCard.hass = hass;
+  }
+
+  _renderBadge() {
+    if (!this._hass || !this._config) return;
+
+    const lang = this._hass.language || "en";
+    const stateObj = this._hass.states[this._config.entity];
+    if (!stateObj) {
+      this.shadowRoot.innerHTML = `<ha-icon icon="mdi:shield-alert" style="color:var(--error-color)"></ha-icon>`;
+      return;
+    }
+
+    const state = stateObj.state;
+    const icons = stateObj.attributes.force_arm_available
+      ? { icon: "mdi:alert", color: "var(--warning-color, #FF9800)" }
+      : STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { display: inline-block; }
+        .badge {
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: transform 0.1s;
+        }
+        .badge:active { transform: scale(0.9); }
+        .badge ha-icon {
+          --mdc-icon-size: 24px;
+          color: ${icons.color};
+        }
+      </style>
+      <div class="badge" id="badge">
+        <ha-icon icon="${icons.icon}"></ha-icon>
+      </div>`;
+
+    this.shadowRoot.getElementById("badge").addEventListener("click", () => {
+      this._openDialog();
+    });
+  }
+
+  _openDialog() {
+    if (this._dialogOpen) return;
+    this._dialogOpen = true;
+
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", top: "0", left: "0", right: "0", bottom: "0",
+      background: "rgba(0,0,0,0.5)", zIndex: "7",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "16px",
+    });
+
+    const content = document.createElement("div");
+    Object.assign(content.style, {
+      width: "100%", maxWidth: "400px", maxHeight: "90vh", overflowY: "auto",
+      borderRadius: "16px", background: "var(--card-background-color, var(--ha-card-background, #fff))",
+      boxShadow: "0 8px 32px rgba(0,0,0,0.25)", position: "relative",
+    });
+
+    const closeBtn = document.createElement("button");
+    closeBtn.textContent = "\u2715";
+    Object.assign(closeBtn.style, {
+      position: "absolute", top: "8px", right: "8px", width: "32px", height: "32px",
+      border: "none", borderRadius: "50%", background: "var(--secondary-background-color)",
+      color: "var(--primary-text-color)", fontSize: "1.1em", cursor: "pointer",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: "1",
+    });
+
+    content.appendChild(closeBtn);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+
+    // Create the full alarm card inside the dialog
+    this._dialogCard = document.createElement("securitas-alarm-card");
+    this._dialogCard.setConfig(this._config);
+    this._dialogCard.hass = this._hass;
+    content.appendChild(this._dialogCard);
+
+    // Close handlers
+    const close = () => {
+      this._dialogOpen = false;
+      this._dialogCard = null;
+      overlay.remove();
+    };
+    closeBtn.addEventListener("click", close);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close();
+    });
+  }
+
+  getCardSize() { return 1; }
+
+  static getConfigElement() {
+    return document.createElement("securitas-alarm-card-editor");
+  }
+
+  static getStubConfig(hass) {
+    const entities = Object.keys(hass.states).filter(e => e.startsWith("alarm_control_panel."));
+    return { entity: entities[0] || "" };
   }
 }
 
 customElements.define("securitas-alarm-card", SecuritasAlarmCard);
+customElements.define("securitas-alarm-card-editor", SecuritasAlarmCardEditor);
+customElements.define("securitas-alarm-badge", SecuritasAlarmBadge);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "securitas-alarm-card",
-  name:        "Securitas Alarm Card",
-  description: "Full-featured alarm card for Securitas Direct: dynamic arm modes, PIN support, force-arm for open sensors.",
+  name:        TRANSLATIONS.en.card_name,
+  description: TRANSLATIONS.en.card_description,
+  preview:     false,
+});
+window.customBadges = window.customBadges || [];
+window.customBadges.push({
+  type:        "securitas-alarm-badge",
+  name:        "Securitas Alarm Badge",
+  description: "Compact alarm badge — click to open full alarm card with force-arm support.",
   preview:     false,
 });
