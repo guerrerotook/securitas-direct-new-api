@@ -110,7 +110,8 @@ class SecuritasLock(lock.LockEntity):
     def __force_state(self, state: str) -> None:
         self._last_state = self._state
         self._state = state
-        self.async_schedule_update_ha_state()
+        if self.hass is not None:
+            self.async_schedule_update_ha_state()
 
     def _notify_error(self, notification_id, title: str, message: str) -> None:
         """Notify user with persistent notification."""
@@ -146,6 +147,8 @@ class SecuritasLock(lock.LockEntity):
         await self.async_update_status()
 
     async def async_update_status(self, now=None) -> None:
+        if self.hass is None:
+            return
         try:
             self._new_state = await self.get_lock_state()
             if self._new_state != LOCK_STATUS_UNKNOWN:

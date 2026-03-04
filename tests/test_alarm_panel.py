@@ -2286,3 +2286,31 @@ class TestNotifyError:
             service_data["notification_id"]
             == "securitas.securitas_arming_failed_123456"
         )
+
+
+# ===========================================================================
+# hass-is-None guard tests (issue #323)
+# ===========================================================================
+
+
+class TestHassNoneGuardsAlarm:
+    """Verify alarm entity bails out when hass is None (after removal)."""
+
+    async def test_update_status_skips_when_hass_is_none(self):
+        alarm = make_alarm()
+        alarm.hass = None
+        alarm.client.update_overview = AsyncMock()
+
+        await alarm.async_update_status()
+
+        alarm.client.update_overview.assert_not_awaited()
+
+    def test_force_state_skips_schedule_when_hass_is_none(self):
+        alarm = make_alarm()
+        alarm.async_schedule_update_ha_state = MagicMock()
+        alarm.hass = None
+
+        alarm._SecuritasAlarm__force_state(AlarmControlPanelState.ARMING)
+
+        assert alarm._state == AlarmControlPanelState.ARMING
+        alarm.async_schedule_update_ha_state.assert_not_called()

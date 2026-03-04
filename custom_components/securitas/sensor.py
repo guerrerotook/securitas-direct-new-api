@@ -96,6 +96,8 @@ class SentinelTemperature(SensorEntity):
 
     async def async_update(self):
         """Update the status of the alarm based on the configuration."""
+        if self.hass is None:
+            return
         sentinel_data: Sentinel = await self._client.session.get_sentinel_data(
             self._service.installation, self._service
         )
@@ -134,6 +136,8 @@ class SentinelHumidity(SensorEntity):
 
     async def async_update(self):
         """Update the status of the alarm based on the configuration."""
+        if self.hass is None:
+            return
         sentinel_data: Sentinel = await self._client.session.get_sentinel_data(
             self._service.installation, self._service
         )
@@ -173,6 +177,8 @@ class SentinelAirQuality(SensorEntity):
 
     async def async_update(self):
         """Update the status of the alarm based on the configuration."""
+        if self.hass is None:
+            return
         air_quality: AirQuality = await self._client.session.get_air_quality_data(
             self._service.installation, self._service
         )
