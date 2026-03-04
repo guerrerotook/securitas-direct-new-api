@@ -185,6 +185,7 @@ class ApiManager:
         )
 
         # Retry once on HTTP 403 (Incapsula WAF rate limiting)
+        response_text = ""
         for attempt in range(2):
             try:
                 async with self.http_client.post(
