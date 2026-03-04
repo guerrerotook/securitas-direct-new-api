@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ha-channel: [dev, stable]
+        ha-channel: [dev, stable, minimum]
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +71,15 @@ jobs:
           # Pin HA to the stable release via a constraint so phcc can't upgrade it
           echo "homeassistant==$HA_VERSION" > /tmp/ha_stable.txt
           pip install -r requirements_test.txt --constraint /tmp/ha_stable.txt
+
+      - name: Install dependencies (minimum)
+        if: matrix.ha-channel == 'minimum'
+        run: |
+          pip install --upgrade pip
+          # phcc 0.13.210 pins homeassistant==2025.2.0 (our declared minimum)
+          # Install phcc first — it pins exact versions of pytest, pytest-asyncio,
+          # coverage etc. that conflict with the ~= ranges in requirements_test.txt
+          pip install pytest-homeassistant-custom-component==0.13.210 pytest-cov PyJWT~=2.10
 
       - name: Install dependencies (dev)
         if: matrix.ha-channel == 'dev'
