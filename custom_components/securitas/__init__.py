@@ -60,6 +60,7 @@ CONF_MAP_HOME = "map_home"
 CONF_MAP_AWAY = "map_away"
 CONF_MAP_NIGHT = "map_night"
 CONF_MAP_CUSTOM = "map_custom"
+CONF_MAP_VACATION = "map_vacation"
 CONF_NOTIFY_GROUP = "notify_group"
 
 DEFAULT_USE_2FA = True
@@ -128,6 +129,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_MAP_AWAY,
             CONF_MAP_NIGHT,
             CONF_MAP_CUSTOM,
+            CONF_MAP_VACATION,
             CONF_NOTIFY_GROUP,
         )
     ):
@@ -170,6 +172,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_MAP_AWAY] = entry.data.get(CONF_MAP_AWAY)
     config[CONF_MAP_NIGHT] = entry.data.get(CONF_MAP_NIGHT)
     config[CONF_MAP_CUSTOM] = entry.data.get(CONF_MAP_CUSTOM)
+    config[CONF_MAP_VACATION] = entry.data.get(CONF_MAP_VACATION)
 
     # Migrate old config: derive per-button mappings from PERI_alarm checkbox
     if config[CONF_MAP_HOME] is None:
@@ -179,6 +182,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         config[CONF_MAP_AWAY] = defaults[CONF_MAP_AWAY]
         config[CONF_MAP_NIGHT] = defaults[CONF_MAP_NIGHT]
         config[CONF_MAP_CUSTOM] = defaults[CONF_MAP_CUSTOM]
+        config[CONF_MAP_VACATION] = defaults[CONF_MAP_VACATION]
         hass.config_entries.async_update_entry(
             entry,
             data={
@@ -187,6 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_MAP_AWAY: config[CONF_MAP_AWAY],
                 CONF_MAP_NIGHT: config[CONF_MAP_NIGHT],
                 CONF_MAP_CUSTOM: config[CONF_MAP_CUSTOM],
+                CONF_MAP_VACATION: config[CONF_MAP_VACATION],
             },
         )
 

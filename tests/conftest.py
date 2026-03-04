@@ -20,6 +20,7 @@ from custom_components.securitas import (
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
+    CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
     CONF_PERI_ALARM,
     DEFAULT_DELAY_CHECK_OPERATION,
@@ -208,6 +209,7 @@ def make_config_entry_data(
     map_away: str | None = None,
     map_night: str | None = None,
     map_custom: str | None = None,
+    map_vacation: str | None = None,
     notify_group: str = "",
 ) -> dict:
     """Build config entry data dict with sensible defaults."""
@@ -233,6 +235,9 @@ def make_config_entry_data(
         CONF_MAP_CUSTOM: map_custom
         if map_custom is not None
         else defaults[CONF_MAP_CUSTOM],
+        CONF_MAP_VACATION: map_vacation
+        if map_vacation is not None
+        else defaults[CONF_MAP_VACATION],
         CONF_NOTIFY_GROUP: notify_group,
     }
 

@@ -5,7 +5,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 ## Features
 
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
-- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Custom) to any Securitas alarm mode.
+- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Custom, Vacation) to any Securitas alarm mode.
 - **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you of the problem and lets you force-arm anyway via a mobile notification button or the `securitas.force_arm` service.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
@@ -74,7 +74,7 @@ After setup, you can change most settings via **Settings → Integrations → Se
 
 ## Alarm State Mappings
 
-Securitas Direct supports several alarm modes, but Home Assistant's alarm panel only has four buttons: **Home**, **Away**, **Night**, and **Custom Bypass**. This integration lets you choose which Securitas mode each button activates.
+Securitas Direct supports several alarm modes, but Home Assistant's alarm panel only has five buttons: **Home**, **Away**, **Night**, **Custom Bypass**, and **Vacation**. This integration lets you choose which Securitas mode each button activates.
 
 ![Alarm State Mapping](./docs/images/state-mappings.png)
 
@@ -97,7 +97,7 @@ The available modes depend on whether **Perimetral alarm** is enabled. Standard 
 
 ### How It Works
 
-Each of the four HA alarm buttons can be mapped to any Securitas mode in the integration options. Set a button to "Not Used" to hide it from the alarm panel.
+Each of the five HA alarm buttons can be mapped to any Securitas mode in the integration options. Set a button to "Not Used" to hide it from the alarm panel.
 
 When the integration checks the alarm status, it translates the Securitas response back to the correct HA state using the same mapping. For example, if you mapped **Away** to "Total + Perimeter", then when Securitas reports "Total + Perimeter" the alarm panel will show "Armed Away".
 
@@ -113,6 +113,7 @@ When switching between armed modes (e.g. from "Armed Home" to "Armed Away"), the
 | Away      | Total             |
 | Night     | Partial Night     |
 | Custom    | Not Used (hidden) |
+| Vacation  | Not Used (hidden) |
 
 **Perimeter installations** (external sensors enabled):
 
@@ -122,6 +123,7 @@ When switching between armed modes (e.g. from "Armed Home" to "Armed Away"), the
 | Away      | Total + Perimeter |
 | Night     | Partial Night     |
 | Custom    | Perimeter Only    |
+| Vacation  | Not Used (hidden) |
 
 > **Note:** Perimeter variants (e.g. "Partial Night + Perimeter") are available as options and can be assigned to any button via the integration options. Some panels (e.g. SDVECU in Italy) accept compound commands like `ARMNIGHT1PERI1` as a single API call, while others (e.g. SDVFAST in Spain) require two sequential requests (`ARMNIGHT1` then `PERI1`). The integration auto-detects which mode your panel supports: it tries the single command first and, on failure, falls back to multi-step — remembering the result for the rest of the session.
 

@@ -64,6 +64,7 @@ def make_alarm(
             "map_away": defaults["map_away"],
             "map_night": defaults["map_night"],
             "map_custom": defaults["map_custom"],
+            "map_vacation": defaults["map_vacation"],
             "scan_interval": 120,
         }
 
@@ -365,6 +366,27 @@ class TestSupportedFeatures:
         assert features & AlarmControlPanelEntityFeature.ARM_AWAY
         assert features & AlarmControlPanelEntityFeature.ARM_NIGHT
         assert features & AlarmControlPanelEntityFeature.ARM_CUSTOM_BYPASS
+
+    def test_std_defaults_no_vacation(self):
+        """STD defaults: vacation is NOT enabled (map_vacation defaults to not_used)."""
+        alarm = make_alarm(has_peri=False)
+        features = alarm.supported_features
+        assert not (features & AlarmControlPanelEntityFeature.ARM_VACATION)
+
+    def test_vacation_feature_when_mapped(self):
+        """Vacation feature is enabled when map_vacation is mapped to a Securitas mode."""
+        config = {
+            "PERI_alarm": False,
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": SecuritasState.TOTAL.value,
+            "scan_interval": 120,
+        }
+        alarm = make_alarm(config=config)
+        features = alarm.supported_features
+        assert features & AlarmControlPanelEntityFeature.ARM_VACATION
 
     def test_no_features_when_all_not_used(self):
         """If all mappings are not_used, no features are reported."""
@@ -1233,6 +1255,40 @@ class TestArmMethods:
             == alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
         )
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+
+    async def test_arm_vacation_passes_armed_vacation(self):
+        """async_alarm_arm_vacation calls set_arm_state with ARMED_VACATION."""
+        config = {
+            "PERI_alarm": False,
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": SecuritasState.NOT_USED.value,
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": SecuritasState.TOTAL.value,
+            "scan_interval": 120,
+        }
+        alarm = make_alarm(config=config)
+        alarm._state = AlarmControlPanelState.DISARMED
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="T",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_alarm_arm_vacation()
+
+        alarm.client.session.arm_alarm.assert_called_once()
+        call_args = alarm.client.session.arm_alarm.call_args
+        assert (
+            call_args[0][1] == alarm._command_map[AlarmControlPanelState.ARMED_VACATION]
+        )
+        assert alarm._state == AlarmControlPanelState.ARMED_VACATION
 
     async def test_each_arm_method_transitions_through_arming(self):
         """All arm methods set ARMING state via __force_state before the API call."""

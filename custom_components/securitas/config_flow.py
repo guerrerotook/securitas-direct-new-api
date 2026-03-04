@@ -34,6 +34,7 @@ from . import (
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
+    CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
     CONF_PERI_ALARM,
     CONF_USE_2FA,
@@ -358,6 +359,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         map_home = _valid_map(CONF_MAP_HOME)
         map_away = _valid_map(CONF_MAP_AWAY)
         map_night = _valid_map(CONF_MAP_NIGHT)
+        map_vacation = _valid_map(CONF_MAP_VACATION)
         map_custom = _valid_map(CONF_MAP_CUSTOM)
 
         # Build dropdown options
@@ -374,6 +376,9 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
                     {"select": {"options": select_options}}
                 ),
                 vol.Optional(CONF_MAP_NIGHT, default=map_night): selector(
+                    {"select": {"options": select_options}}
+                ),
+                vol.Optional(CONF_MAP_VACATION, default=map_vacation): selector(
                     {"select": {"options": select_options}}
                 ),
                 vol.Optional(CONF_MAP_CUSTOM, default=map_custom): selector(
