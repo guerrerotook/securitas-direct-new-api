@@ -13,6 +13,7 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -668,6 +669,99 @@ class TestAsyncSetupEntry:
 
         assert result is True
         mock_forward.assert_awaited_once_with(entry, PLATFORMS)
+
+    async def test_setup_registers_static_path_and_extra_js(self, hass, mock_hub):
+        """Successful setup should register the alarm card static path and JS URL."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        # Make hass.http truthy with an async_register_static_paths mock
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "custom_components.securitas.frontend.add_extra_js_url"
+            ) as mock_add_js,
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+
+        # Verify static path registration
+        hass.http.async_register_static_paths.assert_awaited_once()
+        call_args = hass.http.async_register_static_paths.call_args[0][0]
+        assert len(call_args) == 1
+        assert isinstance(call_args[0], StaticPathConfig)
+        assert call_args[0].url_path == "/securitas_panel"
+
+        # Verify extra JS URL registration
+        mock_add_js.assert_called_once_with(
+            hass, "/securitas_panel/securitas-alarm-card.js"
+        )
+
+    async def test_setup_skips_card_when_no_http(self, hass, mock_hub):
+        """When hass.http is None, neither static paths nor extra JS should be registered."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        hass.http = None
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "custom_components.securitas.frontend.add_extra_js_url"
+            ) as mock_add_js,
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        mock_add_js.assert_not_called()
+
+    async def test_setup_card_registration_idempotent(self, hass, mock_hub):
+        """Calling async_setup_entry twice should register card JS both times without error."""
+        # Make hass.http truthy with an async_register_static_paths mock
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        entry1 = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry1.add_to_hass(hass)
+
+        entry2 = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry2.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "custom_components.securitas.frontend.add_extra_js_url"
+            ) as mock_add_js,
+        ):
+            result1 = await async_setup_entry(hass, entry1)
+            result2 = await async_setup_entry(hass, entry2)
+
+        assert result1 is True
+        assert result2 is True
+        assert mock_add_js.call_count == 2
+        mock_add_js.assert_called_with(hass, "/securitas_panel/securitas-alarm-card.js")
 
 
 # ===========================================================================

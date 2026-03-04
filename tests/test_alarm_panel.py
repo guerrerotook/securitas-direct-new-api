@@ -1589,8 +1589,8 @@ class TestForceArmContext:
 
         alarm.hass.async_create_task.assert_called_once()
 
-    def test_mobile_action_cancel_clears_context(self):
-        """SECURITAS_CANCEL_FORCE_ARM_<num> mobile action clears force context."""
+    def test_mobile_action_cancel_dispatches_task(self):
+        """SECURITAS_CANCEL_FORCE_ARM_<num> mobile action dispatches async_force_arm_cancel."""
         alarm = make_alarm()
         alarm._force_context = {
             "reference_id": "ref-mobile",
@@ -1608,9 +1608,8 @@ class TestForceArmContext:
 
         alarm._handle_mobile_action(event)
 
-        assert alarm._force_context is None
-        assert "force_arm_available" not in alarm._attr_extra_state_attributes
-        alarm.async_write_ha_state.assert_called()
+        # _handle_mobile_action creates a task — verify the task was dispatched
+        alarm.hass.async_create_task.assert_called_once()
 
     def test_mobile_action_unknown_does_nothing(self):
         """Unrecognised mobile action does not affect alarm state."""
@@ -2286,6 +2285,432 @@ class TestNotifyError:
             service_data["notification_id"]
             == "securitas.securitas_arming_failed_123456"
         )
+
+
+# ===========================================================================
+# Notification content tests
+# ===========================================================================
+
+
+class TestNotificationContent:
+    """Tests for arming exception notification content."""
+
+    def _make_exc(self, exceptions=None):
+        if exceptions is None:
+            exceptions = [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}]
+        return ArmingExceptionError("ref-123", "suid-123", exceptions)
+
+    def test_persistent_notification_content(self):
+        """Persistent notification has correct title, message, and notification_id."""
+        alarm = make_alarm()
+        exc = self._make_exc()
+
+        alarm._notify_arm_exceptions(exc)
+
+        # Find the persistent_notification.create call
+        calls = alarm.hass.services.async_call.call_args_list
+        pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
+        sd = pn_call[1]["service_data"]
+        assert sd["title"] == "Securitas: Arm blocked — open sensor(s)"
+        assert "Kitchen Door" in sd["message"]
+        assert sd["notification_id"] == "securitas.arming_exception_123456"
+
+    def test_mobile_notification_has_tag(self):
+        """Mobile notification includes the per-installation tag."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        exc = self._make_exc()
+
+        alarm._notify_arm_exceptions(exc)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        data = mobile_call[1]["service_data"]["data"]
+        assert data["tag"] == "securitas.arming_exception_123456"
+
+    def test_mobile_notification_action_buttons(self):
+        """Mobile notification has Force Arm and Cancel action buttons."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        exc = self._make_exc()
+
+        alarm._notify_arm_exceptions(exc)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        actions = mobile_call[1]["service_data"]["data"]["actions"]
+        assert len(actions) == 2
+        assert actions[0]["action"] == "SECURITAS_FORCE_ARM_123456"
+        assert actions[0]["title"] == "Force Arm"
+        assert actions[1]["action"] == "SECURITAS_CANCEL_FORCE_ARM_123456"
+        assert actions[1]["title"] == "Cancel"
+
+    def test_mobile_notification_short_message(self):
+        """Mobile message is shorter than persistent message and contains sensor alias."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        exc = self._make_exc()
+
+        alarm._notify_arm_exceptions(exc)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        persistent_msg = pn_call[1]["service_data"]["message"]
+        mobile_msg = mobile_call[1]["service_data"]["message"]
+        assert "Kitchen Door" in mobile_msg
+        assert len(mobile_msg) < len(persistent_msg)
+
+    def test_notification_multiple_sensors(self):
+        """Multiple sensors appear in both persistent and mobile notifications."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        exc = self._make_exc(
+            exceptions=[{"alias": "Kitchen Door"}, {"alias": "Bedroom Window"}]
+        )
+
+        alarm._notify_arm_exceptions(exc)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        persistent_msg = pn_call[1]["service_data"]["message"]
+        mobile_msg = mobile_call[1]["service_data"]["message"]
+        assert "Kitchen Door" in persistent_msg
+        assert "Bedroom Window" in persistent_msg
+        assert "Kitchen Door" in mobile_msg
+        assert "Bedroom Window" in mobile_msg
+
+    def test_notification_sensor_alias_fallback(self):
+        """Sensor without alias key shows 'unknown' in notification."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        exc = self._make_exc(exceptions=[{"status": "0", "deviceType": "MG"}])
+
+        alarm._notify_arm_exceptions(exc)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        assert "unknown" in pn_call[1]["service_data"]["message"]
+        assert "unknown" in mobile_call[1]["service_data"]["message"]
+
+    def test_no_mobile_notification_without_notify_group(self):
+        """Without notify_group, only persistent notification fires with correct content."""
+        alarm = make_alarm()
+        exc = self._make_exc()
+
+        alarm._notify_arm_exceptions(exc)
+
+        # Only 1 async_create_task call (persistent only)
+        assert alarm.hass.async_create_task.call_count == 1
+        # Verify persistent notification content is still correct
+        calls = alarm.hass.services.async_call.call_args_list
+        assert len(calls) == 1
+        sd = calls[0][1]["service_data"]
+        assert sd["title"] == "Securitas: Arm blocked — open sensor(s)"
+        assert "Kitchen Door" in sd["message"]
+        assert sd["notification_id"] == "securitas.arming_exception_123456"
+
+
+# ===========================================================================
+# Dismiss notification tests
+# ===========================================================================
+
+
+class TestDismissNotification:
+    """Tests for _dismiss_arming_exception_notification."""
+
+    def test_dismiss_persistent_notification(self):
+        """Dismissing sends persistent_notification.dismiss with correct notification_id."""
+        alarm = make_alarm()
+
+        alarm._dismiss_arming_exception_notification()
+
+        calls = alarm.hass.services.async_call.call_args_list
+        pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
+        assert pn_call[1]["service"] == "dismiss"
+        assert pn_call[1]["service_data"] == {
+            "notification_id": "securitas.arming_exception_123456"
+        }
+
+    def test_dismiss_mobile_notification_with_notify_group(self):
+        """With notify_group, dismiss also sends clear_notification to mobile."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._dismiss_arming_exception_notification()
+
+        calls = alarm.hass.services.async_call.call_args_list
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        assert mobile_call[1]["service"] == "mobile_app_phone"
+        assert mobile_call[1]["service_data"] == {
+            "message": "clear_notification",
+            "data": {"tag": "securitas.arming_exception_123456"},
+        }
+
+    def test_dismiss_no_mobile_without_notify_group(self):
+        """Without notify_group, only persistent dismiss fires."""
+        alarm = make_alarm()
+
+        alarm._dismiss_arming_exception_notification()
+
+        # Only 1 async_create_task call (persistent dismiss only)
+        assert alarm.hass.async_create_task.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_force_arm_cancel_dismisses_both(self):
+        """async_force_arm_cancel dismisses both persistent and mobile notifications."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._force_context = {
+            "reference_id": "ref-123",
+            "suid": "suid-123",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        await alarm.async_force_arm_cancel()
+
+        calls = alarm.hass.services.async_call.call_args_list
+        # persistent_notification.dismiss
+        pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
+        assert pn_call[1]["service"] == "dismiss"
+        # notify clear_notification
+        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        assert mobile_call[1]["service_data"]["message"] == "clear_notification"
+        assert (
+            mobile_call[1]["service_data"]["data"]["tag"]
+            == "securitas.arming_exception_123456"
+        )
+        # Context should be cleared
+        assert alarm._force_context is None
+
+
+# ===========================================================================
+# async_added_to_hass tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestAsyncAddedToHass:
+    """Tests for async_added_to_hass event listener registration."""
+
+    async def test_registers_mobile_action_listener(self):
+        """async_added_to_hass registers listener for mobile_app_notification_action."""
+        alarm = make_alarm()
+
+        await alarm.async_added_to_hass()
+
+        alarm.hass.bus.async_listen.assert_called_once_with(
+            "mobile_app_notification_action",
+            alarm._handle_mobile_action,
+        )
+
+    async def test_mobile_action_unsub_stored(self):
+        """async_added_to_hass stores the unsubscribe callable from bus.async_listen."""
+        alarm = make_alarm()
+        sentinel = MagicMock()
+        alarm.hass.bus.async_listen.return_value = sentinel
+
+        await alarm.async_added_to_hass()
+
+        assert alarm._mobile_action_unsub is sentinel
+
+
+# ===========================================================================
+# Force-arm workflow integration tests
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestForceArmWorkflow:
+    """End-to-end integration tests for the force-arm workflow."""
+
+    async def test_full_force_arm_workflow(self):
+        """Full workflow: arm fails -> notifications -> force arm succeeds."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = ArmingExceptionError(
+            "ref-force-123",
+            "suid-force-123",
+            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
+        )
+        success_result = ArmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="P",
+            protomResponseData="",
+        )
+        # First call raises ArmingExceptionError, second succeeds
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=[exc, success_result])
+
+        # Step 1: initial arm attempt fails
+        alarm._state = AlarmControlPanelState.ARMING
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Force context should be stored
+        assert alarm._force_context is not None
+        assert alarm._force_context["reference_id"] == "ref-force-123"
+        assert alarm._force_context["suid"] == "suid-force-123"
+        assert alarm._force_context["mode"] == AlarmControlPanelState.ARMED_HOME
+
+        # Notifications should have been sent (persistent + mobile)
+        assert alarm.hass.async_create_task.call_count == 2
+        calls = alarm.hass.services.async_call.call_args_list
+        pn_create = next(
+            c
+            for c in calls
+            if c[1]["domain"] == "persistent_notification"
+            and c[1]["service"] == "create"
+        )
+        assert "Kitchen Door" in pn_create[1]["service_data"]["message"]
+
+        # Reset call tracking for step 2
+        alarm.hass.async_create_task.reset_mock()
+        alarm.hass.services.async_call.reset_mock()
+
+        # Step 2: force arm
+        await alarm.async_force_arm()
+
+        # arm_alarm should be called with force params
+        force_call_kwargs = alarm.client.session.arm_alarm.call_args[1]
+        assert force_call_kwargs["force_arming_remote_id"] == "ref-force-123"
+        assert force_call_kwargs["suid"] == "suid-force-123"
+
+        # Context should be cleared
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        assert "arm_exceptions" not in alarm._attr_extra_state_attributes
+
+        # State should reflect successful arm
+        assert alarm._state == AlarmControlPanelState.ARMED_HOME
+
+        # Dismiss notifications should have been called
+        dismiss_calls = alarm.hass.services.async_call.call_args_list
+        pn_dismiss = next(
+            c
+            for c in dismiss_calls
+            if c[1]["domain"] == "persistent_notification"
+            and c[1]["service"] == "dismiss"
+        )
+        assert (
+            pn_dismiss[1]["service_data"]["notification_id"]
+            == "securitas.arming_exception_123456"
+        )
+
+    async def test_full_cancel_workflow(self):
+        """Full workflow: arm fails -> user cancels -> context cleared."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = ArmingExceptionError(
+            "ref-cancel-123",
+            "suid-cancel-123",
+            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
+        )
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=exc)
+
+        # Step 1: initial arm fails
+        alarm._state = AlarmControlPanelState.ARMING
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        assert alarm._force_context is not None
+
+        # Reset tracking
+        alarm.hass.async_create_task.reset_mock()
+        alarm.hass.services.async_call.reset_mock()
+
+        # Step 2: user cancels
+        await alarm.async_force_arm_cancel()
+
+        # Context should be cleared
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+
+        # Dismiss notifications should have been called for both
+        dismiss_calls = alarm.hass.services.async_call.call_args_list
+        pn_dismiss = next(
+            c
+            for c in dismiss_calls
+            if c[1]["domain"] == "persistent_notification"
+            and c[1]["service"] == "dismiss"
+        )
+        assert pn_dismiss is not None
+        mobile_clear = next(c for c in dismiss_calls if c[1]["domain"] == "notify")
+        assert mobile_clear[1]["service_data"]["message"] == "clear_notification"
+
+        # State should be disarmed
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+    async def test_force_arm_after_status_refresh(self):
+        """Force context survives an immediate status refresh and force arm succeeds."""
+        alarm = make_alarm()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._last_status = AlarmControlPanelState.DISARMED
+
+        exc = ArmingExceptionError(
+            "ref-refresh-123",
+            "suid-refresh-123",
+            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
+        )
+        success_result = ArmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="P",
+            protomResponseData="",
+        )
+
+        # Step 1: initial arm fails
+        alarm.client.session.arm_alarm = AsyncMock(side_effect=exc)
+        alarm._state = AlarmControlPanelState.ARMING
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        assert alarm._force_context is not None
+        created_at = alarm._force_context["created_at"]
+
+        # Step 2: status refresh returns disarmed (HA auto-refreshes after service calls)
+        alarm.client.update_overview = AsyncMock(
+            return_value=CheckAlarmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="D",
+                protomResponseData="",
+            )
+        )
+        await alarm.async_update_status()
+
+        # Context should survive (age < scan interval of 120s)
+        assert alarm._force_context is not None
+        assert alarm._force_context["created_at"] == created_at
+        assert alarm._attr_extra_state_attributes.get("force_arm_available") is True
+
+        # Step 3: force arm succeeds
+        alarm.client.session.arm_alarm = AsyncMock(return_value=success_result)
+        await alarm.async_force_arm()
+
+        # arm_alarm should have been called with force params
+        call_kwargs = alarm.client.session.arm_alarm.call_args[1]
+        assert call_kwargs["force_arming_remote_id"] == "ref-refresh-123"
+        assert call_kwargs["suid"] == "suid-refresh-123"
+
+        # Context cleared, state reflects success
+        assert alarm._force_context is None
+        assert alarm._state == AlarmControlPanelState.ARMED_HOME
 
 
 # ===========================================================================

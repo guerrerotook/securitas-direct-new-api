@@ -225,9 +225,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         if action == f"SECURITAS_FORCE_ARM_{num}":
             self.hass.async_create_task(self.async_force_arm())
         elif action == f"SECURITAS_CANCEL_FORCE_ARM_{num}":
-            self._clear_force_context(force=True)
-            self.async_write_ha_state()
-            self._dismiss_arming_exception_notification()
+            self.hass.async_create_task(self.async_force_arm_cancel())
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
@@ -608,6 +606,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         "title": title,
                         "message": mobile_message,
                         "data": {
+                            "tag": self._arming_exception_notification_id,
                             "actions": [
                                 {
                                     "action": f"SECURITAS_FORCE_ARM_{self.installation.number}",
@@ -624,7 +623,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
 
     def _dismiss_arming_exception_notification(self) -> None:
-        """Dismiss the persistent arming-exception notification."""
+        """Dismiss the persistent and mobile arming-exception notifications."""
         self.hass.async_create_task(
             self.hass.services.async_call(
                 domain="persistent_notification",
@@ -634,6 +633,21 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 },
             )
         )
+        # Clear mobile notification if notify group is configured
+        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        if notify_group:
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="notify",
+                    service=notify_group,
+                    service_data={
+                        "message": "clear_notification",
+                        "data": {
+                            "tag": self._arming_exception_notification_id,
+                        },
+                    },
+                )
+            )
 
     async def async_force_arm_cancel(self) -> None:
         """Cancel a pending force-arm context.

@@ -5,8 +5,9 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 ## Features
 
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
-- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Custom, Vacation) to any Securitas alarm mode.
-- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you of the problem and lets you force-arm anyway via a mobile notification button or the `securitas.force_arm` service.
+- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Securitas alarm mode.
+- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you and lets you force-arm via mobile notification, the `securitas.force_arm` service, or the custom alarm card.
+- **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
 - **Smart locks** — lock and unlock smart door locks.
@@ -16,17 +17,17 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 
 ## Supported Countries
 
-| Code | Country     | Brand            |
-| ---- | ----------- | ---------------- |
-| AR   | Argentina   | Verisure         |
-| BR   | Brazil      | Verisure         |
-| CL   | Chile       | Verisure         |
-| ES   | Spain       | Securitas Direct |
-| FR   | France      | Securitas Direct |
-| GB   | Great Britain | Verisure       |
-| IE   | Ireland     | Verisure         |
-| IT   | Italy       | Verisure         |
-| PT   | Portugal    | Verisure         |
+| Code | Country       | Brand            |
+| ---- | ------------- | ---------------- |
+| AR   | Argentina     | Verisure         |
+| BR   | Brazil        | Verisure         |
+| CL   | Chile         | Verisure         |
+| ES   | Spain         | Securitas Direct |
+| FR   | France        | Securitas Direct |
+| GB   | Great Britain | Verisure         |
+| IE   | Ireland       | Verisure         |
+| IT   | Italy         | Verisure         |
+| PT   | Portugal      | Verisure         |
 
 If your country is not listed, try `default`. If that doesn't work, [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues).
 
@@ -49,18 +50,18 @@ Or manually:
 
 Go to **Settings → Integrations → Add Integration** and search for **Securitas Direct**.
 
-| Option | Default | Description |
-| ------ | ------- | ----------- |
-| Username | — | Your Securitas Direct account username. |
-| Password | — | Your Securitas Direct account password. |
-| Use 2FA | Yes | Enable two-factor authentication via SMS. Uncheck to skip. |
-| Country Code | ES | Your country code (see table above). |
-| PIN Code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Securitas — it only protects the panel in Home Assistant. Can be numeric or alphanumeric. Leave empty for no PIN. |
-| Require PIN to arm | No | When enabled, the PIN is also required to arm the alarm (not just to disarm). Useful to disable for Android Auto and similar interfaces. Has no effect if no PIN is set. |
-| Perimetral alarm | No | Enable if your installation has external/outdoor sensors. This determines which alarm modes are available and the correct disarm command. |
-| Check alarm panel | Yes | When enabled, the integration queries the physical alarm panel for its status. When disabled, it reads the last known status from the Securitas server (fewer requests, but may be out of sync if you use the Securitas app). |
-| Update interval | 120s | How often (in seconds) the integration checks the alarm status. |
-| Notify service | _(none)_ | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
+| Option             | Default   | Description                                                                                                                                                                                                                   |
+| ------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Username           | —         | Your Securitas Direct account username.                                                                                                                                                                                       |
+| Password           | —         | Your Securitas Direct account password.                                                                                                                                                                                       |
+| Use 2FA            | Yes       | Enable two-factor authentication via SMS. Uncheck to skip.                                                                                                                                                                    |
+| Country Code       | ES        | Your country code (see table above).                                                                                                                                                                                          |
+| PIN Code           | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Securitas — it only protects the panel in Home Assistant. Can be numeric or alphanumeric. Leave empty for no PIN.                                      |
+| Require PIN to arm | No        | When enabled, the PIN is also required to arm the alarm (not just to disarm). Useful to disable for Android Auto and similar interfaces. Has no effect if no PIN is set.                                                      |
+| Perimetral alarm   | No        | Enable if your installation has external/outdoor sensors. This determines which alarm modes are available and the correct disarm command.                                                                                     |
+| Check alarm panel  | Yes       | When enabled, the integration queries the physical alarm panel for its status. When disabled, it reads the last known status from the Securitas server (fewer requests, but may be out of sync if you use the Securitas app). |
+| Update interval    | 120s      | How often (in seconds) the integration checks the alarm status.                                                                                                                                                               |
+| Notify service     | _(none)_  | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons.                                        |
 
 ### Two-factor authentication
 
@@ -147,10 +148,9 @@ When you arm the alarm and a sensor is in a fault state (e.g. a window is open),
 - **Force arm** to arm despite the exception. You can do this from:
   - The **Force Arm** button in the mobile notification.
   - The `securitas.force_arm` service, targeted at the alarm panel entity.
+  - The **Force Arm** button in the [custom alarm card](#custom-alarm-card).
 
 The force-arm context expires automatically at the next status refresh, so force-arming is only possible immediately after the exception occurs.
-
-> **Limitation:** The standard Home Assistant alarm panel card has no way to display exception details or a force-arm button. Exception information is only surfaced via the persistent notification and (if configured) the mobile notification.
 
 ### Notifying multiple people
 
@@ -171,8 +171,8 @@ This registers a `notify.mobiles` service. After restarting Home Assistant, `mob
 
 ### `securitas.force_arm` service
 
-| Field | Description |
-| ----- | ----------- |
+| Field         | Description                                    |
+| ------------- | ---------------------------------------------- |
 | Target entity | The Securitas alarm panel entity to force-arm. |
 
 Example automation action:
@@ -182,6 +182,37 @@ action: securitas.force_arm
 target:
   entity_id: alarm_control_panel.my_home
 ```
+
+## Custom Alarm Card
+
+The integration ships with a custom Lovelace card (`securitas-alarm-card`) that is purpose-built for Securitas Direct. It goes beyond the standard HA alarm panel card by integrating the force-arm flow directly into the dashboard.
+
+|                   Disarmed                   |                   Armed (Home)                   |                   All Modes                    |
+| :------------------------------------------: | :----------------------------------------------: | :--------------------------------------------: |
+| ![Disarmed](./docs/images/card-disarmed.png) | ![Armed Home](./docs/images/card-armed-home.png) | ![All Modes](./docs/images/card-all-modes.png) |
+
+|                PIN Keypad                 |                   Force Arm                    |
+| :---------------------------------------: | :--------------------------------------------: |
+| ![PIN Keypad](./docs/images/card-pin.png) | ![Force Arm](./docs/images/card-force-arm.png) |
+
+### Features
+
+- **Dynamic arm buttons** — reads `supported_features` from the entity and only shows the modes that are actually configured. No unused buttons.
+- **PIN keypad** — when a PIN code is configured, a numeric keypad appears automatically on arm/disarm. Alphanumeric codes use a text input instead. Respects `code_arm_required` (keypad only shown on arm if required, always shown on disarm).
+- **Force-arm UI** — when arming is blocked by an open sensor, the card automatically shows a warning with the sensor name(s) and **Force Arm** / **Cancel** buttons. No Template Binary Sensor helper required.
+- **Theme-aware** — uses Home Assistant CSS variables and works correctly in both light and dark mode.
+
+### Setup
+
+The card is registered automatically when the integration loads — no manual file copying or Lovelace resource configuration required.
+
+To add the card to your dashboard, click **Add Card → Search for "Securitas Alarm Card"** and pick your alarm panel entity from the dropdown.
+
+### Badge
+
+A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails. Click the badge to open the full alarm card in a popup overlay.
+
+To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and pick your alarm panel entity from the dropdown.
 
 ## Sentinel Sensors
 
