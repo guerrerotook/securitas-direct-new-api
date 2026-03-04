@@ -76,8 +76,8 @@ jobs:
         if: matrix.ha-channel == 'minimum'
         run: |
           pip install --upgrade pip
-          echo "homeassistant==2025.2.0" > /tmp/ha_minimum.txt
-          pip install -r requirements_test.txt --constraint /tmp/ha_minimum.txt
+          # phcc 0.13.210 pins homeassistant==2025.2.0 (our declared minimum)
+          pip install -r requirements_test.txt pytest-homeassistant-custom-component==0.13.210
 
       - name: Install dependencies (dev)
         if: matrix.ha-channel == 'dev'
