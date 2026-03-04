@@ -1551,7 +1551,11 @@ class TestForceArmContext:
         call_kwargs = alarm.client.session.arm_alarm.call_args[1]
         assert call_kwargs["force_arming_remote_id"] == "ref-exc-456"
         assert call_kwargs["suid"] == "suid-456"
-        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+        # Force arm always bypasses sensors — state must be ARMED_CUSTOM_BYPASS
+        # regardless of the proto code the Securitas API returns (which is the
+        # same as a normal arm and would otherwise map to the original mode).
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        assert alarm._was_force_armed is True
         # Force context should be cleared after consumption
         assert alarm._force_context is None
         assert "force_arm_available" not in alarm._attr_extra_state_attributes
