@@ -204,6 +204,23 @@ class ApiManager:
             _LOGGER.debug(response_text)
 
             if http_status == 403 and attempt == 0:
+                # Incapsula WAF blocks return HTML — retrying immediately
+                # just adds more requests that extend the block.  Only retry
+                # for non-WAF 403s (e.g. server-side rate limit with
+                # Retry-After header).
+                if "_Incapsula_Resource" in response_text:
+                    _LOGGER.warning(
+                        "HTTP 403 WAF block from Securitas API for '%s'"
+                        " (not retrying — WAF blocks require longer backoff)",
+                        operation,
+                    )
+                    raise SecuritasDirectError(
+                        f"HTTP {http_status} from Securitas API ({operation})",
+                        None,
+                        headers,
+                        content,
+                        http_status=http_status,
+                    )
                 retry_after = response.headers.get("Retry-After")
                 delay = int(retry_after) if retry_after else 2
                 _LOGGER.warning(

@@ -345,6 +345,28 @@ class TestExecuteRequest:
         with pytest.raises(SecuritasDirectError, match="HTTP 403"):
             await api._execute_request({"query": "test"}, "TestOp")
 
+    async def test_http_403_waf_block_skips_retry(self, api):
+        """Incapsula WAF block (HTML with _Incapsula_Resource) skips retry."""
+        waf_html = (
+            '<html><body><iframe src="/_Incapsula_Resource?CWUDNSAI=23">'
+            "Request unsuccessful.</iframe></body></html>"
+        )
+        response = AsyncMock()
+        response.status = 403
+        response.text = AsyncMock(return_value=waf_html)
+        response.headers = {}
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError, match="HTTP 403"):
+            await api._execute_request({"query": "test"}, "TestOp")
+
+        # Only one HTTP call — WAF block should NOT retry
+        api.http_client.post.assert_called_once()
+
     async def test_http_403_respects_retry_after_header(self, api):
         """HTTP 403 retry uses Retry-After header when present."""
         fail_response = AsyncMock()
