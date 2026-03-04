@@ -12,6 +12,7 @@
  *  - Force-arm section: automatically appears when `force_arm_available`
  *    is true, lists open sensors from `arm_exceptions`, provides
  *    Force Arm and Cancel buttons — no helper entity required
+ *  - Handles `unavailable` and `unknown` entity states gracefully
  *  - Styling aligned with Home Assistant's design language (CSS variables)
  *
  * Card config:
@@ -30,15 +31,20 @@ const FEATURE = {
 
 // ── Per-state visual config ───────────────────────────────────────────────────
 const STATE_CFG = {
-  disarmed:           { icon: "mdi:shield-off-outline",  color: "var(--success-color,#4CAF50)",  label: "Disarmed" },
-  armed_away:         { icon: "mdi:shield-lock",         color: "var(--error-color,#F44336)",    label: "Armed Away" },
-  armed_home:         { icon: "mdi:shield-home",         color: "var(--warning-color,#FF9800)",  label: "Armed Home" },
-  armed_night:        { icon: "mdi:shield-moon",         color: "#9C27B0",                       label: "Armed Night" },
-  armed_custom_bypass:{ icon: "mdi:shield-star",         color: "#00BCD4",                       label: "Armed Custom" },
-  arming:             { icon: "mdi:shield-sync-outline", color: "var(--warning-color,#FF9800)",  label: "Arming…" },
-  pending:            { icon: "mdi:shield-alert-outline",color: "var(--warning-color,#FF9800)",  label: "Pending" },
-  triggered:          { icon: "mdi:shield-alert",        color: "var(--error-color,#F44336)",    label: "TRIGGERED" },
+  disarmed:           { icon: "mdi:shield-off-outline",  color: "var(--success-color,#4CAF50)",   label: "Disarmed" },
+  armed_away:         { icon: "mdi:shield-lock",         color: "var(--error-color,#F44336)",     label: "Armed Away" },
+  armed_home:         { icon: "mdi:shield-home",         color: "var(--warning-color,#FF9800)",   label: "Armed Home" },
+  armed_night:        { icon: "mdi:shield-moon",         color: "#9C27B0",                        label: "Armed Night" },
+  armed_custom_bypass:{ icon: "mdi:shield-star",         color: "#00BCD4",                        label: "Armed Custom" },
+  arming:             { icon: "mdi:shield-sync-outline", color: "var(--warning-color,#FF9800)",   label: "Arming…" },
+  pending:            { icon: "mdi:shield-alert-outline",color: "var(--warning-color,#FF9800)",   label: "Pending" },
+  triggered:          { icon: "mdi:shield-alert",        color: "var(--error-color,#F44336)",     label: "TRIGGERED" },
+  unavailable:        { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)",  label: "Unavailable" },
+  unknown:            { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)",  label: "Unknown" },
 };
+
+// States where the alarm is considered armed (not disarmed/transitioning)
+const INACTIVE_STATES = new Set(["disarmed", "arming", "pending", "triggered", "unavailable", "unknown"]);
 
 // ── Arm action definitions ────────────────────────────────────────────────────
 const ARM_ACTIONS = [
@@ -81,6 +87,16 @@ class SecuritasAlarmCard extends HTMLElement {
     }
   }
 
+  // ── HTML escaping — prevents XSS via user-controlled strings ───────────────
+  _esc(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   // ── UI state helpers ────────────────────────────────────────────────────────
   _resetUI() {
     this._uiState = "normal";
@@ -101,13 +117,13 @@ class SecuritasAlarmCard extends HTMLElement {
 
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) {
-      this.shadowRoot.innerHTML = `<ha-card><div class="missing">Entity not found: ${this._config.entity}</div></ha-card>`;
+      this.shadowRoot.innerHTML = `<ha-card><div class="missing">Entity not found: ${this._esc(this._config.entity)}</div></ha-card>`;
       return;
     }
 
     const state    = stateObj.state;
     const attrs    = stateObj.attributes;
-    const cfg      = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)", label: state };
+    const cfg      = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)", label: this._esc(state) };
     const name     = this._config.name || attrs.friendly_name || this._config.entity;
     const features = attrs.supported_features || 0;
 
@@ -118,9 +134,12 @@ class SecuritasAlarmCard extends HTMLElement {
     const codeArmRequired = attrs.code_arm_required === true; // need code to arm?
     const hasCode         = !!codeFormat;
 
+    // Unavailable / unknown — show state but no action buttons
+    const isUnavailable = state === "unavailable" || state === "unknown";
+
     // Determine which arm buttons to show
     const availableArmActions = ARM_ACTIONS.filter(a => features & a.feature);
-    const isArmed = !["disarmed", "arming", "pending", "triggered"].includes(state);
+    const isArmed = !INACTIVE_STATES.has(state);
 
     this.shadowRoot.innerHTML = `
       <style>${this._styles(cfg)}</style>
@@ -134,19 +153,22 @@ class SecuritasAlarmCard extends HTMLElement {
               <ha-icon icon="${cfg.icon}"></ha-icon>
             </div>
             <div class="title-block">
-              <div class="entity-name">${name}</div>
+              <div class="entity-name">${this._esc(name)}</div>
               <div class="state-pill">${cfg.label}</div>
             </div>
           </div>
 
+          <!-- ── Unavailable notice ── -->
+          ${isUnavailable ? `<div class="unavailable-msg">Entity is ${cfg.label.toLowerCase()}.</div>` : ""}
+
           <!-- ── Force arm section ── -->
-          ${forceArmAvailable ? this._renderForceArm(openSensors) : ""}
+          ${!isUnavailable && forceArmAvailable ? this._renderForceArm(openSensors) : ""}
 
           <!-- ── PIN entry ── -->
-          ${this._uiState === "pin" ? this._renderPin(codeFormat) : ""}
+          ${!isUnavailable && this._uiState === "pin" ? this._renderPin(codeFormat) : ""}
 
-          <!-- ── Normal buttons (hidden during pin entry) ── -->
-          ${this._uiState === "normal" && !forceArmAvailable ? `
+          <!-- ── Normal buttons (hidden during pin entry / force arm / unavailable) ── -->
+          ${!isUnavailable && this._uiState === "normal" && !forceArmAvailable ? `
             <div class="btn-grid">
               ${isArmed
                 ? `<button class="btn btn-disarm" data-action="disarm">Disarm</button>`
@@ -165,7 +187,7 @@ class SecuritasAlarmCard extends HTMLElement {
   // ── Force arm section ───────────────────────────────────────────────────────
   _renderForceArm(sensors) {
     const list = sensors.length
-      ? `<ul class="sensor-list">${sensors.map(s => `<li>${s}</li>`).join("")}</ul>`
+      ? `<ul class="sensor-list">${sensors.map(s => `<li>${this._esc(s)}</li>`).join("")}</ul>`
       : "";
     return `
       <div class="force-section">
@@ -189,7 +211,7 @@ class SecuritasAlarmCard extends HTMLElement {
     if (codeFormat === "number") {
       return `
         <div class="pin-section">
-          <div class="pin-label">Enter PIN to ${label}</div>
+          <div class="pin-label">Enter PIN to ${this._esc(label)}</div>
           <div class="pin-display">${masked}</div>
           <div class="keypad">
             ${[1,2,3,4,5,6,7,8,9].map(n =>
@@ -199,15 +221,16 @@ class SecuritasAlarmCard extends HTMLElement {
             <button class="key" data-key="0">0</button>
             <button class="key key-del" data-key="del">⌫</button>
           </div>
+          <button class="btn btn-arm pin-confirm" data-action="confirm-pin">Confirm</button>
         </div>`;
     }
 
     // Text code
     return `
       <div class="pin-section">
-        <div class="pin-label">Enter code to ${label}</div>
+        <div class="pin-label">Enter code to ${this._esc(label)}</div>
         <input class="code-input" type="password" autocomplete="off"
-               placeholder="Code" value="${this._pin}" id="code-input" />
+               placeholder="Code" value="${this._esc(this._pin)}" id="code-input" />
         <div class="text-pin-btns">
           <button class="btn btn-arm" data-action="confirm-pin">Confirm</button>
           <button class="btn btn-cancel-force" data-action="cancel-pin">Cancel</button>
@@ -235,8 +258,6 @@ class SecuritasAlarmCard extends HTMLElement {
         if (k === "del")    { this._pin = this._pin.slice(0, -1); this._render(); return; }
         this._pin += k;
         this._render();
-        // Auto-submit after reasonable PIN length (≥4 digits)
-        if (this._pin.length >= 4) this._submitPin(entity);
       });
     });
 
@@ -254,7 +275,9 @@ class SecuritasAlarmCard extends HTMLElement {
   _handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity) {
     // Force-arm / cancel
     if (action === "force_arm") {
-      this._hass.callService("securitas", "force_arm", { entity_id: entity });
+      const serviceData = { entity_id: entity };
+      if (this._pin) serviceData.code = this._pin;
+      this._hass.callService("securitas", "force_arm", serviceData);
       return;
     }
     if (action === "cancel_force") {
@@ -301,6 +324,13 @@ class SecuritasAlarmCard extends HTMLElement {
       ha-card { overflow: hidden; }
 
       .missing { padding: 16px; color: var(--error-color); }
+
+      .unavailable-msg {
+        padding: 8px 0 12px;
+        font-size: 0.85em;
+        color: var(--secondary-text-color);
+        text-align: center;
+      }
 
       /* colour accent strip at top */
       .top-bar {
@@ -468,6 +498,13 @@ class SecuritasAlarmCard extends HTMLElement {
       .key:active  { transform: scale(0.94); }
       .key-cancel  { color: var(--error-color, #F44336); }
       .key-del     { color: var(--primary-color); }
+      .pin-confirm {
+        display: block;
+        width: 100%;
+        max-width: 240px;
+        margin: 10px auto 0;
+        box-sizing: border-box;
+      }
 
       /* text code input */
       .code-input {
@@ -487,7 +524,12 @@ class SecuritasAlarmCard extends HTMLElement {
     `;
   }
 
-  getCardSize() { return 3; }
+  getCardSize() {
+    if (this._uiState === "pin") return 6;
+    const stateObj = this._hass?.states[this._config?.entity];
+    if (stateObj?.attributes?.force_arm_available) return 5;
+    return 3;
+  }
 
   static getStubConfig() {
     return { entity: "alarm_control_panel.your_panel_id" };
