@@ -754,9 +754,10 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           <label>${_t(lang, "editor_entity")}</label>
           <select id="entity">
             <option value="" ${!selected ? "selected" : ""}>${_t(lang, "editor_select")}</option>
-            ${entities.map(e =>
-              `<option value="${e}" ${e === selected ? "selected" : ""}>${this._hass.states[e].attributes.friendly_name || e}</option>`
-            ).join("")}
+            ${entities.map(e => {
+              const label = this._escapeAttr(this._hass.states[e].attributes.friendly_name || e);
+              return `<option value="${e}" ${e === selected ? "selected" : ""}>${label}</option>`;
+            }).join("")}
           </select>
         </div>
         <div class="row">

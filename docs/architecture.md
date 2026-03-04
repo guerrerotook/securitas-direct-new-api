@@ -348,7 +348,6 @@ Step 2 (mappings): Alarm state mappings
   - Map Night button → Securitas state
   - Map Vacation button → Securitas state
   - Map Custom Bypass button → Securitas state
-  - Map Vacation button → Securitas state
   Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
 ```
 

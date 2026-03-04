@@ -682,11 +682,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.__force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
-    async def async_force_arm_cancel(self) -> None:
-        """Cancel a pending force-arm and dismiss the notification."""
-        self._clear_force_context(force=True)
-        self.async_write_ha_state()
-        self._dismiss_arming_exception_notification()
 
     async def async_alarm_arm_home(self, code: str | None = None):
         """Send arm home command."""
