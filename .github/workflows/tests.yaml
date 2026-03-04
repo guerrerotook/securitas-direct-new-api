@@ -77,7 +77,9 @@ jobs:
         run: |
           pip install --upgrade pip
           # phcc 0.13.210 pins homeassistant==2025.2.0 (our declared minimum)
-          pip install -r requirements_test.txt pytest-homeassistant-custom-component==0.13.210
+          # Install phcc first — it pins exact versions of pytest, pytest-asyncio,
+          # coverage etc. that conflict with the ~= ranges in requirements_test.txt
+          pip install pytest-homeassistant-custom-component==0.13.210 pytest-cov PyJWT~=2.10
 
       - name: Install dependencies (dev)
         if: matrix.ha-channel == 'dev'
