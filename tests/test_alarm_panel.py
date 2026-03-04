@@ -2712,6 +2712,7 @@ class TestForceArmWorkflow:
         assert alarm._force_context is None
         assert alarm._state == AlarmControlPanelState.ARMED_HOME
 
+
 # ===========================================================================
 # hass-is-None guard tests (issue #323)
 # ===========================================================================
