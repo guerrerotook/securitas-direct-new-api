@@ -17,17 +17,17 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 
 ## Supported Countries
 
-| Code | Country     | Brand            |
-| ---- | ----------- | ---------------- |
-| AR   | Argentina   | Verisure         |
-| BR   | Brazil      | Verisure         |
-| CL   | Chile       | Verisure         |
-| ES   | Spain       | Securitas Direct |
-| FR   | France      | Securitas Direct |
-| GB   | Great Britain | Verisure       |
-| IE   | Ireland     | Verisure         |
-| IT   | Italy       | Verisure         |
-| PT   | Portugal    | Verisure         |
+| Code | Country       | Brand            |
+| ---- | ------------- | ---------------- |
+| AR   | Argentina     | Verisure         |
+| BR   | Brazil        | Verisure         |
+| CL   | Chile         | Verisure         |
+| ES   | Spain         | Securitas Direct |
+| FR   | France        | Securitas Direct |
+| GB   | Great Britain | Verisure         |
+| IE   | Ireland       | Verisure         |
+| IT   | Italy         | Verisure         |
+| PT   | Portugal      | Verisure         |
 
 If your country is not listed, try `default`. If that doesn't work, [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues).
 
@@ -50,18 +50,18 @@ Or manually:
 
 Go to **Settings → Integrations → Add Integration** and search for **Securitas Direct**.
 
-| Option | Default | Description |
-| ------ | ------- | ----------- |
-| Username | — | Your Securitas Direct account username. |
-| Password | — | Your Securitas Direct account password. |
-| Use 2FA | Yes | Enable two-factor authentication via SMS. Uncheck to skip. |
-| Country Code | ES | Your country code (see table above). |
-| PIN Code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Securitas — it only protects the panel in Home Assistant. Can be numeric or alphanumeric. Leave empty for no PIN. |
-| Require PIN to arm | No | When enabled, the PIN is also required to arm the alarm (not just to disarm). Useful to disable for Android Auto and similar interfaces. Has no effect if no PIN is set. |
-| Perimetral alarm | No | Enable if your installation has external/outdoor sensors. This determines which alarm modes are available and the correct disarm command. |
-| Check alarm panel | Yes | When enabled, the integration queries the physical alarm panel for its status. When disabled, it reads the last known status from the Securitas server (fewer requests, but may be out of sync if you use the Securitas app). |
-| Update interval | 120s | How often (in seconds) the integration checks the alarm status. |
-| Notify service | _(none)_ | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
+| Option             | Default   | Description                                                                                                                                                                                                                   |
+| ------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Username           | —         | Your Securitas Direct account username.                                                                                                                                                                                       |
+| Password           | —         | Your Securitas Direct account password.                                                                                                                                                                                       |
+| Use 2FA            | Yes       | Enable two-factor authentication via SMS. Uncheck to skip.                                                                                                                                                                    |
+| Country Code       | ES        | Your country code (see table above).                                                                                                                                                                                          |
+| PIN Code           | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Securitas — it only protects the panel in Home Assistant. Can be numeric or alphanumeric. Leave empty for no PIN.                                      |
+| Require PIN to arm | No        | When enabled, the PIN is also required to arm the alarm (not just to disarm). Useful to disable for Android Auto and similar interfaces. Has no effect if no PIN is set.                                                      |
+| Perimetral alarm   | No        | Enable if your installation has external/outdoor sensors. This determines which alarm modes are available and the correct disarm command.                                                                                     |
+| Check alarm panel  | Yes       | When enabled, the integration queries the physical alarm panel for its status. When disabled, it reads the last known status from the Securitas server (fewer requests, but may be out of sync if you use the Securitas app). |
+| Update interval    | 120s      | How often (in seconds) the integration checks the alarm status.                                                                                                                                                               |
+| Notify service     | _(none)_  | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons.                                        |
 
 ### Two-factor authentication
 
@@ -171,8 +171,8 @@ This registers a `notify.mobiles` service. After restarting Home Assistant, `mob
 
 ### `securitas.force_arm` service
 
-| Field | Description |
-| ----- | ----------- |
+| Field         | Description                                    |
+| ------------- | ---------------------------------------------- |
 | Target entity | The Securitas alarm panel entity to force-arm. |
 
 Example automation action:
@@ -187,12 +187,12 @@ target:
 
 The integration ships with a custom Lovelace card (`securitas-alarm-card`) that is purpose-built for Securitas Direct. It goes beyond the standard HA alarm panel card by integrating the force-arm flow directly into the dashboard.
 
-| Disarmed | Armed (Home) | All Modes |
-|:---:|:---:|:---:|
+|                   Disarmed                   |                   Armed (Home)                   |                   All Modes                    |
+| :------------------------------------------: | :----------------------------------------------: | :--------------------------------------------: |
 | ![Disarmed](./docs/images/card-disarmed.png) | ![Armed Home](./docs/images/card-armed-home.png) | ![All Modes](./docs/images/card-all-modes.png) |
 
-| PIN Keypad | Force Arm |
-|:---:|:---:|
+|                PIN Keypad                 |                   Force Arm                    |
+| :---------------------------------------: | :--------------------------------------------: |
 | ![PIN Keypad](./docs/images/card-pin.png) | ![Force Arm](./docs/images/card-force-arm.png) |
 
 ### Features
