@@ -302,6 +302,77 @@ class TestExecuteRequest:
         with pytest.raises(SecuritasDirectError, match=f"HTTP {status_code}"):
             await api._execute_request({"query": "test"}, "TestOperation")
 
+    async def test_http_403_retries_once_then_succeeds(self, api):
+        """HTTP 403 is retried once; if second attempt succeeds, return result."""
+        fail_response = AsyncMock()
+        fail_response.status = 403
+        fail_response.text = AsyncMock(return_value="<html>Incapsula</html>")
+        fail_response.headers = {}
+
+        ok_response = AsyncMock()
+        ok_response.status = 200
+        ok_response.text = AsyncMock(return_value='{"data": {"test": "ok"}}')
+
+        call_count = 0
+
+        def _make_cm():
+            nonlocal call_count
+            call_count += 1
+            cm = AsyncMock()
+            resp = fail_response if call_count == 1 else ok_response
+            cm.__aenter__ = AsyncMock(return_value=resp)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        api.http_client.post = MagicMock(side_effect=lambda *a, **kw: _make_cm())
+
+        result = await api._execute_request({"query": "test"}, "TestOp")
+        assert result == {"data": {"test": "ok"}}
+        assert call_count == 2
+
+    async def test_http_403_retries_once_then_raises(self, api):
+        """HTTP 403 on both attempts raises SecuritasDirectError."""
+        response = AsyncMock()
+        response.status = 403
+        response.text = AsyncMock(return_value="<html>Incapsula</html>")
+        response.headers = {}
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError, match="HTTP 403"):
+            await api._execute_request({"query": "test"}, "TestOp")
+
+    async def test_http_403_respects_retry_after_header(self, api):
+        """HTTP 403 retry uses Retry-After header when present."""
+        fail_response = AsyncMock()
+        fail_response.status = 403
+        fail_response.text = AsyncMock(return_value="<html>blocked</html>")
+        fail_response.headers = {"Retry-After": "5"}
+
+        ok_response = AsyncMock()
+        ok_response.status = 200
+        ok_response.text = AsyncMock(return_value='{"data": {"ok": true}}')
+
+        call_count = 0
+
+        def _make_cm():
+            nonlocal call_count
+            call_count += 1
+            cm = AsyncMock()
+            resp = fail_response if call_count == 1 else ok_response
+            cm.__aenter__ = AsyncMock(return_value=resp)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        api.http_client.post = MagicMock(side_effect=lambda *a, **kw: _make_cm())
+
+        result = await api._execute_request({"query": "test"}, "TestOp")
+        assert result == {"data": {"ok": True}}
+        assert call_count == 2
+
     @pytest.mark.parametrize(
         "operation",
         ["mkValidateDevice", "RefreshLogin", "mkSendOTP"],
