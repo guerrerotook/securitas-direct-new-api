@@ -902,11 +902,22 @@ class SecuritasAlarmBadge extends HTMLElement {
       this._dialogOpen = false;
       this._dialogCard = null;
       overlay.remove();
+      if (this._unsubConnection) {
+        this._unsubConnection();
+        this._unsubConnection = null;
+      }
     };
     closeBtn.addEventListener("click", close);
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) close();
     });
+
+    // Close overlay when HA connection drops (e.g. restart)
+    if (this._hass?.connection) {
+      this._unsubConnection = this._hass.connection.addEventListener(
+        "disconnected", close
+      );
+    }
   }
 
   getCardSize() { return 1; }
