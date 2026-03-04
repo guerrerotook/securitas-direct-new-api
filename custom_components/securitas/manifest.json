@@ -1,14 +1,15 @@
 {
     "domain": "securitas",
     "name": "Securitas Direct",
-    "documentation": "https://github.com/guerrerotook/securitas-direct-new-api",
-    "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
-    "requirements": [],
-    "dependencies": [],
     "codeowners": [
         "@guerrerotook"
     ],
     "config_flow": true,
+    "dependencies": [],
+    "documentation": "https://github.com/guerrerotook/securitas-direct-new-api",
+    "homeassistant": "2024.11.0",
     "iot_class": "cloud_polling",
+    "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
+    "requirements": [],
     "version": "1.1.1.0"
 }
