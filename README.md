@@ -6,7 +6,8 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
 - **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Custom, Vacation) to any Securitas alarm mode.
-- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you of the problem and lets you force-arm anyway via a mobile notification button or the `securitas.force_arm` service.
+- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you and lets you force-arm via mobile notification, the `securitas.force_arm` service, or the custom alarm card.
+- **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
 - **Smart locks** — lock and unlock smart door locks.
@@ -147,10 +148,9 @@ When you arm the alarm and a sensor is in a fault state (e.g. a window is open),
 - **Force arm** to arm despite the exception. You can do this from:
   - The **Force Arm** button in the mobile notification.
   - The `securitas.force_arm` service, targeted at the alarm panel entity.
+  - The **Force Arm** button in the [custom alarm card](#custom-alarm-card).
 
 The force-arm context expires automatically at the next status refresh, so force-arming is only possible immediately after the exception occurs.
-
-> **Limitation:** The standard Home Assistant alarm panel card has no way to display exception details or a force-arm button. Exception information is only surfaced via the persistent notification and (if configured) the mobile notification.
 
 ### Notifying multiple people
 
@@ -181,6 +181,40 @@ Example automation action:
 action: securitas.force_arm
 target:
   entity_id: alarm_control_panel.my_home
+```
+
+## Custom Alarm Card
+
+The integration ships with a custom Lovelace card (`securitas-alarm-card`) that is purpose-built for Securitas Direct. It goes beyond the standard HA alarm panel card by integrating the force-arm flow directly into the dashboard.
+
+![Securitas Alarm Card states](./docs/images/securitas-alarm-card.png)
+
+### Features
+
+- **Dynamic arm buttons** — reads `supported_features` from the entity and only shows the modes that are actually configured. No unused buttons.
+- **PIN keypad** — when a PIN code is configured, a numeric keypad appears automatically on arm/disarm. Alphanumeric codes use a text input instead. Respects `code_arm_required` (keypad only shown on arm if required, always shown on disarm).
+- **Force-arm UI** — when arming is blocked by an open sensor, the card automatically shows a warning with the sensor name(s) and **Force Arm** / **Cancel** buttons. No Template Binary Sensor helper required.
+- **Theme-aware** — uses Home Assistant CSS variables and works correctly in both light and dark mode.
+
+### Installation
+
+1. Copy `securitas-alarm-card.js` from the integration's `www/` folder to `/config/www/` on your Home Assistant instance:
+
+```bash
+curl -o /config/www/securitas-alarm-card.js \
+  "https://raw.githubusercontent.com/guerrerotook/securitas-direct-new-api/main/custom_components/securitas/www/securitas-alarm-card.js"
+```
+
+2. Add it as a Lovelace resource: **Settings → Dashboards → (⋮ menu) → Resources → Add resource**
+   - URL: `/local/securitas-alarm-card.js`
+   - Type: **JavaScript module**
+
+3. Add the card to your dashboard:
+
+```yaml
+type: custom:securitas-alarm-card
+entity: alarm_control_panel.YOUR_PANEL_ID
+name: My Alarm   # optional — overrides friendly_name
 ```
 
 ## Sentinel Sensors
