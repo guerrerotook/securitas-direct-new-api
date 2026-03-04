@@ -329,15 +329,12 @@ class TestPeriDefaults:
 class TestCompoundCommandSteps:
     """Tests for COMPOUND_COMMAND_STEPS mapping."""
 
-    def test_known_failing_compounds_present(self):
-        """Only commands known to fail on some panels have step definitions."""
+    def test_all_peri_compounds_present(self):
+        """All compound arm+peri commands have step definitions."""
+        assert "ARM1PERI1" in COMPOUND_COMMAND_STEPS
+        assert "ARMDAY1PERI1" in COMPOUND_COMMAND_STEPS
         assert "ARMNIGHT1PERI1" in COMPOUND_COMMAND_STEPS
         assert "DARM1DARMPERI" in COMPOUND_COMMAND_STEPS
-
-    def test_universally_accepted_commands_not_in_table(self):
-        """Commands accepted by all known panels should NOT be in the table."""
-        assert "ARMDAY1PERI1" not in COMPOUND_COMMAND_STEPS
-        assert "ARM1PERI1" not in COMPOUND_COMMAND_STEPS
 
     def test_disarm_compound_present(self):
         assert "DARM1DARMPERI" in COMPOUND_COMMAND_STEPS
