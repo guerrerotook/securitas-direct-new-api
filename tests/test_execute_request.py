@@ -185,6 +185,73 @@ class TestExecuteRequest:
         ):
             await api._execute_request({"query": "test"}, "xSArmPanel")
 
+    async def test_graphql_error_with_status_sets_http_status(self, api):
+        """GraphQL error with data.status should set http_status on exception."""
+        error_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "alarm-manager.alarm_process_error",
+                        "name": "ApiError",
+                        "data": {"res": "ERROR", "err": "11", "status": 409},
+                        "path": ["xSDisarmPanel"],
+                    }
+                ],
+                "data": {"xSDisarmPanel": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSDisarmPanel")
+
+        assert exc_info.value.http_status == 409
+
+    async def test_graphql_error_without_status_has_none_http_status(self, api):
+        """GraphQL error without data.status should have http_status=None."""
+        error_response = json.dumps(
+            {
+                "errors": [{"message": "Something went wrong"}],
+                "data": {"xSFoo": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSFoo")
+
+        assert exc_info.value.http_status is None
+
+    async def test_http_error_sets_http_status(self, api):
+        """HTTP error responses should set http_status on exception."""
+        response = AsyncMock()
+        response.text = AsyncMock(return_value="Server Error")
+        response.status = 500
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "TestOp")
+
+        assert exc_info.value.http_status == 500
+
     async def test_graphql_errors_list_without_data_key_passes_through(self, api):
         """GraphQL errors-only response (no data key) is returned as-is so callers can handle it."""
         error_response = json.dumps({"errors": [{"message": "Invalid credentials"}]})
@@ -316,58 +383,6 @@ class TestGenerateDeviceId:
         a = generate_device_id("ES")
         b = generate_device_id("ES")
         assert a != b
-
-
-# ── _check_errors tests ──────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-class TestCheckErrors:
-    """Tests for ApiManager._check_errors."""
-
-    async def test_invalid_session_error_triggers_relogin(self, api):
-        """Response with 'Invalid session' error triggers re-login."""
-        api.login = AsyncMock()
-        response_text = json.dumps(
-            {"errors": [{"message": "Invalid session. Please, try again later."}]}
-        )
-
-        result = await api._check_errors(response_text)
-
-        assert result is True
-        assert api.authentication_token is None
-        api.login.assert_awaited_once()
-
-    async def test_expired_token_error_triggers_relogin(self, api):
-        """Response with 'Invalid token: Expired' error triggers re-login."""
-        api.login = AsyncMock()
-        response_text = json.dumps({"errors": [{"message": "Invalid token: Expired"}]})
-
-        result = await api._check_errors(response_text)
-
-        assert result is True
-        assert api.authentication_token is None
-        api.login.assert_awaited_once()
-
-    async def test_other_errors_dont_trigger_relogin(self, api):
-        """Other error messages don't trigger re-login."""
-        api.login = AsyncMock()
-        response_text = json.dumps({"errors": [{"message": "Some other error"}]})
-
-        result = await api._check_errors(response_text)
-
-        assert result is False
-        api.login.assert_not_called()
-
-    async def test_no_errors_does_nothing(self, api):
-        """Response without errors field does nothing."""
-        api.login = AsyncMock()
-        response_text = json.dumps({"data": {"test": "ok"}})
-
-        result = await api._check_errors(response_text)
-
-        assert result is False
-        api.login.assert_not_called()
 
 
 # ── _check_capabilities_token tests ──────────────────────────────────────────

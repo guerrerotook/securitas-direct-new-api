@@ -86,7 +86,7 @@ class TestCheckAlarm:
     ):
         mock_execute.return_value = {"data": {"xSCheckAlarm": None}}
 
-        with pytest.raises(SecuritasDirectError, match="no check alarm data"):
+        with pytest.raises(SecuritasDirectError, match="xSCheckAlarm response is None"):
             await authed_api.check_alarm(installation)
 
 
@@ -530,7 +530,9 @@ class TestDisarmAlarm:
     ):
         mock_execute.return_value = {"data": {"xSDisarmPanel": None}}
 
-        with pytest.raises(SecuritasDirectError, match="Disarm response is None"):
+        with pytest.raises(
+            SecuritasDirectError, match="xSDisarmPanel response is None"
+        ):
             await authed_api.disarm_alarm(installation, "DARM1")
 
     async def test_errors_only_response_raises_error(
@@ -599,10 +601,10 @@ class TestDisarmAlarm:
         # 1 for xSDisarmPanel + 2 for _check_disarm_status (WAIT then OK)
         assert mock_execute.call_count == 3
 
-    async def test_max_retries_exceeded_returns_last_status(
+    async def test_timeout_raises_when_always_wait(
         self, authed_api, mock_execute, installation
     ):
-        """When max retries exceeded, the loop breaks and returns whatever data it has."""
+        """When the panel keeps returning WAIT, _poll_operation times out."""
         initial_response = {
             "data": {
                 "xSDisarmPanel": {
@@ -626,19 +628,30 @@ class TestDisarmAlarm:
                 }
             }
         }
-        # With delay_check_operation=0, max_retries = max(10, round(30/max(1,0)))
-        # max(1, 0) = 1, 30/1 = 30, max(10, 30) = 30
-        # We need more than 30 WAIT responses to exceed retries.
-        # Actually with delay=0: max(1, self.delay_check_operation) = max(1, 0) = 1
-        # max_retries = max(10, round(30 / 1)) = 30
-        # So we need 31 WAIT responses (count goes from 1 to 31, which is > 30).
-        mock_execute.side_effect = [initial_response] + [wait_response] * 31
 
-        result = await authed_api.disarm_alarm(installation, "DARM1")
+        # First call returns initial_response, all subsequent return WAIT
+        call_count = 0
 
-        # Should return with WAIT status rather than hanging forever
-        assert isinstance(result, DisarmStatus)
-        assert result.operation_status == "WAIT"
+        async def _side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return initial_response
+            return wait_response
+
+        mock_execute.side_effect = _side_effect
+
+        # _poll_operation uses wall-clock timeout; use a short one via monkeypatch
+        original_poll = authed_api._poll_operation
+
+        async def _short_timeout_poll(check_fn, **kwargs):
+            kwargs.setdefault("timeout", 0.05)
+            return await original_poll(check_fn, **kwargs)
+
+        authed_api._poll_operation = _short_timeout_poll
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            await authed_api.disarm_alarm(installation, "DARM1")
 
 
 # ── check_general_status() ───────────────────────────────────────────────────

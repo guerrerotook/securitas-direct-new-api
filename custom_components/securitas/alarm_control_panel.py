@@ -43,7 +43,6 @@ from .securitas_direct_new_api import (
     COMPOUND_COMMAND_STEPS,
     DisarmStatus,
     Installation,
-    PERI_ARMED_PROTO_CODES,
     PROTO_DISARMED,
     PROTO_TO_STATE,
     SecuritasDirectError,
@@ -249,7 +248,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             alarm_status = await self.client.update_overview(self.installation)
         except SecuritasDirectError as err:
-            _LOGGER.warning("Error updating alarm status: %s", err.args)
+            _LOGGER.warning(
+                "Error updating alarm status: %s",
+                err.args[0] if err.args else err,
+            )
         else:
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
@@ -310,12 +312,16 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
     async def _send_disarm_command(self) -> DisarmStatus:
         """Send the appropriate disarm command based on current state.
 
-        If perimeter is configured and currently armed, tries DARM1DARMPERI
-        first.  If that fails (or the panel is known to need multi-step
-        commands), falls back to DARM1 which disarms everything on panels
-        that don't support compound commands.
+        If perimeter is configured, tries DARM1DARMPERI first to ensure
+        both interior and perimeter are disarmed (even during an in-progress
+        arm operation).  If an arm command has already set _use_multi_step
+        (panel doesn't support compound commands), skips straight to DARM1.
+
+        Unlike _send_arm_command, disarm does NOT set _use_multi_step on
+        failure — only arm failures should trigger that flag, since a
+        disarm-specific failure shouldn't disable compound arm commands.
         """
-        if not self._has_peri or self._last_proto_code not in PERI_ARMED_PROTO_CODES:
+        if not self._has_peri:
             return await self.client.session.disarm_alarm(self.installation, "DARM1")
 
         if self._use_multi_step:
@@ -325,11 +331,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             return await self.client.session.disarm_alarm(
                 self.installation, "DARM1DARMPERI"
             )
-        except SecuritasDirectError:
-            self._use_multi_step = True
+        except SecuritasDirectError as err:
+            if err.http_status == 409:
+                raise
             _LOGGER.info(
-                "Combined disarm (DARM1DARMPERI) not supported by panel, "
-                "switching to simple disarm (DARM1) for this session"
+                "Combined disarm (DARM1DARMPERI) failed, "
+                "falling back to simple disarm (DARM1): %s",
+                err.args[0] if err.args else err,
             )
             return await self.client.session.disarm_alarm(self.installation, "DARM1")
 
@@ -360,7 +368,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 )
                 self._last_arm_result = result
                 return result
-            except SecuritasDirectError:
+            except SecuritasDirectError as err:
+                if err.http_status == 409:
+                    raise
                 self._use_multi_step = True
                 _LOGGER.info(
                     "Compound arm command (%s) not supported by panel, "
@@ -388,8 +398,9 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._operation_in_progress = True
                 disarm_status = await self._send_disarm_command()
             except SecuritasDirectError as err:
-                self._notify_error("Securitas: Error disarming", str(err.args))
-                _LOGGER.error(err.args)
+                err_msg = str(err.args[0]) if err.args else str(err)
+                self._notify_error("Securitas: Error disarming", err_msg)
+                _LOGGER.error("Disarm failed: %s", err_msg)
                 self._state = self._last_status
                 self.async_write_ha_state()
                 return
@@ -457,7 +468,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                         "Failed to disarm before re-arming (last_status: %s, alarm "
                         "may already be disarmed), continuing with arm: %s",
                         self._last_status,
-                        err.args,
+                        err.args[0] if err.args else err,
                     )
                 else:
                     await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
@@ -471,8 +482,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._notify_arm_exceptions(exc)
                 return
             except SecuritasDirectError as err:
-                _LOGGER.error(err.args)
-                err_msg = str(err.args[0]) if err.args else ""
+                err_msg = str(err.args[0]) if err.args else str(err)
+                _LOGGER.error("Arm failed: %s", err_msg)
                 if "does not exist" in err_msg:
                     body = (
                         "The alarm panel does not support the requested"

@@ -209,6 +209,7 @@ class ApiManager:
                 None,
                 headers,
                 content,
+                http_status=http_status,
             )
 
         try:
@@ -246,35 +247,19 @@ class ApiManager:
                         if isinstance(first, dict)
                         else str(first)
                     )
+                    # Extract HTTP-like status from GraphQL error data
+                    error_status = None
+                    if isinstance(first, dict) and isinstance(first.get("data"), dict):
+                        error_status = first["data"].get("status")
                     raise SecuritasDirectError(
                         message,
                         response_dict,
                         headers,
                         content,
+                        http_status=error_status,
                     )
 
         return response_dict
-
-    async def _check_errors(self, value: str) -> bool:
-        if value is not None:
-            response = json.loads(value)
-            if "errors" in response:
-                for error_item in response["errors"]:
-                    if "message" in error_item:
-                        if (
-                            error_item["message"]
-                            == "Invalid session. Please, try again later."
-                            or error_item["message"] == "Invalid token: Expired"
-                            or error_item["message"]
-                            == "Required request header 'x-installationNumber' for method parameter type String is not present"
-                        ):
-                            self.authentication_token = None
-                            _LOGGER.info("Login is expired. Login again")
-                            await self.login()
-                            return True
-                        else:
-                            _LOGGER.error(error_item["message"])
-        return False
 
     async def _check_capabilities_token(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""
@@ -308,9 +293,15 @@ class ApiManager:
                 try:
                     if await self.refresh_token():
                         return
-                    _LOGGER.debug("Refresh token failed, falling back to login")
-                except Exception:  # noqa: BLE001
-                    _LOGGER.debug("Refresh token error, falling back to login")
+                    _LOGGER.warning("Refresh token failed, falling back to login")
+                except (
+                    SecuritasDirectError,
+                    asyncio.TimeoutError,
+                    ClientConnectorError,
+                ) as err:
+                    _LOGGER.warning(
+                        "Refresh token error, falling back to login: %s", err
+                    )
             _LOGGER.debug("Authentication token expired, logging in again")
             await self.login()
 
@@ -328,6 +319,96 @@ class ApiManager:
             + str(current.microsecond)
         )
 
+    def _decode_auth_token(self, token_str: str | None) -> dict | None:
+        """Decode a JWT auth token and update the token expiry.
+
+        Returns the decoded claims dict, or None on failure.
+        """
+        if not token_str:
+            return None
+        try:
+            decoded = jwt.decode(
+                token_str,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
+            )
+        except jwt.exceptions.DecodeError:
+            _LOGGER.warning("Failed to decode authentication token")
+            return None
+        if "exp" in decoded:
+            self.authentication_token_exp = datetime.fromtimestamp(decoded["exp"])
+        return decoded
+
+    def _extract_response_data(self, response: dict, field_name: str) -> dict:
+        """Extract and validate response['data'][field_name].
+
+        Raises SecuritasDirectError if the data is missing or None.
+        """
+        data = response.get("data")
+        if data is None:
+            raise SecuritasDirectError(f"{field_name}: no data in response", response)
+        result = data.get(field_name)
+        if result is None:
+            raise SecuritasDirectError(f"{field_name} response is None", response)
+        return result
+
+    async def _poll_operation(
+        self,
+        check_fn,
+        *,
+        timeout: float = 60.0,
+        continue_on_msg: str | None = None,
+    ) -> dict[str, Any]:
+        """Poll check_fn until result is no longer WAIT.
+
+        Args:
+            check_fn: Async callable that returns a dict with at least 'res' key.
+            timeout: Wall-clock timeout in seconds (default 60).
+            continue_on_msg: If set, also continue polling when response 'msg'
+                matches this value (used by disarm for error_no_response_to_request).
+
+        Returns:
+            The final poll result dict.
+
+        Raises:
+            TimeoutError: If wall-clock timeout is exceeded.
+            SecuritasDirectError: If a non-transient error occurs.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        result: dict[str, Any] = {}
+        first = True
+
+        while True:
+            if not first and loop.time() > deadline:
+                raise TimeoutError(
+                    f"Poll operation timed out after {timeout}s, "
+                    f"last response: {result}"
+                )
+            await asyncio.sleep(self.delay_check_operation)
+            try:
+                result = await check_fn()
+            except (ClientConnectorError, asyncio.TimeoutError) as err:
+                _LOGGER.warning("Transient error during poll, retrying: %s", err)
+                first = False
+                continue
+            except SecuritasDirectError as err:
+                if err.http_status == 409:
+                    _LOGGER.warning("Server busy (409) during poll, retrying: %s", err)
+                    first = False
+                    continue
+                raise
+
+            first = False
+
+            if result.get("res") == "WAIT":
+                continue
+            if continue_on_msg and result.get("msg") == continue_on_msg:
+                continue
+            break
+
+        return result
+
     async def logout(self):
         """Logout."""
         content = {
@@ -335,7 +416,13 @@ class ApiManager:
             "variables": {},
             "query": "mutation Logout {\n  xSLogout\n}\n",
         }
-        await self._execute_request(content, "Logout")
+        try:
+            await self._execute_request(content, "Logout")
+        finally:
+            self.authentication_token = None
+            self.refresh_token_value = ""
+            self.authentication_token_exp = datetime.min
+            self.login_timestamp = 0
 
     def _extract_otp_data(self, data) -> tuple[str | None, list[OtpPhone]]:
         if not data:
@@ -384,25 +471,10 @@ class ApiManager:
             # the API call succeeds but is unauthorized
             return self._extract_otp_data(response["errors"][0]["data"])
 
-        validate_data = response["data"]["xSValidateDevice"]
-        if validate_data is None:
-            raise SecuritasDirectError("xSValidateDevice response is None", response)
+        validate_data = self._extract_response_data(response, "xSValidateDevice")
         self.authentication_token = validate_data["hash"]
         self._register_secret("auth_token", self.authentication_token)
-        try:
-            assert self.authentication_token is not None
-            token = jwt.decode(
-                self.authentication_token,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
-        except jwt.exceptions.DecodeError:
-            _LOGGER.warning(
-                "Failed to decode authentication token after device validation"
-            )
-        else:
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
+        self._decode_auth_token(self.authentication_token)
         if validate_data.get("refreshToken"):
             self.refresh_token_value = validate_data["refreshToken"]
             self._register_secret("refresh_token", self.refresh_token_value)
@@ -432,9 +504,7 @@ class ApiManager:
         }
         response = await self._execute_request(content, "RefreshLogin")
 
-        refresh_data = response["data"]["xSRefreshLogin"]
-        if refresh_data is None:
-            raise SecuritasDirectError("xSRefreshLogin response is None", response)
+        refresh_data = self._extract_response_data(response, "xSRefreshLogin")
 
         if refresh_data.get("res") != "OK":
             return False
@@ -442,18 +512,8 @@ class ApiManager:
         if refresh_data.get("hash"):
             self.authentication_token = refresh_data["hash"]
             self._register_secret("auth_token", self.authentication_token)
-            try:
-                assert self.authentication_token is not None
-                token = jwt.decode(
-                    self.authentication_token,
-                    algorithms=["HS256"],
-                    options={"verify_signature": False},
-                )
-            except jwt.exceptions.DecodeError:
-                _LOGGER.warning("Failed to decode refreshed authentication token")
+            if self._decode_auth_token(self.authentication_token) is None:
                 return False
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
         else:
             return False
@@ -475,9 +535,7 @@ class ApiManager:
         }
         response = await self._execute_request(content, "mkSendOTP")
 
-        otp_data = response["data"]["xSSendOtp"]
-        if otp_data is None:
-            raise SecuritasDirectError("xSSendOtp response is None", response)
+        otp_data = self._extract_response_data(response, "xSSendOtp")
         return otp_data["res"]
 
     async def login(self) -> None:
@@ -527,9 +585,7 @@ class ApiManager:
             raise LoginError(response["errors"][0]["message"], response)
 
         # Check if 2FA is required even on successful response
-        login_data = response["data"]["xSLoginToken"]
-        if login_data is None:
-            raise SecuritasDirectError("xSLoginToken response is None", response)
+        login_data = self._extract_response_data(response, "xSLoginToken")
         if login_data.get("needDeviceAuthorization", False):
             # needs a 2FA
             raise Login2FAError("2FA authentication required", response)
@@ -543,20 +599,8 @@ class ApiManager:
             self._register_secret("auth_token", self.authentication_token)
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
-            try:
-                assert self.authentication_token is not None
-                token = jwt.decode(
-                    self.authentication_token,
-                    algorithms=["HS256"],
-                    options={"verify_signature": False},
-                )
-            except jwt.exceptions.DecodeError as err:
-                raise SecuritasDirectError(
-                    "Failed to decode authentication token"
-                ) from err
-
-            if "exp" in token:
-                self.authentication_token_exp = datetime.fromtimestamp(token["exp"])
+            if self._decode_auth_token(self.authentication_token) is None:
+                raise SecuritasDirectError("Failed to decode authentication token")
         else:
             # Token is null, this is expected for 2FA
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
@@ -570,9 +614,7 @@ class ApiManager:
         response = await self._execute_request(content, "mkInstallationList")
 
         result: list[Installation] = []
-        installations_data = response["data"]["xSInstallations"]
-        if installations_data is None:
-            raise SecuritasDirectError("xSInstallations response is None", response)
+        installations_data = self._extract_response_data(response, "xSInstallations")
         raw_installations = installations_data["installations"]
         for item in raw_installations:
             installation_item: Installation = Installation(
@@ -608,9 +650,7 @@ class ApiManager:
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "CheckAlarm", installation)
 
-        check_alarm = response.get("data", {}).get("xSCheckAlarm")
-        if check_alarm is None:
-            raise SecuritasDirectError("API returned no check alarm data", response)
+        check_alarm = self._extract_response_data(response, "xSCheckAlarm")
 
         return check_alarm["referenceId"]
 
@@ -848,9 +888,7 @@ class ApiManager:
             content, "CheckAlarmStatus", installation
         )
 
-        check_data = response["data"]["xSCheckAlarmStatus"]
-        if check_data is None:
-            raise SecuritasDirectError("xSCheckAlarmStatus response is None", response)
+        check_data = self._extract_response_data(response, "xSCheckAlarmStatus")
         return check_data
 
     async def arm_alarm(
@@ -895,49 +933,28 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSArmPanel", installation)
-        if "data" not in response or response["data"] is None:
-            errors = response.get("errors", [])
-            first = errors[0] if errors else {}
-            msg = (
-                first.get("message", str(first))
-                if isinstance(first, dict)
-                else str(first)
-            )
-            raise SecuritasDirectError(
-                msg or "xSArmPanel: no data in response", response
-            )
-        arm_data = response["data"]["xSArmPanel"]
-        if arm_data is None:
-            raise SecuritasDirectError("xSArmPanel response is None", response)
+        arm_data = self._extract_response_data(response, "xSArmPanel")
         if arm_data["res"] != "OK":
             raise SecuritasDirectError(arm_data["msg"], response)
 
         reference_id = arm_data["referenceId"]
 
-        count = 1
-        raw_data: dict[str, Any] = {}
-        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
-        while (count == 1) or (raw_data.get("res") == "WAIT"):
-            if count > max_retries:
-                _LOGGER.warning(
-                    "Arm status check exceeded max retries (%d), last response: %s",
-                    max_retries,
-                    raw_data,
-                )
-                break
-            await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_arm_status(
+        count = 0
+
+        async def _check():
+            nonlocal count
+            count += 1
+            data = await self._check_arm_status(
                 installation,
                 reference_id,
                 command,
                 count,
                 force_arming_remote_id,
             )
-
             # Detect non-blocking exception that allows forcing
-            error = raw_data.get("error")
+            error = data.get("error")
             if (
-                raw_data.get("res") == "ERROR"
+                data.get("res") == "ERROR"
                 and error
                 and error.get("type") == "NON_BLOCKING"
                 and error.get("allowForcing")
@@ -948,8 +965,9 @@ class ApiManager:
                     installation, error_ref, error_suid
                 )
                 raise ArmingExceptionError(error_ref, error_suid, exceptions)
+            return data
 
-            count += 1
+        raw_data = await self._poll_operation(_check)
 
         self.protom_response = raw_data["protomResponse"]
         return ArmStatus(
@@ -1003,9 +1021,7 @@ class ApiManager:
         }
         response = await self._execute_request(content, "ArmStatus", installation)
 
-        raw_data = response["data"]["xSArmStatus"]
-        if raw_data is None:
-            raise SecuritasDirectError("xSArmStatus response is None", response)
+        raw_data = self._extract_response_data(response, "xSArmStatus")
         return raw_data
 
     async def _get_exceptions(
@@ -1077,20 +1093,7 @@ class ApiManager:
         await self._check_authentication_token()
         await self._check_capabilities_token(installation)
         response = await self._execute_request(content, "xSDisarmPanel", installation)
-        if "data" not in response or response["data"] is None:
-            errors = response.get("errors", [])
-            first = errors[0] if errors else {}
-            msg = (
-                first.get("message", str(first))
-                if isinstance(first, dict)
-                else str(first)
-            )
-            raise SecuritasDirectError(
-                msg or "xSDisarmPanel: no data in response", response
-            )
-        disarm_data = response["data"]["xSDisarmPanel"]
-        if disarm_data is None:
-            raise SecuritasDirectError("Disarm response is None", response)
+        disarm_data = self._extract_response_data(response, "xSDisarmPanel")
         if "res" in disarm_data and disarm_data["res"] != "OK":
             raise SecuritasDirectError(disarm_data["msg"], response)
 
@@ -1099,28 +1102,22 @@ class ApiManager:
 
         reference_id = disarm_data["referenceId"]
 
-        count = 1
-        raw_data: dict[str, Any] = {}
-        max_retries = max(10, round(30 / max(1, self.delay_check_operation)))
-        while (count == 1) or (
-            raw_data.get("res") == "WAIT"
-            or raw_data.get("msg") == "alarm-manager.error_no_response_to_request"
-        ):
-            if count > max_retries:
-                _LOGGER.warning(
-                    "Disarm status check exceeded max retries (%d), last response: %s",
-                    max_retries,
-                    raw_data,
-                )
-                break
-            await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_disarm_status(
+        count = 0
+
+        async def _check():
+            nonlocal count
+            count += 1
+            return await self._check_disarm_status(
                 installation,
                 reference_id,
                 command,
                 count,
             )
-            count = count + 1
+
+        raw_data = await self._poll_operation(
+            _check,
+            continue_on_msg="alarm-manager.error_no_response_to_request",
+        )
 
         if raw_data.get("protomResponse"):
             self.protom_response = raw_data["protomResponse"]
@@ -1157,9 +1154,7 @@ class ApiManager:
         }
         response = await self._execute_request(content, "DisarmStatus", installation)
 
-        disarm_data = response["data"]["xSDisarmStatus"]
-        if disarm_data is None:
-            raise SecuritasDirectError("xSDisarmStatus response is None", response)
+        disarm_data = self._extract_response_data(response, "xSDisarmStatus")
         return disarm_data
 
     async def get_smart_lock_config(self, installation: Installation) -> SmartLock:
@@ -1244,11 +1239,7 @@ class ApiManager:
         response = await self._execute_request(
             content, "xSChangeSmartlockMode", installation
         )
-        lock_data = response["data"]["xSChangeSmartlockMode"]
-        if lock_data is None:
-            raise SecuritasDirectError(
-                "xSChangeSmartlockMode response is None", response
-            )
+        lock_data = self._extract_response_data(response, "xSChangeSmartlockMode")
         if "res" in lock_data and lock_data["res"] != "OK":
             raise SecuritasDirectError(lock_data["msg"], response)
 
@@ -1257,16 +1248,18 @@ class ApiManager:
 
         reference_id = lock_data["referenceId"]
 
-        count = 1
-        raw_data: dict[str, Any] = {}
-        while (count == 1) or raw_data.get("res") == "WAIT":
-            await asyncio.sleep(self.delay_check_operation)
-            raw_data = await self._check_change_lock_mode(
+        count = 0
+
+        async def _check():
+            nonlocal count
+            count += 1
+            return await self._check_change_lock_mode(
                 installation,
                 reference_id,
                 count,
             )
-            count = count + 1
+
+        raw_data = await self._poll_operation(_check)
 
         await asyncio.sleep(self.delay_check_operation * LOCK_MODE_SETTLE_MULTIPLIER)
         self.protom_response = raw_data["protomResponse"]
@@ -1298,9 +1291,7 @@ class ApiManager:
             content, "xSChangeSmartlockModeStatus", installation
         )
 
-        lock_status_data = response["data"]["xSChangeSmartlockModeStatus"]
-        if lock_status_data is None:
-            raise SecuritasDirectError(
-                "xSChangeSmartlockModeStatus response is None", response
-            )
+        lock_status_data = self._extract_response_data(
+            response, "xSChangeSmartlockModeStatus"
+        )
         return lock_status_data
