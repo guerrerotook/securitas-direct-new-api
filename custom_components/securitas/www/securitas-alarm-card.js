@@ -521,7 +521,7 @@ class SecuritasAlarmCard extends HTMLElement {
         transition: background 0.4s;
       }
 
-      .content { padding: 16px; }
+      .content { padding: var(--ha-card-padding, 16px); }
 
       /* ── Header ── */
       .header {
@@ -573,6 +573,7 @@ class SecuritasAlarmCard extends HTMLElement {
         border-radius: 10px;
         font-size: 0.85em;
         font-weight: 600;
+        font-family: inherit;
         cursor: pointer;
         transition: filter 0.15s, transform 0.1s;
         letter-spacing: 0.02em;
@@ -661,6 +662,7 @@ class SecuritasAlarmCard extends HTMLElement {
         border-radius: 10px;
         font-size: 1.1em;
         font-weight: 500;
+        font-family: inherit;
         cursor: pointer;
         background: var(--secondary-background-color);
         color: var(--primary-text-color);
@@ -673,10 +675,11 @@ class SecuritasAlarmCard extends HTMLElement {
       .pin-input {
         display: block; width: 100%; box-sizing: border-box;
         text-align: center; font-size: 1.5em; letter-spacing: 0.3em;
+        font-family: inherit;
         padding: 8px; margin-bottom: 8px;
         border: 1px solid var(--divider-color, #e0e0e0);
         border-radius: 8px;
-        background: var(--card-background-color, #fff);
+        background: var(--ha-card-background, var(--card-background-color, #fff));
         color: var(--primary-text-color);
         outline: none;
       }
@@ -696,6 +699,7 @@ class SecuritasAlarmCard extends HTMLElement {
         border: 1.5px solid var(--divider-color);
         border-radius: 8px;
         font-size: 1em;
+        font-family: inherit;
         background: var(--secondary-background-color);
         color: var(--primary-text-color);
         margin-bottom: 12px;
@@ -757,52 +761,24 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     if (!this._hass) return;
 
     const lang = this._hass.language || "en";
-    const entities = Object.keys(this._hass.states)
-      .filter(e => e.startsWith("alarm_control_panel."))
-      .sort();
-
-    const selected = this._config.entity || "";
-    const name = this._config.name || "";
-
     const colors = this._config.colors || {};
 
+    // Shell with slots for HA native components + static color section
     this.shadowRoot.innerHTML = `
       <style>
-        .editor { padding: 16px; }
-        .row { margin-bottom: 16px; }
-        label {
-          display: block;
-          font-weight: 500;
-          font-size: 0.85em;
-          color: var(--secondary-text-color);
-          margin-bottom: 4px;
-        }
-        select, input[type="text"] {
-          width: 100%;
-          box-sizing: border-box;
-          padding: 8px 12px;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          font-size: 1em;
-          background: var(--secondary-background-color);
-          color: var(--primary-text-color);
-        }
-        select:focus, input[type="text"]:focus {
-          outline: none;
-          border-color: var(--primary-color);
-        }
+        .editor { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+        ha-entity-picker, ha-textfield { width: 100%; display: block; }
         .section-title {
           font-weight: 600;
           font-size: 0.9em;
           color: var(--primary-text-color);
-          margin: 20px 0 4px;
           padding-bottom: 6px;
           border-bottom: 1px solid var(--divider-color);
         }
         .section-hint {
           font-size: 0.8em;
           color: var(--secondary-text-color);
-          margin-bottom: 12px;
+          margin-top: -8px;
         }
         /* Flat 3-column grid: label | picker | reset — all rows perfectly aligned */
         .color-grid {
@@ -840,25 +816,11 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           justify-content: center;
         }
         .reset-btn:hover { color: var(--error-color); }
-        /* visibility keeps the space so the grid stays aligned even without override */
         .reset-btn[hidden] { visibility: hidden; display: flex; }
       </style>
       <div class="editor">
-        <div class="row">
-          <label>${_t(lang, "editor_entity")}</label>
-          <select id="entity">
-            <option value="" ${!selected ? "selected" : ""}>${_t(lang, "editor_select")}</option>
-            ${entities.map(e => {
-              const label = this._escapeAttr(this._hass.states[e].attributes.friendly_name || e);
-              return `<option value="${e}" ${e === selected ? "selected" : ""}>${label}</option>`;
-            }).join("")}
-          </select>
-        </div>
-        <div class="row">
-          <label>${_t(lang, "editor_name")}</label>
-          <input id="name" type="text" value="${this._escapeAttr(name)}" placeholder="${_t(lang, "editor_name_placeholder")}" />
-        </div>
-
+        <div id="entity-slot"></div>
+        <div id="name-slot"></div>
         <div class="section-title">State Colors</div>
         <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
         <div class="color-grid">
@@ -873,12 +835,27 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    this.shadowRoot.getElementById("entity").addEventListener("change", (e) => {
-      this._config = { ...this._config, entity: e.target.value };
-      this._fireChanged();
+    // ── Entity picker (HA native) ────────────────────────────────────────────
+    const entityPicker = document.createElement("ha-entity-picker");
+    entityPicker.hass = this._hass;
+    entityPicker.value = this._config.entity || "";
+    entityPicker.label = _t(lang, "editor_entity");
+    entityPicker.includeDomains = ["alarm_control_panel"];
+    entityPicker.allowCustomEntity = false;
+    entityPicker.addEventListener("value-changed", (e) => {
+      if (e.detail.value !== undefined) {
+        this._config = { ...this._config, entity: e.detail.value };
+        this._fireChanged();
+      }
     });
+    this.shadowRoot.getElementById("entity-slot").appendChild(entityPicker);
 
-    this.shadowRoot.getElementById("name").addEventListener("input", (e) => {
+    // ── Name field (HA native) ───────────────────────────────────────────────
+    const nameTf = document.createElement("ha-textfield");
+    nameTf.label = _t(lang, "editor_name");
+    nameTf.value = this._config.name || "";
+    nameTf.placeholder = _t(lang, "editor_name_placeholder");
+    nameTf.addEventListener("input", (e) => {
       const val = e.target.value.trim();
       if (val) {
         this._config = { ...this._config, name: val };
@@ -888,6 +865,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
       }
       this._fireChanged();
     });
+    this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
 
     // Color pickers
     this.shadowRoot.querySelectorAll("input[type='color'][data-state]").forEach(input => {
