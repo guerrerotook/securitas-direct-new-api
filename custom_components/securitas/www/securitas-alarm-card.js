@@ -399,6 +399,18 @@ class SecuritasAlarmCard extends HTMLElement {
   _attachListeners(stateObj, codeFormat, codeArmRequired, hasCode, isArmed) {
     const entity = this._config.entity;
 
+    // Header click → open HA more-info dialog (history, attributes, etc.)
+    const header = this.shadowRoot.querySelector(".header");
+    if (header) {
+      header.addEventListener("click", () => {
+        this.dispatchEvent(new CustomEvent("hass-more-info", {
+          detail: { entityId: entity },
+          bubbles: true,
+          composed: true,
+        }));
+      });
+    }
+
     // Arm / Disarm buttons
     this.shadowRoot.querySelectorAll("[data-action]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -517,7 +529,11 @@ class SecuritasAlarmCard extends HTMLElement {
         align-items: center;
         gap: 14px;
         margin-bottom: 20px;
+        cursor: pointer;
+        border-radius: 10px;
+        transition: background 0.15s;
       }
+      .header:hover { background: var(--secondary-background-color); }
       .icon-wrap {
         width: 48px; height: 48px;
         border-radius: 50%;
