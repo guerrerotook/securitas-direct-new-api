@@ -530,10 +530,7 @@ class SecuritasAlarmCard extends HTMLElement {
         gap: 14px;
         margin-bottom: 20px;
         cursor: pointer;
-        border-radius: 10px;
-        transition: opacity 0.15s;
       }
-      .header:hover { opacity: 0.75; }
       .icon-wrap {
         width: 48px; height: 48px;
         border-radius: 50%;
