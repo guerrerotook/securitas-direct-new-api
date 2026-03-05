@@ -126,7 +126,11 @@ class ApiManager:
             self._log_filter.add_installation(installation.number)
 
     async def _execute_request(
-        self, content, operation: str, installation: Optional[Installation] = None
+        self,
+        content,
+        operation: str,
+        installation: Optional[Installation] = None,
+        _retried: bool = False,
     ) -> dict[str, Any]:
         """Send request to Securitas' API."""
 
@@ -291,6 +295,18 @@ class ApiManager:
                     error_status = None
                     if isinstance(first, dict) and isinstance(first.get("data"), dict):
                         error_status = first["data"].get("status")
+
+                    # Session expired server-side: re-authenticate and retry once
+                    if error_status == 403 and not _retried:
+                        _LOGGER.debug("Session expired server-side, re-authenticating")
+                        self.authentication_token_exp = datetime.min
+                        await self._check_authentication_token()
+                        if installation is not None:
+                            await self._check_capabilities_token(installation)
+                        return await self._execute_request(
+                            content, operation, installation, _retried=True
+                        )
+
                     raise SecuritasDirectError(
                         message,
                         response_dict,
