@@ -183,34 +183,74 @@ class ApiManager:
             self.uuid,
             self.id_device_indigitall,
         )
-        try:
-            async with self.http_client.post(
-                self.api_url, headers=headers, json=content
-            ) as response:
-                http_status: int = response.status
-                response_text: str = await response.text()
-        except ClientConnectorError as err:
-            raise SecuritasDirectError(
-                f"Connection error with URL {self.api_url}", None, headers, content
-            ) from err
 
-        _LOGGER.debug("--------------Response--------------")
-        _LOGGER.debug(response_text)
+        # Retry once on HTTP 403 (Incapsula WAF rate limiting)
+        response_text = ""
+        for attempt in range(2):
+            try:
+                async with self.http_client.post(
+                    self.api_url, headers=headers, json=content
+                ) as response:
+                    http_status: int = response.status
+                    response_text: str = await response.text()
+            except ClientConnectorError as err:
+                raise SecuritasDirectError(
+                    f"Connection error with URL {self.api_url}",
+                    None,
+                    headers,
+                    content,
+                ) from err
 
-        if http_status >= 400:
-            _LOGGER.debug(
-                "HTTP %d from Securitas API for operation '%s': %s",
-                http_status,
-                operation,
-                response_text[:500],
-            )
-            raise SecuritasDirectError(
-                f"HTTP {http_status} from Securitas API ({operation})",
-                None,
-                headers,
-                content,
-                http_status=http_status,
-            )
+            _LOGGER.debug("--------------Response--------------")
+            _LOGGER.debug(response_text)
+
+            if http_status == 403 and attempt == 0:
+                # Incapsula WAF blocks return HTML — retrying immediately
+                # just adds more requests that extend the block.  Only retry
+                # for non-WAF 403s (e.g. server-side rate limit with
+                # Retry-After header).
+                if "_Incapsula_Resource" in response_text:
+                    _LOGGER.warning(
+                        "HTTP 403 WAF block from Securitas API for '%s'"
+                        " (not retrying — WAF blocks require longer backoff)",
+                        operation,
+                    )
+                    raise SecuritasDirectError(
+                        f"HTTP {http_status} from Securitas API ({operation})",
+                        None,
+                        headers,
+                        content,
+                        http_status=http_status,
+                    )
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = int(retry_after) if retry_after else 2
+                except (ValueError, TypeError):
+                    delay = 2
+                _LOGGER.warning(
+                    "HTTP 403 from Securitas API for '%s', retrying in %ds",
+                    operation,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+
+            if http_status >= 400:
+                _LOGGER.debug(
+                    "HTTP %d from Securitas API for operation '%s': %s",
+                    http_status,
+                    operation,
+                    response_text[:500],
+                )
+                raise SecuritasDirectError(
+                    f"HTTP {http_status} from Securitas API ({operation})",
+                    None,
+                    headers,
+                    content,
+                    http_status=http_status,
+                )
+
+            break  # Success
 
         try:
             response_dict = json.loads(response_text)
@@ -393,8 +433,12 @@ class ApiManager:
                 first = False
                 continue
             except SecuritasDirectError as err:
-                if err.http_status == 409:
-                    _LOGGER.warning("Server busy (409) during poll, retrying: %s", err)
+                if err.http_status in (403, 409):
+                    _LOGGER.warning(
+                        "Transient error (%s) during poll, retrying: %s",
+                        err.http_status,
+                        err.args[0] if err.args else err,
+                    )
                     first = False
                     continue
                 raise

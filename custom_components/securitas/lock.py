@@ -203,7 +203,7 @@ class SecuritasLock(lock.LockEntity):
         try:
             await self.client.session.change_lock_mode(self.installation, True)
         except SecuritasDirectError as err:
-            _LOGGER.error(err.args)
+            _LOGGER.error("Lock operation failed: %s", err.args[0] if err.args else err)
             return
 
         self._state = LOCK_STATUS_LOCKED
@@ -213,7 +213,9 @@ class SecuritasLock(lock.LockEntity):
         try:
             await self.client.session.change_lock_mode(self.installation, False)
         except SecuritasDirectError as err:
-            _LOGGER.error(err.args)
+            _LOGGER.error(
+                "Unlock operation failed: %s", err.args[0] if err.args else err
+            )
             return
 
         self._state = LOCK_STATUS_OPEN

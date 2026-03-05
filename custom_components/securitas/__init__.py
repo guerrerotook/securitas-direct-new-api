@@ -254,7 +254,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     DOMAIN, context={"source": SOURCE_IMPORT}, data=config
                 )
             )
-            _LOGGER.error("Could not log in to Securitas %s", err.args)
+            _LOGGER.error(
+                "Could not log in to Securitas: %s",
+                err.args[0] if err.args else err,
+            )
             return False
         except SecuritasDirectError as err:
             _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
@@ -422,6 +425,7 @@ class SecuritasHub:
             log_filter=self.log_filter,
         )
         self.installations: list[Installation] = []
+        self._api_lock = asyncio.Lock()
 
     async def login(self):
         """Login to Securitas."""
@@ -466,35 +470,45 @@ class SecuritasHub:
         return True
 
     async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
-        """Update the overview."""
+        """Update the overview.
 
-        if self.check_alarm is not True:
-            status: SStatus = SStatus()
+        Uses a lock to serialize API calls across installations, preventing
+        concurrent request bursts that trigger the Securitas WAF.
+        """
+        async with self._api_lock:
+            if self.check_alarm is not True:
+                status: SStatus = SStatus()
+                try:
+                    status = await self.session.check_general_status(installation)
+                except SecuritasDirectError as err:
+                    _LOGGER.warning(
+                        "Error checking general status: %s",
+                        err.args[0] if err.args else err,
+                    )
+
+                return CheckAlarmStatus(
+                    status.status or "",
+                    "",
+                    status.status or "",
+                    installation.number,
+                    status.status or "",
+                    status.timestampUpdate or "",
+                )
+
+            alarm_status = CheckAlarmStatus()
             try:
-                status = await self.session.check_general_status(installation)
+                reference_id: str = await self.session.check_alarm(installation)
+                await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
+                alarm_status = await self.session.check_alarm_status(
+                    installation, reference_id
+                )
             except SecuritasDirectError as err:
-                _LOGGER.warning("Error checking general status: %s", err.args)
+                _LOGGER.error(
+                    "Error checking alarm status: %s",
+                    err.args[0] if err.args else err,
+                )
 
-            return CheckAlarmStatus(
-                status.status or "",
-                "",
-                status.status or "",
-                installation.number,
-                status.status or "",
-                status.timestampUpdate or "",
-            )
-
-        alarm_status = CheckAlarmStatus()
-        try:
-            reference_id: str = await self.session.check_alarm(installation)
-            await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
-            alarm_status = await self.session.check_alarm_status(
-                installation, reference_id
-            )
-        except SecuritasDirectError as err:
-            _LOGGER.error(err.args)
-
-        return alarm_status
+            return alarm_status
 
     @property
     def get_config_entry(self) -> ConfigEntry | None:
