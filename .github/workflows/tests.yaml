@@ -56,21 +56,12 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Resolve stable HA version
-        if: matrix.ha-channel == 'stable'
-        run: |
-          HA_VERSION=$(curl -fsSL "https://pypi.org/pypi/homeassistant/json" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])")
-          echo "Stable HA version: $HA_VERSION"
-          echo "HA_VERSION=$HA_VERSION" >> "$GITHUB_ENV"
-
       - name: Install dependencies (stable)
         if: matrix.ha-channel == 'stable'
         run: |
           pip install --upgrade pip
-          # Pin HA to the stable release via a constraint so phcc can't upgrade it
-          echo "homeassistant==$HA_VERSION" > /tmp/ha_stable.txt
-          pip install -r requirements_test.txt --constraint /tmp/ha_stable.txt
+          # phcc pins the latest stable HA it supports — just install normally
+          pip install -r requirements_test.txt
 
       - name: Install dependencies (minimum)
         if: matrix.ha-channel == 'minimum'
@@ -85,6 +76,7 @@ jobs:
         if: matrix.ha-channel == 'dev'
         run: |
           pip install --upgrade pip
+          python -m pip install --pre pytest-homeassistant-custom-component
           pip install -r requirements_test.txt
 
       - name: Run tests with coverage

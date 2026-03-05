@@ -445,6 +445,77 @@ class TestExecuteRequest:
         assert security_value["type"] == "OTP"
         assert security_value["otpHash"] == "otp-hash-123"
 
+    async def test_expired_session_403_retries_after_reauth(self, api):
+        """GraphQL 403 ExpiredSessionError triggers re-auth and retry."""
+        expired_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "Invalid session. Please, try again later.",
+                        "name": "ExpiredSessionError",
+                        "data": {"status": 403, "err": "ExpiredSessionError"},
+                    }
+                ],
+                "data": None,
+            }
+        )
+        ok_response = json.dumps({"data": {"xSStatus": {"status": "1"}}})
+
+        # First call returns 403, second returns success
+        responses = iter([expired_response, ok_response])
+
+        def make_cm(*_args, **_kwargs):
+            resp = AsyncMock()
+            resp.text = AsyncMock(return_value=next(responses))
+            resp.status = 200
+            resp.headers = {}
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=resp)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        api.http_client.post = MagicMock(side_effect=make_cm)
+        api.login = AsyncMock()
+
+        result = await api._execute_request({"query": "test"}, "Status")
+
+        assert result == {"data": {"xSStatus": {"status": "1"}}}
+        api.login.assert_awaited_once()
+
+    async def test_expired_session_403_raises_on_second_failure(self, api):
+        """If re-auth succeeds but server returns 403 again, raise instead of looping."""
+        expired_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "Invalid session. Please, try again later.",
+                        "name": "ExpiredSessionError",
+                        "data": {"status": 403, "err": "ExpiredSessionError"},
+                    }
+                ],
+                "data": None,
+            }
+        )
+
+        def make_cm(*_args, **_kwargs):
+            resp = AsyncMock()
+            resp.text = AsyncMock(return_value=expired_response)
+            resp.status = 200
+            resp.headers = {}
+            cm = AsyncMock()
+            cm.__aenter__ = AsyncMock(return_value=resp)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        api.http_client.post = MagicMock(side_effect=make_cm)
+        api.login = AsyncMock()
+
+        with pytest.raises(SecuritasDirectError, match="Invalid session"):
+            await api._execute_request({"query": "test"}, "Status")
+
+        # Login was called once for the retry, then it raised on the second 403
+        api.login.assert_awaited_once()
+
 
 # ── generate_uuid tests ─────────────────────────────────────────────────────
 
