@@ -304,7 +304,7 @@ class ApiManager:
                         if installation is not None:
                             await self._check_capabilities_token(installation)
                         return await self._execute_request(
-                            content, operation, installation, _retried=True
+                            content, operation, installation=installation, _retried=True
                         )
 
                     raise SecuritasDirectError(
