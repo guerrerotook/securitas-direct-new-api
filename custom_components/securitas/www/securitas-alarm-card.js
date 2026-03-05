@@ -194,8 +194,9 @@ class SecuritasAlarmCard extends HTMLElement {
     this._hass = hass;
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
+    const refreshKey = this._findRefreshEntity() || "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${refreshKey}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -236,10 +237,12 @@ class SecuritasAlarmCard extends HTMLElement {
     if (!this._hass) return null;
     // Explicit config takes priority
     if (this._config.refresh_entity) return this._config.refresh_entity;
-    // Auto-discover: find button.refresh_* entities
-    return Object.keys(this._hass.states).find(
+    // Only auto-select when there is a single candidate to avoid binding
+    // to the wrong installation in multi-panel setups.
+    const candidates = Object.keys(this._hass.states).filter(
       e => e.startsWith("button.refresh_") && this._hass.states[e]
-    ) || null;
+    );
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
   // ── Main render ─────────────────────────────────────────────────────────────
@@ -293,7 +296,7 @@ class SecuritasAlarmCard extends HTMLElement {
               <div class="entity-name">${this._esc(name)}</div>
               <div class="state-pill">${cfg.label}</div>
             </div>
-            ${refreshEntity ? `<button class="refresh-btn" data-action="refresh" title="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
+            ${refreshEntity ? `<button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
           </div>
 
           <!-- ── Unavailable notice ── -->
