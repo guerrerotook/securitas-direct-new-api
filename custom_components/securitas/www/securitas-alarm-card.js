@@ -44,6 +44,7 @@ const TRANSLATIONS = {
     open_sensors: "Open sensor(s) \u2014 arm anyway?",
     enter_pin: "Enter PIN to {action}", enter_code: "Enter code to {action}",
     code: "Code", confirm: "Confirm",
+    refresh: "Refresh status",
     entity_not_found: "Entity not found: {entity}",
     editor_entity: "Entity", editor_select: "\u2014 Select alarm panel \u2014",
     editor_name: "Name (optional)", editor_name_placeholder: "Override friendly name",
@@ -62,6 +63,7 @@ const TRANSLATIONS = {
     open_sensors: "Sensor(es) abierto(s) \u2014 \u00bfarmar igualmente?",
     enter_pin: "Introduzca PIN para {action}", enter_code: "Introduzca c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
+    refresh: "Actualizar estado",
     entity_not_found: "Entidad no encontrada: {entity}",
     editor_entity: "Entidad", editor_select: "\u2014 Seleccionar panel de alarma \u2014",
     editor_name: "Nombre (opcional)", editor_name_placeholder: "Nombre personalizado",
@@ -80,6 +82,7 @@ const TRANSLATIONS = {
     open_sensors: "Capteur(s) ouvert(s) \u2014 armer quand m\u00eame\u00a0?",
     enter_pin: "Entrez le PIN pour {action}", enter_code: "Entrez le code pour {action}",
     code: "Code", confirm: "Confirmer",
+    refresh: "Actualiser le statut",
     entity_not_found: "Entit\u00e9 introuvable\u00a0: {entity}",
     editor_entity: "Entit\u00e9", editor_select: "\u2014 S\u00e9lectionner le panneau d\u2019alarme \u2014",
     editor_name: "Nom (facultatif)", editor_name_placeholder: "Remplacer le nom",
@@ -98,6 +101,7 @@ const TRANSLATIONS = {
     open_sensors: "Sensore/i aperto/i \u2014 armare comunque?",
     enter_pin: "Inserisci PIN per {action}", enter_code: "Inserisci codice per {action}",
     code: "Codice", confirm: "Conferma",
+    refresh: "Aggiorna stato",
     entity_not_found: "Entit\u00e0 non trovata: {entity}",
     editor_entity: "Entit\u00e0", editor_select: "\u2014 Seleziona pannello allarme \u2014",
     editor_name: "Nome (facoltativo)", editor_name_placeholder: "Nome personalizzato",
@@ -116,6 +120,7 @@ const TRANSLATIONS = {
     open_sensors: "Sensor(es) aberto(s) \u2014 armar na mesma?",
     enter_pin: "Introduza PIN para {action}", enter_code: "Introduza c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
+    refresh: "Atualizar estado",
     entity_not_found: "Entidade n\u00e3o encontrada: {entity}",
     editor_entity: "Entidade", editor_select: "\u2014 Selecionar painel de alarme \u2014",
     editor_name: "Nome (opcional)", editor_name_placeholder: "Nome personalizado",
@@ -189,8 +194,9 @@ class SecuritasAlarmCard extends HTMLElement {
     this._hass = hass;
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
+    const refreshKey = this._findRefreshEntity() || "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${refreshKey}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -226,6 +232,19 @@ class SecuritasAlarmCard extends HTMLElement {
     this._render();
   }
 
+  // ── Find the refresh button entity for this alarm panel ─────────────────────
+  _findRefreshEntity() {
+    if (!this._hass) return null;
+    // Explicit config takes priority
+    if (this._config.refresh_entity) return this._config.refresh_entity;
+    // Only auto-select when there is a single candidate to avoid binding
+    // to the wrong installation in multi-panel setups.
+    const candidates = Object.keys(this._hass.states).filter(
+      e => e.startsWith("button.refresh_") && this._hass.states[e]
+    );
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   // ── Main render ─────────────────────────────────────────────────────────────
   _render() {
     if (!this._hass || !this._config) return;
@@ -239,6 +258,7 @@ class SecuritasAlarmCard extends HTMLElement {
 
     const state    = stateObj.state;
     const attrs    = stateObj.attributes;
+    const refreshEntity = this._findRefreshEntity();
     const stateCfg = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
     const cfg      = { ...stateCfg, label: _t(lang, STATE_LABEL_KEYS[state] || state) };
     const name     = this._config.name || attrs.friendly_name || this._config.entity;
@@ -276,6 +296,7 @@ class SecuritasAlarmCard extends HTMLElement {
               <div class="entity-name">${this._esc(name)}</div>
               <div class="state-pill">${cfg.label}</div>
             </div>
+            ${refreshEntity ? `<button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
           </div>
 
           <!-- ── Unavailable notice ── -->
@@ -416,6 +437,22 @@ class SecuritasAlarmCard extends HTMLElement {
   }
 
   _handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity) {
+    // Refresh
+    if (action === "refresh") {
+      const refreshEntity = this._findRefreshEntity();
+      if (refreshEntity) {
+        const btn = this.shadowRoot.querySelector(".refresh-btn");
+        if (btn) btn.classList.add("spinning");
+        this._hass.callService("button", "press", { entity_id: refreshEntity })
+          .finally(() => {
+            setTimeout(() => {
+              const b = this.shadowRoot?.querySelector(".refresh-btn");
+              if (b) b.classList.remove("spinning");
+            }, 2000);
+          });
+      }
+      return;
+    }
     // Force-arm / cancel
     if (action === "force_arm") {
       this._hass.callService("securitas", "force_arm", { entity_id: entity });
@@ -517,6 +554,30 @@ class SecuritasAlarmCard extends HTMLElement {
         text-transform: uppercase;
         background: ${cfg.color}22;
         color: ${cfg.color};
+      }
+      .title-block { flex: 1; }
+      .refresh-btn {
+        width: 36px; height: 36px;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+        transition: background 0.15s, transform 0.1s;
+      }
+      .refresh-btn:hover { background: var(--secondary-background-color); }
+      .refresh-btn:active { transform: scale(0.9); }
+      .refresh-btn ha-icon {
+        --mdc-icon-size: 20px;
+        color: var(--secondary-text-color);
+      }
+      .refresh-btn.spinning ha-icon {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
       }
 
       /* ── Buttons ── */

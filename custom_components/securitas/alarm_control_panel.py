@@ -143,12 +143,18 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 if proto_state == sec_state and code not in self._status_map:
                     self._status_map[code] = ha_state
                     break
+        scan_seconds = client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        # _update_interval is also used as the retention window for force-arm
+        # context, so keep it at DEFAULT_SCAN_INTERVAL when polling is off.
         self._update_interval: timedelta = timedelta(
-            seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            seconds=scan_seconds if scan_seconds > 0 else DEFAULT_SCAN_INTERVAL
         )
-        self._update_unsub = async_track_time_interval(
-            hass, self.async_update_status, self._update_interval
-        )
+        if scan_seconds > 0:
+            self._update_unsub = async_track_time_interval(
+                hass, self.async_update_status, self._update_interval
+            )
+        else:
+            self._update_unsub = None
         self._operation_in_progress: bool = False
         self._code: str | None = client.config.get(CONF_CODE, None)
         self._attr_code_format: CodeFormat | None = None

@@ -76,7 +76,12 @@ DEFAULT_PERI_ALARM = False
 DEFAULT_COUNTRY = "ES"
 
 
-PLATFORMS = [Platform.ALARM_CONTROL_PANEL, Platform.SENSOR, Platform.LOCK]
+PLATFORMS = [
+    Platform.ALARM_CONTROL_PANEL,
+    Platform.BUTTON,
+    Platform.SENSOR,
+    Platform.LOCK,
+]
 HUB = None
 
 

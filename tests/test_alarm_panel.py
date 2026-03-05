@@ -1119,6 +1119,38 @@ class TestAsyncUpdateStatus:
 
         alarm.client.update_overview.assert_called_once()
 
+    async def test_scan_interval_zero_no_timer_registered(self):
+        """scan_interval=0 does not register async_track_time_interval."""
+        alarm = make_alarm(
+            config={
+                "scan_interval": 0,
+                "PERI_alarm": False,
+                "map_home": "not_used",
+                "map_away": "total",
+                "map_night": "not_used",
+                "map_custom": "not_used",
+                "map_vacation": "not_used",
+            }
+        )
+        assert alarm._update_unsub is None
+
+    async def test_scan_interval_zero_keeps_force_context_retention(self):
+        """scan_interval=0 still uses DEFAULT_SCAN_INTERVAL for force_context retention."""
+        from custom_components.securitas import DEFAULT_SCAN_INTERVAL
+
+        alarm = make_alarm(
+            config={
+                "scan_interval": 0,
+                "PERI_alarm": False,
+                "map_home": "not_used",
+                "map_away": "total",
+                "map_night": "not_used",
+                "map_custom": "not_used",
+                "map_vacation": "not_used",
+            }
+        )
+        assert alarm._update_interval == timedelta(seconds=DEFAULT_SCAN_INTERVAL)
+
 
 # ===========================================================================
 # _check_code_for_arm_if_required
