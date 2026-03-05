@@ -149,6 +149,28 @@ const STATE_CFG = {
   unknown:            { icon: "mdi:shield-off-outline",  color: "var(--disabled-color,#9E9E9E)" },
 };
 
+// Hex fallbacks used by the editor color pickers (CSS vars can't be used in <input type="color">)
+const STATE_COLOR_DEFAULTS = {
+  disarmed:            "#4CAF50",
+  armed_away:          "#F44336",
+  armed_home:          "#FF9800",
+  armed_night:         "#9C27B0",
+  armed_vacation:      "#2196F3",
+  armed_custom_bypass: "#00BCD4",
+  triggered:           "#F44336",
+};
+
+// States shown in the color editor (excludes transient/unavailable states)
+const COLOR_EDITOR_STATES = [
+  { state: "disarmed",            label: "Disarmed" },
+  { state: "armed_away",          label: "Armed Away" },
+  { state: "armed_home",          label: "Armed Home" },
+  { state: "armed_night",         label: "Armed Night" },
+  { state: "armed_vacation",      label: "Armed Vacation" },
+  { state: "armed_custom_bypass", label: "Armed Custom / Bypass" },
+  { state: "triggered",           label: "Triggered" },
+];
+
 const STATE_LABEL_KEYS = {
   disarmed: "disarmed", armed_away: "armed_away", armed_home: "armed_home",
   armed_night: "armed_night", armed_vacation: "armed_vacation",
@@ -183,6 +205,13 @@ class SecuritasAlarmCard extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
+    this._lastKey = null; // force re-render so color changes apply immediately
+    if (this._hass) this._render();
+  }
+
+  // Returns the effective color for a state: user config override → STATE_CFG default
+  _getColor(state) {
+    return (this._config?.colors?.[state]) || STATE_CFG[state]?.color || "var(--disabled-color,#9E9E9E)";
   }
 
   set hass(hass) {
@@ -240,7 +269,7 @@ class SecuritasAlarmCard extends HTMLElement {
     const state    = stateObj.state;
     const attrs    = stateObj.attributes;
     const stateCfg = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
-    const cfg      = { ...stateCfg, label: _t(lang, STATE_LABEL_KEYS[state] || state) };
+    const cfg      = { icon: stateCfg.icon, color: this._getColor(state), label: _t(lang, STATE_LABEL_KEYS[state] || state) };
     const name     = this._config.name || attrs.friendly_name || this._config.entity;
     const features = attrs.supported_features || 0;
 
@@ -722,6 +751,8 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     const selected = this._config.entity || "";
     const name = this._config.name || "";
 
+    const colors = this._config.colors || {};
+
     this.shadowRoot.innerHTML = `
       <style>
         .editor { padding: 16px; }
@@ -733,7 +764,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           color: var(--secondary-text-color);
           margin-bottom: 4px;
         }
-        select, input {
+        select, input[type="text"] {
           width: 100%;
           box-sizing: border-box;
           padding: 8px 12px;
@@ -743,10 +774,65 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           background: var(--secondary-background-color);
           color: var(--primary-text-color);
         }
-        select:focus, input:focus {
+        select:focus, input[type="text"]:focus {
           outline: none;
           border-color: var(--primary-color);
         }
+        .section-title {
+          font-weight: 600;
+          font-size: 0.9em;
+          color: var(--primary-text-color);
+          margin: 20px 0 4px;
+          padding-bottom: 6px;
+          border-bottom: 1px solid var(--divider-color);
+        }
+        .section-hint {
+          font-size: 0.8em;
+          color: var(--secondary-text-color);
+          margin-bottom: 12px;
+        }
+        .color-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .color-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .color-label {
+          font-size: 0.82em;
+          color: var(--primary-text-color);
+          flex: 1;
+        }
+        .color-controls {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        input[type="color"] {
+          width: 36px;
+          height: 28px;
+          border: 1px solid var(--divider-color);
+          border-radius: 6px;
+          cursor: pointer;
+          padding: 2px;
+          background: var(--secondary-background-color);
+        }
+        .reset-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--secondary-text-color);
+          font-size: 1em;
+          padding: 2px 4px;
+          border-radius: 4px;
+          line-height: 1;
+        }
+        .reset-btn:hover { color: var(--error-color); }
+        .reset-btn[hidden] { display: none; }
       </style>
       <div class="editor">
         <div class="row">
@@ -762,6 +848,23 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         <div class="row">
           <label>${_t(lang, "editor_name")}</label>
           <input id="name" type="text" value="${this._escapeAttr(name)}" placeholder="${_t(lang, "editor_name_placeholder")}" />
+        </div>
+
+        <div class="section-title">State Colors</div>
+        <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
+        <div class="color-grid">
+          ${COLOR_EDITOR_STATES.map(({ state, label }) => {
+            const override = colors[state];
+            const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
+            return `
+              <div class="color-row">
+                <span class="color-label">${label}</span>
+                <div class="color-controls">
+                  <input type="color" data-state="${state}" value="${pickerVal}" />
+                  <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>
+                </div>
+              </div>`;
+          }).join("")}
         </div>
       </div>`;
 
@@ -779,6 +882,38 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         this._config = rest;
       }
       this._fireChanged();
+    });
+
+    // Color pickers
+    this.shadowRoot.querySelectorAll("input[type='color'][data-state]").forEach(input => {
+      input.addEventListener("change", (e) => {
+        const state = e.target.dataset.state;
+        const newColors = { ...(this._config.colors || {}), [state]: e.target.value };
+        this._config = { ...this._config, colors: newColors };
+        // Show reset button for this state
+        const resetBtn = this.shadowRoot.querySelector(`.reset-btn[data-reset="${state}"]`);
+        if (resetBtn) resetBtn.removeAttribute("hidden");
+        this._fireChanged();
+      });
+    });
+
+    // Reset buttons — remove override and go back to default
+    this.shadowRoot.querySelectorAll(".reset-btn[data-reset]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const state = e.target.dataset.reset;
+        const { [state]: _, ...remainingColors } = this._config.colors || {};
+        if (Object.keys(remainingColors).length === 0) {
+          const { colors: __, ...rest } = this._config;
+          this._config = rest;
+        } else {
+          this._config = { ...this._config, colors: remainingColors };
+        }
+        // Reset picker to default value and hide reset button
+        const picker = this.shadowRoot.querySelector(`input[type="color"][data-state="${state}"]`);
+        if (picker) picker.value = STATE_COLOR_DEFAULTS[state] || "#808080";
+        btn.setAttribute("hidden", "");
+        this._fireChanged();
+      });
     });
   }
 
