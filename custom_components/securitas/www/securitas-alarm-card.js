@@ -900,9 +900,6 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     });
   }
 
-  _escapeAttr(s) {
-    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
 
   _fireChanged() {
     this.dispatchEvent(new CustomEvent("config-changed", {
