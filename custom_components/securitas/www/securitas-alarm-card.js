@@ -791,35 +791,26 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           color: var(--secondary-text-color);
           margin-bottom: 12px;
         }
+        /* Flat 3-column grid: label | picker | reset — all rows perfectly aligned */
         .color-grid {
           display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-        .color-row {
-          display: flex;
+          grid-template-columns: 1fr 44px 28px;
+          gap: 10px 12px;
           align-items: center;
-          justify-content: space-between;
-          gap: 8px;
         }
         .color-label {
-          font-size: 0.82em;
+          font-size: 0.85em;
           color: var(--primary-text-color);
-          flex: 1;
-        }
-        .color-controls {
-          display: flex;
-          align-items: center;
-          gap: 4px;
         }
         input[type="color"] {
-          width: 36px;
+          width: 44px;
           height: 28px;
           border: 1px solid var(--divider-color);
           border-radius: 6px;
           cursor: pointer;
           padding: 2px;
           background: var(--secondary-background-color);
+          display: block;
         }
         .reset-btn {
           background: none;
@@ -827,12 +818,17 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           cursor: pointer;
           color: var(--secondary-text-color);
           font-size: 1em;
-          padding: 2px 4px;
+          padding: 0;
           border-radius: 4px;
-          line-height: 1;
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
         .reset-btn:hover { color: var(--error-color); }
-        .reset-btn[hidden] { display: none; }
+        /* visibility keeps the space so the grid stays aligned even without override */
+        .reset-btn[hidden] { visibility: hidden; display: flex; }
       </style>
       <div class="editor">
         <div class="row">
@@ -857,13 +853,9 @@ class SecuritasAlarmCardEditor extends HTMLElement {
             const override = colors[state];
             const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
             return `
-              <div class="color-row">
-                <span class="color-label">${label}</span>
-                <div class="color-controls">
-                  <input type="color" data-state="${state}" value="${pickerVal}" />
-                  <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>
-                </div>
-              </div>`;
+              <span class="color-label">${label}</span>
+              <input type="color" data-state="${state}" value="${pickerVal}" />
+              <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
           }).join("")}
         </div>
       </div>`;
