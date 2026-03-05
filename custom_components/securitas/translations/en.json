@@ -14,7 +14,7 @@
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request",
-                    "scan_interval": "Update scan interval (sec)",
+                    "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
                     "delay_check_operation": "Delay to check the arming and disarming operations (sec)"
                 },
                 "description": "Login into Securitas Direct.",
@@ -38,7 +38,7 @@
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
                     "PERI_alarm": "Is there a Perimetral alarm?",
                     "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
-                    "scan_interval": "Update scan interval (sec)",
+                    "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
                     "delay_check_operation": "Delay to check the arming and disarming operation (sec)",
                     "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)"
                 }

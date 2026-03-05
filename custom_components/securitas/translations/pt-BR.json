@@ -14,7 +14,7 @@
                     "code_arm_required": "Exigir também o código PIN (se houver) para armar o alarme",
                     "PERI_alarm": "Existe um alarme perimetral?",
                     "check_alarm_panel": "Verificar o status do painel de alarme em cada solicitação",
-                    "scan_interval": "Intervalo de atualização (seg)",
+                    "scan_interval": "Intervalo de atualização em segundos (0 desativa as atualizações automáticas)",
                     "delay_check_operation": "Atraso para verificar as operações de armar e desarmar (seg)"
                 },
                 "description": "Fazer login no Securitas Direct.",
@@ -38,7 +38,7 @@
                     "code_arm_required": "Exigir também o código PIN (se houver) para armar o alarme",
                     "PERI_alarm": "Existe um alarme perimetral?",
                     "check_alarm_panel": "Verificar o status do painel de alarme em cada solicitação (não recomendado)",
-                    "scan_interval": "Intervalo de atualização (seg)",
+                    "scan_interval": "Intervalo de atualização em segundos (0 desativa as atualizações automáticas)",
                     "delay_check_operation": "Atraso para verificar as operações de armar e desarmar (seg)",
                     "notify_group": "Serviço de notificação para exceções de armar (ex. mobile_app_phone)"
                 }

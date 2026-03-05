@@ -91,13 +91,14 @@ class SecuritasLock(lock.LockEntity):
         self._attr_extra_state_attributes: dict[str, Any] = {}
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
-        self._update_interval: timedelta = timedelta(
-            seconds=client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        )
-
-        self._update_unsub = async_track_time_interval(
-            hass, self.async_update_status, self._update_interval
-        )
+        scan_seconds = client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        self._update_interval: timedelta = timedelta(seconds=scan_seconds)
+        if scan_seconds > 0:
+            self._update_unsub = async_track_time_interval(
+                hass, self.async_update_status, self._update_interval
+            )
+        else:
+            self._update_unsub = None
 
         self._attr_device_info: DeviceInfo | None = DeviceInfo(
             identifiers={(DOMAIN, self._attr_unique_id)},
