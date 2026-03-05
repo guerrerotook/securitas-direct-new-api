@@ -534,7 +534,7 @@ class SecuritasAlarmCard extends HTMLElement {
       .icon-wrap {
         width: 48px; height: 48px;
         border-radius: 50%;
-        background: ${cfg.color}22;
+        background: color-mix(in srgb, ${cfg.color} 13%, transparent);
         display: flex; align-items: center; justify-content: center;
         flex-shrink: 0;
       }
@@ -557,7 +557,7 @@ class SecuritasAlarmCard extends HTMLElement {
         font-weight: 600;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        background: ${cfg.color}22;
+        background: color-mix(in srgb, ${cfg.color} 13%, transparent);
         color: ${cfg.color};
       }
 
@@ -586,7 +586,7 @@ class SecuritasAlarmCard extends HTMLElement {
       .btn-arm:hover    { filter: brightness(1.1); }
       .btn-disarm {
         background: var(--error-color, #F44336);
-        color: #fff;
+        color: var(--text-primary-color, #fff);
         grid-column: 1 / -1;
       }
       .btn-disarm:hover { filter: brightness(1.1); }
@@ -594,7 +594,7 @@ class SecuritasAlarmCard extends HTMLElement {
       /* ── Force arm section ── */
       .force-section {
         border-radius: 12px;
-        background: var(--warning-color, #FF9800)18;
+        background: color-mix(in srgb, var(--warning-color, #FF9800) 9%, transparent);
         border: 1.5px solid var(--warning-color, #FF9800);
         padding: 14px;
         margin-bottom: 16px;
@@ -630,7 +630,7 @@ class SecuritasAlarmCard extends HTMLElement {
       .btn-force {
         flex: 2;
         background: var(--warning-color, #FF9800);
-        color: #fff;
+        color: var(--text-primary-color, #fff);
       }
       .btn-force:hover { filter: brightness(1.1); }
       .btn-cancel-force {
