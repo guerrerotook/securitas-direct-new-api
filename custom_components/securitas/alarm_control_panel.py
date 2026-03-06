@@ -444,7 +444,17 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         if blocked:
             self._attr_extra_state_attributes["waf_blocked"] = True
         else:
-            self._attr_extra_state_attributes.pop("waf_blocked", None)
+            if self._attr_extra_state_attributes.pop("waf_blocked", None):
+                # Dismiss the rate-limited persistent notification
+                self.hass.async_create_task(
+                    self.hass.services.async_call(
+                        domain="persistent_notification",
+                        service="dismiss",
+                        service_data={
+                            "notification_id": f"{DOMAIN}.securitas_rate_limited_{self.installation.number}",
+                        },
+                    )
+                )
 
     def _mode_to_alarm_state(self, mode: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the securitas state map."""

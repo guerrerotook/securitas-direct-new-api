@@ -99,7 +99,7 @@ class SecuritasRefreshButton(ButtonEntity):
                             "Please wait a few minutes before trying again."
                         ),
                         "notification_id": (
-                            f"{DOMAIN}.rate_limited_{self.installation.number}"
+                            f"{DOMAIN}.securitas_rate_limited_{self.installation.number}"
                         ),
                     },
                 )
