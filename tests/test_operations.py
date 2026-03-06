@@ -406,10 +406,10 @@ class TestArmAlarm:
         status_variables = status_call[0][0]["variables"]
         assert status_variables["forceArmingRemoteId"] == "ref-original"
 
-    async def test_blocking_error_does_not_raise_arming_exception(
+    async def test_blocking_error_raises_securitas_error_not_arming_exception(
         self, authed_api, mock_execute, installation
     ):
-        """A BLOCKING error (allowForcing=false) should not raise ArmingExceptionError."""
+        """A BLOCKING error (allowForcing=false) should raise SecuritasDirectError, not ArmingExceptionError."""
         initial_response = {
             "data": {
                 "xSArmPanel": {
@@ -442,10 +442,48 @@ class TestArmAlarm:
         }
         mock_execute.side_effect = [initial_response, blocking_error_response]
 
-        # Should exit the loop (not WAIT, not forceable) and return status
-        # with protomResponse=None — which is fine, the caller handles it
-        result = await authed_api.arm_alarm(installation, "ARM1")
-        assert result.protomResponse is None
+        # BLOCKING errors raise SecuritasDirectError (not ArmingExceptionError)
+        with pytest.raises(SecuritasDirectError, match="error_blocking"):
+            await authed_api.arm_alarm(installation, "ARM1")
+
+    async def test_arm_raises_on_technical_error(
+        self, authed_api, installation, mock_execute
+    ):
+        """TECHNICAL_ERROR from polling should raise SecuritasDirectError."""
+        mock_execute.side_effect = [
+            # Initial arm request
+            {
+                "data": {
+                    "xSArmPanel": {
+                        "res": "OK",
+                        "msg": "processed",
+                        "referenceId": "ref-1",
+                    }
+                }
+            },
+            # Poll returns TECHNICAL_ERROR
+            {
+                "data": {
+                    "xSArmStatus": {
+                        "res": "ERROR",
+                        "msg": "alarm-manager.error_protom_session",
+                        "status": None,
+                        "protomResponse": None,
+                        "protomResponseDate": None,
+                        "numinst": None,
+                        "requestId": None,
+                        "error": {
+                            "code": "alarm-manager.error_protom_session",
+                            "type": "TECHNICAL_ERROR",
+                            "allowForcing": False,
+                            "protomResponse": None,
+                        },
+                    }
+                }
+            },
+        ]
+        with pytest.raises(SecuritasDirectError, match="error_protom_session"):
+            await authed_api.arm_alarm(installation, "ARM1PERI1")
 
     async def test_get_exceptions_method(self, authed_api, mock_execute, installation):
         """Test _get_exceptions returns parsed exception list."""
@@ -600,6 +638,45 @@ class TestDisarmAlarm:
         assert result.status == "DISARMED"
         # 1 for xSDisarmPanel + 2 for _check_disarm_status (WAIT then OK)
         assert mock_execute.call_count == 3
+
+    async def test_disarm_raises_on_technical_error(
+        self, authed_api, installation, mock_execute
+    ):
+        """TECHNICAL_ERROR from polling should raise SecuritasDirectError."""
+        mock_execute.side_effect = [
+            # Initial disarm request
+            {
+                "data": {
+                    "xSDisarmPanel": {
+                        "res": "OK",
+                        "msg": "processed",
+                        "referenceId": "ref-1",
+                    }
+                }
+            },
+            # Poll returns TECHNICAL_ERROR
+            {
+                "data": {
+                    "xSDisarmStatus": {
+                        "res": "ERROR",
+                        "msg": "alarm-manager.error_protom_session",
+                        "status": None,
+                        "protomResponse": None,
+                        "protomResponseDate": None,
+                        "numinst": None,
+                        "requestId": None,
+                        "error": {
+                            "code": "alarm-manager.error_protom_session",
+                            "type": "TECHNICAL_ERROR",
+                            "allowForcing": False,
+                            "protomResponse": None,
+                        },
+                    }
+                }
+            },
+        ]
+        with pytest.raises(SecuritasDirectError, match="error_protom_session"):
+            await authed_api.disarm_alarm(installation, "DARM1DARMPERI")
 
     async def test_timeout_raises_when_always_wait(
         self, authed_api, mock_execute, installation

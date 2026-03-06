@@ -37,23 +37,6 @@ STATE_TO_COMMAND: dict[SecuritasState, str] = {
     SecuritasState.PARTIAL_NIGHT_PERI: "ARMNIGHT1PERI1",
     SecuritasState.TOTAL_PERI: "ARM1PERI1",
 }
-
-# Compound commands that some panels reject as a single API call.
-# The integration tries the single call first and falls back to the
-# multi-step sequence, remembering the result for the session.
-# Note: on SDVFAST, DARM1 disarms everything (interior + perimeter);
-# on SDVECU, DARM1 only disarms the interior — but DARM1DARMPERI works
-# on SDVECU so the fallback to DARM1 only triggers on SDVFAST.
-COMPOUND_COMMAND_STEPS: dict[str, tuple[str, ...]] = {
-    "ARM1PERI1": ("ARM1", "PERI1"),
-    "ARMDAY1PERI1": ("ARMDAY1", "PERI1"),
-    "ARMNIGHT1PERI1": ("ARMNIGHT1", "PERI1"),
-    "DARM1DARMPERI": ("DARM1",),
-}
-
-# Proto response codes where the perimeter is armed.
-PERI_ARMED_PROTO_CODES: frozenset[str] = frozenset({"E", "B", "C", "A"})
-
 # Proto response code for the disarmed state (handled separately from PROTO_TO_STATE
 # in alarm_control_panel.py because it applies unconditionally regardless of mapping)
 PROTO_DISARMED = "D"

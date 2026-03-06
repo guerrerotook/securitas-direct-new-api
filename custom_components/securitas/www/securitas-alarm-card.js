@@ -45,6 +45,7 @@ const TRANSLATIONS = {
     enter_pin: "Enter PIN to {action}", enter_code: "Enter code to {action}",
     code: "Code", confirm: "Confirm",
     refresh: "Refresh status",
+    waf_blocked: "Rate limited by Securitas servers. Please wait a few minutes.",
     entity_not_found: "Entity not found: {entity}",
     editor_entity: "Entity", editor_select: "\u2014 Select alarm panel \u2014",
     editor_name: "Name (optional)", editor_name_placeholder: "Override friendly name",
@@ -64,6 +65,7 @@ const TRANSLATIONS = {
     enter_pin: "Introduzca PIN para {action}", enter_code: "Introduzca c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
     refresh: "Actualizar estado",
+    waf_blocked: "Bloqueado por los servidores de Securitas. Espere unos minutos.",
     entity_not_found: "Entidad no encontrada: {entity}",
     editor_entity: "Entidad", editor_select: "\u2014 Seleccionar panel de alarma \u2014",
     editor_name: "Nombre (opcional)", editor_name_placeholder: "Nombre personalizado",
@@ -83,6 +85,7 @@ const TRANSLATIONS = {
     enter_pin: "Entrez le PIN pour {action}", enter_code: "Entrez le code pour {action}",
     code: "Code", confirm: "Confirmer",
     refresh: "Actualiser le statut",
+    waf_blocked: "Bloqu\u00e9 par les serveurs Securitas. Veuillez patienter quelques minutes.",
     entity_not_found: "Entit\u00e9 introuvable\u00a0: {entity}",
     editor_entity: "Entit\u00e9", editor_select: "\u2014 S\u00e9lectionner le panneau d\u2019alarme \u2014",
     editor_name: "Nom (facultatif)", editor_name_placeholder: "Remplacer le nom",
@@ -102,6 +105,7 @@ const TRANSLATIONS = {
     enter_pin: "Inserisci PIN per {action}", enter_code: "Inserisci codice per {action}",
     code: "Codice", confirm: "Conferma",
     refresh: "Aggiorna stato",
+    waf_blocked: "Bloccato dai server Securitas. Attendere qualche minuto.",
     entity_not_found: "Entit\u00e0 non trovata: {entity}",
     editor_entity: "Entit\u00e0", editor_select: "\u2014 Seleziona pannello allarme \u2014",
     editor_name: "Nome (facoltativo)", editor_name_placeholder: "Nome personalizzato",
@@ -121,6 +125,7 @@ const TRANSLATIONS = {
     enter_pin: "Introduza PIN para {action}", enter_code: "Introduza c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
     refresh: "Atualizar estado",
+    waf_blocked: "Bloqueado pelos servidores da Securitas. Aguarde alguns minutos.",
     entity_not_found: "Entidade n\u00e3o encontrada: {entity}",
     editor_entity: "Entidade", editor_select: "\u2014 Selecionar painel de alarme \u2014",
     editor_name: "Nome (opcional)", editor_name_placeholder: "Nome personalizado",
@@ -225,7 +230,7 @@ class SecuritasAlarmCard extends HTMLElement {
     const stateObj = hass.states[this._config.entity];
     const refreshKey = this._findRefreshEntity() || "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${refreshKey}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${refreshKey}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -295,6 +300,7 @@ class SecuritasAlarmCard extends HTMLElement {
 
     const forceArmAvailable = attrs.force_arm_available === true;
     const openSensors       = attrs.arm_exceptions || [];
+    const wafBlocked        = attrs.waf_blocked === true;
 
     const codeFormat      = attrs.code_format || null;        // "number" | "text" | null
     const codeArmRequired = attrs.code_arm_required === true; // need code to arm?
@@ -330,6 +336,9 @@ class SecuritasAlarmCard extends HTMLElement {
 
           <!-- ── Unavailable notice ── -->
           ${isUnavailable ? `<div class="unavailable-msg">Entity is ${cfg.label.toLowerCase()}.</div>` : ""}
+
+          <!-- ── WAF rate-limit banner ── -->
+          ${wafBlocked ? `<div class="waf-banner"><ha-icon icon="mdi:shield-alert"></ha-icon> ${_t(lang, "waf_blocked")}</div>` : ""}
 
           <!-- ── Force arm section ── -->
           ${!isUnavailable && forceArmAvailable ? `
@@ -549,6 +558,21 @@ class SecuritasAlarmCard extends HTMLElement {
         font-size: 0.85em;
         color: var(--secondary-text-color);
         text-align: center;
+      }
+      .waf-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        margin: 4px 0 8px;
+        border-radius: 8px;
+        font-size: 0.85em;
+        background: var(--warning-color, #FF9800);
+        color: var(--text-primary-color, #fff);
+      }
+      .waf-banner ha-icon {
+        --mdc-icon-size: 18px;
+        flex-shrink: 0;
       }
 
       /* colour accent strip at top */

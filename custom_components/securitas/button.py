@@ -86,4 +86,20 @@ class SecuritasRefreshButton(ButtonEntity):
                     )
 
         except SecuritasDirectError as err:
-            _LOGGER.error("Error calling the securitas direct API: %s", str(err))
+            err_msg = str(err.args[0]) if err.args else str(err)
+            _LOGGER.error("Error calling the securitas direct API: %s", err_msg)
+            if getattr(err, "http_status", None) == 403:
+                await self.hass.services.async_call(
+                    domain="persistent_notification",
+                    service="create",
+                    service_data={
+                        "title": "Securitas: Rate limited",
+                        "message": (
+                            "Too many requests — blocked by Securitas servers. "
+                            "Please wait a few minutes before trying again."
+                        ),
+                        "notification_id": (
+                            f"{DOMAIN}.rate_limited_{self.installation.number}"
+                        ),
+                    },
+                )

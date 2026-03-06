@@ -275,12 +275,12 @@ class ApiManager:
                     headers,
                     content,
                 )
-            elif isinstance(errors, list) and errors and "data" in response_dict:
-                # Partial GraphQL response: errors list alongside a data key.
-                # Only raise automatically when the operation result is null/empty
-                # (all data values are None), so callers that handle partial data
-                # themselves are not affected.
-                data = response_dict["data"]
+            elif isinstance(errors, list) and errors:
+                # GraphQL error response. When there's no "data" key at all, it's
+                # a pure validation error (e.g. BAD_USER_INPUT). When there IS a
+                # data key, only raise when all values are null/empty (partial
+                # responses with valid data are handled by callers).
+                data = response_dict.get("data")
                 all_null = data is None or (
                     isinstance(data, dict) and all(v is None for v in data.values())
                 )
@@ -293,8 +293,23 @@ class ApiManager:
                     )
                     # Extract HTTP-like status from GraphQL error data
                     error_status = None
-                    if isinstance(first, dict) and isinstance(first.get("data"), dict):
-                        error_status = first["data"].get("status")
+                    if isinstance(first, dict):
+                        if isinstance(first.get("data"), dict):
+                            error_status = first["data"].get("status")
+                        # BAD_USER_INPUT = command not in panel's enum
+                        if (
+                            error_status is None
+                            and isinstance(first.get("extensions"), dict)
+                            and first["extensions"].get("code") == "BAD_USER_INPUT"
+                        ):
+                            error_status = 400
+                        # Application-level rejection (e.g. "not valid for Central Unit")
+                        if (
+                            error_status is None
+                            and isinstance(first.get("data"), dict)
+                            and first["data"].get("res") == "ERROR"
+                        ):
+                            error_status = 400
 
                     # Session expired server-side: re-authenticate and retry once
                     if error_status == 403 and not _retried:
@@ -449,10 +464,9 @@ class ApiManager:
                 first = False
                 continue
             except SecuritasDirectError as err:
-                if err.http_status in (403, 409):
+                if err.http_status == 409:
                     _LOGGER.warning(
-                        "Transient error (%s) during poll, retrying: %s",
-                        err.http_status,
+                        "Transient error (409) during poll, retrying: %s",
                         err.args[0] if err.args else err,
                     )
                     first = False
@@ -636,8 +650,10 @@ class ApiManager:
                         # needs a 2FA
                         raise Login2FAError(err.args) from err
                 raise LoginError(err.args) from err
-            # No response data (connection/network error) — let
-            # SecuritasDirectError propagate so HA can retry setup
+            # Has response dict = server responded with error → login failure.
+            # No response dict = network/connection error → let propagate.
+            if result_json is not None:
+                raise LoginError(err.args) from err
             raise
 
         if "errors" in response:
@@ -1030,6 +1046,15 @@ class ApiManager:
 
         raw_data = await self._poll_operation(_check)
 
+        # Detect unsupported command errors that pass GraphQL validation
+        # but fail at the panel level (e.g. TECHNICAL_ERROR after polling)
+        if raw_data.get("res") == "ERROR":
+            error_info = raw_data.get("error") or {}
+            if error_info.get("type") != "NON_BLOCKING":
+                raise SecuritasDirectError(
+                    f"Arm command failed: {raw_data.get('msg', 'unknown error')}",
+                )
+
         self.protom_response = raw_data["protomResponse"]
         return ArmStatus(
             raw_data["res"],
@@ -1179,6 +1204,14 @@ class ApiManager:
             _check,
             continue_on_msg="alarm-manager.error_no_response_to_request",
         )
+
+        # Detect unsupported command errors
+        if raw_data.get("res") == "ERROR":
+            error_info = raw_data.get("error") or {}
+            if error_info.get("type") != "NON_BLOCKING":
+                raise SecuritasDirectError(
+                    f"Disarm command failed: {raw_data.get('msg', 'unknown error')}",
+                )
 
         if raw_data.get("protomResponse"):
             self.protom_response = raw_data["protomResponse"]
