@@ -400,6 +400,25 @@ class TestSecuritasHub:
         with pytest.raises(SecuritasDirectError) as exc_info:
             await hub.update_overview(inst)
         assert exc_info.value.http_status == 403
+        # _last_api_time should still be updated even on 403 (for cooldown)
+        assert hub._last_api_time > 0
+
+    async def test_update_overview_403_check_alarm_updates_last_api_time(self):
+        """403 on check_alarm_status still updates _last_api_time for cooldown."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: True})
+        hub.session = AsyncMock()
+        hub.session.check_alarm = AsyncMock(return_value="ref-123")
+        hub.session.check_alarm_status = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+        inst = make_installation()
+
+        with pytest.raises(SecuritasDirectError):
+            with patch(
+                "custom_components.securitas.asyncio.sleep", new_callable=AsyncMock
+            ):
+                await hub.update_overview(inst)
+        assert hub._last_api_time > 0
 
     async def test_update_overview_swallows_non_403_error(self):
         """update_overview swallows non-403 errors and returns empty status."""

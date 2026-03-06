@@ -237,9 +237,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         need_sign_in = True
 
     _card_registered = hass.data.get(DOMAIN, {}).get("card_registered", False)
+    _card_resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
     hass.data[DOMAIN] = {}
     if _card_registered:
         hass.data[DOMAIN]["card_registered"] = True
+    if _card_resource_id is not None:
+        hass.data[DOMAIN]["card_resource_id"] = _card_resource_id
 
     # Set up log sanitization filter — must be on handlers, not the logger,
     # because logger-level filters don't apply to child logger records.
@@ -574,8 +577,9 @@ class SecuritasHub:
                     )
                     if getattr(err, "http_status", None) == 403:
                         raise
+                finally:
+                    self._last_api_time = time.monotonic()
 
-                self._last_api_time = time.monotonic()
                 return CheckAlarmStatus(
                     status.status or "",
                     "",
