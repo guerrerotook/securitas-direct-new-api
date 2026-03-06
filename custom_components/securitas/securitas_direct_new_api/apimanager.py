@@ -275,12 +275,12 @@ class ApiManager:
                     headers,
                     content,
                 )
-            elif isinstance(errors, list) and errors and "data" in response_dict:
-                # Partial GraphQL response: errors list alongside a data key.
-                # Only raise automatically when the operation result is null/empty
-                # (all data values are None), so callers that handle partial data
-                # themselves are not affected.
-                data = response_dict["data"]
+            elif isinstance(errors, list) and errors:
+                # GraphQL error response. When there's no "data" key at all, it's
+                # a pure validation error (e.g. BAD_USER_INPUT). When there IS a
+                # data key, only raise when all values are null/empty (partial
+                # responses with valid data are handled by callers).
+                data = response_dict.get("data")
                 all_null = data is None or (
                     isinstance(data, dict) and all(v is None for v in data.values())
                 )
@@ -293,8 +293,23 @@ class ApiManager:
                     )
                     # Extract HTTP-like status from GraphQL error data
                     error_status = None
-                    if isinstance(first, dict) and isinstance(first.get("data"), dict):
-                        error_status = first["data"].get("status")
+                    if isinstance(first, dict):
+                        if isinstance(first.get("data"), dict):
+                            error_status = first["data"].get("status")
+                        # BAD_USER_INPUT = command not in panel's enum
+                        if (
+                            error_status is None
+                            and isinstance(first.get("extensions"), dict)
+                            and first["extensions"].get("code") == "BAD_USER_INPUT"
+                        ):
+                            error_status = 400
+                        # Application-level rejection (e.g. "not valid for Central Unit")
+                        if (
+                            error_status is None
+                            and isinstance(first.get("data"), dict)
+                            and first["data"].get("res") == "ERROR"
+                        ):
+                            error_status = 400
 
                     # Session expired server-side: re-authenticate and retry once
                     if error_status == 403 and not _retried:
@@ -635,8 +650,10 @@ class ApiManager:
                         # needs a 2FA
                         raise Login2FAError(err.args) from err
                 raise LoginError(err.args) from err
-            # No response data (connection/network error) — let
-            # SecuritasDirectError propagate so HA can retry setup
+            # Has response dict = server responded with error → login failure.
+            # No response dict = network/connection error → let propagate.
+            if result_json is not None:
+                raise LoginError(err.args) from err
             raise
 
         if "errors" in response:
