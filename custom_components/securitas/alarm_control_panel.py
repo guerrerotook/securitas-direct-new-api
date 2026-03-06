@@ -386,6 +386,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                     return result
                 else:
                     result = await self._send_single_command(command, **force_params)
+                    self._last_arm_result = result
                     return result
             except ArmingExceptionError:
                 raise  # Arming exceptions need special handling upstream
@@ -459,6 +460,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             err_msg = str(err.args[0]) if err.args else str(err)
             _LOGGER.error("Disarm failed: %s", err_msg)
             self._notify_error("Securitas: Error disarming", err_msg)
+            self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
 

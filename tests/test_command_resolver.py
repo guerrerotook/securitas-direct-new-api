@@ -114,7 +114,7 @@ class TestCommandResolverDisarm:
         assert len(steps) == 1
         assert steps[0].commands == ["DARM1"]
 
-    def test_disarm_peri_skips_unsupported_dperi1(self):
+    def test_disarm_peri_skips_unsupported_darmperi(self):
         resolver = CommandResolver(has_peri=True)
         resolver.mark_unsupported("DARMPERI")
         current = AlarmState(InteriorMode.OFF, PerimeterMode.ON)
