@@ -176,6 +176,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_NOTIFY_GROUP] = entry.data.get(CONF_NOTIFY_GROUP, "")
     config = add_device_information(config)
 
+    # Register card static path + Lovelace resource early so the card
+    # is available even when login fails (ConfigEntryNotReady).
+    if hass.http and not hass.data.get(DOMAIN, {}).get("card_registered"):
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    "/securitas_panel",
+                    str(Path(__file__).parent / "www"),
+                    cache_headers=False,
+                )
+            ]
+        )
+        await _register_card_resource(hass)
+        hass.data.setdefault(DOMAIN, {})["card_registered"] = True
+
     # Read mapping config from entry data
     config[CONF_MAP_HOME] = entry.data.get(CONF_MAP_HOME)
     config[CONF_MAP_AWAY] = entry.data.get(CONF_MAP_AWAY)
@@ -286,18 +301,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
-            # Serve the custom alarm card JS automatically
-            if hass.http:
-                await hass.http.async_register_static_paths(
-                    [
-                        StaticPathConfig(
-                            "/securitas_panel",
-                            str(Path(__file__).parent / "www"),
-                            cache_headers=False,
-                        )
-                    ]
-                )
-                await _register_card_resource(hass)
 
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             return True
