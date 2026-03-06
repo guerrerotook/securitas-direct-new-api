@@ -371,11 +371,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 continue
 
             try:
+                _LOGGER.info("Sending command: %s", command)
                 if "+" in command:
                     # Multi-step: split and execute sequentially
                     sub_commands = command.split("+")
                     result: ArmStatus | DisarmStatus | None = None
                     for sub_cmd in sub_commands:
+                        _LOGGER.info("Sending sub-command: %s", sub_cmd)
                         result = await self._send_single_command(
                             sub_cmd, **force_params
                         )
@@ -388,14 +390,24 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             except ArmingExceptionError:
                 raise  # Arming exceptions need special handling upstream
             except SecuritasDirectError as err:
-                if err.http_status == 409:
-                    raise  # Server busy — don't try alternatives
-                _LOGGER.info(
-                    "Command %s not supported by panel, trying next alternative: %s",
-                    command,
-                    err.args[0] if err.args else err,
-                )
-                self._resolver.mark_unsupported(command)
+                if err.http_status in (403, 409):
+                    raise  # WAF block or server busy — don't try alternatives
+                if err.http_status is not None:
+                    # GraphQL validation error (e.g. BAD_USER_INPUT) —
+                    # command not in panel's enum, mark as unsupported
+                    _LOGGER.info(
+                        "Command %s not supported by panel (status %s),"
+                        " trying next alternative: %s",
+                        command,
+                        err.http_status,
+                        err.args[0] if err.args else err,
+                    )
+                    self._resolver.mark_unsupported(command)
+                else:
+                    # Panel-level error (e.g. TECHNICAL_ERROR after polling) —
+                    # panel communication failure, not a command issue.
+                    # Don't try alternatives (they'll likely also fail).
+                    raise
                 last_err = err
 
         raise last_err or SecuritasDirectError(
