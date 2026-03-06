@@ -1092,8 +1092,8 @@ class TestAsyncUpdateStatus:
         assert alarm._state == AlarmControlPanelState.DISARMED
         alarm.async_write_ha_state.assert_called_once()
 
-    async def test_error_logged_no_ha_state_write(self):
-        """Error: SecuritasDirectError logged, doesn't write HA state."""
+    async def test_error_logged_state_unchanged(self):
+        """Error: SecuritasDirectError logged, state unchanged, HA state written."""
         alarm = make_alarm()
         alarm.client.update_overview = AsyncMock(
             side_effect=SecuritasDirectError("Network error")
@@ -1102,10 +1102,39 @@ class TestAsyncUpdateStatus:
         await alarm.async_update_status()
 
         alarm.client.update_overview.assert_called_once()
-        # async_write_ha_state should NOT be called on error
-        alarm.async_write_ha_state.assert_not_called()
-        # State should remain at initial DISARMED
         assert alarm._state == AlarmControlPanelState.DISARMED
+        alarm.async_write_ha_state.assert_called_once()
+        assert "waf_blocked" not in alarm._attr_extra_state_attributes
+
+    async def test_403_error_sets_waf_blocked_attribute(self):
+        """403 WAF error sets waf_blocked attribute for the card."""
+        alarm = make_alarm()
+        alarm.client.update_overview = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        await alarm.async_update_status()
+
+        assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
+        alarm.async_write_ha_state.assert_called_once()
+
+    async def test_successful_update_clears_waf_blocked(self):
+        """Successful status check clears waf_blocked attribute."""
+        alarm = make_alarm()
+        alarm._attr_extra_state_attributes["waf_blocked"] = True
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="D",
+            protomResponseData="",
+        )
+        alarm.client.update_overview = AsyncMock(return_value=status)
+
+        await alarm.async_update_status()
+
+        assert "waf_blocked" not in alarm._attr_extra_state_attributes
 
     async def test_skips_poll_when_operation_in_progress(self):
         """Status poll is skipped when _operation_in_progress is True."""

@@ -279,7 +279,11 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 "Error updating alarm status: %s",
                 err.args[0] if err.args else err,
             )
+            if getattr(err, "http_status", None) == 403:
+                self._attr_extra_state_attributes["waf_blocked"] = True
+            self.async_write_ha_state()
         else:
+            self._attr_extra_state_attributes.pop("waf_blocked", None)
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
 
@@ -391,8 +395,15 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             except ArmingExceptionError:
                 raise  # Arming exceptions need special handling upstream
             except SecuritasDirectError as err:
-                if err.http_status in (403, 409):
-                    raise  # WAF block or server busy — don't try alternatives
+                if err.http_status == 403:
+                    self._notify_error(
+                        "Securitas: Rate limited",
+                        "Too many requests — blocked by Securitas servers. "
+                        "Please wait a few minutes before trying again.",
+                    )
+                    raise
+                if err.http_status == 409:
+                    raise  # Server busy — don't try alternatives
                 if err.http_status is not None:
                     # GraphQL validation error (e.g. BAD_USER_INPUT) —
                     # command not in panel's enum, mark as unsupported
