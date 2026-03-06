@@ -1029,6 +1029,15 @@ class ApiManager:
 
         raw_data = await self._poll_operation(_check)
 
+        # Detect unsupported command errors that pass GraphQL validation
+        # but fail at the panel level (e.g. TECHNICAL_ERROR after polling)
+        if raw_data.get("res") == "ERROR":
+            error_info = raw_data.get("error") or {}
+            if error_info.get("type") != "NON_BLOCKING":
+                raise SecuritasDirectError(
+                    f"Arm command failed: {raw_data.get('msg', 'unknown error')}",
+                )
+
         self.protom_response = raw_data["protomResponse"]
         return ArmStatus(
             raw_data["res"],
@@ -1178,6 +1187,14 @@ class ApiManager:
             _check,
             continue_on_msg="alarm-manager.error_no_response_to_request",
         )
+
+        # Detect unsupported command errors
+        if raw_data.get("res") == "ERROR":
+            error_info = raw_data.get("error") or {}
+            if error_info.get("type") != "NON_BLOCKING":
+                raise SecuritasDirectError(
+                    f"Disarm command failed: {raw_data.get('msg', 'unknown error')}",
+                )
 
         if raw_data.get("protomResponse"):
             self.protom_response = raw_data["protomResponse"]
