@@ -49,6 +49,7 @@ from .securitas_direct_new_api import (
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "securitas"
+CARD_URL = "/securitas_panel/securitas-alarm-card.js"
 
 CONF_COUNTRY = "country"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
@@ -296,9 +297,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         )
                     ]
                 )
-                frontend.add_extra_js_url(
-                    hass, "/securitas_panel/securitas-alarm-card.js"
-                )
+                await _register_card_resource(hass)
 
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             return True
@@ -315,6 +314,61 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
 
+async def _register_card_resource(hass: HomeAssistant) -> None:
+    """Register the alarm card as a Lovelace resource for proper load ordering.
+
+    Using add_extra_js_url injects the script asynchronously, causing a race
+    condition on cold start where Lovelace renders cards before the custom
+    element is registered. Registering as a Lovelace resource gives Lovelace
+    explicit load ordering and avoids the "Configuration error" on first load.
+    Falls back to add_extra_js_url if Lovelace resources are unavailable.
+    """
+    try:
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data and hasattr(lovelace_data, "resources"):
+            resources = lovelace_data.resources
+            if hasattr(resources, "async_create_item"):
+                # Storage mode — can add programmatically
+                if not resources.loaded:
+                    await resources.async_load()
+                    resources.loaded = True
+                # Don't add if already registered (user may have added manually)
+                for item in resources.async_items():
+                    if item.get("url") == CARD_URL:
+                        return
+                item = await resources.async_create_item(
+                    {"res_type": "module", "url": CARD_URL}
+                )
+                hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item["id"]
+                return
+    except Exception:
+        _LOGGER.debug(
+            "Could not register as Lovelace resource, falling back to add_extra_js_url"
+        )
+    # Fallback: YAML mode or Lovelace not available
+    frontend.add_extra_js_url(hass, CARD_URL)
+
+
+async def _unregister_card_resource(hass: HomeAssistant) -> None:
+    """Remove the alarm card Lovelace resource on unload."""
+    resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
+    if not resource_id:
+        # Was using add_extra_js_url fallback or user-managed resource
+        try:
+            frontend.remove_extra_js_url(hass, CARD_URL)
+        except Exception:
+            pass
+        return
+    try:
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data and hasattr(lovelace_data, "resources"):
+            resources = lovelace_data.resources
+            if hasattr(resources, "async_delete_item"):
+                await resources.async_delete_item(resource_id)
+    except Exception:
+        _LOGGER.debug("Could not remove Lovelace resource %s", resource_id)
+
+
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     log_filter = hass.data[DOMAIN].get("log_filter")
@@ -325,8 +379,12 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )
+
+    await _unregister_card_resource(hass)
+
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
     hass.data[DOMAIN].pop("log_filter", None)
+    hass.data[DOMAIN].pop("card_resource_id", None)
     if not hass.data[DOMAIN]:
         hass.data.pop(DOMAIN)
     return unload_ok

@@ -44,17 +44,25 @@ async def async_setup_entry(
         try:
             services: list[Service] = await client.get_services(device.installation)
         except SecuritasDirectError as err:
-            _LOGGER.error(
-                "Failed to get services for installation %s: %s",
+            _LOGGER.warning(
+                "Skipping installation %s for sensor setup: %s",
                 device.installation.number,
                 err.args[0] if err.args else err,
             )
             continue
         for service in services:
             if service.request == sentinel_confort_name:
-                sentinel_data: Sentinel = await client.session.get_sentinel_data(
-                    service.installation, service
-                )
+                try:
+                    sentinel_data: Sentinel = await client.session.get_sentinel_data(
+                        service.installation, service
+                    )
+                except SecuritasDirectError as err:
+                    _LOGGER.warning(
+                        "Sentinel data not available for installation %s: %s",
+                        service.installation.number,
+                        err.args[0] if err.args else err,
+                    )
+                    continue
                 sensors.append(
                     SentinelTemperature(sentinel_data, service, client, device)
                 )
