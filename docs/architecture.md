@@ -165,6 +165,8 @@ The central coordinator. It owns an `ApiManager` session and is shared by all en
 - **Status polling** — `update_overview()` checks the alarm status using one of two strategies:
   - **Panel check** (default, `check_alarm_panel=True`): Sends `check_alarm()` to get a `referenceId`, waits 1 second, then calls `check_alarm_status()` to poll the panel directly
   - **General status** (`check_alarm_panel=False`): Calls `check_general_status()` which returns the last known cloud status without waking the panel
+- **API call cooldown** — `update_overview()` enforces a 5-second minimum gap between API call bursts via `_last_api_time`. This prevents the second installation's queued poll from firing immediately after an arm/disarm operation (which makes many API calls), which would trigger the Incapsula WAF rate limiter. Arm/disarm operations also update `_last_api_time` when they complete.
+- **403 re-raise** — `update_overview()` re-raises 403 `SecuritasDirectError` so the calling alarm entity can set `waf_blocked`. Non-403 errors are swallowed and return an empty `CheckAlarmStatus`.
 
 ### Setup flow (`async_setup_entry`)
 
@@ -283,7 +285,12 @@ The `_get_exceptions()` API call uses the same polling pattern as arm/disarm —
 
 **Why disarm-before-rearm?** The Securitas API treats interior and perimeter as independent axes. Sending `ARMDAY1` while the perimeter is armed leaves the perimeter armed. Transitioning from `Partial+Perimeter` to `Partial` (no perimeter) would silently fail without disarming first. The `CommandResolver` handles this automatically: when the interior mode changes and the current interior is not off, it inserts a disarm step before the arm step.
 
-**Status updates:** `async_track_time_interval` fires `async_update_status()` every `scan_interval` seconds (default 120). This calls `SecuritasHub.update_overview()` and then `update_status_alarm()` to map the response to an HA state.
+**Status updates:** `async_track_time_interval` fires `async_update_status()` every `scan_interval` seconds (default 120). This calls `SecuritasHub.update_overview()` and then `update_status_alarm()` to map the response to an HA state. Polls are skipped when `_operation_in_progress` is True (during arm/disarm) to prevent concurrent API calls.
+
+**WAF rate-limit handling:** When the Securitas Incapsula WAF blocks requests with 403, the integration tracks this via a `waf_blocked` attribute on the alarm entity's `extra_state_attributes`. The custom Lovelace card reads this attribute to show an orange warning banner. A `_set_waf_blocked(blocked)` helper method manages the attribute and auto-dismisses the "Rate limited" persistent notification when the block clears. The attribute is:
+- **Set** on 403 errors from status polls, arm/disarm operations, and button presses
+- **Cleared** on successful arm/disarm operations and successful status polls
+- 403 on arm/disarm shows only the rate-limited notification (the generic "Error arming/disarming" notification is suppressed to avoid duplicates)
 
 **PIN code validation:**
 - `_check_code(code)` — Always checked for disarm. Raises `ServiceValidationError` if the code doesn't match the configured PIN. No PIN configured = any code accepted.
@@ -314,7 +321,7 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
 
 ### Refresh button (`button.py`)
 
-`SecuritasRefreshButton` — A simple button entity that calls `SecuritasHub.update_overview()` when pressed. Allows users to manually trigger a status refresh outside the normal polling interval.
+`SecuritasRefreshButton` — A simple button entity that calls `SecuritasHub.update_overview()` when pressed. Allows users to manually trigger a status refresh outside the normal polling interval. On 403 errors, it creates a "Rate limited" persistent notification and sets `waf_blocked` on the corresponding alarm entity (looked up via `hass.data[DOMAIN]["alarm_entities"]`) so the card shows the orange warning banner.
 
 ## Configuration
 
@@ -407,7 +414,7 @@ async_track_time_interval fires every scan_interval seconds
 
 ### Overview
 
-The test suite has 539 tests achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
+The test suite has 632 tests achieving 95% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
 
 ```bash
 # Run the full suite
@@ -432,9 +439,9 @@ Tests are organized by module, with a shared `conftest.py` providing fixtures an
 tests/
 ├── conftest.py              Shared fixtures (API client, JWT helpers, response factories)
 ├── mock_graphql.py          Mock HTTP transport for integration tests (see below)
-├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation
+├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
 ├── test_auth.py             Login, refresh, 2FA, token lifecycle
-├── test_button.py           Refresh button entity
+├── test_button.py           Refresh button entity, 403 WAF notification + alarm entity sync
 ├── test_config_flow.py      Config flow (setup + 2FA) and options flow
 ├── test_command_resolver.py  CommandResolver state transitions, fallback chains
 ├── test_constants.py        SecuritasState enum, mapping tables
@@ -442,7 +449,7 @@ tests/
 ├── test_execute_request.py  HTTP request execution, headers, error handling, http_status
 ├── test_ha_platforms.py     Platform async_setup_entry for all entity types
 ├── test_helpers.py          DRY helpers: _poll_operation (409 retry, transient errors)
-├── test_init.py             Integration setup, SecuritasHub, device info, options
+├── test_init.py             Integration setup, SecuritasHub, device info, options, API cooldown
 ├── test_integration.py      Integration tests using MockGraphQLServer (see below)
 ├── test_log_filter.py       SensitiveDataFilter: secret redaction, installation masking
 ├── test_operations.py       Arm, disarm, check alarm, polling
@@ -561,12 +568,12 @@ Three parallel jobs run on every PR and push to main:
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `__init__.py` | 478 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice`, log filter setup |
+| `__init__.py` | 609 | Integration setup, `SecuritasHub`, `SecuritasDirectDevice`, log filter setup |
 | `config_flow.py` | 362 | Config flow (setup + 2FA) and options flow (settings + mappings) |
-| `alarm_control_panel.py` | 713 | Alarm entity with state mapping, arm/disarm, force arm, PIN validation |
+| `alarm_control_panel.py` | 772 | Alarm entity with state mapping, arm/disarm, force arm, PIN validation, WAF tracking |
 | `sensor.py` | 195 | Sentinel temperature, humidity, air quality sensors |
 | `lock.py` | 211 | Smart lock entity |
-| `button.py` | 83 | Manual refresh button |
+| `button.py` | 112 | Manual refresh button with WAF notification |
 | `constants.py` | 21 | `SentinelName` language mapping |
 | `log_filter.py` | 86 | `SensitiveDataFilter` — log sanitization for secrets |
 | `securitas_direct_new_api/apimanager.py` | 1296 | GraphQL API client with auth, polling, DRY helpers, all operations |
@@ -575,3 +582,4 @@ Three parallel jobs run on every PR and push to main:
 | `securitas_direct_new_api/dataTypes.py` | 168 | Response dataclasses |
 | `securitas_direct_new_api/domains.py` | 49 | Country-to-URL routing |
 | `securitas_direct_new_api/exceptions.py` | 53 | Exception hierarchy with `http_status` and `ArmingExceptionError` |
+| `www/securitas-alarm-card.js` | 1157 | Custom Lovelace alarm card with WAF warning banner, multi-language |

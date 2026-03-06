@@ -99,7 +99,14 @@ class SecuritasRefreshButton(ButtonEntity):
                             "Please wait a few minutes before trying again."
                         ),
                         "notification_id": (
-                            f"{DOMAIN}.rate_limited_{self.installation.number}"
+                            f"{DOMAIN}.securitas_rate_limited_{self.installation.number}"
                         ),
                     },
                 )
+                alarm_entities = self.hass.data.get(DOMAIN, {}).get(
+                    "alarm_entities", {}
+                )
+                alarm_entity = alarm_entities.get(self.installation.number)
+                if alarm_entity is not None:
+                    alarm_entity._set_waf_blocked(True)
+                    alarm_entity.async_write_ha_state()

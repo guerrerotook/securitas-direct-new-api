@@ -371,6 +371,122 @@ class TestSecuritasHub:
         assert result.status == "armed"
         assert result.InstallationNumer == inst.number
 
+    async def test_update_overview_reraises_403_check_alarm(self):
+        """update_overview re-raises 403 errors from check_alarm_status."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: True})
+        hub.session = AsyncMock()
+        hub.session.check_alarm = AsyncMock(return_value="ref-123")
+        hub.session.check_alarm_status = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+        inst = make_installation()
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            with patch(
+                "custom_components.securitas.asyncio.sleep", new_callable=AsyncMock
+            ):
+                await hub.update_overview(inst)
+        assert exc_info.value.http_status == 403
+
+    async def test_update_overview_reraises_403_general_status(self):
+        """update_overview re-raises 403 from check_general_status."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: False})
+        hub.session = AsyncMock()
+        hub.session.check_general_status = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+        inst = make_installation()
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await hub.update_overview(inst)
+        assert exc_info.value.http_status == 403
+        # _last_api_time should still be updated even on 403 (for cooldown)
+        assert hub._last_api_time > 0
+
+    async def test_update_overview_403_check_alarm_updates_last_api_time(self):
+        """403 on check_alarm_status still updates _last_api_time for cooldown."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: True})
+        hub.session = AsyncMock()
+        hub.session.check_alarm = AsyncMock(return_value="ref-123")
+        hub.session.check_alarm_status = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+        inst = make_installation()
+
+        with pytest.raises(SecuritasDirectError):
+            with patch(
+                "custom_components.securitas.asyncio.sleep", new_callable=AsyncMock
+            ):
+                await hub.update_overview(inst)
+        assert hub._last_api_time > 0
+
+    async def test_update_overview_swallows_non_403_error(self):
+        """update_overview swallows non-403 errors and returns empty status."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: True})
+        hub.session = AsyncMock()
+        hub.session.check_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("Network error")
+        )
+        inst = make_installation()
+
+        with patch("custom_components.securitas.asyncio.sleep", new_callable=AsyncMock):
+            result = await hub.update_overview(inst)
+        # Should return empty CheckAlarmStatus, not raise
+        assert not result.protomResponse
+
+    async def test_update_overview_cooldown_between_calls(self):
+        """update_overview waits if called too soon after previous API call."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: True})
+        hub.session = AsyncMock()
+        hub.session.check_alarm = AsyncMock(return_value="ref-123")
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="D",
+            protomResponseData="",
+        )
+        hub.session.check_alarm_status = AsyncMock(return_value=status)
+        inst = make_installation()
+
+        import time
+
+        # Simulate recent API call
+        hub._last_api_time = time.monotonic()
+
+        with patch(
+            "custom_components.securitas.asyncio.sleep", new_callable=AsyncMock
+        ) as mock_sleep:
+            await hub.update_overview(inst)
+
+        # asyncio.sleep should have been called for the cooldown
+        # (once for cooldown, once for poll delay)
+        assert mock_sleep.call_count >= 2
+
+    async def test_update_overview_updates_last_api_time(self):
+        """update_overview updates _last_api_time after API calls."""
+        hub = self._make_hub(**{CONF_CHECK_ALARM_PANEL: True})
+        hub.session = AsyncMock()
+        hub.session.check_alarm = AsyncMock(return_value="ref-123")
+        status = CheckAlarmStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            InstallationNumer="123456",
+            protomResponse="D",
+            protomResponseData="",
+        )
+        hub.session.check_alarm_status = AsyncMock(return_value=status)
+        inst = make_installation()
+
+        assert hub._last_api_time == 0
+
+        with patch("custom_components.securitas.asyncio.sleep", new_callable=AsyncMock):
+            await hub.update_overview(inst)
+
+        assert hub._last_api_time > 0
+
 
 # ===========================================================================
 # 5. TestAsyncSetupEntry
@@ -702,10 +818,10 @@ class TestAsyncSetupEntry:
         assert isinstance(call_args[0], StaticPathConfig)
         assert call_args[0].url_path == "/securitas_panel"
 
-        # Verify extra JS URL registration
-        mock_add_js.assert_called_once_with(
-            hass, "/securitas_panel/securitas-alarm-card.js"
-        )
+        # Verify extra JS URL registration (includes version cache-buster)
+        mock_add_js.assert_called_once()
+        js_url = mock_add_js.call_args[0][1]
+        assert js_url.startswith("/securitas_panel/securitas-alarm-card.js?v=")
 
     async def test_setup_skips_card_when_no_http(self, hass, mock_hub):
         """When hass.http is None, neither static paths nor extra JS should be registered."""
@@ -732,7 +848,7 @@ class TestAsyncSetupEntry:
         mock_add_js.assert_not_called()
 
     async def test_setup_card_registration_idempotent(self, hass, mock_hub):
-        """Calling async_setup_entry twice should register card JS both times without error."""
+        """Calling async_setup_entry twice should only register card JS once."""
         # Make hass.http truthy with an async_register_static_paths mock
         hass.http = MagicMock()
         hass.http.async_register_static_paths = AsyncMock()
@@ -760,8 +876,10 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        assert mock_add_js.call_count == 2
-        mock_add_js.assert_called_with(hass, "/securitas_panel/securitas-alarm-card.js")
+        # Card registered only once (guarded by card_registered flag)
+        mock_add_js.assert_called_once()
+        js_url = mock_add_js.call_args[0][1]
+        assert js_url.startswith("/securitas_panel/securitas-alarm-card.js?v=")
 
 
 # ===========================================================================

@@ -941,6 +941,116 @@ class TestForceState:
 
         assert alarm._operation_in_progress is False
 
+    async def test_disarm_403_sets_waf_blocked_skips_generic_notification(self):
+        """403 on disarm sets waf_blocked, shows rate-limited but NOT generic error."""
+        alarm = make_alarm(code="1234")
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm._last_proto_code = "T"
+        alarm._notify_error = MagicMock()
+
+        alarm.client.session.disarm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        await alarm.async_alarm_disarm("1234")
+
+        assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
+        # _notify_error is called once for "Rate limited" from _execute_step,
+        # but NOT for the generic "Error disarming" message
+        for call in alarm._notify_error.call_args_list:
+            assert "Error disarming" not in call[0][0]
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+    async def test_arm_403_sets_waf_blocked_skips_generic_notification(self):
+        """403 on arm sets waf_blocked, shows rate-limited but NOT generic error."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._notify_error = MagicMock()
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
+        # _notify_error is called once for "Rate limited" from _execute_step,
+        # but NOT for the generic "Arming failed" message
+        for call in alarm._notify_error.call_args_list:
+            assert "Arming failed" not in call[0][0]
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+    async def test_successful_disarm_clears_waf_blocked(self):
+        """Successful disarm clears waf_blocked."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm._last_proto_code = "T"
+        alarm._attr_extra_state_attributes["waf_blocked"] = True
+
+        alarm.client.session.disarm_alarm = AsyncMock(
+            return_value=DisarmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                numinst="123456",
+                protomResponse="D",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.async_alarm_disarm()
+
+        assert "waf_blocked" not in alarm._attr_extra_state_attributes
+
+    async def test_successful_arm_clears_waf_blocked(self):
+        """Successful arm clears waf_blocked."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._attr_extra_state_attributes["waf_blocked"] = True
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            return_value=ArmStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                InstallationNumer="123456",
+                protomResponse="T",
+                protomResponseData="",
+            )
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert "waf_blocked" not in alarm._attr_extra_state_attributes
+
+    async def test_disarm_403_updates_client_last_api_time(self):
+        """Disarm (even on 403) updates client._last_api_time for cooldown."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm._last_proto_code = "T"
+        alarm.client._last_api_time = 0
+
+        alarm.client.session.disarm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        await alarm.async_alarm_disarm()
+
+        assert alarm.client._last_api_time > 0
+
+    async def test_arm_403_updates_client_last_api_time(self):
+        """Arm (even on 403) updates client._last_api_time for cooldown."""
+        alarm = make_alarm()
+        alarm.client._last_api_time = 0
+
+        alarm.client.session.arm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm.client._last_api_time > 0
+
 
 # ===========================================================================
 # get_arm_state
@@ -1119,7 +1229,7 @@ class TestAsyncUpdateStatus:
         alarm.async_write_ha_state.assert_called_once()
 
     async def test_successful_update_clears_waf_blocked(self):
-        """Successful status check clears waf_blocked attribute."""
+        """Successful status check clears waf_blocked and dismisses notification."""
         alarm = make_alarm()
         alarm._attr_extra_state_attributes["waf_blocked"] = True
         status = CheckAlarmStatus(
@@ -1135,6 +1245,7 @@ class TestAsyncUpdateStatus:
         await alarm.async_update_status()
 
         assert "waf_blocked" not in alarm._attr_extra_state_attributes
+        alarm.hass.async_create_task.assert_called_once()
 
     async def test_skips_poll_when_operation_in_progress(self):
         """Status poll is skipped when _operation_in_progress is True."""

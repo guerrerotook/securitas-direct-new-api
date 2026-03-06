@@ -5,6 +5,7 @@ import datetime
 import re
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 import homeassistant.components.alarm_control_panel as alarm
@@ -102,6 +103,7 @@ async def async_setup_entry(
             )
         )
     async_add_entities(alarms, True)
+    hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
 
     platform = async_get_current_platform()
     platform.async_register_entity_service(
@@ -280,10 +282,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 err.args[0] if err.args else err,
             )
             if getattr(err, "http_status", None) == 403:
-                self._attr_extra_state_attributes["waf_blocked"] = True
+                self._set_waf_blocked(True)
             self.async_write_ha_state()
         else:
-            self._attr_extra_state_attributes.pop("waf_blocked", None)
+            self._set_waf_blocked(False)
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
 
@@ -439,6 +441,23 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self.installation, command, **force_params
             )
 
+    def _set_waf_blocked(self, blocked: bool) -> None:
+        """Track WAF rate-limit state for the alarm card."""
+        if blocked:
+            self._attr_extra_state_attributes["waf_blocked"] = True
+        else:
+            if self._attr_extra_state_attributes.pop("waf_blocked", None):
+                # Dismiss the rate-limited persistent notification
+                self.hass.async_create_task(
+                    self.hass.services.async_call(
+                        domain="persistent_notification",
+                        service="dismiss",
+                        service_data={
+                            "notification_id": f"{DOMAIN}.securitas_rate_limited_{self.installation.number}",
+                        },
+                    )
+                )
+
     def _mode_to_alarm_state(self, mode: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the securitas state map."""
         securitas_state = self._securitas_state_map.get(mode)
@@ -455,6 +474,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
             result = await self._execute_transition(target)
+            self._set_waf_blocked(False)
             self.update_status_alarm(
                 CheckAlarmStatus(
                     operation_status=result.operation_status,
@@ -470,10 +490,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self._state = self._last_status
             err_msg = str(err.args[0]) if err.args else str(err)
             _LOGGER.error("Disarm failed: %s", err_msg)
-            self._notify_error("Securitas: Error disarming", err_msg)
+            if getattr(err, "http_status", None) == 403:
+                self._set_waf_blocked(True)
+            else:
+                self._notify_error("Securitas: Error disarming", err_msg)
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            self.client._last_api_time = time.monotonic()
 
     async def set_arm_state(
         self,
@@ -495,6 +519,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             target = self._mode_to_alarm_state(mode)
             result = await self._execute_transition(target, **force_params)
+            self._set_waf_blocked(False)
             self.update_status_alarm(
                 CheckAlarmStatus(
                     operation_status=getattr(result, "operation_status", ""),
@@ -526,10 +551,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = self._last_status
             err_msg = str(err.args[0]) if err.args else str(err)
             _LOGGER.error("Arm failed: %s", err_msg)
-            self._notify_error("Securitas: Arming failed", err_msg)
+            if getattr(err, "http_status", None) == 403:
+                self._set_waf_blocked(True)
+            else:
+                self._notify_error("Securitas: Arming failed", err_msg)
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            self.client._last_api_time = time.monotonic()
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store force-arm context from an arming exception."""
