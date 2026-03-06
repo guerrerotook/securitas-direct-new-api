@@ -1118,8 +1118,8 @@ class TestAsyncUpdateStatus:
         assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
         alarm.async_write_ha_state.assert_called_once()
 
-    async def test_successful_update_does_not_clear_waf_blocked(self):
-        """Successful status check does NOT clear waf_blocked (only arm/disarm does)."""
+    async def test_successful_update_clears_waf_blocked(self):
+        """Successful status check clears waf_blocked and dismisses notification."""
         alarm = make_alarm()
         alarm._attr_extra_state_attributes["waf_blocked"] = True
         status = CheckAlarmStatus(
@@ -1134,8 +1134,8 @@ class TestAsyncUpdateStatus:
 
         await alarm.async_update_status()
 
-        # waf_blocked persists — only cleared by successful arm/disarm
-        assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
+        assert "waf_blocked" not in alarm._attr_extra_state_attributes
+        alarm.hass.async_create_task.assert_called_once()
 
     async def test_skips_poll_when_operation_in_progress(self):
         """Status poll is skipped when _operation_in_progress is True."""

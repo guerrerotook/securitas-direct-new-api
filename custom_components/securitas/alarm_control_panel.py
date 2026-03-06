@@ -284,6 +284,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._set_waf_blocked(True)
             self.async_write_ha_state()
         else:
+            self._set_waf_blocked(False)
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
 
