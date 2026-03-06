@@ -31,7 +31,11 @@ When we send a compound command like `DARM1DARMPERI` that the panel doesn't supp
 
 ## Fix (implemented)
 
-This bug is now fixed. After `_poll_operation` returns, `arm_alarm()` and `disarm_alarm()` in `apimanager.py` check for `res: "ERROR"` with a non-`NON_BLOCKING` error type (e.g. `TECHNICAL_ERROR`). When detected, they raise `SecuritasDirectError`, which triggers the `CommandResolver`'s fallback chain in `_execute_step()`. The failed command is marked unsupported via `resolver.mark_unsupported()` and skipped in future resolutions.
+This bug is now fixed in two stages:
+
+1. **Detection**: After `_poll_operation` returns, `arm_alarm()` and `disarm_alarm()` in `apimanager.py` check for `res: "ERROR"` with a non-`NON_BLOCKING` error type (e.g. `TECHNICAL_ERROR`). When detected, they raise `SecuritasDirectError` (without `http_status`, distinguishing it from GraphQL validation errors).
+
+2. **Handling in `_execute_step()`**: TECHNICAL_ERROR is re-raised immediately (like 403 WAF and 409 busy errors) without trying alternative commands — the panel is having communication issues, so alternatives would likely also fail. The command is NOT marked as unsupported since the error is transient.
 
 Previously, the ERROR result passed through silently — `_poll_operation` returned it (not WAIT), `disarm_alarm()` wrapped it in a `DisarmStatus` without raising, and the fallback logic never fired. The user waited 60 seconds for nothing.
 
@@ -51,9 +55,10 @@ The `DisarmCodeRequest` (and `ArmCodeRequest`) enums are validated server-side b
 
 This means `DARM1DARMPERI` **is** a valid enum value in the schema — the GraphQL layer accepts it. The failure happens at the panel level: the panel can't execute the compound command, resulting in the 60s polling timeout followed by `error_protom_session`.
 
-Two distinct failure modes:
-1. **Unknown command** (e.g. `TEST`): Instant GraphQL validation error (`BAD_USER_INPUT`), raises `SecuritasDirectError` → fallback triggers correctly
-2. **Valid-but-unsupported command** (e.g. `DARM1DARMPERI` on a panel that doesn't support it): Accepted by API, 60s polling, `error_protom_session` / `TECHNICAL_ERROR` → now raises `SecuritasDirectError`, fallback triggers correctly
+Three distinct failure modes:
+1. **Unknown command** (e.g. `TEST`): Instant GraphQL validation error (`BAD_USER_INPUT` with no `"data"` key in response), raises `SecuritasDirectError(http_status=400)` → marked unsupported, fallback triggers
+2. **Application-level rejection** (e.g. `ARMINTEXT1` on Italian panel, `DARM1DARMPERI` on Spanish panel): Returns `"errors"` with `"data": {"res": "ERROR"}` or `"data": {"status": 404}`, raises `SecuritasDirectError(http_status=404)` → marked unsupported, fallback triggers
+3. **Valid-but-unsupported command** (e.g. `DARM1DARMPERI` on a panel that accepts but can't execute it): Accepted by API, 60s polling, `error_protom_session` / `TECHNICAL_ERROR` → raises `SecuritasDirectError` (no `http_status`) → re-raised immediately, NOT marked unsupported (transient)
 
 ## Log Evidence
 

@@ -216,7 +216,9 @@ The main entity. One `SecuritasAlarm` per installation.
       - resolver.resolve(current, target) returns list of CommandSteps
       - If mode change (e.g. Partial→Total): resolver inserts disarm first
       - For each step, _execute_step() tries command alternatives in order
-      - Failed command (non-409)? mark_unsupported(), try next alternative
+      - BAD_USER_INPUT/404? mark_unsupported(), try next alternative
+      - 403 (WAF) or 409 (busy)? re-raise immediately
+      - TECHNICAL_ERROR (panel comms failure)? re-raise immediately
       - Multi-step commands ("+") executed as sequential API calls
       - Force params passed to all commands (both interior and perimeter
         sensors can trigger ArmingExceptionError)
@@ -237,7 +239,7 @@ The main entity. One `SecuritasAlarm` per installation.
    a. resolver.resolve(current, disarmed) returns CommandStep with ordered
       alternatives based on current state:
       - Both armed? → [DARM1DARMPERI, DARM1]
-      - Only perimeter? → [DPERI1, DARM1]
+      - Only perimeter? → [DARMPERI, DARM1]
       - Only interior? → [DARM1]
    b. _execute_step() tries alternatives, marks failed ones unsupported
    c. 409 errors re-raised (server busy, not unsupported)
