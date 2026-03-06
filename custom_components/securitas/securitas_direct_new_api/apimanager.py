@@ -449,10 +449,9 @@ class ApiManager:
                 first = False
                 continue
             except SecuritasDirectError as err:
-                if err.http_status in (403, 409):
+                if err.http_status == 409:
                     _LOGGER.warning(
-                        "Transient error (%s) during poll, retrying: %s",
-                        err.http_status,
+                        "Transient error (409) during poll, retrying: %s",
                         err.args[0] if err.args else err,
                     )
                     first = False
