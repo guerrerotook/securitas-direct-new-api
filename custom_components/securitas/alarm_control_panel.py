@@ -102,6 +102,7 @@ async def async_setup_entry(
             )
         )
     async_add_entities(alarms, True)
+    hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
 
     platform = async_get_current_platform()
     platform.async_register_entity_service(
@@ -485,11 +486,12 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.async_write_ha_state()
         except SecuritasDirectError as err:
             self._state = self._last_status
-            if getattr(err, "http_status", None) == 403:
-                self._set_waf_blocked(True)
             err_msg = str(err.args[0]) if err.args else str(err)
             _LOGGER.error("Disarm failed: %s", err_msg)
-            self._notify_error("Securitas: Error disarming", err_msg)
+            if getattr(err, "http_status", None) == 403:
+                self._set_waf_blocked(True)
+            else:
+                self._notify_error("Securitas: Error disarming", err_msg)
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
@@ -531,8 +533,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self._state = self._last_status
             self._notify_arm_exceptions(exc)
         except SecuritasDirectError as err:
-            if getattr(err, "http_status", None) == 403:
-                self._set_waf_blocked(True)
             if self._last_arm_result.protomResponse:
                 self.update_status_alarm(
                     CheckAlarmStatus(
@@ -548,7 +548,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self._state = self._last_status
             err_msg = str(err.args[0]) if err.args else str(err)
             _LOGGER.error("Arm failed: %s", err_msg)
-            self._notify_error("Securitas: Arming failed", err_msg)
+            if getattr(err, "http_status", None) == 403:
+                self._set_waf_blocked(True)
+            else:
+                self._notify_error("Securitas: Arming failed", err_msg)
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
