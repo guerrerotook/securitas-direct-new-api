@@ -446,7 +446,9 @@ class TestArmAlarm:
         with pytest.raises(SecuritasDirectError, match="error_blocking"):
             await authed_api.arm_alarm(installation, "ARM1")
 
-    async def test_arm_raises_on_technical_error(self, authed_api, installation, mock_execute):
+    async def test_arm_raises_on_technical_error(
+        self, authed_api, installation, mock_execute
+    ):
         """TECHNICAL_ERROR from polling should raise SecuritasDirectError."""
         mock_execute.side_effect = [
             # Initial arm request
@@ -637,7 +639,9 @@ class TestDisarmAlarm:
         # 1 for xSDisarmPanel + 2 for _check_disarm_status (WAIT then OK)
         assert mock_execute.call_count == 3
 
-    async def test_disarm_raises_on_technical_error(self, authed_api, installation, mock_execute):
+    async def test_disarm_raises_on_technical_error(
+        self, authed_api, installation, mock_execute
+    ):
         """TECHNICAL_ERROR from polling should raise SecuritasDirectError."""
         mock_execute.side_effect = [
             # Initial disarm request

@@ -125,10 +125,12 @@ class CommandResolver:
         steps: list[CommandStep] = []
 
         interior_changes = current.interior != target.interior
-        peri_changes = current.perimeter != target.perimeter
 
         # Full disarm (target is off/off)
-        if target.interior == InteriorMode.OFF and target.perimeter == PerimeterMode.OFF:
+        if (
+            target.interior == InteriorMode.OFF
+            and target.perimeter == PerimeterMode.OFF
+        ):
             steps.extend(self._resolve_disarm(current))
             return steps
 

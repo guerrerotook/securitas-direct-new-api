@@ -5,7 +5,6 @@ import pytest
 from custom_components.securitas.securitas_direct_new_api.command_resolver import (
     AlarmState,
     CommandResolver,
-    CommandStep,
     InteriorMode,
     PerimeterMode,
     PROTO_TO_ALARM_STATE,

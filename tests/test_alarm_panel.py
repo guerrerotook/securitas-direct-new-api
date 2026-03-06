@@ -2326,9 +2326,7 @@ class TestExecuteTransition:
         alarm.client.session.disarm_alarm = AsyncMock(
             return_value=DisarmStatus(protomResponse="D", operation_status="OK")
         )
-        await alarm._execute_transition(
-            AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
-        )
+        await alarm._execute_transition(AlarmState(InteriorMode.OFF, PerimeterMode.OFF))
         alarm.client.session.disarm_alarm.assert_called_once_with(
             alarm.installation, "DARM1"
         )
@@ -2343,9 +2341,7 @@ class TestExecuteTransition:
                 DisarmStatus(protomResponse="D", operation_status="OK"),
             ]
         )
-        await alarm._execute_transition(
-            AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
-        )
+        await alarm._execute_transition(AlarmState(InteriorMode.OFF, PerimeterMode.OFF))
         calls = alarm.client.session.disarm_alarm.call_args_list
         assert calls[0].args == (alarm.installation, "DARM1DARMPERI")
         assert calls[1].args == (alarm.installation, "DARM1")
@@ -2360,9 +2356,7 @@ class TestExecuteTransition:
                 DisarmStatus(protomResponse="D", operation_status="OK"),
             ]
         )
-        await alarm._execute_transition(
-            AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
-        )
+        await alarm._execute_transition(AlarmState(InteriorMode.OFF, PerimeterMode.OFF))
         assert "DARM1DARMPERI" in alarm._resolver.unsupported
 
     async def test_409_not_treated_as_unsupported(self):
