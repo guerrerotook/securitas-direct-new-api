@@ -17,8 +17,8 @@ The integration has three layers:
 ├─────────────────────────────────────────────────────────┤
 │  API Client Layer                                       │
 │  securitas_direct_new_api/                              │
-│  apimanager.py  domains.py  const.py  dataTypes.py      │
-│  exceptions.py                                          │
+│  apimanager.py  command_resolver.py  domains.py         │
+│  const.py  dataTypes.py  exceptions.py                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +43,7 @@ The core API client. All communication with Securitas happens through GraphQL PO
 
 - `_extract_response_data(response, field_name)` — Extracts `response["data"][field_name]`, raising `SecuritasDirectError` if the data is missing or `None`. Used by all operation methods to validate responses consistently.
 
-- `_poll_operation(check_fn, *, timeout, continue_on_msg)` — Polls `check_fn()` in a loop until the result is no longer `"WAIT"`. Handles transient errors (connection errors, timeouts, 409 "server busy") by retrying. Raises `TimeoutError` after `timeout` seconds (default 60). Used by arm, disarm, status check, exception fetch, and lock operations.
+- `_poll_operation(check_fn, *, timeout, continue_on_msg)` — Polls `check_fn()` in a loop until the result is no longer `"WAIT"`. Handles transient errors (connection errors, timeouts, 409 "server busy") by retrying. 403 errors are not retried during polling (only at the `_execute_request` level). Raises `TimeoutError` after `timeout` seconds (default 60). Used by arm, disarm, status check, exception fetch, and lock operations.
 
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Securitas mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
@@ -57,7 +57,7 @@ The core API client. All communication with Securitas happens through GraphQL PO
 
 **Token lifecycle:** Before every API operation, `_check_authentication_token()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Errors during refresh are caught with specific exception types (`SecuritasDirectError`, `asyncio.TimeoutError`, `ClientConnectorError`) rather than bare `except`. Similarly, `_check_capabilities_token()` checks a per-installation capabilities JWT that's obtained from `get_all_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
 
-**Polling pattern:** Arm, disarm, status-check, and exception-fetch operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint via `_poll_operation()` (sleeping `delay_check_operation` seconds between attempts) until the response changes from `"WAIT"` to a final state or a wall-clock timeout (default 60 seconds) is reached. Transient errors during polling — connection failures, timeouts, and 409 "server busy" responses — are automatically retried rather than failing the operation.
+**Polling pattern:** Arm, disarm, status-check, and exception-fetch operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint via `_poll_operation()` (sleeping `delay_check_operation` seconds between attempts) until the response changes from `"WAIT"` to a final state or a wall-clock timeout (default 60 seconds) is reached. Transient errors during polling — connection failures, timeouts, and 409 "server busy" responses — are automatically retried rather than failing the operation. After polling completes, `arm_alarm()` and `disarm_alarm()` check for `res: "ERROR"` with non-`NON_BLOCKING` error types (e.g. `TECHNICAL_ERROR`) and raise `SecuritasDirectError`, enabling the command resolver's fallback chain.
 
 ### Log sanitization (`log_filter.py`)
 
@@ -92,36 +92,33 @@ Securitas alarms have two independent axes: **interior mode** (disarmed, partial
 | `PARTIAL_NIGHT_PERI` | night | on | `ARMNIGHT1PERI1` | `C` |
 | `TOTAL_PERI` | full | on | `ARM1PERI1` | `A` |
 
-Most compound commands (`ARMDAY1PERI1`, `ARM1PERI1`) are accepted by all known panels. However, `ARMNIGHT1PERI1` and `DARM1DARMPERI` are rejected by some panels (e.g. SDVFAST in Spain). The integration auto-detects which mode the panel supports (see [Compound command auto-detection](#compound-command-auto-detection) below).
+Most compound commands (`ARMDAY1PERI1`, `ARM1PERI1`) are accepted by all known panels. However, `ARMNIGHT1PERI1` and `DARM1DARMPERI` are rejected by some panels (e.g. SDVFAST in Spain). The integration auto-detects which commands the panel supports at runtime (see [Command resolver](#command-resolver) below).
 
 **Panel-specific `DARM1` behavior:** On SDVFAST (Spain), `DARM1` disarms everything (interior + perimeter). On SDVECU (Italy), `DARM1` only disarms the interior — `DARMPERI` disarms only the perimeter, and `DARM1DARMPERI` disarms both. This difference is safe because the `DARM1` fallback only triggers on panels that reject `DARM1DARMPERI` (i.e. SDVFAST, where `DARM1` disarms everything).
 
-Four mapping tables connect these:
+Two mapping tables connect these:
 - `STATE_TO_COMMAND` — `SecuritasState` to API command string (e.g. `TOTAL` -> `"ARM1"`)
 - `PROTO_TO_STATE` — single-letter protocol response code to `SecuritasState` (e.g. `"T"` -> `TOTAL`)
-- `COMPOUND_COMMAND_STEPS` — commands known to fail on some panels, mapped to multi-step fallbacks (e.g. `"ARMNIGHT1PERI1"` -> `("ARMNIGHT1", "PERI1")`, `"DARM1DARMPERI"` -> `("DARM1",)`)
-- `PERI_ARMED_PROTO_CODES` — protocol codes where the perimeter is armed (`{"E", "B", "C", "A"}`)
 
-#### Compound command auto-detection
+#### Command resolver
 
-Most compound commands work on all known panels, but two are rejected by SDVFAST (Spain):
+**Location:** `securitas_direct_new_api/command_resolver.py`
 
-| Command | SDVFAST (Spain) | SDVECU (Italy) | In `COMPOUND_COMMAND_STEPS`? |
-|---------|----------------|----------------|------------------------------|
-| `ARMDAY1PERI1` | Works | Works | No |
-| `ARMNIGHT1PERI1` | Rejected | Works | Yes |
-| `ARM1PERI1` | Works | Works | No |
-| `DARM1DARMPERI` | Rejected (404) | Works | Yes |
+The `CommandResolver` class models the alarm as two independent axes — `InteriorMode` (off, day, night, total) and `PerimeterMode` (off, on) — combined into an `AlarmState`. It replaces the old `_use_multi_step` flag, `_send_arm_command()` / `_send_disarm_command()` methods, `COMPOUND_COMMAND_STEPS` constant, and `PERI_ARMED_PROTO_CODES` set.
 
-Only the two failing commands are listed in `COMPOUND_COMMAND_STEPS`. For these, the integration detects support at runtime:
+**How it works:**
 
-1. **First compound command**: Try the single call (e.g. `ARMNIGHT1PERI1`)
-2. **If it fails** (`SecuritasDirectError` with non-409 status): Set `_use_multi_step = True`, execute the fallback steps (`ARMNIGHT1` then `PERI1`), and log the switch. A 409 error (server busy) is re-raised rather than triggering the fallback, since 409 means "busy" not "unsupported".
-3. **Subsequent commands**: Skip the single-call attempt and go straight to multi-step
+1. `resolve(current, target)` computes the state transition and returns an ordered list of `CommandStep` objects. Each step contains a list of command alternatives to try in order.
 
-The `_use_multi_step` flag is per-installation (resets on HA restart) and is **only set by arm failures**. Disarm failures do not set this flag, since a disarm-specific failure (e.g. `DARM1DARMPERI` rejected) shouldn't disable compound arm commands (`ARMNIGHT1PERI1`, etc.). Commands not in the table (`ARMDAY1PERI1`, `ARM1PERI1`) are always sent as-is regardless of the flag.
+2. Combined commands are tried first (e.g. `ARMINTEXT1`, `ARM1PERI1`), with multi-step fallbacks using `+` separator (e.g. `ARM1+PERI1` means send `ARM1` then `PERI1` as separate sequential API calls).
 
-For disarm, `DARM1DARMPERI` is always attempted when perimeter is configured (`_has_peri`), regardless of the current alarm state. This ensures both interior and perimeter are disarmed even during an in-progress arm operation where `_last_proto_code` may be stale. If an arm command has already set `_use_multi_step`, disarm skips straight to `DARM1`.
+3. For Total+Perimeter arm, `ARMINTEXT1` is ordered before `ARM1PERI1` — `ARMINTEXT1` arms interior+perimeter in one step without triggering the siren delay, which is important for Spanish WAF (Wife Acceptance Factor) safety.
+
+4. **Runtime discovery of unsupported commands:** When a command fails with a non-409 `SecuritasDirectError`, `_execute_step()` calls `resolver.mark_unsupported(command)`, and the resolver skips it in all future resolutions. This is per-command granularity (not a global flag), so a disarm-specific failure (e.g. `DARM1DARMPERI`) does not disable unrelated compound arm commands. The unsupported set is in-memory and resets on HA restart.
+
+5. **Disarm uses current state:** The resolver determines the disarm command from the current `AlarmState` (derived from `_last_proto_code`), not from configuration flags. If both interior and perimeter are armed, it tries `DARM1DARMPERI` first, falling back to `DARM1`. If only perimeter is armed, it tries `DPERI1` first, falling back to `DARM1`.
+
+6. **409 errors** (server busy) are re-raised immediately and do not trigger the fallback chain.
 
 Home Assistant has five alarm buttons (Home, Away, Night, Vacation, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Vacation` and `Custom Bypass` buttons are hidden unless a mapping is configured for them.
 
@@ -213,38 +210,37 @@ The main entity. One `SecuritasAlarm` per installation.
 1. _check_code_for_arm_if_required(code) — if PIN required for arming
 2. __force_state(ARMING) — set transitional state, save previous in _last_status
 3. set_arm_state(target_mode):
-   a. Look up command from _command_map
-   b. If _last_status was an armed state → _send_disarm_command() first
-      (required because Securitas treats interior and perimeter as independent)
-      - Disarm error? Log warning, continue anyway
-   c. _send_arm_command(command, **force_params):
-      - Not in COMPOUND_COMMAND_STEPS? → single API call
-      - In table and _use_multi_step is False? → try single call first
-        - SecuritasDirectError with http_status 409? → re-raise (server busy)
-        - SecuritasDirectError (other)? → set _use_multi_step = True, fall back
-      - In table and _use_multi_step is True? → send steps sequentially
-      - Force params passed to all steps (both interior and perimeter sensors
-        can trigger ArmingExceptionError; API ignores irrelevant force params)
+   a. Convert target HA mode to AlarmState via _mode_to_alarm_state()
+   b. _execute_transition(target_alarm_state, **force_params):
+      - Derives current AlarmState from _last_proto_code
+      - resolver.resolve(current, target) returns list of CommandSteps
+      - If mode change (e.g. Partial→Total): resolver inserts disarm first
+      - For each step, _execute_step() tries command alternatives in order
+      - Failed command (non-409)? mark_unsupported(), try next alternative
+      - Multi-step commands ("+") executed as sequential API calls
+      - Force params passed to all commands (both interior and perimeter
+        sensors can trigger ArmingExceptionError)
       - _last_arm_result tracks the most recent successful step for partial state
-   d. On error:
+   c. On error:
       - Notify user via persistent notification (short message only, never
         full error tuples with headers/tokens)
       - If a prior step succeeded (_last_arm_result), reflect that partial state
       - If no steps succeeded, revert to _last_status
-   e. update_status_alarm() with the final response
+   d. update_status_alarm() with the final response
 ```
 
 **Disarm flow** (`async_alarm_disarm`):
 ```
 1. _check_code(code) — raises ServiceValidationError if wrong
 2. __force_state(DISARMING)
-3. _send_disarm_command():
-   a. If no perimeter config (_has_peri is False) → send DARM1 directly
-   b. If _use_multi_step is True (set by a prior arm failure) → send DARM1
-      directly (known that combined doesn't work on this panel)
-   c. Otherwise → try DARM1DARMPERI; on SecuritasDirectError:
-      - If http_status == 409 → re-raise (server busy, not unsupported)
-      - Otherwise → fall back to DARM1 (does NOT set _use_multi_step)
+3. _execute_transition(AlarmState(OFF, OFF)):
+   a. resolver.resolve(current, disarmed) returns CommandStep with ordered
+      alternatives based on current state:
+      - Both armed? → [DARM1DARMPERI, DARM1]
+      - Only perimeter? → [DPERI1, DARM1]
+      - Only interior? → [DARM1]
+   b. _execute_step() tries alternatives, marks failed ones unsupported
+   c. 409 errors re-raised (server busy, not unsupported)
    d. Error on all attempts? → _notify_error() with short message, restore
       _last_status
 4. update_status_alarm() with the response
@@ -283,7 +279,7 @@ Mobile notification actions:
 
 The `_get_exceptions()` API call uses the same polling pattern as arm/disarm — the server returns `WAIT` on the first poll while the panel reports the open sensors, then `OK` with the full exception list on a subsequent poll.
 
-**Why disarm-before-rearm?** The Securitas API treats interior and perimeter as independent axes. Sending `ARMDAY1` while the perimeter is armed leaves the perimeter armed. Transitioning from `Partial+Perimeter` to `Partial` (no perimeter) would silently fail without disarming first.
+**Why disarm-before-rearm?** The Securitas API treats interior and perimeter as independent axes. Sending `ARMDAY1` while the perimeter is armed leaves the perimeter armed. Transitioning from `Partial+Perimeter` to `Partial` (no perimeter) would silently fail without disarming first. The `CommandResolver` handles this automatically: when the interior mode changes and the current interior is not off, it inserts a disarm step before the arm step.
 
 **Status updates:** `async_track_time_interval` fires `async_update_status()` every `scan_interval` seconds (default 120). This calls `SecuritasHub.update_overview()` and then `update_status_alarm()` to map the response to an HA state.
 
@@ -363,20 +359,19 @@ User presses "Arm Away" in HA UI
     → _check_code_for_arm_if_required(code)  # PIN check if configured
     → __force_state(ARMING)                  # UI shows "Arming..."
     → set_arm_state(ARMED_AWAY)
-      → _command_map[ARMED_AWAY] = "ARM1PERI1"  (example with peri)
-      → _last_status == ARMED_HOME?             # Currently armed?
-        → _send_disarm_command()                #   Disarm first
-          → _last_proto_code in PERI_ARMED_PROTO_CODES?
-            → try DARM1DARMPERI (or DARM1 if _use_multi_step)
-          → else → DARM1
-        → asyncio.sleep(1)
-      → _send_arm_command("ARM1PERI1")
-        → _use_multi_step == False?
-          → try session.arm_alarm("ARM1PERI1")    # Single compound call
-          → SecuritasDirectError? → _use_multi_step = True, fall back ↓
-        → _use_multi_step == True?
-          → session.arm_alarm("ARM1")             # Step 1: interior
-          → session.arm_alarm("PERI1")            # Step 2: perimeter
+      → _mode_to_alarm_state(ARMED_AWAY) = AlarmState(TOTAL, ON)  (example with peri)
+      → _execute_transition(target=AlarmState(TOTAL, ON))
+        → current = AlarmState from _last_proto_code (e.g. "B" → DAY+ON)
+        → resolver.resolve(current, target) returns:
+          Step 1: disarm [DARM1DARMPERI, DARM1]  (mode change needs disarm first)
+          Step 2: arm [ARMINTEXT1, ARM1PERI1, ARM1+PERI1]
+        → _execute_step(Step 1):
+          → try DARM1DARMPERI → success? done
+          → SecuritasDirectError (non-409)? mark_unsupported, try DARM1
+        → _execute_step(Step 2):
+          → try ARMINTEXT1 → success? done
+          → fail? mark_unsupported, try ARM1PERI1
+          → fail? mark_unsupported, try ARM1 then PERI1
         → Return ArmStatus with protomResponse="A"
       → update_status_alarm(status)
         → _last_proto_code = "A"
@@ -399,7 +394,7 @@ async_track_time_interval fires every scan_interval seconds
         → session.check_general_status(installation)  # Cloud-only, no panel wake
         → Return CheckAlarmStatus from SStatus
     → update_status_alarm(status)
-      → _last_proto_code = status.protomResponse  # Track for disarm decisions
+      → _last_proto_code = status.protomResponse  # Track for resolver's current state
       → protomResponse "D" → DISARMED
       → protomResponse in _status_map → mapped HA state
       → protomResponse unknown → ARMED_CUSTOM_BYPASS + notification
@@ -439,6 +434,7 @@ tests/
 ├── test_auth.py             Login, refresh, 2FA, token lifecycle
 ├── test_button.py           Refresh button entity
 ├── test_config_flow.py      Config flow (setup + 2FA) and options flow
+├── test_command_resolver.py  CommandResolver state transitions, fallback chains
 ├── test_constants.py        SecuritasState enum, mapping tables
 ├── test_domains.py          Country-to-URL routing
 ├── test_execute_request.py  HTTP request execution, headers, error handling, http_status
@@ -572,6 +568,7 @@ Three parallel jobs run on every PR and push to main:
 | `constants.py` | 21 | `SentinelName` language mapping |
 | `log_filter.py` | 86 | `SensitiveDataFilter` — log sanitization for secrets |
 | `securitas_direct_new_api/apimanager.py` | 1296 | GraphQL API client with auth, polling, DRY helpers, all operations |
+| `securitas_direct_new_api/command_resolver.py` | 206 | `CommandResolver`, `AlarmState`, `CommandStep` — state transition logic |
 | `securitas_direct_new_api/const.py` | 100 | `SecuritasState`, command/protocol mappings, defaults |
 | `securitas_direct_new_api/dataTypes.py` | 168 | Response dataclasses |
 | `securitas_direct_new_api/domains.py` | 49 | Country-to-URL routing |
