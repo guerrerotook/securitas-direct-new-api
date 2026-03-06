@@ -1765,7 +1765,7 @@ class TestCompoundArmCommands:
         async def track_arm(installation, command, **kwargs):
             calls.append(command)
             if command == "ARMNIGHT1PERI1":
-                raise SecuritasDirectError("does not exist")
+                raise SecuritasDirectError("does not exist", http_status=400)
             proto = "Q" if command == "ARMNIGHT1" else "C"
             return ArmStatus(
                 operation_status="OK",
@@ -1920,7 +1920,7 @@ class TestCompoundArmCommands:
         alarm._notify_error = MagicMock()
 
         alarm.client.session.arm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("API error")
+            side_effect=SecuritasDirectError("API error", http_status=400)
         )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
@@ -1984,7 +1984,8 @@ class TestCompoundArmCommands:
             calls.append(command)
             if command == "ARMNIGHT1PERI1":
                 raise SecuritasDirectError(
-                    'Value "ARMNIGHT1PERI1" does not exist in "ArmCodeRequest" enum.'
+                    'Value "ARMNIGHT1PERI1" does not exist in "ArmCodeRequest" enum.',
+                    http_status=400,
                 )
             proto = "Q" if command == "ARMNIGHT1" else "C"
             return ArmStatus(
@@ -2018,7 +2019,7 @@ class TestCompoundArmCommands:
         async def track_arm(installation, command, **kwargs):
             calls.append(command)
             if command in ("ARMINTEXT1", "ARM1PERI1"):
-                raise SecuritasDirectError("does not exist")
+                raise SecuritasDirectError("does not exist", http_status=400)
             proto = "T" if command == "ARM1" else "A"
             return ArmStatus(
                 operation_status="OK",
@@ -2056,7 +2057,7 @@ class TestCompoundArmCommands:
         async def track_arm(installation, command, **kwargs):
             calls.append(command)
             if command == "ARMDAY1PERI1":
-                raise SecuritasDirectError("does not exist")
+                raise SecuritasDirectError("does not exist", http_status=400)
             proto = "P" if command == "ARMDAY1" else "B"
             return ArmStatus(
                 operation_status="OK",
@@ -2120,7 +2121,7 @@ class TestDynamicDisarm:
         async def disarm_side_effect(installation, command):
             calls.append(command)
             if command == "DARM1DARMPERI":
-                raise SecuritasDirectError("404 not found")
+                raise SecuritasDirectError("404 not found", http_status=400)
             return DisarmStatus(
                 operation_status="OK",
                 message="",
@@ -2186,7 +2187,7 @@ class TestDynamicDisarm:
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "E"  # peri_only
         alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-        alarm._resolver.mark_unsupported("DPERI1")
+        alarm._resolver.mark_unsupported("DARMPERI")
 
         alarm.client.session.disarm_alarm = AsyncMock(
             return_value=DisarmStatus(
@@ -2214,7 +2215,7 @@ class TestDynamicDisarm:
         alarm._notify_error = MagicMock()
 
         alarm.client.session.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("permanent failure")
+            side_effect=SecuritasDirectError("permanent failure", http_status=400)
         )
 
         await alarm.async_alarm_disarm()
@@ -2285,7 +2286,7 @@ class TestDynamicDisarm:
         async def track_disarm(installation, command):
             disarm_calls.append(command)
             if command == "DARM1DARMPERI":
-                raise SecuritasDirectError("404 not found")
+                raise SecuritasDirectError("404 not found", http_status=400)
             return DisarmStatus(protomResponse="D", operation_status="OK")
 
         alarm.client.session.disarm_alarm = track_disarm
@@ -2337,7 +2338,7 @@ class TestExecuteTransition:
         alarm._last_proto_code = "A"
         alarm.client.session.disarm_alarm = AsyncMock(
             side_effect=[
-                SecuritasDirectError("unsupported"),
+                SecuritasDirectError("unsupported", http_status=400),
                 DisarmStatus(protomResponse="D", operation_status="OK"),
             ]
         )
@@ -2352,7 +2353,7 @@ class TestExecuteTransition:
         alarm._last_proto_code = "A"
         alarm.client.session.disarm_alarm = AsyncMock(
             side_effect=[
-                SecuritasDirectError("unsupported"),
+                SecuritasDirectError("unsupported", http_status=400),
                 DisarmStatus(protomResponse="D", operation_status="OK"),
             ]
         )
@@ -2372,12 +2373,49 @@ class TestExecuteTransition:
             )
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
 
+    async def test_403_waf_reraises_without_marking_unsupported(self):
+        """403 WAF block re-raises immediately without marking command unsupported."""
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "A"
+        alarm.client.session.disarm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError(
+                "HTTP 403 from Securitas API", http_status=403
+            )
+        )
+        with pytest.raises(SecuritasDirectError, match="403"):
+            await alarm._execute_transition(
+                AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+            )
+        # Only tried first command, didn't fall back
+        alarm.client.session.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1DARMPERI"
+        )
+        assert "DARM1DARMPERI" not in alarm._resolver.unsupported
+
+    async def test_technical_error_reraises_without_trying_alternatives(self):
+        """TECHNICAL_ERROR (no http_status) re-raises immediately, no fallback."""
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "A"
+        alarm.client.session.disarm_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("Disarm command failed: TECHNICAL_ERROR"),
+        )
+        with pytest.raises(SecuritasDirectError, match="TECHNICAL_ERROR"):
+            await alarm._execute_transition(
+                AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+            )
+        # Only tried first command, didn't fall back to DARM1
+        alarm.client.session.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1DARMPERI"
+        )
+        # Not marked as unsupported — error was transient
+        assert "DARM1DARMPERI" not in alarm._resolver.unsupported
+
     async def test_all_commands_fail_raises(self):
         """When all command alternatives fail, raises the last error."""
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"
         alarm.client.session.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("fail")
+            side_effect=SecuritasDirectError("fail", http_status=400)
         )
         with pytest.raises(SecuritasDirectError):
             await alarm._execute_transition(

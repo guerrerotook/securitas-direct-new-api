@@ -252,8 +252,8 @@ class TestExecuteRequest:
 
         assert exc_info.value.http_status == 500
 
-    async def test_graphql_errors_list_without_data_key_passes_through(self, api):
-        """GraphQL errors-only response (no data key) is returned as-is so callers can handle it."""
+    async def test_graphql_errors_list_without_data_key_raises(self, api):
+        """GraphQL errors-only response (no data key) raises SecuritasDirectError."""
         error_response = json.dumps({"errors": [{"message": "Invalid credentials"}]})
         response = AsyncMock()
         response.text = AsyncMock(return_value=error_response)
@@ -264,8 +264,90 @@ class TestExecuteRequest:
         cm.__aexit__ = AsyncMock(return_value=False)
         api.http_client.post = MagicMock(return_value=cm)
 
-        result = await api._execute_request({"query": "test"}, "mkLoginToken")
-        assert result == {"errors": [{"message": "Invalid credentials"}]}
+        with pytest.raises(SecuritasDirectError, match="Invalid credentials"):
+            await api._execute_request({"query": "test"}, "mkLoginToken")
+
+    async def test_bad_user_input_sets_http_status_400(self, api):
+        """BAD_USER_INPUT from GraphQL extensions should set http_status=400."""
+        error_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": 'Value "DARMPERI" does not exist in "DisarmCodeRequest" enum.',
+                        "extensions": {"code": "BAD_USER_INPUT"},
+                        "data": {},
+                    }
+                ]
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSDisarmPanel")
+        assert exc_info.value.http_status == 400
+
+    async def test_application_rejection_sets_http_status(self, api):
+        """Application-level rejection (res: ERROR in error data) sets http_status from data.status."""
+        error_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "4: Requested data not found error.",
+                        "name": "ApiError",
+                        "data": {"res": "ERROR", "err": "4", "status": 404},
+                        "path": ["xSArmPanel"],
+                    }
+                ],
+                "data": {"xSArmPanel": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSArmPanel")
+        assert exc_info.value.http_status == 404
+
+    async def test_application_rejection_res_error_sets_400(self, api):
+        """Application rejection with res:ERROR but no status falls back to 400."""
+        error_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "Request ARMINTEXT1 is not valid for Central Unit",
+                        "name": "ApiError",
+                        "data": {"res": "ERROR", "err": "Request not valid"},
+                        "path": ["xSArmPanel"],
+                    }
+                ],
+                "data": {"xSArmPanel": None},
+            }
+        )
+        response = AsyncMock()
+        response.text = AsyncMock(return_value=error_response)
+        response.status = 200
+
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=response)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+
+        with pytest.raises(SecuritasDirectError) as exc_info:
+            await api._execute_request({"query": "test"}, "xSArmPanel")
+        assert exc_info.value.http_status == 400
 
     async def test_graphql_errors_list_with_non_null_data_passes_through(self, api):
         """GraphQL partial response with errors but non-null data is returned as-is for callers to handle."""
