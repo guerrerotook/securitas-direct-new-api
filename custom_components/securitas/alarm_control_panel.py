@@ -280,10 +280,10 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 err.args[0] if err.args else err,
             )
             if getattr(err, "http_status", None) == 403:
-                self._attr_extra_state_attributes["waf_blocked"] = True
+                self._set_waf_blocked(True)
             self.async_write_ha_state()
         else:
-            self._attr_extra_state_attributes.pop("waf_blocked", None)
+            self._set_waf_blocked(False)
             self.update_status_alarm(alarm_status)
             self.async_write_ha_state()
 
@@ -439,6 +439,13 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
                 self.installation, command, **force_params
             )
 
+    def _set_waf_blocked(self, blocked: bool) -> None:
+        """Track WAF rate-limit state for the alarm card."""
+        if blocked:
+            self._attr_extra_state_attributes["waf_blocked"] = True
+        else:
+            self._attr_extra_state_attributes.pop("waf_blocked", None)
+
     def _mode_to_alarm_state(self, mode: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the securitas state map."""
         securitas_state = self._securitas_state_map.get(mode)
@@ -455,6 +462,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
             result = await self._execute_transition(target)
+            self._set_waf_blocked(False)
             self.update_status_alarm(
                 CheckAlarmStatus(
                     operation_status=result.operation_status,
@@ -468,6 +476,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.async_write_ha_state()
         except SecuritasDirectError as err:
             self._state = self._last_status
+            if getattr(err, "http_status", None) == 403:
+                self._set_waf_blocked(True)
             err_msg = str(err.args[0]) if err.args else str(err)
             _LOGGER.error("Disarm failed: %s", err_msg)
             self._notify_error("Securitas: Error disarming", err_msg)
@@ -495,6 +505,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         try:
             target = self._mode_to_alarm_state(mode)
             result = await self._execute_transition(target, **force_params)
+            self._set_waf_blocked(False)
             self.update_status_alarm(
                 CheckAlarmStatus(
                     operation_status=getattr(result, "operation_status", ""),
@@ -511,6 +522,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self._state = self._last_status
             self._notify_arm_exceptions(exc)
         except SecuritasDirectError as err:
+            if getattr(err, "http_status", None) == 403:
+                self._set_waf_blocked(True)
             if self._last_arm_result.protomResponse:
                 self.update_status_alarm(
                     CheckAlarmStatus(
