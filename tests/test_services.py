@@ -171,7 +171,9 @@ class TestListInstallations:
 
 
 class TestGetAllServices:
-    async def test_returns_service_objects(self, authed_api, mock_execute, installation):
+    async def test_returns_service_objects(
+        self, authed_api, mock_execute, installation
+    ):
         capabilities_jwt = make_jwt(exp_minutes=60)
         mock_execute.return_value = {
             "data": {
@@ -215,7 +217,9 @@ class TestGetAllServices:
         assert svc.attributes[0].name == "zone"
         assert svc.attributes[0].value == "1"
 
-    async def test_sets_capabilities_and_exp(self, authed_api, mock_execute, installation):
+    async def test_sets_capabilities_and_exp(
+        self, authed_api, mock_execute, installation
+    ):
         capabilities_jwt = make_jwt(exp_minutes=60)
         mock_execute.return_value = {
             "data": {
@@ -255,7 +259,9 @@ class TestGetAllServices:
 
         assert result == []
 
-    async def test_none_services_returns_empty(self, authed_api, mock_execute, installation):
+    async def test_none_services_returns_empty(
+        self, authed_api, mock_execute, installation
+    ):
         capabilities_jwt = make_jwt(exp_minutes=60)
         mock_execute.return_value = {
             "data": {
@@ -554,7 +560,9 @@ class TestGetAirQualityDataEdgeCases:
 
 
 class TestGetAllServicesEdgeCases:
-    async def test_null_xssrv_returns_empty_list(self, authed_api, mock_execute, installation):
+    async def test_null_xssrv_returns_empty_list(
+        self, authed_api, mock_execute, installation
+    ):
         """When xSSrv response is None, returns empty list."""
         mock_execute.return_value = {"data": {"xSSrv": None}}
 
