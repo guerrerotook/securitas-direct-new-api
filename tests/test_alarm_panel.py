@@ -2110,7 +2110,7 @@ class TestDynamicDisarm:
         assert alarm._state == AlarmControlPanelState.DISARMED
 
     async def test_peri_armed_falls_back_to_darm1(self):
-        """When DARM1DARMPERI fails, falls back to DARM1 without setting _use_multi_step."""
+        """When DARM1DARMPERI fails, falls back to DARM1."""
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"  # total_peri = peri armed
         alarm._state = AlarmControlPanelState.ARMED_AWAY
@@ -2135,8 +2135,6 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         assert calls == ["DARM1DARMPERI", "DARM1"]
-        # Disarm does NOT set _use_multi_step — only arm failures should
-        assert alarm._use_multi_step is False
         assert alarm._state == AlarmControlPanelState.DISARMED
 
     async def test_peri_not_armed_uses_darm1(self):
@@ -2245,7 +2243,6 @@ class TestDynamicDisarm:
         alarm.client.session.disarm_alarm.assert_called_once_with(
             alarm.installation, "DARM1DARMPERI"
         )
-        assert alarm._use_multi_step is False
         # Error notification should show clean message, not full args dump
         alarm._notify_error.assert_called_once()
         _, msg = alarm._notify_error.call_args[0]

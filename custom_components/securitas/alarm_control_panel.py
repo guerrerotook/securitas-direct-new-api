@@ -139,7 +139,6 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self.client: SecuritasHub = client
         self.hass: HomeAssistant = hass
         self._has_peri = self.client.config.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
-        self._use_multi_step: bool = False
         self._last_proto_code: str | None = None
         self._resolver = CommandResolver(has_peri=self._has_peri)
 
@@ -299,8 +298,8 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             # Only update _last_proto_code when protomResponse is a known proto
             # code.  When check_alarm_panel is disabled, protomResponse may
             # contain non-proto values like "ARMED_TOTAL" from xSStatus; those
-            # must not overwrite the last proto code or the perimeter-armed
-            # detection in _send_disarm_command() will break.
+            # must not overwrite the last proto code or the resolver's
+            # state-based command selection will break.
             if (
                 status.protomResponse == PROTO_DISARMED
                 or status.protomResponse in PROTO_TO_STATE
