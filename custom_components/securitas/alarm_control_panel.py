@@ -74,9 +74,17 @@ async def async_setup_entry(
         CONF_INSTALLATION_KEY
     )
     for devices in securitas_devices:
-        current_state: CheckAlarmStatus = await client.update_overview(
-            devices.installation
-        )
+        try:
+            current_state: CheckAlarmStatus = await client.update_overview(
+                devices.installation
+            )
+        except SecuritasDirectError as err:
+            _LOGGER.warning(
+                "Skipping installation %s for alarm setup: %s",
+                devices.installation.number,
+                err.args[0] if err.args else err,
+            )
+            continue
         alarms.append(
             SecuritasAlarm(
                 devices.installation,

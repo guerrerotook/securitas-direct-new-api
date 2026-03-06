@@ -52,7 +52,15 @@ async def async_setup_entry(
         CONF_INSTALLATION_KEY
     )
     for device in securitas_devices:
-        services: list[Service] = await client.get_services(device.installation)
+        try:
+            services: list[Service] = await client.get_services(device.installation)
+        except SecuritasDirectError as err:
+            _LOGGER.warning(
+                "Skipping installation %s for lock setup: %s",
+                device.installation.number,
+                err.args[0] if err.args else err,
+            )
+            continue
         for service in services:
             _LOGGER.debug("Service: %s", service.request)
             if service.request == DOORLOCK_SERVICE:
