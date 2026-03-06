@@ -40,7 +40,6 @@ from .securitas_direct_new_api import (
     ArmingExceptionError,
     ArmStatus,
     CheckAlarmStatus,
-    COMPOUND_COMMAND_STEPS,
     DisarmStatus,
     Installation,
     PROTO_DISARMED,
@@ -48,6 +47,15 @@ from .securitas_direct_new_api import (
     SecuritasDirectError,
     SecuritasState,
     STATE_TO_COMMAND,
+)
+from .securitas_direct_new_api.command_resolver import (
+    AlarmState,
+    CommandResolver,
+    CommandStep,
+    InteriorMode,
+    PerimeterMode,
+    PROTO_TO_ALARM_STATE,
+    SECURITAS_STATE_TO_ALARM_STATE,
 )
 
 # Map HA alarm state names to config keys
@@ -133,11 +141,14 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         self._has_peri = self.client.config.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
         self._use_multi_step: bool = False
         self._last_proto_code: str | None = None
+        self._resolver = CommandResolver(has_peri=self._has_peri)
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
+        # Build securitas state map: HA state -> SecuritasState (for resolver)
         self._command_map: dict[str, str] = {}
         self._status_map: dict[str, str] = {}
+        self._securitas_state_map: dict[str, SecuritasState] = {}
 
         for ha_state, conf_key in HA_STATE_TO_CONF_KEY.items():
             sec_state_str = self.client.config.get(conf_key)
@@ -147,6 +158,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             if sec_state == SecuritasState.NOT_USED:
                 continue
             self._command_map[ha_state] = STATE_TO_COMMAND[sec_state]
+            self._securitas_state_map[ha_state] = sec_state
             for code, proto_state in PROTO_TO_STATE.items():
                 if proto_state == sec_state and code not in self._status_map:
                     self._status_map[code] = ha_state
@@ -325,115 +337,123 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             )
         return result
 
-    async def _send_disarm_command(self) -> DisarmStatus:
-        """Send the appropriate disarm command based on current state.
+    async def _execute_transition(
+        self,
+        target: AlarmState,
+        **force_params: str,
+    ) -> ArmStatus | DisarmStatus:
+        """Execute a state transition using the command resolver."""
+        current = PROTO_TO_ALARM_STATE.get(
+            self._last_proto_code or "D",
+            AlarmState(InteriorMode.OFF, PerimeterMode.OFF),
+        )
+        steps = self._resolver.resolve(current, target)
 
-        If perimeter is configured, tries DARM1DARMPERI first to ensure
-        both interior and perimeter are disarmed (even during an in-progress
-        arm operation).  If an arm command has already set _use_multi_step
-        (panel doesn't support compound commands), skips straight to DARM1.
+        if not steps:
+            return DisarmStatus(protomResponse=self._last_proto_code or "D")
 
-        Unlike _send_arm_command, disarm does NOT set _use_multi_step on
-        failure — only arm failures should trigger that flag, since a
-        disarm-specific failure shouldn't disable compound arm commands.
-        """
-        if not self._has_peri:
-            return await self.client.session.disarm_alarm(self.installation, "DARM1")
+        result: ArmStatus | DisarmStatus | None = None
+        for step in steps:
+            result = await self._execute_step(step, **force_params)
 
-        if self._use_multi_step:
-            return await self.client.session.disarm_alarm(self.installation, "DARM1")
+        assert result is not None
+        return result
 
-        try:
-            return await self.client.session.disarm_alarm(
-                self.installation, "DARM1DARMPERI"
-            )
-        except SecuritasDirectError as err:
-            if err.http_status == 409:
-                raise
-            _LOGGER.info(
-                "Combined disarm (DARM1DARMPERI) failed, "
-                "falling back to simple disarm (DARM1): %s",
-                err.args[0] if err.args else err,
-            )
-            return await self.client.session.disarm_alarm(self.installation, "DARM1")
+    async def _execute_step(
+        self,
+        step: CommandStep,
+        **force_params: str,
+    ) -> ArmStatus | DisarmStatus:
+        """Execute a single command step, trying alternatives on failure."""
+        last_err: SecuritasDirectError | None = None
 
-    async def _send_arm_command(self, command: str, **kwargs: str) -> ArmStatus:
-        """Send an arm command, auto-detecting multi-step requirement.
+        for command in step.commands:
+            if command in self._resolver.unsupported:
+                continue
 
-        For compound commands (e.g. ARMNIGHT1PERI1), tries as a single API
-        call first.  If that fails, splits into sequential steps and
-        remembers the decision for the rest of the session.
-
-        During multi-step execution, ``_last_arm_result`` is updated after
-        each successful step so the caller can inspect partial state if a
-        later step fails.
-        """
-        self._last_arm_result = ArmStatus()
-
-        if command not in COMPOUND_COMMAND_STEPS:
-            result = await self.client.session.arm_alarm(
-                self.installation, command, **kwargs
-            )
-            self._last_arm_result = result
-            return result
-
-        if not self._use_multi_step:
             try:
-                result = await self.client.session.arm_alarm(
-                    self.installation, command, **kwargs
-                )
-                self._last_arm_result = result
-                return result
+                if "+" in command:
+                    # Multi-step: split and execute sequentially
+                    sub_commands = command.split("+")
+                    result: ArmStatus | DisarmStatus | None = None
+                    for sub_cmd in sub_commands:
+                        result = await self._send_single_command(
+                            sub_cmd, **force_params
+                        )
+                        self._last_arm_result = result
+                    assert result is not None
+                    return result
+                else:
+                    result = await self._send_single_command(
+                        command, **force_params
+                    )
+                    return result
+            except ArmingExceptionError:
+                raise  # Arming exceptions need special handling upstream
             except SecuritasDirectError as err:
                 if err.http_status == 409:
-                    raise
-                self._use_multi_step = True
+                    raise  # Server busy — don't try alternatives
                 _LOGGER.info(
-                    "Compound arm command (%s) not supported by panel, "
-                    "switching to multi-step for this session",
+                    "Command %s not supported by panel, trying next alternative: %s",
                     command,
+                    err.args[0] if err.args else err,
                 )
+                self._resolver.mark_unsupported(command)
+                last_err = err
 
-        # Multi-step: send each step sequentially.
-        # Force params (forceArmingRemoteId / suid) are passed to every step
-        # because we don't know which step produced the original exception —
-        # both interior and perimeter sensors can trigger ArmingExceptionError.
-        # The API ignores force params that don't match a prior exception.
-        for step in COMPOUND_COMMAND_STEPS[command]:
-            self._last_arm_result = await self.client.session.arm_alarm(
-                self.installation, step, **kwargs
+        raise last_err or SecuritasDirectError(
+            "No supported command found for this panel"
+        )
+
+    async def _send_single_command(
+        self,
+        command: str,
+        **force_params: str,
+    ) -> ArmStatus | DisarmStatus:
+        """Send a single arm or disarm command to the API."""
+        if command.startswith("D"):
+            return await self.client.session.disarm_alarm(
+                self.installation, command
             )
-        return self._last_arm_result
+        else:
+            return await self.client.session.arm_alarm(
+                self.installation, command, **force_params
+            )
+
+    def _mode_to_alarm_state(self, mode: str) -> AlarmState:
+        """Convert an HA alarm mode to an AlarmState using the securitas state map."""
+        securitas_state = self._securitas_state_map.get(mode)
+        if securitas_state is None:
+            raise SecuritasDirectError(f"Unsupported alarm mode: {mode}")
+        return SECURITAS_STATE_TO_ALARM_STATE[securitas_state]
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
-        if self._check_code(code):
-            self.__force_state(AlarmControlPanelState.DISARMING)
-            disarm_status: DisarmStatus = DisarmStatus()
-            try:
-                self._operation_in_progress = True
-                disarm_status = await self._send_disarm_command()
-            except SecuritasDirectError as err:
-                err_msg = str(err.args[0]) if err.args else str(err)
-                self._notify_error("Securitas: Error disarming", err_msg)
-                _LOGGER.error("Disarm failed: %s", err_msg)
-                self._state = self._last_status
-                self.async_write_ha_state()
-                return
-            finally:
-                self._operation_in_progress = False
-
+        if not self._check_code(code):
+            return
+        self.__force_state(AlarmControlPanelState.DISARMING)
+        self._operation_in_progress = True
+        try:
+            target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+            result = await self._execute_transition(target)
             self.update_status_alarm(
                 CheckAlarmStatus(
-                    disarm_status.operation_status,
-                    disarm_status.message,
-                    disarm_status.status,
-                    self.installation.number,
-                    disarm_status.protomResponse,
-                    disarm_status.protomResponseData,
+                    operation_status=result.operation_status,
+                    message=getattr(result, "message", ""),
+                    status="",
+                    InstallationNumer="",
+                    protomResponse=result.protomResponse,
+                    protomResponseData="",
                 )
             )
             self.async_write_ha_state()
+        except SecuritasDirectError as err:
+            self._state = self._last_status
+            err_msg = str(err.args[0]) if err.args else str(err)
+            _LOGGER.error("Disarm failed: %s", err_msg)
+            self._notify_error("Securitas: Error disarming", err_msg)
+        finally:
+            self._operation_in_progress = False
 
     async def set_arm_state(
         self,
@@ -442,105 +462,54 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
         force_arming_remote_id: str | None = None,
         suid: str | None = None,
     ) -> None:
-        """Send set arm state command.
-
-        If the alarm is already in an armed state, disarm first before
-        re-arming.  This is required because the Securitas API treats
-        interior and perimeter as independent axes — e.g. sending ARMDAY1
-        while the perimeter is armed leaves the perimeter armed, so
-        transitioning from Partial+Perimeter to Partial would silently fail.
-
-        When force_arming_remote_id and suid are provided (via the
-        force_arm service), the arm request overrides non-blocking
-        exceptions from a previous failed attempt.
-        """
-        command = self._command_map.get(mode)
-        if command is None:
-            _LOGGER.error("No command configured for mode %s", mode)
-            return
-
+        """Set the arm state using the command resolver."""
         self._operation_in_progress = True
+        self._last_arm_result = ArmStatus()
+
+        force_params: dict[str, str] = {}
+        if force_arming_remote_id:
+            force_params["force_arming_remote_id"] = force_arming_remote_id
+        if suid:
+            force_params["suid"] = suid
+
         try:
-            force_params: dict[str, str] = {}
-            if force_arming_remote_id is not None:
-                force_params = {
-                    "force_arming_remote_id": force_arming_remote_id,
-                    "suid": suid or "",
-                }
-
-            # Disarm first if previously in a confirmed armed state.
-            # Note: self._state is already ARMING (set by caller via
-            # __force_state), so check _last_status for the actual prior state.
-            if self._last_status in (
-                AlarmControlPanelState.ARMED_HOME,
-                AlarmControlPanelState.ARMED_AWAY,
-                AlarmControlPanelState.ARMED_NIGHT,
-                AlarmControlPanelState.ARMED_CUSTOM_BYPASS,
-                AlarmControlPanelState.ARMED_VACATION,
-            ):
-                try:
-                    await self._send_disarm_command()
-                except SecuritasDirectError as err:
-                    _LOGGER.warning(
-                        "Failed to disarm before re-arming (last_status: %s, alarm "
-                        "may already be disarmed), continuing with arm: %s",
-                        self._last_status,
-                        err.args[0] if err.args else err,
+            target = self._mode_to_alarm_state(mode)
+            result = await self._execute_transition(target, **force_params)
+            self.update_status_alarm(
+                CheckAlarmStatus(
+                    operation_status=getattr(result, "operation_status", ""),
+                    message=getattr(result, "message", ""),
+                    status="",
+                    InstallationNumer="",
+                    protomResponse=result.protomResponse,
+                    protomResponseData="",
+                )
+            )
+            self.async_write_ha_state()
+        except ArmingExceptionError as exc:
+            self._set_force_context(exc, mode)
+            self._state = self._last_status
+            self._notify_arm_exceptions(exc)
+        except SecuritasDirectError as err:
+            if self._last_arm_result.protomResponse:
+                self.update_status_alarm(
+                    CheckAlarmStatus(
+                        operation_status=self._last_arm_result.operation_status,
+                        message="",
+                        status="",
+                        InstallationNumer="",
+                        protomResponse=self._last_arm_result.protomResponse,
+                        protomResponseData="",
                     )
-                else:
-                    await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
-
-            try:
-                arm_status = await self._send_arm_command(command, **force_params)
-            except ArmingExceptionError as exc:
-                self._set_force_context(exc, mode)
+                )
+            else:
                 self._state = self._last_status
-                self.async_write_ha_state()
-                self._notify_arm_exceptions(exc)
-                return
-            except SecuritasDirectError as err:
-                err_msg = str(err.args[0]) if err.args else str(err)
-                _LOGGER.error("Arm failed: %s", err_msg)
-                if "does not exist" in err_msg:
-                    body = (
-                        "The alarm panel does not support the requested"
-                        f" state (command {command})"
-                    )
-                else:
-                    body = f"Error sending arm command ({command}): {err_msg}"
-                self._notify_error("Securitas: Arming failed", body)
-                partial = self._last_arm_result
-                if partial.protomResponse:
-                    # A prior step succeeded — reflect the partial state.
-                    self.update_status_alarm(
-                        CheckAlarmStatus(
-                            partial.operation_status,
-                            partial.message,
-                            partial.status,
-                            partial.InstallationNumer,
-                            partial.protomResponse,
-                            partial.protomResponseData,
-                        )
-                    )
-                    self.async_write_ha_state()
-                else:
-                    self._state = self._last_status
-                    self.async_write_ha_state()
-                return
+            err_msg = str(err.args[0]) if err.args else str(err)
+            _LOGGER.error("Arm failed: %s", err_msg)
+            self._notify_error("Securitas: Arming failed", err_msg)
+            self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
-
-        self.update_status_alarm(
-            CheckAlarmStatus(
-                arm_status.operation_status,
-                arm_status.message,
-                arm_status.status,
-                arm_status.InstallationNumer,
-                arm_status.protomResponse,
-                arm_status.protomResponseData,
-            )
-        )
-        self.async_write_ha_state()
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store force-arm context from an arming exception."""

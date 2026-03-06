@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from .const import SecuritasState
+
 
 class InteriorMode(StrEnum):
     """Interior alarm mode."""
@@ -50,6 +52,18 @@ PROTO_TO_ALARM_STATE: dict[str, AlarmState] = {
 # AlarmState -> proto response code
 ALARM_STATE_TO_PROTO: dict[AlarmState, str] = {
     v: k for k, v in PROTO_TO_ALARM_STATE.items()
+}
+
+# SecuritasState (config/UI) -> AlarmState (resolver)
+SECURITAS_STATE_TO_ALARM_STATE: dict[SecuritasState, AlarmState] = {
+    SecuritasState.DISARMED: AlarmState(InteriorMode.OFF, PerimeterMode.OFF),
+    SecuritasState.PARTIAL_DAY: AlarmState(InteriorMode.DAY, PerimeterMode.OFF),
+    SecuritasState.PARTIAL_NIGHT: AlarmState(InteriorMode.NIGHT, PerimeterMode.OFF),
+    SecuritasState.TOTAL: AlarmState(InteriorMode.TOTAL, PerimeterMode.OFF),
+    SecuritasState.PERI_ONLY: AlarmState(InteriorMode.OFF, PerimeterMode.ON),
+    SecuritasState.PARTIAL_DAY_PERI: AlarmState(InteriorMode.DAY, PerimeterMode.ON),
+    SecuritasState.PARTIAL_NIGHT_PERI: AlarmState(InteriorMode.NIGHT, PerimeterMode.ON),
+    SecuritasState.TOTAL_PERI: AlarmState(InteriorMode.TOTAL, PerimeterMode.ON),
 }
 
 
