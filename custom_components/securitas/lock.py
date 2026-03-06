@@ -58,7 +58,7 @@ async def async_setup_entry(
             _LOGGER.error(
                 "Failed to get services for installation %s: %s",
                 device.installation.number,
-                err.args[0],
+                err.args[0] if err.args else err,
             )
             continue
         for service in services:
