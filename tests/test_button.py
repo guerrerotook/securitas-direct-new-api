@@ -189,6 +189,77 @@ class TestSecuritasRefreshButtonAsyncPress:
 
         mock_sleep.assert_called_once_with(1)
 
+    async def test_403_creates_persistent_notification(self):
+        """403 error creates a rate-limited persistent notification."""
+        button = make_button()
+        button.client.session.check_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
+            await button.async_press()
+
+        button.hass.services.async_call.assert_called_once()
+        call_kwargs = button.hass.services.async_call.call_args
+        assert call_kwargs[1]["domain"] == "persistent_notification"
+        assert call_kwargs[1]["service"] == "create"
+        assert "Rate limited" in call_kwargs[1]["service_data"]["title"]
+
+    async def test_403_sets_waf_blocked_on_alarm_entity(self):
+        """403 on button press sets waf_blocked on the alarm entity."""
+        button = make_button()
+        button.client.session.check_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+
+        # Set up a mock alarm entity accessible via hass.data
+        mock_alarm = MagicMock()
+        mock_alarm._set_waf_blocked = MagicMock()
+        mock_alarm.async_write_ha_state = MagicMock()
+        button.hass.data = {
+            DOMAIN: {"alarm_entities": {button.installation.number: mock_alarm}}
+        }
+
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
+            await button.async_press()
+
+        mock_alarm._set_waf_blocked.assert_called_once_with(True)
+        mock_alarm.async_write_ha_state.assert_called_once()
+
+    async def test_403_without_alarm_entity_does_not_crash(self):
+        """403 when no alarm entity is registered still works (just notification)."""
+        button = make_button()
+        button.client.session.check_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        )
+        button.hass.data = {}
+
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
+            await button.async_press()
+
+        # Should not crash, notification still created
+        button.hass.services.async_call.assert_called_once()
+
+    async def test_non_403_error_does_not_create_notification(self):
+        """Non-403 errors are logged but do not create persistent notifications."""
+        button = make_button()
+        button.client.session.check_alarm = AsyncMock(
+            side_effect=SecuritasDirectError("Network error")
+        )
+
+        with patch(
+            "custom_components.securitas.button.asyncio.sleep", new_callable=AsyncMock
+        ):
+            await button.async_press()
+
+        button.hass.services.async_call.assert_not_called()
+
 
 # ===========================================================================
 # async_setup_entry
