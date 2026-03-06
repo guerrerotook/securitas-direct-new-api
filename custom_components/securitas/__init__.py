@@ -565,6 +565,8 @@ class SecuritasHub:
                         "Error checking general status: %s",
                         err.args[0] if err.args else err,
                     )
+                    if getattr(err, "http_status", None) == 403:
+                        raise
 
                 return CheckAlarmStatus(
                     status.status or "",
@@ -587,6 +589,8 @@ class SecuritasHub:
                     "Error checking alarm status: %s",
                     err.args[0] if err.args else err,
                 )
+                if getattr(err, "http_status", None) == 403:
+                    raise
 
             return alarm_status
 
