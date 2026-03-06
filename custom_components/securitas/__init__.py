@@ -5,6 +5,7 @@ from collections import OrderedDict
 import json
 import logging
 from pathlib import Path
+import time
 from uuid import uuid4
 
 from aiohttp import ClientSession
@@ -506,6 +507,7 @@ class SecuritasHub:
         )
         self.installations: list[Installation] = []
         self._api_lock = asyncio.Lock()
+        self._last_api_time: float = 0
 
     async def login(self):
         """Login to Securitas."""
@@ -555,7 +557,12 @@ class SecuritasHub:
         Uses a lock to serialize API calls across installations, preventing
         concurrent request bursts that trigger the Securitas WAF.
         """
+        _MIN_API_INTERVAL = 5  # seconds between API call bursts
         async with self._api_lock:
+            elapsed = time.monotonic() - self._last_api_time
+            if elapsed < _MIN_API_INTERVAL:
+                await asyncio.sleep(_MIN_API_INTERVAL - elapsed)
+
             if self.check_alarm is not True:
                 status: SStatus = SStatus()
                 try:
@@ -568,6 +575,7 @@ class SecuritasHub:
                     if getattr(err, "http_status", None) == 403:
                         raise
 
+                self._last_api_time = time.monotonic()
                 return CheckAlarmStatus(
                     status.status or "",
                     "",
@@ -591,6 +599,8 @@ class SecuritasHub:
                 )
                 if getattr(err, "http_status", None) == 403:
                     raise
+            finally:
+                self._last_api_time = time.monotonic()
 
             return alarm_status
 

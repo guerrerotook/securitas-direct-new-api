@@ -5,6 +5,7 @@ import datetime
 import re
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 import homeassistant.components.alarm_control_panel as alarm
@@ -496,6 +497,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            self.client._last_api_time = time.monotonic()
 
     async def set_arm_state(
         self,
@@ -556,6 +558,7 @@ class SecuritasAlarm(alarm.AlarmControlPanelEntity):
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            self.client._last_api_time = time.monotonic()
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store force-arm context from an arming exception."""
