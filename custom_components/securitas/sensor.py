@@ -41,7 +41,15 @@ async def async_setup_entry(
     sentinel_name: SentinelName = SentinelName()
     sentinel_confort_name = sentinel_name.get_sentinel_name(client.lang)
     for device in securitas_devices:
-        services: list[Service] = await client.get_services(device.installation)
+        try:
+            services: list[Service] = await client.get_services(device.installation)
+        except SecuritasDirectError as err:
+            _LOGGER.error(
+                "Failed to get services for installation %s: %s",
+                device.installation.number,
+                err.args[0],
+            )
+            continue
         for service in services:
             if service.request == sentinel_confort_name:
                 sentinel_data: Sentinel = await client.session.get_sentinel_data(
