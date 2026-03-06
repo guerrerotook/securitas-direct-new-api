@@ -164,7 +164,7 @@ class CommandResolver:
             return [CommandStep(commands=cmds)]
 
         # Only perimeter armed
-        cmds = self._filter_unsupported(["DPERI1", "DARM1"])
+        cmds = self._filter_unsupported(["DARMPERI", "DARM1"])
         return [CommandStep(commands=cmds)]
 
     def _resolve_arm(
@@ -181,7 +181,7 @@ class CommandResolver:
         if not interior_changes and peri_changes:
             if target.perimeter == PerimeterMode.ON:
                 return [CommandStep(commands=["PERI1"])]
-            cmds = self._filter_unsupported(["DPERI1", "DARM1"])
+            cmds = self._filter_unsupported(["DARMPERI", "DARM1"])
             return [CommandStep(commands=cmds)]
 
         # Only interior changes

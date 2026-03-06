@@ -86,7 +86,7 @@ class TestCommandResolverDisarm:
         target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
         steps = resolver.resolve(current, target)
         assert len(steps) == 1
-        assert steps[0].commands == ["DPERI1", "DARM1"]
+        assert steps[0].commands == ["DARMPERI", "DARM1"]
 
     def test_disarm_both_axes(self):
         resolver = CommandResolver(has_peri=True)
@@ -116,7 +116,7 @@ class TestCommandResolverDisarm:
 
     def test_disarm_peri_skips_unsupported_dperi1(self):
         resolver = CommandResolver(has_peri=True)
-        resolver.mark_unsupported("DPERI1")
+        resolver.mark_unsupported("DARMPERI")
         current = AlarmState(InteriorMode.OFF, PerimeterMode.ON)
         target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
         steps = resolver.resolve(current, target)
