@@ -349,7 +349,10 @@ async def _unregister_card_resource(hass: HomeAssistant) -> None:
     resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
     if not resource_id:
         # Was using add_extra_js_url fallback or user-managed resource
-        frontend.remove_extra_js_url(hass, CARD_URL)
+        try:
+            frontend.remove_extra_js_url(hass, CARD_URL)
+        except Exception:
+            pass
         return
     try:
         lovelace_data = hass.data.get("lovelace")
