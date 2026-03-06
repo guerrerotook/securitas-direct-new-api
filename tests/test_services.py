@@ -171,7 +171,9 @@ class TestListInstallations:
 
 
 class TestGetAllServices:
-    async def test_returns_service_objects(self, api, mock_execute, installation):
+    async def test_returns_service_objects(
+        self, authed_api, mock_execute, installation
+    ):
         capabilities_jwt = make_jwt(exp_minutes=60)
         mock_execute.return_value = {
             "data": {
@@ -202,7 +204,7 @@ class TestGetAllServices:
             }
         }
 
-        result = await api.get_all_services(installation)
+        result = await authed_api.get_all_services(installation)
 
         assert len(result) == 1
         svc = result[0]
@@ -215,7 +217,9 @@ class TestGetAllServices:
         assert svc.attributes[0].name == "zone"
         assert svc.attributes[0].value == "1"
 
-    async def test_sets_capabilities_and_exp(self, api, mock_execute, installation):
+    async def test_sets_capabilities_and_exp(
+        self, authed_api, mock_execute, installation
+    ):
         capabilities_jwt = make_jwt(exp_minutes=60)
         mock_execute.return_value = {
             "data": {
@@ -241,21 +245,23 @@ class TestGetAllServices:
             }
         }
 
-        await api.get_all_services(installation)
+        await authed_api.get_all_services(installation)
 
         assert installation.capabilities == capabilities_jwt
         assert installation.capabilities_exp > datetime.now()
 
     async def test_none_installation_data_returns_empty(
-        self, api, mock_execute, installation
+        self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {"data": {"xSSrv": {"installation": None}}}
 
-        result = await api.get_all_services(installation)
+        result = await authed_api.get_all_services(installation)
 
         assert result == []
 
-    async def test_none_services_returns_empty(self, api, mock_execute, installation):
+    async def test_none_services_returns_empty(
+        self, authed_api, mock_execute, installation
+    ):
         capabilities_jwt = make_jwt(exp_minutes=60)
         mock_execute.return_value = {
             "data": {
@@ -268,12 +274,12 @@ class TestGetAllServices:
             }
         }
 
-        result = await api.get_all_services(installation)
+        result = await authed_api.get_all_services(installation)
 
         assert result == []
 
     async def test_none_capabilities_returns_empty(
-        self, api, mock_execute, installation
+        self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {
             "data": {
@@ -299,7 +305,7 @@ class TestGetAllServices:
             }
         }
 
-        result = await api.get_all_services(installation)
+        result = await authed_api.get_all_services(installation)
 
         assert result == []
 
@@ -554,11 +560,13 @@ class TestGetAirQualityDataEdgeCases:
 
 
 class TestGetAllServicesEdgeCases:
-    async def test_null_xssrv_returns_empty_list(self, api, mock_execute, installation):
+    async def test_null_xssrv_returns_empty_list(
+        self, authed_api, mock_execute, installation
+    ):
         """When xSSrv response is None, returns empty list."""
         mock_execute.return_value = {"data": {"xSSrv": None}}
 
-        result = await api.get_all_services(installation)
+        result = await authed_api.get_all_services(installation)
 
         assert result == []
 
