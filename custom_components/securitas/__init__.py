@@ -2,6 +2,7 @@
 
 import asyncio
 from collections import OrderedDict
+import json
 import logging
 from pathlib import Path
 from uuid import uuid4
@@ -49,7 +50,9 @@ from .securitas_direct_new_api import (
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "securitas"
-CARD_URL = "/securitas_panel/securitas-alarm-card.js"
+CARD_BASE_URL = "/securitas_panel/securitas-alarm-card.js"
+_MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text())
+CARD_URL = f"{CARD_BASE_URL}?v={_MANIFEST['version']}"
 
 CONF_COUNTRY = "country"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
@@ -232,7 +235,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         need_sign_in = True
 
+    _card_registered = hass.data.get(DOMAIN, {}).get("card_registered", False)
     hass.data[DOMAIN] = {}
+    if _card_registered:
+        hass.data[DOMAIN]["card_registered"] = True
 
     # Set up log sanitization filter — must be on handlers, not the logger,
     # because logger-level filters don't apply to child logger records.
@@ -335,9 +341,17 @@ async def _register_card_resource(hass: HomeAssistant) -> None:
                 if not resources.loaded:
                     await resources.async_load()
                     resources.loaded = True
-                # Don't add if already registered (user may have added manually)
+                # Update or skip if already registered
                 for item in resources.async_items():
-                    if item.get("url") == CARD_URL:
+                    url = item.get("url", "")
+                    if url == CARD_URL:
+                        return  # Already current version
+                    if url.startswith(CARD_BASE_URL):
+                        # Old version — update the URL
+                        await resources.async_update_item(item["id"], {"url": CARD_URL})
+                        hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item[
+                            "id"
+                        ]
                         return
                 item = await resources.async_create_item(
                     {"res_type": "module", "url": CARD_URL}

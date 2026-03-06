@@ -702,10 +702,10 @@ class TestAsyncSetupEntry:
         assert isinstance(call_args[0], StaticPathConfig)
         assert call_args[0].url_path == "/securitas_panel"
 
-        # Verify extra JS URL registration
-        mock_add_js.assert_called_once_with(
-            hass, "/securitas_panel/securitas-alarm-card.js"
-        )
+        # Verify extra JS URL registration (includes version cache-buster)
+        mock_add_js.assert_called_once()
+        js_url = mock_add_js.call_args[0][1]
+        assert js_url.startswith("/securitas_panel/securitas-alarm-card.js?v=")
 
     async def test_setup_skips_card_when_no_http(self, hass, mock_hub):
         """When hass.http is None, neither static paths nor extra JS should be registered."""
@@ -732,7 +732,7 @@ class TestAsyncSetupEntry:
         mock_add_js.assert_not_called()
 
     async def test_setup_card_registration_idempotent(self, hass, mock_hub):
-        """Calling async_setup_entry twice should register card JS both times without error."""
+        """Calling async_setup_entry twice should only register card JS once."""
         # Make hass.http truthy with an async_register_static_paths mock
         hass.http = MagicMock()
         hass.http.async_register_static_paths = AsyncMock()
@@ -760,8 +760,10 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        assert mock_add_js.call_count == 2
-        mock_add_js.assert_called_with(hass, "/securitas_panel/securitas-alarm-card.js")
+        # Card registered only once (guarded by card_registered flag)
+        mock_add_js.assert_called_once()
+        js_url = mock_add_js.call_args[0][1]
+        assert js_url.startswith("/securitas_panel/securitas-alarm-card.js?v=")
 
 
 # ===========================================================================
