@@ -1251,7 +1251,13 @@ class ApiManager:
         disarm_data = self._extract_response_data(response, "xSDisarmStatus")
         return disarm_data
 
-    async def get_smart_lock_config(self, installation: Installation) -> SmartLock:
+    async def get_smart_lock_config(
+        self,
+        installation: Installation,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+        device_type: str = SMARTLOCK_DEVICE_TYPE,
+        key_type: str = SMARTLOCK_KEY_TYPE,
+    ) -> SmartLock:
         content = {
             "operationName": "xSGetSmartlockConfig",
             "variables": {
@@ -1259,9 +1265,9 @@ class ApiManager:
                 "panel": installation.panel,
                 "devices": [
                     {
-                        "deviceType": SMARTLOCK_DEVICE_TYPE,
-                        "deviceId": SMARTLOCK_DEVICE_ID,
-                        "keytype": SMARTLOCK_KEY_TYPE,
+                        "deviceType": device_type,
+                        "deviceId": device_id,
+                        "keytype": key_type,
                     }
                 ],
             },
@@ -1275,17 +1281,30 @@ class ApiManager:
 
         if "errors" in response:
             _LOGGER.error(response)
-            return SmartLock(None, None, None)
+            return SmartLock()
 
         if "data" in response:
             raw_data = response["data"]["xSGetSmartlockConfig"]
             if raw_data is None:
-                return SmartLock(None, None, None)
-            return SmartLock(raw_data["res"], raw_data["location"], raw_data["type"])
+                return SmartLock()
+            return SmartLock(
+                res=raw_data.get("res"),
+                location=raw_data.get("location"),
+                type=raw_data.get("type"),
+                deviceId=device_id,
+                referenceId=raw_data.get("referenceId"),
+                zoneId=raw_data.get("zoneId"),
+                serialNumber=raw_data.get("serialNumber"),
+                family=raw_data.get("family"),
+                label=raw_data.get("label"),
+                features=raw_data.get("features"),
+            )
 
-        return SmartLock(None, None, None)
+        return SmartLock()
 
-    async def get_lock_current_mode(self, installation: Installation) -> SmartLockMode:
+    async def get_lock_current_mode(
+        self, installation: Installation
+    ) -> list[SmartLockMode]:
         content = {
             "operationName": "xSGetLockCurrentMode",
             "variables": {
@@ -1301,29 +1320,39 @@ class ApiManager:
 
         if "errors" in response:
             _LOGGER.error(response)
-            return SmartLockMode(None, "0")
+            return []
 
         if "data" in response:
             raw_data = response["data"]["xSGetLockCurrentMode"]
             if raw_data is None:
-                return SmartLockMode(None, "0")
-            lock_status = "0"
-            if raw_data.get("smartlockInfo"):
-                lock_status = raw_data["smartlockInfo"][0]["lockStatus"]
-            return SmartLockMode(raw_data["res"], lock_status)
+                return []
+            result: list[SmartLockMode] = []
+            for lock_info in raw_data.get("smartlockInfo") or []:
+                result.append(
+                    SmartLockMode(
+                        res=raw_data["res"],
+                        lockStatus=lock_info.get("lockStatus", "0"),
+                        deviceId=lock_info.get("deviceId", ""),
+                    )
+                )
+            return result
 
-        return SmartLockMode(None, "0")
+        return []
 
     async def change_lock_mode(
-        self, installation: Installation, lock: bool
+        self,
+        installation: Installation,
+        lock: bool,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+        device_type: str = SMARTLOCK_DEVICE_TYPE,
     ) -> SmartLockModeStatus:
         content = {
             "operationName": "xSChangeSmartlockMode",
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "deviceType": SMARTLOCK_DEVICE_TYPE,
-                "deviceId": SMARTLOCK_DEVICE_ID,
+                "deviceType": device_type,
+                "deviceId": device_id,
                 "lock": lock,
             },
             "query": "mutation xSChangeSmartlockMode($numinst: String!, $panel: String!, $deviceId: String!, $deviceType: String!, $lock: Boolean!) {\n  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n  ) {\n    res\n    msg\n    referenceId\n  }\n}",
@@ -1351,6 +1380,7 @@ class ApiManager:
                 installation,
                 reference_id,
                 count,
+                device_id=device_id,
             )
 
         raw_data = await self._poll_operation(_check)
@@ -1369,12 +1399,13 @@ class ApiManager:
         installation: Installation,
         reference_id: str,
         counter: int,
+        device_id: str = SMARTLOCK_DEVICE_ID,
     ) -> dict[str, Any]:
         content = {
             "operationName": "xSChangeSmartlockModeStatus",
             "variables": {
                 "counter": counter,
-                "deviceId": SMARTLOCK_DEVICE_ID,
+                "deviceId": device_id,
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "referenceId": reference_id,
