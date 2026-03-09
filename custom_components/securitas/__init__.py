@@ -2,8 +2,10 @@
 
 import asyncio
 from collections import OrderedDict
+import json
 import logging
 from pathlib import Path
+import time
 from uuid import uuid4
 
 from aiohttp import ClientSession
@@ -49,7 +51,9 @@ from .securitas_direct_new_api import (
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "securitas"
-CARD_URL = "/securitas_panel/securitas-alarm-card.js"
+CARD_BASE_URL = "/securitas_panel/securitas-alarm-card.js"
+_MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text())
+CARD_URL = f"{CARD_BASE_URL}?v={_MANIFEST['version']}"
 
 CONF_COUNTRY = "country"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
@@ -176,6 +180,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     config[CONF_NOTIFY_GROUP] = entry.data.get(CONF_NOTIFY_GROUP, "")
     config = add_device_information(config)
 
+    # Register card static path + Lovelace resource early so the card
+    # is available even when login fails (ConfigEntryNotReady).
+    if hass.http and not hass.data.get(DOMAIN, {}).get("card_registered"):
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    "/securitas_panel",
+                    str(Path(__file__).parent / "www"),
+                    cache_headers=False,
+                )
+            ]
+        )
+        await _register_card_resource(hass)
+        hass.data.setdefault(DOMAIN, {})["card_registered"] = True
+
     # Read mapping config from entry data
     config[CONF_MAP_HOME] = entry.data.get(CONF_MAP_HOME)
     config[CONF_MAP_AWAY] = entry.data.get(CONF_MAP_AWAY)
@@ -217,7 +236,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         need_sign_in = True
 
+    _card_registered = hass.data.get(DOMAIN, {}).get("card_registered", False)
+    _card_resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
     hass.data[DOMAIN] = {}
+    if _card_registered:
+        hass.data[DOMAIN]["card_registered"] = True
+    if _card_resource_id is not None:
+        hass.data[DOMAIN]["card_resource_id"] = _card_resource_id
 
     # Set up log sanitization filter — must be on handlers, not the logger,
     # because logger-level filters don't apply to child logger records.
@@ -286,18 +311,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
             hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
-            # Serve the custom alarm card JS automatically
-            if hass.http:
-                await hass.http.async_register_static_paths(
-                    [
-                        StaticPathConfig(
-                            "/securitas_panel",
-                            str(Path(__file__).parent / "www"),
-                            cache_headers=False,
-                        )
-                    ]
-                )
-                await _register_card_resource(hass)
 
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
             return True
@@ -332,9 +345,17 @@ async def _register_card_resource(hass: HomeAssistant) -> None:
                 if not resources.loaded:
                     await resources.async_load()
                     resources.loaded = True
-                # Don't add if already registered (user may have added manually)
+                # Update or skip if already registered
                 for item in resources.async_items():
-                    if item.get("url") == CARD_URL:
+                    url = item.get("url", "")
+                    if url == CARD_URL:
+                        return  # Already current version
+                    if url.startswith(CARD_BASE_URL):
+                        # Old version — update the URL
+                        await resources.async_update_item(item["id"], {"url": CARD_URL})
+                        hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item[
+                            "id"
+                        ]
                         return
                 item = await resources.async_create_item(
                     {"res_type": "module", "url": CARD_URL}
@@ -489,6 +510,7 @@ class SecuritasHub:
         )
         self.installations: list[Installation] = []
         self._api_lock = asyncio.Lock()
+        self._last_api_time: float = 0
 
     async def login(self):
         """Login to Securitas."""
@@ -538,7 +560,12 @@ class SecuritasHub:
         Uses a lock to serialize API calls across installations, preventing
         concurrent request bursts that trigger the Securitas WAF.
         """
+        _MIN_API_INTERVAL = 5  # seconds between API call bursts
         async with self._api_lock:
+            elapsed = time.monotonic() - self._last_api_time
+            if elapsed < _MIN_API_INTERVAL:
+                await asyncio.sleep(_MIN_API_INTERVAL - elapsed)
+
             if self.check_alarm is not True:
                 status: SStatus = SStatus()
                 try:
@@ -548,6 +575,10 @@ class SecuritasHub:
                         "Error checking general status: %s",
                         err.args[0] if err.args else err,
                     )
+                    if getattr(err, "http_status", None) == 403:
+                        raise
+                finally:
+                    self._last_api_time = time.monotonic()
 
                 return CheckAlarmStatus(
                     status.status or "",
@@ -570,6 +601,10 @@ class SecuritasHub:
                     "Error checking alarm status: %s",
                     err.args[0] if err.args else err,
                 )
+                if getattr(err, "http_status", None) == 403:
+                    raise
+            finally:
+                self._last_api_time = time.monotonic()
 
             return alarm_status
 

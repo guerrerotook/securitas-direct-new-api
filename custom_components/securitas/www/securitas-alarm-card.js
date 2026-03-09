@@ -441,9 +441,10 @@ class SecuritasAlarmCard extends HTMLElement {
       });
     }
 
-    // Arm / Disarm buttons
+    // Arm / Disarm / Refresh buttons
     this.shadowRoot.querySelectorAll("[data-action]").forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation(); // prevent header's more-info handler
         const action = btn.dataset.action;
         this._handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity);
       });
