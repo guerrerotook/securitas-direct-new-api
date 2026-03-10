@@ -17,7 +17,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 - **PIN code protection** — optional local PIN code for arming and/or disarming the alarm from Home Assistant (independent of your Securitas account).
 - **Two-factor authentication** — login via SMS verification code.
 
-## Breaking Changes in v2.0
+## Breaking Changes in v4.0.0
 
 > **Warning:** This release includes breaking changes. Please read before upgrading.
 
