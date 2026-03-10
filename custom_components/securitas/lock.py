@@ -130,7 +130,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
                 if cfg and cfg.features and cfg.features.holdBackLatchTime > 0:
                     _LOGGER.info(
                         "Lock %s on %s supports latch hold-back (%ds) — "
-                        "open-door feature pending API mutation capture",
+                        "open-door feature enabled",
                         self._device_id,
                         self.installation.number,
                         cfg.features.holdBackLatchTime,

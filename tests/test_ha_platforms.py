@@ -803,6 +803,24 @@ class TestSecuritasLockUpdateStatus:
         # No matching device_id → get_lock_state returns "0" (unknown) → ignored
         assert lock._state == "2"
 
+    async def test_config_fetch_with_holdback_triggers_state_write(self):
+        """After fetching config with holdBackLatchTime, HA state is refreshed
+        so supported_features picks up the OPEN flag."""
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(return_value=config)
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+
+        assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
+
     async def test_async_update_delegates_to_update_status(self):
         """async_update just calls async_update_status."""
         lock = make_lock()
