@@ -431,7 +431,7 @@ Sentinel sensors are discovered during platform setup by scanning services for o
 
 Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows the same polling pattern as arm/disarm. Status is polled via `get_lock_current_mode()` on the scan interval.
 
-**Danalock configuration:** On first update, each lock lazily fetches its `DanalockConfig` via `get_danalock_config()`. This exposes battery threshold, arm-lock policies (lock before full/partial arm, unlock after disarm), auto-lock timeout, and `holdBackLatchTime` (latch hold-back for door opening) as `extra_state_attributes`. Config fetch is optional — errors are tolerated and logged.
+**Danalock configuration:** On first update, each lock lazily fetches its `DanalockConfig` via `get_danalock_config()`. This exposes battery threshold, arm-lock policies (lock before full/partial arm, unlock after disarm), auto-lock timeout, and `holdBackLatchTime` (latch hold-back for door opening) as `extra_state_attributes`. Config fetch is optional — errors are tolerated and logged. When `holdBackLatchTime > 0`, the entity advertises `LockEntityFeature.OPEN` so users can trigger door unlatching from the UI even when the lock is already unlocked. The `async_open()` method sends the same `change_lock_mode(lock=False)` command — there is no separate API mutation for opening.
 
 ### Camera (`camera.py`)
 
