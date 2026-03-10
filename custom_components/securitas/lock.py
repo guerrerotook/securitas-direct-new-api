@@ -253,5 +253,12 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
     @property
     def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
         """Return the list of supported features."""
-        # TODO: Add LockEntityFeature.OPEN when open-door mutation is captured
+        cfg = self._danalock_config
+        if (
+            cfg
+            and cfg.features
+            and cfg.features.holdBackLatchTime
+            and cfg.features.holdBackLatchTime > 0
+        ):
+            return lock.LockEntityFeature.OPEN
         return lock.LockEntityFeature(0)

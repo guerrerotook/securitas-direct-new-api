@@ -589,10 +589,35 @@ class TestSecuritasLockConfig:
         assert attrs["unlock_after_disarm"] is True
         assert "hold_back_latch_time" not in attrs
 
-    def test_supported_features_returns_zero(self):
+    def test_supported_features_no_config_returns_zero(self):
         import homeassistant.components.lock as lock_mod
 
         lock = make_lock()
+        assert lock.supported_features == lock_mod.LockEntityFeature(0)
+
+    def test_supported_features_with_holdback_returns_open(self):
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
+        lock = make_lock(danalock_config=config)
+        assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
+
+    def test_supported_features_holdback_zero_returns_zero(self):
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=0, calibrationType=0)
+        )
+        lock = make_lock(danalock_config=config)
+        assert lock.supported_features == lock_mod.LockEntityFeature(0)
+
+    def test_supported_features_no_features_returns_zero(self):
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(features=None)
+        lock = make_lock(danalock_config=config)
         assert lock.supported_features == lock_mod.LockEntityFeature(0)
 
 
