@@ -1,0 +1,33 @@
+[MAIN]
+
+[FORMAT]
+max-line-length=100
+
+[MESSAGES CONTROL]
+# Disabled globally — these are structural issues that require refactoring,
+# not quick fixes.  Tackle in a dedicated refactoring pass.
+disable=
+    # Complexity / size metrics — refactoring scope
+    too-many-instance-attributes,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-public-methods,
+    too-many-return-statements,
+    too-many-lines,
+    too-few-public-methods,
+    # Duplicate code — refactoring scope
+    duplicate-code,
+    # HA platform pattern: deferred imports avoid circular deps at module level
+    cyclic-import,
+    import-outside-toplevel,
+    wrong-import-position,
+    # HA entity pattern: base classes declare abstract methods as optional overrides
+    abstract-method,
+    # dataTypes.py field names match the GraphQL API schema — renaming would
+    # break the API layer
+    invalid-name,
+    # Intentional TODOs
+    fixme,
