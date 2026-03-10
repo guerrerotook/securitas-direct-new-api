@@ -10,6 +10,7 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     Installation,
     Sentinel,
     Service,
+    SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
 )
@@ -93,7 +94,25 @@ def make_device():
     return SecuritasDirectDevice(make_installation())
 
 
-def make_lock():
+def make_lock_config(
+    device_id="01",
+    location="Front Door",
+    family="DR",
+    serial_number="SN001",
+):
+    """Create a test SmartLock config."""
+    return SmartLock(
+        res="OK",
+        location=location,
+        type=1,
+        deviceId=device_id,
+        family=family,
+        serialNumber=serial_number,
+        label="lock1",
+    )
+
+
+def make_lock(device_id="01", lock_config=None):
     """Create a SecuritasLock with mocked dependencies."""
     installation = make_installation()
     client = MagicMock()
@@ -103,11 +122,20 @@ def make_lock():
     hass.async_create_task = MagicMock()
     hass.services = MagicMock()
 
+    if lock_config is None:
+        lock_config = make_lock_config(device_id=device_id)
+
     with patch(
         "custom_components.securitas.lock.async_track_time_interval"
     ) as mock_track:
         mock_track.return_value = MagicMock()
-        lock_entity = SecuritasLock(installation=installation, client=client, hass=hass)
+        lock_entity = SecuritasLock(
+            installation=installation,
+            client=client,
+            hass=hass,
+            device_id=device_id,
+            lock_config=lock_config,
+        )
     return lock_entity
 
 
@@ -375,9 +403,42 @@ class TestSecuritasLockInit:
             lock._state = state
             assert lock.is_unlocking is False
 
-    def test_name_returns_installation_alias(self):
+    def test_name_returns_lock_config_location(self):
         lock = make_lock()
-        assert lock.name == "Home"
+        assert lock.name == "Front Door"
+
+    def test_name_falls_back_when_no_location(self):
+        config = SmartLock(deviceId="01")
+        lock = make_lock(lock_config=config)
+        assert lock.name == "Home Lock 01"
+
+    def test_unique_id_contains_device_id(self):
+        lock = make_lock(device_id="02")
+        assert "lock.02" in lock._attr_unique_id
+
+    def test_unique_id_contains_installation_number(self):
+        lock = make_lock()
+        assert "123456" in lock._attr_unique_id
+
+    def test_device_info_uses_lock_config(self):
+        config = make_lock_config(
+            device_id="01",
+            location="Front Door",
+            family="DR",
+            serial_number="SN001",
+        )
+        lock = make_lock(lock_config=config)
+        assert lock._attr_device_info["name"] == "Front Door"
+        assert lock._attr_device_info["model"] == "DR"
+        assert lock._attr_device_info["serial_number"] == "SN001"
+        assert lock._attr_device_info["manufacturer"] == "Securitas Direct"
+
+    def test_device_info_via_device_links_to_installation(self):
+        lock = make_lock()
+        assert lock._attr_device_info["via_device"] == (
+            "securitas",
+            "securitas_direct.123456",
+        )
 
 
 class TestSecuritasLockActions:
@@ -444,7 +505,7 @@ class TestSecuritasLockActions:
         original_schedule = MagicMock()
         lock.async_schedule_update_ha_state = original_schedule
 
-        async def capture_state(installation, lock_mode):
+        async def capture_state(installation, lock_mode, **kwargs):
             """Capture state at the moment the API call is made."""
             observed_states.append(lock._state)
             return SmartLockModeStatus()
@@ -465,7 +526,7 @@ class TestSecuritasLockActions:
 
         lock.async_schedule_update_ha_state = MagicMock()
 
-        async def capture_state(installation, lock_mode):
+        async def capture_state(installation, lock_mode, **kwargs):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
@@ -476,14 +537,40 @@ class TestSecuritasLockActions:
         assert observed_states == ["3"]
         assert lock._state == "1"
 
+    async def test_async_lock_passes_device_id(self):
+        lock = make_lock(device_id="02")
+        lock.async_schedule_update_ha_state = MagicMock()
+        lock.client.session.change_lock_mode = AsyncMock(
+            return_value=SmartLockModeStatus()
+        )
+
+        await lock.async_lock()
+
+        lock.client.session.change_lock_mode.assert_awaited_once_with(
+            lock.installation, True, device_id="02"
+        )
+
+    async def test_async_unlock_passes_device_id(self):
+        lock = make_lock(device_id="03")
+        lock.async_schedule_update_ha_state = MagicMock()
+        lock.client.session.change_lock_mode = AsyncMock(
+            return_value=SmartLockModeStatus()
+        )
+
+        await lock.async_unlock()
+
+        lock.client.session.change_lock_mode.assert_awaited_once_with(
+            lock.installation, False, device_id="03"
+        )
+
 
 class TestSecuritasLockUpdateStatus:
     """Tests for SecuritasLock async_update_status."""
 
     async def test_async_update_status_updates_state_from_api(self):
-        lock = make_lock()
+        lock = make_lock(device_id="01")
         lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="1")
+            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
         )
 
         await lock.async_update_status()
@@ -491,12 +578,12 @@ class TestSecuritasLockUpdateStatus:
         assert lock._state == "1"
 
     async def test_async_update_status_ignores_zero_status(self):
-        lock = make_lock()
+        lock = make_lock(device_id="01")
         # Initial state is "2" (locked)
         assert lock._state == "2"
 
         lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="0")
+            return_value=[SmartLockMode(res="OK", lockStatus="0", deviceId="01")]
         )
 
         await lock.async_update_status()
@@ -505,9 +592,9 @@ class TestSecuritasLockUpdateStatus:
         assert lock._state == "2"
 
     async def test_async_update_status_updates_on_non_zero(self):
-        lock = make_lock()
+        lock = make_lock(device_id="01")
         lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="3")
+            return_value=[SmartLockMode(res="OK", lockStatus="3", deviceId="01")]
         )
 
         await lock.async_update_status()
@@ -516,15 +603,71 @@ class TestSecuritasLockUpdateStatus:
 
     async def test_async_update_delegates_to_update_status(self):
         """async_update just calls async_update_status."""
-        lock = make_lock()
+        lock = make_lock(device_id="01")
         lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="1")
+            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
         )
 
         await lock.async_update()
 
         lock.client.session.get_lock_current_mode.assert_awaited_once()
         assert lock._state == "1"
+
+    async def test_async_update_matches_correct_device_id(self):
+        """When multiple locks returned, matches by device_id."""
+        lock = make_lock(device_id="02")
+        lock.client.session.get_lock_current_mode = AsyncMock(
+            return_value=[
+                SmartLockMode(res="OK", lockStatus="2", deviceId="01"),
+                SmartLockMode(res="OK", lockStatus="1", deviceId="02"),
+            ]
+        )
+
+        await lock.async_update_status()
+
+        # Should use status from device "02", not "01"
+        assert lock._state == "1"
+
+    async def test_async_update_fallback_single_lock_no_match(self):
+        """When only one lock returned and deviceId doesn't match, use it anyway."""
+        lock = make_lock(device_id="99")
+        lock.client.session.get_lock_current_mode = AsyncMock(
+            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+
+        assert lock._state == "1"
+
+    async def test_async_update_returns_unknown_when_no_match(self):
+        """When multiple locks but none match, return unknown (state unchanged)."""
+        lock = make_lock(device_id="99")
+        # Initial state is "2" (locked)
+        assert lock._state == "2"
+
+        lock.client.session.get_lock_current_mode = AsyncMock(
+            return_value=[
+                SmartLockMode(res="OK", lockStatus="1", deviceId="01"),
+                SmartLockMode(res="OK", lockStatus="1", deviceId="02"),
+            ]
+        )
+
+        await lock.async_update_status()
+
+        # "0" (UNKNOWN) is ignored, so state stays "2"
+        assert lock._state == "2"
+
+    async def test_async_update_empty_list_keeps_state(self):
+        """When API returns empty list, state stays unchanged."""
+        lock = make_lock(device_id="01")
+        assert lock._state == "2"
+
+        lock.client.session.get_lock_current_mode = AsyncMock(return_value=[])
+
+        await lock.async_update_status()
+
+        # Empty list → get_lock_state returns "0" → ignored → state stays "2"
+        assert lock._state == "2"
 
 
 class TestSecuritasLockRemoval:

@@ -23,6 +23,7 @@ from .dataTypes import (  # noqa: F401
     Installation,
     OtpPhone,
     Service,
+    SmartLock,
     SStatus,
     SmartLockMode,
     SmartLockModeStatus,

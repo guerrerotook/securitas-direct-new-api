@@ -152,12 +152,20 @@ class SmartLock:
     res: str | None = None
     location: str | None = None
     type: int | None = None
+    deviceId: str | None = None
+    referenceId: str | None = None
+    zoneId: str | None = None
+    serialNumber: str | None = None
+    family: str | None = None
+    label: str | None = None
+    features: dict | None = None
 
 
 @dataclass
 class SmartLockMode:
     res: str | None = None
     lockStatus: str = ""
+    deviceId: str = ""
 
 
 @dataclass

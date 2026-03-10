@@ -61,6 +61,42 @@ class TestGetSmartLockConfig:
         assert result.res == "OK"
         assert result.location == "Front Door"
         assert result.type == 1
+        assert result.referenceId == "ref1"
+        assert result.zoneId == "z1"
+        assert result.serialNumber == "SN001"
+        assert result.family == "DR"
+        assert result.label == "lock1"
+
+    async def test_success_with_explicit_device_id(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetSmartlockConfig": {
+                    "res": "OK",
+                    "location": "Back Door",
+                    "type": 2,
+                    "referenceId": "ref2",
+                    "zoneId": "z2",
+                    "serialNumber": "SN002",
+                    "family": "DR",
+                    "label": "lock2",
+                    "features": None,
+                }
+            }
+        }
+
+        result = await authed_api.get_smart_lock_config(
+            installation, device_id="02"
+        )
+
+        assert result.res == "OK"
+        assert result.deviceId == "02"
+        assert result.location == "Back Door"
+        assert result.serialNumber == "SN002"
+        # Verify the device_id was sent in the request
+        call_args = mock_execute.call_args[0][0]
+        assert call_args["variables"]["devices"][0]["deviceId"] == "02"
 
     async def test_error_in_response_returns_empty_smart_lock(
         self, authed_api, mock_execute, installation
@@ -103,7 +139,7 @@ class TestGetSmartLockConfig:
 
 
 class TestGetLockCurrentMode:
-    async def test_success_returns_locked_status(
+    async def test_success_returns_list_with_locked_status(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {
@@ -117,11 +153,13 @@ class TestGetLockCurrentMode:
 
         result = await authed_api.get_lock_current_mode(installation)
 
-        assert isinstance(result, SmartLockMode)
-        assert result.res == "OK"
-        assert result.lockStatus == "2"
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].res == "OK"
+        assert result[0].lockStatus == "2"
+        assert result[0].deviceId == "01"
 
-    async def test_success_returns_open_status(
+    async def test_success_returns_list_with_open_status(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {
@@ -135,31 +173,70 @@ class TestGetLockCurrentMode:
 
         result = await authed_api.get_lock_current_mode(installation)
 
-        assert isinstance(result, SmartLockMode)
-        assert result.res == "OK"
-        assert result.lockStatus == "1"
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0].res == "OK"
+        assert result[0].lockStatus == "1"
 
-    async def test_error_in_response_returns_default_mode(
+    async def test_multiple_locks_returned(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": [
+                        {"lockStatus": "2", "deviceId": "01"},
+                        {"lockStatus": "1", "deviceId": "02"},
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert len(result) == 2
+        assert result[0].deviceId == "01"
+        assert result[0].lockStatus == "2"
+        assert result[1].deviceId == "02"
+        assert result[1].lockStatus == "1"
+
+    async def test_error_in_response_returns_empty_list(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
         result = await authed_api.get_lock_current_mode(installation)
 
-        assert isinstance(result, SmartLockMode)
-        assert result.res is None
-        assert result.lockStatus == "0"
+        assert isinstance(result, list)
+        assert len(result) == 0
 
-    async def test_none_data_returns_default_mode(
+    async def test_none_data_returns_empty_list(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {"data": {"xSGetLockCurrentMode": None}}
 
         result = await authed_api.get_lock_current_mode(installation)
 
-        assert isinstance(result, SmartLockMode)
-        assert result.res is None
-        assert result.lockStatus == "0"
+        assert isinstance(result, list)
+        assert len(result) == 0
+
+    async def test_empty_smartlock_info_returns_empty_list(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": [],
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert isinstance(result, list)
+        assert len(result) == 0
 
 
 # ── change_lock_mode() ──────────────────────────────────────────────────────
@@ -231,6 +308,43 @@ class TestChangeLockMode:
         assert result.message == ""
         assert result.protomResponse == "D"
         assert result.status == "unlocked"
+
+    async def test_lock_with_custom_device_id(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.side_effect = [
+            {
+                "data": {
+                    "xSChangeSmartlockMode": {
+                        "res": "OK",
+                        "msg": "",
+                        "referenceId": "ref789",
+                    }
+                }
+            },
+            {
+                "data": {
+                    "xSChangeSmartlockModeStatus": {
+                        "res": "OK",
+                        "msg": "",
+                        "protomResponse": "D",
+                        "status": "locked",
+                    }
+                }
+            },
+        ]
+
+        result = await authed_api.change_lock_mode(
+            installation, lock=True, device_id="02"
+        )
+
+        assert result.status == "locked"
+        # Verify device_id was passed in the initial request
+        call_args = mock_execute.call_args_list[0][0][0]
+        assert call_args["variables"]["deviceId"] == "02"
+        # Verify device_id was passed in the status poll
+        poll_args = mock_execute.call_args_list[1][0][0]
+        assert poll_args["variables"]["deviceId"] == "02"
 
     async def test_non_ok_initial_response_raises_error(
         self, authed_api, mock_execute, installation
