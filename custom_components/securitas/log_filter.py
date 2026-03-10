@@ -80,7 +80,7 @@ class SensitiveDataFilter(logging.Filter):
                 record.args = tuple(self._redact_value(a) for a in record.args)
             elif isinstance(record.args, dict):
                 record.args = {k: self._redact_value(v) for k, v in record.args.items()}
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # filter must never crash
             pass  # Never break logging
 
         return True

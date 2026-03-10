@@ -15,7 +15,4 @@ class SentinelName:
 
     def get_sentinel_name(self, language: str) -> str:
         """Get the sentinel string for the language."""
-        result: str = self.sentinel_name["default"].format(language=language)
-        if language in self.sentinel_name:
-            result = self.sentinel_name[language]
-        return result
+        return self.sentinel_name.get(language, self.sentinel_name["default"])
