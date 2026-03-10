@@ -37,7 +37,6 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENTRY_ID,
     CONF_HAS_PERI,
     CONF_INSTALLATION,
-    CONF_INSTALLATION_KEY,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,

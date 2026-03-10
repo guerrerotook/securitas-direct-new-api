@@ -24,7 +24,6 @@ from custom_components.securitas import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_INSTALLATION,
-    CONF_INSTALLATION_KEY,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
@@ -1423,7 +1422,6 @@ class TestSharedSession:
         assert isinstance(devices[0], SecuritasDirectDevice)
         # Old backward-compat keys should NOT be present
         assert SecuritasHub.__name__ not in hass.data[DOMAIN]
-        assert CONF_INSTALLATION_KEY not in hass.data[DOMAIN]
 
     async def test_legacy_entry_without_installation_gets_all(self, hass, mock_hub):
         """An entry without CONF_INSTALLATION should get all installations."""
