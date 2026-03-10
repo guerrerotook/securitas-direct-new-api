@@ -250,6 +250,26 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._state = LOCK_STATUS_OPEN
         self.async_write_ha_state()
 
+    async def async_open(self, **kwargs):
+        self._force_state(LOCK_STATUS_OPENING)
+        try:
+            await self.client.change_lock_mode(
+                self.installation, False, self._device_id
+            )
+        except SecuritasDirectError as err:
+            self._state = self._last_state
+            self.async_write_ha_state()
+            _LOGGER.error(
+                "Open operation failed for %s device %s: %s",
+                self.installation.number,
+                self._device_id,
+                err.log_detail(),
+            )
+            return
+
+        self._state = LOCK_STATUS_OPEN
+        self.async_write_ha_state()
+
     @property
     def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
         """Return the list of supported features."""

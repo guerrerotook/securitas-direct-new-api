@@ -705,6 +705,52 @@ class TestSecuritasLockActions:
         assert observed_states == ["3"]
         assert lock._state == "1"
 
+    async def test_async_open_sets_state_to_opening_then_open_on_success(self):
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_open()
+
+        assert lock._state == "1"
+        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
+        lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
+
+    async def test_async_open_error_restores_previous_state(self):
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(
+            side_effect=SecuritasDirectError("API error")
+        )
+
+        await lock.async_open()
+
+        assert lock._state == "2"
+
+    async def test_async_open_calls_change_lock_mode_with_false(self):
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_open()
+
+        lock.client.change_lock_mode.assert_awaited_once_with(
+            lock.installation, False, "01"
+        )
+
+    async def test_async_open_intermediate_state_is_opening(self):
+        """Verify _force_state is called with '3' (opening) before the API call."""
+        lock = make_lock()
+        observed_states = []
+
+        async def capture_state(installation, lock_mode, device_id=None):
+            observed_states.append(lock._state)
+            return SmartLockModeStatus()
+
+        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
+
+        await lock.async_open()
+
+        assert observed_states == ["3"]
+        assert lock._state == "1"
+
 
 class TestSecuritasLockUpdateStatus:
     """Tests for SecuritasLock async_update_status."""
