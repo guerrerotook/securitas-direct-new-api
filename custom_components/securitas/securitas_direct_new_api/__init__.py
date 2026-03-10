@@ -4,7 +4,6 @@ import logging
 
 from .apimanager import ApiManager, generate_device_id, generate_uuid  # noqa: F401
 from .const import (  # noqa: F401
-    ALARM_STATUS_POLL_DELAY,
     CommandType,
     PERI_DEFAULTS,
     PERI_OPTIONS,
@@ -17,15 +16,18 @@ from .const import (  # noqa: F401
     SecuritasState,
 )
 from .dataTypes import (  # noqa: F401
-    ArmStatus,
-    CheckAlarmStatus,
-    DisarmStatus,
+    Attribute,
+    Attributes,
+    CameraDevice,
+    DanalockConfig,
     Installation,
+    OperationStatus,
     OtpPhone,
     Service,
     SStatus,
     SmartLockMode,
     SmartLockModeStatus,
+    ThumbnailResponse,
 )
 from .domains import ApiDomains  # noqa: F401
 from .exceptions import (  # noqa: F401

@@ -21,7 +21,8 @@ class ApiDomains:
 
         self.languages = {
             "default": "en",
-            "BR": "br",  # I know they speak Portuguese, but past code basically did lang=country.lower()
+            # They speak Portuguese, but past code basically did lang=country.lower()
+            "BR": "br",
             "CL": "es",
             "ES": "es",
             "FR": "fr",
