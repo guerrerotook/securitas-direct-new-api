@@ -1,5 +1,6 @@
 {
-    "name": "Securitas Direct Alarm",
-    "content_in_root": false,
-    "homeassistant": "2021.9.0"
+  "name": "Securitas Direct Alarm",
+  "content_in_root": false,
+  "description": "Securitas Direct Alarm, Lock, and Sensor integration for Home Assistant",
+  "homeassistant": "2025.2.0"
 }
