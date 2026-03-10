@@ -1,35 +1,36 @@
-import datetime
+"""Securitas Direct smart lock platform."""
+
+from __future__ import annotations
+
 from datetime import timedelta
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import homeassistant.components.lock as lock
+from homeassistant.components import lock
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
 from . import (
-    CONF_INSTALLATION_KEY,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    SecuritasDirectDevice,
     SecuritasHub,
 )
+from .entity import SecuritasEntity
 from .securitas_direct_new_api import (
+    DanalockConfig,
     Installation,
     SecuritasDirectError,
-    SmartLockMode,
 )
+from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
 
-from .securitas_direct_new_api.dataTypes import Service
+if TYPE_CHECKING:
+    from .securitas_direct_new_api import SmartLockMode
 
 _LOGGER = logging.getLogger(__name__)
-
-SCAN_INTERVAL = timedelta(minutes=20)
 
 # Service request name that identifies a smart-lock capability
 DOORLOCK_SERVICE = "DOORLOCK"
@@ -45,93 +46,58 @@ LOCK_STATUS_LOCKING = "4"
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up Securitas Direct based on config_entry."""
-    client: SecuritasHub = hass.data[DOMAIN][SecuritasHub.__name__]
-    locks = []
-    securitas_devices: list[SecuritasDirectDevice] = hass.data[DOMAIN].get(
-        CONF_INSTALLATION_KEY
-    )
-    for device in securitas_devices:
-        services: list[Service] = await client.get_services(device.installation)
-        for service in services:
-            _LOGGER.debug("Service: %s", service.request)
-            if service.request == DOORLOCK_SERVICE:
-                locks.append(
-                    SecuritasLock(
-                        device.installation,
-                        client=client,
-                        hass=hass,
-                    )
-                )
+    """Set up Securitas Direct lock entities.
 
-    if not locks:
-        _LOGGER.debug("No Securitas Direct %s services found", DOORLOCK_SERVICE)
-        return
-
-    async_add_entities(locks, True)
+    No API calls are made here.  Lock devices are discovered
+    asynchronously after startup and added via the stored callback.
+    """
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    entry_data["lock_add_entities"] = async_add_entities
 
 
-class SecuritasLock(lock.LockEntity):
+class SecuritasLock(SecuritasEntity, lock.LockEntity):
+    """Representation of a Securitas Direct smart lock."""
+
     def __init__(
         self,
         installation: Installation,
         client: SecuritasHub,
         hass: HomeAssistant,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+        initial_status: str = LOCK_STATUS_LOCKED,
+        danalock_config: DanalockConfig | None = None,
     ) -> None:
-        self._state = LOCK_STATUS_LOCKED
-        self._last_state = LOCK_STATUS_LOCKED
-        self._new_state: str = LOCK_STATUS_LOCKED
+        super().__init__(installation, client)
+        self._state = (
+            initial_status
+            if initial_status != LOCK_STATUS_UNKNOWN
+            else LOCK_STATUS_LOCKED
+        )
+        self._last_state = self._state
+        self._new_state: str = self._state
         self._changed_by: str = ""
         self._device: str = installation.address
-        self.entity_id: str = f"securitas_direct.{installation.number}"
-        self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
-        self._time: datetime.datetime = datetime.datetime.now()
-        self._message: str = ""
-        self.installation: Installation = installation
-        self._attr_extra_state_attributes: dict[str, Any] = {}
-        self.client: SecuritasHub = client
+        self._device_id: str = device_id
+        self._danalock_config: DanalockConfig | None = danalock_config
+        self._danalock_config_fetched: bool = danalock_config is not None
+
+        self._attr_name = f"{installation.alias} Lock {device_id}"
+        self._attr_unique_id = (
+            f"securitas_direct.{installation.number}_lock_{device_id}"
+        )
+
         self.hass: HomeAssistant = hass
         scan_seconds = client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         self._update_interval: timedelta = timedelta(seconds=scan_seconds)
-        if scan_seconds > 0:
+        self._scan_seconds = scan_seconds
+        self._update_unsub = None
+
+    async def async_added_to_hass(self) -> None:
+        """Register timer when entity is added to HA."""
+        if self._scan_seconds > 0:
             self._update_unsub = async_track_time_interval(
-                hass, self.async_update_status, self._update_interval
+                self.hass, self.async_update_status, self._update_interval
             )
-        else:
-            self._update_unsub = None
-
-        self._attr_device_info: DeviceInfo | None = DeviceInfo(
-            identifiers={(DOMAIN, self._attr_unique_id)},
-            manufacturer="Securitas Direct",
-            model=installation.panel,
-            name=installation.alias,
-            hw_version=installation.type,
-        )
-
-    def __force_state(self, state: str) -> None:
-        self._last_state = self._state
-        self._state = state
-        if self.hass is not None:
-            self.async_schedule_update_ha_state()
-
-    def _notify_error(self, notification_id, title: str, message: str) -> None:
-        """Notify user with persistent notification."""
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                domain="persistent_notification",
-                service="create",
-                service_data={
-                    "title": title,
-                    "message": message,
-                    "notification_id": f"{DOMAIN}.{notification_id}",
-                },
-            )
-        )
-
-    @property
-    def name(self) -> str:  # type: ignore[override]
-        """Return the name of the device."""
-        return self.installation.alias
 
     @property
     def changed_by(self) -> str:  # type: ignore[override]
@@ -145,83 +111,147 @@ class SecuritasLock(lock.LockEntity):
             self._update_unsub = None
 
     async def async_update(self) -> None:
+        """Update lock state."""
         await self.async_update_status()
 
-    async def async_update_status(self, now=None) -> None:
+    async def async_update_status(self, _now=None) -> None:
+        """Poll lock status from the API."""
         if self.hass is None:
             return
+
+        # Lazily fetch Danalock config on first update (avoids blocking setup)
+        if not self._danalock_config_fetched:
+            self._danalock_config_fetched = True
+            try:
+                self._danalock_config = await self.client.get_danalock_config(
+                    self.installation, self._device_id
+                )
+                cfg = self._danalock_config
+                if cfg and cfg.features and cfg.features.holdBackLatchTime > 0:
+                    _LOGGER.info(
+                        "Lock %s on %s supports latch hold-back (%ds) — "
+                        "open-door feature pending API mutation capture",
+                        self._device_id,
+                        self.installation.number,
+                        cfg.features.holdBackLatchTime,
+                    )
+            except (SecuritasDirectError, KeyError, TypeError):
+                _LOGGER.debug(
+                    "[%s] Could not fetch Danalock config for device %s",
+                    self.entity_id,
+                    self._device_id,
+                )
+
         try:
             self._new_state = await self.get_lock_state()
             if self._new_state != LOCK_STATUS_UNKNOWN:
                 self._state = self._new_state
         except SecuritasDirectError as err:
-            _LOGGER.error("Error updating Securitas lock state: %s", err)
+            _LOGGER.error(
+                "Error updating lock state for %s device %s: %s",
+                self.installation.number,
+                self._device_id,
+                err,
+            )
+
+        # When called from timer callback (_now is not None), HA does not
+        # automatically write state — we must do it explicitly.
+        if _now is not None:
+            self.async_write_ha_state()
 
     async def get_lock_state(self) -> str:
-        smartlock_status: SmartLockMode = (
-            await self.client.session.get_lock_current_mode(self.installation)
+        """Return the current lock status from the API."""
+        lock_modes: list[SmartLockMode] = await self.client.get_lock_modes(
+            self.installation
         )
-        return smartlock_status.lockStatus
+        for mode in lock_modes:
+            if mode.deviceId == self._device_id:
+                return mode.lockStatus
+        return LOCK_STATUS_UNKNOWN
 
     @property
     def is_locked(self) -> bool:  # type: ignore[override]
-        if self._state == LOCK_STATUS_LOCKED:
-            return True
-        else:
-            return False
+        return self._state == LOCK_STATUS_LOCKED
 
     @property
     def is_open(self) -> bool:  # type: ignore[override]
-        if self._state == LOCK_STATUS_OPEN:
-            return True
-        else:
-            return False
+        return self._state == LOCK_STATUS_OPEN
 
     @property
     def is_locking(self) -> bool:  # type: ignore[override]
-        if self._state == LOCK_STATUS_LOCKING:
-            return True
-        else:
-            return False
+        return self._state == LOCK_STATUS_LOCKING
 
     @property
     def is_unlocking(self) -> bool:  # type: ignore[override]
-        return False
+        return self._state == LOCK_STATUS_OPENING
 
     @property
     def is_opening(self) -> bool:  # type: ignore[override]
-        if self._state == LOCK_STATUS_OPENING:
-            return True
-        else:
-            return False
+        return False
 
     @property
     def is_jammed(self) -> bool:  # type: ignore[override]
         return False
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:  # type: ignore[override]
+        """Return lock configuration as state attributes."""
+        attrs: dict[str, Any] = {}
+        if self._danalock_config:
+            cfg = self._danalock_config
+            attrs["battery_low_threshold"] = cfg.batteryLowPercentage
+            attrs["lock_before_full_arm"] = cfg.lockBeforeFullArm == "1"
+            attrs["lock_before_partial_arm"] = cfg.lockBeforePartialArm == "1"
+            attrs["lock_before_perimeter_arm"] = cfg.lockBeforePerimeterArm == "1"
+            attrs["unlock_after_disarm"] = cfg.unlockAfterDisarm == "1"
+            attrs["auto_lock_time"] = cfg.autoLockTime
+            if cfg.features:
+                attrs["hold_back_latch_time"] = cfg.features.holdBackLatchTime
+                if cfg.features.autolock:
+                    attrs["autolock_active"] = cfg.features.autolock.active
+                    attrs["autolock_timeout"] = cfg.features.autolock.timeout
+        return attrs
+
     async def async_lock(self, **kwargs):
-        self.__force_state(LOCK_STATUS_LOCKING)
+        self._force_state(LOCK_STATUS_LOCKING)
         try:
-            await self.client.session.change_lock_mode(self.installation, True)
+            await self.client.change_lock_mode(self.installation, True, self._device_id)
         except SecuritasDirectError as err:
-            _LOGGER.error("Lock operation failed: %s", err.args[0] if err.args else err)
+            self._state = self._last_state
+            self.async_write_ha_state()
+            _LOGGER.error(
+                "Lock operation failed for %s device %s: %s",
+                self.installation.number,
+                self._device_id,
+                err.log_detail(),
+            )
             return
 
         self._state = LOCK_STATUS_LOCKED
+        self.async_write_ha_state()
 
     async def async_unlock(self, **kwargs):
-        self.__force_state(LOCK_STATUS_OPENING)
+        self._force_state(LOCK_STATUS_OPENING)
         try:
-            await self.client.session.change_lock_mode(self.installation, False)
+            await self.client.change_lock_mode(
+                self.installation, False, self._device_id
+            )
         except SecuritasDirectError as err:
+            self._state = self._last_state
+            self.async_write_ha_state()
             _LOGGER.error(
-                "Unlock operation failed: %s", err.args[0] if err.args else err
+                "Unlock operation failed for %s device %s: %s",
+                self.installation.number,
+                self._device_id,
+                err.log_detail(),
             )
             return
 
         self._state = LOCK_STATUS_OPEN
+        self.async_write_ha_state()
 
     @property
-    def supported_features(self) -> int:  # type: ignore[override]
+    def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
         """Return the list of supported features."""
-        return 0
+        # TODO: Add LockEntityFeature.OPEN when open-door mutation is captured
+        return lock.LockEntityFeature(0)
