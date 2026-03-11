@@ -421,7 +421,7 @@ Sentinel sensors are discovered during platform setup by scanning services for o
 
 `SecuritasLock` controls DOORLOCK services. Supports multiple locks per installation — each lock is identified by a `device_id` (extracted from the API response, defaults to `"01"`).
 
-**Discovery:** Locks are discovered in the background task (`_async_discover_devices`). When a DOORLOCK service is found, `get_lock_modes()` returns all known lock devices. One `SecuritasLock` entity is created per device. Unique IDs maintain backward compatibility: the first lock (device "01") uses `securitas_direct.{number}`, additional locks use `securitas_direct.{number}_lock_{device_id}`.
+**Discovery:** Locks are discovered in the background task (`_async_discover_devices`). When a DOORLOCK service is found, `get_lock_modes()` returns all known lock devices. For each lock, `get_smart_lock_config(device_id)` is called to fetch metadata from the `xSGetSmartlockConfig` API response (location name, serial number, device family). Each lock creates a separate HA device with `via_device` linking to the installation device as parent; name, model, and serial number in the `DeviceInfo` come from the config response. If the config fetch fails, the lock still works but falls back to using the installation alias as the device name with no serial number or model. One `SecuritasLock` entity is created per device. Unique IDs follow the format `securitas_direct.{number}_lock_{device_id}`.
 
 **Lock states** (string codes from the API):
 - `"1"` = open/unlocked
