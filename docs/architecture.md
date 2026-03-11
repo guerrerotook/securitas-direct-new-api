@@ -56,6 +56,8 @@ The HTTP transport layer. All communication with Securitas happens through Graph
 
 - `_execute_graphql(operation, query, variables, installation)` — High-level wrapper that calls `_ensure_auth()` then `_execute_request()`, providing a single entry point for installation-scoped GraphQL operations.
 
+**Response log sanitization:** Before logging API responses at DEBUG level, `_sanitize_response_for_log()` replaces large fields (`hours`, `image`) with placeholder values (`["..."]` for lists, `"..."` for strings). This prevents base64-encoded camera images and hourly sensor arrays from flooding the debug log.
+
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Securitas mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
 ### ApiManager (`apimanager.py`)

@@ -257,6 +257,10 @@ For Danalock locks, the entity exposes additional attributes: battery threshold,
 
 If your installation includes Securitas cameras, the integration creates a camera entity showing the last captured image. A **Capture** button entity is also created for each camera, allowing you to request a new image on demand.
 
+Both QR-type cameras (Italy and some regions) and YR-type PIR cameras (Spain) are supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
+
+When the capture button is pressed, the integration checks whether any images were taken since the last update (e.g. via the Securitas app or web portal) and displays them immediately, even before the newly requested capture arrives.
+
 ## Troubleshooting
 
 - **HTTP 403 errors / rate limiting** — Securitas uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries once automatically, but if you see repeated 403 errors in the logs:
