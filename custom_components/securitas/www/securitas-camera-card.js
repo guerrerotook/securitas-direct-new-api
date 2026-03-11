@@ -299,6 +299,8 @@ class SecuritasCameraCard extends HTMLElement {
     const cameraEntry = hass.entities[cameraEntityId];
     if (!cameraEntry?.device_id) return null;
     const deviceId = cameraEntry.device_id;
+    // Camera and its capture button share the same per-camera sub-device.
+    // There is exactly one mdi:camera button per camera device.
     for (const [eid, entry] of Object.entries(hass.entities)) {
       if (!eid.startsWith("button.")) continue;
       if (entry.device_id !== deviceId) continue;
