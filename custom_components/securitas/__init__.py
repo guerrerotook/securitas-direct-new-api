@@ -27,6 +27,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api_queue import ApiQueue
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
     API_CACHE_TTL,
+    CAMERA_CARD_BASE_URL,
+    CAMERA_CARD_URL,
     CARD_BASE_URL,
     CARD_URL,
     CONF_ADVANCED,
@@ -369,7 +371,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 )
             ]
         )
-        await _register_card_resource(hass)
+        await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
+        await _register_card_resource(hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id")
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
     hass.data.setdefault(DOMAIN, {})
@@ -542,60 +545,60 @@ async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> No
         await _discover_locks(hass, client, installation, entry_data)
 
 
-async def _register_card_resource(hass: HomeAssistant) -> None:
-    """Register the alarm card as a Lovelace resource for proper load ordering.
+async def _register_card_resource(
+    hass: HomeAssistant,
+    base_url: str,
+    card_url: str,
+    storage_key: str,
+) -> None:
+    """Register a card JS file as a Lovelace resource.
 
-    Using add_extra_js_url injects the script asynchronously, causing a race
-    condition on cold start where Lovelace renders cards before the custom
-    element is registered. Registering as a Lovelace resource gives Lovelace
-    explicit load ordering and avoids the "Configuration error" on first load.
     Falls back to add_extra_js_url if Lovelace resources are unavailable.
+    ``storage_key`` is used to track the resource ID in hass.data[DOMAIN].
     """
     try:
         lovelace_data = hass.data.get("lovelace")
         if lovelace_data and hasattr(lovelace_data, "resources"):
             resources = lovelace_data.resources
             if hasattr(resources, "async_create_item"):
-                # Storage mode — can add programmatically
                 if not resources.loaded:
                     await resources.async_load()
                     resources.loaded = True
-                # Update or skip if already registered
                 for item in resources.async_items():
                     url = item.get("url", "")
-                    if url == CARD_URL:
+                    if url == card_url:
                         return  # Already current version
-                    if url.startswith(CARD_BASE_URL):
-                        # Old version — update the URL
-                        await resources.async_update_item(item["id"], {"url": CARD_URL})
-                        hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item[
-                            "id"
-                        ]
+                    if url.startswith(base_url):
+                        await resources.async_update_item(item["id"], {"url": card_url})
+                        hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
                         return
                 item = await resources.async_create_item(
-                    {"res_type": "module", "url": CARD_URL}
+                    {"res_type": "module", "url": card_url}
                 )
-                hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item["id"]
+                hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
                 return
-    except Exception:  # pylint: disable=broad-exception-caught  # HA internals may raise anything
+    except Exception:  # pylint: disable=broad-exception-caught
         _LOGGER.debug(
-            "[setup] Could not register as Lovelace resource, falling back to add_extra_js_url"
+            "[setup] Could not register %s as Lovelace resource, falling back to add_extra_js_url",
+            base_url,
         )
-    # Fallback: YAML mode or Lovelace not available
     try:
-        frontend.add_extra_js_url(hass, CARD_URL)
+        frontend.add_extra_js_url(hass, card_url)
     except (KeyError, Exception):  # pylint: disable=broad-exception-caught
-        _LOGGER.debug("[setup] Could not register card via add_extra_js_url")
+        _LOGGER.debug("[setup] Could not register %s via add_extra_js_url", base_url)
 
 
-async def _unregister_card_resource(hass: HomeAssistant) -> None:
-    """Remove the alarm card Lovelace resource on unload."""
-    resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
+async def _unregister_card_resource(
+    hass: HomeAssistant,
+    card_url: str,
+    storage_key: str,
+) -> None:
+    """Remove a card Lovelace resource on unload."""
+    resource_id = hass.data.get(DOMAIN, {}).get(storage_key)
     if not resource_id:
-        # Was using add_extra_js_url fallback or user-managed resource
         try:
-            frontend.remove_extra_js_url(hass, CARD_URL)
-        except Exception:  # pylint: disable=broad-exception-caught  # HA internals may raise anything
+            frontend.remove_extra_js_url(hass, card_url)
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
         return
     try:
@@ -604,8 +607,8 @@ async def _unregister_card_resource(hass: HomeAssistant) -> None:
             resources = lovelace_data.resources
             if hasattr(resources, "async_delete_item"):
                 await resources.async_delete_item(resource_id)
-    except Exception:  # pylint: disable=broad-exception-caught  # HA internals may raise anything
-        _LOGGER.debug("[setup] Could not remove Lovelace resource %s", resource_id)
+    except Exception:  # pylint: disable=broad-exception-caught
+        _LOGGER.debug("[teardown] Could not remove Lovelace resource %s", resource_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -642,7 +645,8 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
             for handler in logging.getLogger().handlers:
                 handler.removeFilter(log_filter)
 
-        await _unregister_card_resource(hass)
+        await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
+        await _unregister_card_resource(hass, CAMERA_CARD_URL, "camera_card_resource_id")
         hass.data.pop(DOMAIN, None)
 
     return unload_ok
