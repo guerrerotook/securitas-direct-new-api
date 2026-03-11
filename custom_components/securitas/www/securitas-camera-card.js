@@ -12,6 +12,16 @@
  *   name: Front Door   # optional — overrides friendly_name
  */
 
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function _escHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 // ── Editor ────────────────────────────────────────────────────────────────────
 
 class SecuritasCameraCardEditor extends HTMLElement {
@@ -128,7 +138,7 @@ class SecuritasCameraCard extends HTMLElement {
       this.shadowRoot.innerHTML = `
       <ha-card>
         <div style="padding:16px;color:var(--error-color)">
-          Entity not found: ${entityId}
+          Entity not found: ${_escHtml(entityId)}
         </div>
       </ha-card>`;
       return;
@@ -208,9 +218,9 @@ class SecuritasCameraCard extends HTMLElement {
     </style>
     <ha-card>
       <div class="img-wrapper" id="img-wrapper">
-        <img class="camera-img" src="${imgUrl}" alt="${name}" />
+        <img class="camera-img" src="${imgUrl}" alt="${_escHtml(name)}" />
         <div class="overlay">
-          <span class="name">${name}</span>
+          <span class="name">${_escHtml(name)}</span>
           ${timestamp ? `<span class="timestamp" title="${absolute}">${relative}</span>` : ""}
         </div>
         <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn" ${hasCapture ? "" : "hidden"}>
