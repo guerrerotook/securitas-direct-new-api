@@ -11,7 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN, SIGNAL_CAMERA_UPDATE, SecuritasHub
-from .entity import securitas_device_info
+from .entity import camera_device_info
 from .securitas_direct_new_api import Installation
 from .securitas_direct_new_api.dataTypes import CameraDevice
 
@@ -52,7 +52,7 @@ class SecuritasCamera(Camera):
             f"v4_{installation.number}_camera_{camera_device.zone_id}"
         )
         self._attr_name = f"{installation.alias} {camera_device.name}"
-        self._attr_device_info = securitas_device_info(installation)
+        self._attr_device_info = camera_device_info(installation, camera_device)
         self._initial_fetch_done = False
 
     async def async_camera_image(

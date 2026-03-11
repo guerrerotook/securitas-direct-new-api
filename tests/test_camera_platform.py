@@ -100,6 +100,15 @@ class TestSecuritasCamera:
         result = await cam.async_camera_image()
         assert result == _PLACEHOLDER_IMAGE
 
+    def test_device_info_uses_camera_sub_device(self, mock_hub, installation, camera_device):
+        from custom_components.securitas.camera import SecuritasCamera
+        from custom_components.securitas import DOMAIN
+
+        cam = SecuritasCamera(mock_hub, installation, camera_device)
+        info = cam.device_info
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
+
 
 class TestSecuritasCaptureButton:
     def test_unique_id(self, mock_hub, installation, camera_device):
