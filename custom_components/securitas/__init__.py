@@ -471,7 +471,7 @@ async def _discover_locks(
         LOCK_STATUS_UNKNOWN,
         SecuritasLock,
     )
-    from .securitas_direct_new_api import SmartLockMode
+    from .securitas_direct_new_api import SmartLock, SmartLockMode
     from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
 
     try:
@@ -501,16 +501,30 @@ async def _discover_locks(
 
     lock_add = entry_data.get("lock_add_entities")
     if lock_add:
-        locks = [
-            SecuritasLock(
-                installation,
-                client=hub,
-                hass=hass,
-                device_id=mode.deviceId or SMARTLOCK_DEVICE_ID,
-                initial_status=mode.lockStatus,
+        locks = []
+        for mode in lock_modes:
+            device_id = mode.deviceId or SMARTLOCK_DEVICE_ID
+            lock_config: SmartLock | None = None
+            try:
+                lock_config = await hub.get_smart_lock_config(
+                    installation, device_id
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOGGER.debug(
+                    "Could not fetch smart lock config for %s device %s",
+                    installation.number,
+                    device_id,
+                )
+            locks.append(
+                SecuritasLock(
+                    installation,
+                    client=hub,
+                    hass=hass,
+                    device_id=device_id,
+                    initial_status=mode.lockStatus,
+                    lock_config=lock_config,
+                )
             )
-            for mode in lock_modes
-        ]
         lock_add(locks, False)
         schedule_initial_updates(hass, locks)
 
