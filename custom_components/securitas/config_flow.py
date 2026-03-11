@@ -428,9 +428,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if not available:
             return self.async_abort(reason="already_configured")
 
-        if len(available) == 1:
-            return await self._select_installation(available[0])
-
         self._available_installations = available
         return await self.async_step_select_installation()
 

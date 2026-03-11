@@ -917,7 +917,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         .reset-btn[hidden] { visibility: hidden; display: flex; }
       </style>
       <div class="editor">
-        <div id="entity-slot"></div>
+        <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
         <div class="section-title">State Colors</div>
         <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
@@ -933,20 +933,26 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         </div>
       </div>`;
 
-    // ── Entity picker (HA native) ────────────────────────────────────────────
-    const entityPicker = document.createElement("ha-entity-picker");
-    entityPicker.hass = this._hass;
-    entityPicker.value = this._config.entity || "";
-    entityPicker.label = _t(lang, "editor_entity");
-    entityPicker.includeDomains = ["alarm_control_panel"];
-    entityPicker.allowCustomEntity = false;
-    entityPicker.addEventListener("value-changed", (e) => {
-      if (e.detail.value !== undefined) {
-        this._config = { ...this._config, entity: e.detail.value };
+    // ── Entity picker (via ha-form — handles lazy-loading internally) ────────
+    const entityForm = this.shadowRoot.getElementById("entity-form");
+    entityForm.hass = this._hass;
+    entityForm.data = { entity: this._config.entity || "" };
+    entityForm.schema = [
+      {
+        name: "entity",
+        selector: {
+          entity: { domain: "alarm_control_panel" },
+        },
+      },
+    ];
+    entityForm.computeLabel = () => _t(lang, "editor_entity");
+    entityForm.addEventListener("value-changed", (e) => {
+      const newEntity = e.detail.value?.entity;
+      if (newEntity !== undefined) {
+        this._config = { ...this._config, entity: newEntity };
         this._fireChanged();
       }
     });
-    this.shadowRoot.getElementById("entity-slot").appendChild(entityPicker);
 
     // ── Name field (HA native) ───────────────────────────────────────────────
     const nameTf = document.createElement("ha-textfield");
