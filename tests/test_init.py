@@ -689,10 +689,16 @@ class TestAsyncSetupEntry:
         assert isinstance(call_args[0], StaticPathConfig)
         assert call_args[0].url_path == "/securitas_panel"
 
-        # Verify extra JS URL registration (includes version cache-buster)
-        mock_add_js.assert_called_once()
-        js_url = mock_add_js.call_args[0][1]
-        assert js_url.startswith("/securitas_panel/securitas-alarm-card.js?v=")
+        # Verify both card JS URLs are registered (alarm card + camera card)
+        assert mock_add_js.call_count == 2
+        js_urls = [call[0][1] for call in mock_add_js.call_args_list]
+        assert any(
+            u.startswith("/securitas_panel/securitas-alarm-card.js?v=") for u in js_urls
+        )
+        assert any(
+            u.startswith("/securitas_panel/securitas-camera-card.js?v=")
+            for u in js_urls
+        )
 
     async def test_setup_skips_card_when_no_http(self, hass, mock_hub):
         """When hass.http is None, neither static paths nor extra JS should be registered."""
@@ -747,10 +753,16 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        # Card registered only once (guarded by card_registered flag)
-        mock_add_js.assert_called_once()
-        js_url = mock_add_js.call_args[0][1]
-        assert js_url.startswith("/securitas_panel/securitas-alarm-card.js?v=")
+        # Both cards registered exactly once despite two setup calls (guarded by card_registered flag)
+        assert mock_add_js.call_count == 2
+        js_urls = [call[0][1] for call in mock_add_js.call_args_list]
+        assert any(
+            u.startswith("/securitas_panel/securitas-alarm-card.js?v=") for u in js_urls
+        )
+        assert any(
+            u.startswith("/securitas_panel/securitas-camera-card.js?v=")
+            for u in js_urls
+        )
 
 
 # ===========================================================================

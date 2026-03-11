@@ -1,16 +1,24 @@
 """Tests for SecuritasHub orchestration methods."""
 
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.securitas.api_queue import ApiQueue
-from custom_components.securitas.const import API_CACHE_TTL
+from custom_components.securitas.const import (
+    API_CACHE_TTL,
+    SIGNAL_CAMERA_STATE,
+    SIGNAL_CAMERA_UPDATE,
+)
 from custom_components.securitas.hub import SecuritasHub
 from custom_components.securitas.securitas_direct_new_api import (
     OperationStatus,
     SecuritasDirectError,
+)
+from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+    CameraDevice,
+    ThumbnailResponse,
 )
 
 from .conftest import make_installation
@@ -288,3 +296,189 @@ class TestGetLockModes:
         assert result == []
         # Empty list should still be cached
         assert hub._lock_modes[installation.number] == []
+
+
+# ── capture_image tests ─────────────────────────────────────────────────────
+
+
+def make_camera_device(**overrides) -> CameraDevice:
+    defaults = {"id": "11", "code": 10, "zone_id": "QR10", "name": "Salon"}
+    defaults.update(overrides)
+    return CameraDevice(**defaults)
+
+
+def make_thumbnail(**overrides) -> ThumbnailResponse:
+    defaults: dict = {
+        "id_signal": None,
+        "image": None,
+        "timestamp": None,
+        "device_code": None,
+        "device_alias": None,
+        "signal_type": None,
+    }
+    defaults.update(overrides)
+    return ThumbnailResponse(**defaults)
+
+
+def _setup_capture(hub, *, baseline_id="sig1", new_id="sig2", new_image=b"\xff\xd8"):
+    """Wire session mocks for a standard successful capture."""
+    baseline = make_thumbnail(id_signal=baseline_id, timestamp="2026-03-11 10:00:00")
+    new_thumb = make_thumbnail(
+        id_signal=new_id, image="base64data", timestamp="2026-03-11 10:01:00"
+    )
+    hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
+    hub.session.request_images = AsyncMock(return_value="ref-001")
+    hub.session.check_request_images_status = AsyncMock(
+        return_value={"res": "OK", "msg": "alarm-manager.photo-request.success"}
+    )
+    hub._validate_and_store_image = MagicMock(return_value=new_image)
+    return baseline, new_thumb
+
+
+class TestCaptureImage:
+    """Tests for capture_image hub method."""
+
+    async def test_capturing_flag_cleared_after_success(self):
+        """_camera_capturing is empty after a successful capture."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        _setup_capture(hub)
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        assert not hub.is_capturing(installation.number, device.zone_id)
+
+    async def test_is_capturing_true_during_capture(self):
+        """is_capturing returns True once key is added to _camera_capturing."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        capture_key = f"{installation.number}_{device.zone_id}"
+
+        hub._camera_capturing.add(capture_key)
+        assert hub.is_capturing(installation.number, device.zone_id) is True
+
+        hub._camera_capturing.discard(capture_key)
+        assert hub.is_capturing(installation.number, device.zone_id) is False
+
+    async def test_camera_state_signal_dispatched_at_start(self):
+        """SIGNAL_CAMERA_STATE is dispatched immediately when capture starts."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        _setup_capture(hub)
+
+        calls = []
+        with patch(
+            "custom_components.securitas.hub.async_dispatcher_send",
+            side_effect=lambda *a: calls.append(a),
+        ):
+            await hub.capture_image(installation, device)
+
+        # First dispatch must be SIGNAL_CAMERA_STATE
+        assert calls[0][1] == SIGNAL_CAMERA_STATE
+
+    async def test_camera_update_signal_dispatched_on_success(self):
+        """SIGNAL_CAMERA_UPDATE is dispatched when a new image is captured."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        _setup_capture(hub)
+
+        calls = []
+        with patch(
+            "custom_components.securitas.hub.async_dispatcher_send",
+            side_effect=lambda *a: calls.append(a),
+        ):
+            await hub.capture_image(installation, device)
+
+        signal_names = [c[1] for c in calls]
+        assert SIGNAL_CAMERA_UPDATE in signal_names
+
+    async def test_camera_state_signal_dispatched_when_no_image(self):
+        """SIGNAL_CAMERA_STATE (not UPDATE) is dispatched when no image arrives."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        _setup_capture(hub)
+        # Simulate validate returning None (no valid JPEG)
+        hub._validate_and_store_image = MagicMock(return_value=None)
+
+        calls = []
+        with patch(
+            "custom_components.securitas.hub.async_dispatcher_send",
+            side_effect=lambda *a: calls.append(a),
+        ):
+            await hub.capture_image(installation, device)
+
+        signal_names = [c[1] for c in calls]
+        assert SIGNAL_CAMERA_UPDATE not in signal_names
+        # Last signal should be SIGNAL_CAMERA_STATE to clear the spinner
+        assert calls[-1][1] == SIGNAL_CAMERA_STATE
+
+    async def test_missed_baseline_stored_and_update_fired(self):
+        """If baseline image differs from stored, it's stored + SIGNAL_CAMERA_UPDATE fired."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        # Stored timestamp differs from what API returns → missed update
+        key = f"{installation.number}_{device.zone_id}"
+        hub.camera_timestamps[key] = "2026-03-10 09:00:00"
+
+        baseline = make_thumbnail(
+            id_signal="sig1", image="base64data", timestamp="2026-03-11 10:00:00"
+        )
+        new_thumb = make_thumbnail(
+            id_signal="sig2", image="newdata", timestamp="2026-03-11 10:01:00"
+        )
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        )
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        calls = []
+        with patch(
+            "custom_components.securitas.hub.async_dispatcher_send",
+            side_effect=lambda *a: calls.append(a),
+        ):
+            await hub.capture_image(installation, device)
+
+        # _validate_and_store_image called twice: once for baseline, once for new
+        assert hub._validate_and_store_image.call_count == 2
+        # SIGNAL_CAMERA_UPDATE fired at least twice
+        update_calls = [c for c in calls if c[1] == SIGNAL_CAMERA_UPDATE]
+        assert len(update_calls) >= 2
+
+    async def test_no_missed_baseline_when_timestamps_match(self):
+        """If baseline timestamp matches stored, baseline image is not re-stored."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        same_ts = "2026-03-11 10:00:00"
+        key = f"{installation.number}_{device.zone_id}"
+        hub.camera_timestamps[key] = same_ts
+
+        baseline = make_thumbnail(
+            id_signal="sig1", image="base64data", timestamp=same_ts
+        )
+        new_thumb = make_thumbnail(
+            id_signal="sig2", image="newdata", timestamp="2026-03-11 10:01:00"
+        )
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        )
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        # _validate_and_store_image called once (only for new thumbnail, not baseline)
+        assert hub._validate_and_store_image.call_count == 1

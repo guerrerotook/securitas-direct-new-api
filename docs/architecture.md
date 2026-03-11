@@ -437,15 +437,23 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
 
 `SecuritasCamera` shows the last captured image from a Securitas camera device. One entity per discovered camera, grouped under the installation device.
 
-**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type "QR", and for each one a `SecuritasCamera` + `SecuritasCaptureButton` are created using stored `async_add_entities` callbacks.
+**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions) or `"YR"` (PIR cameras, Spain). For each device a `SecuritasCamera` + `SecuritasCaptureButton` are created using stored `async_add_entities` callbacks. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
 
 **Image lifecycle:**
 1. On first frontend request, `async_camera_image()` lazy-fetches the latest thumbnail via `fetch_latest_thumbnail()`
 2. Subsequent requests return the cached image (or a placeholder JPG if none exists)
-3. When `SecuritasCaptureButton` is pressed, `capture_image()` requests a new capture, polls for completion, and handles CDN propagation delay
-4. On new image availability, `SIGNAL_CAMERA_UPDATE` is dispatched, causing the camera entity to rotate its access token (so the frontend re-fetches from the proxy endpoint)
+3. When `SecuritasCaptureButton` is pressed, `capture_image()`:
+   - Sets the `capturing` state and dispatches `SIGNAL_CAMERA_STATE` so the frontend shows a spinner
+   - Fetches the current baseline thumbnail to detect missed intermediate images
+   - If the baseline image differs from the locally stored image, stores and displays it immediately (before the new capture arrives), then fires `SIGNAL_CAMERA_UPDATE`
+   - Requests a new capture via `request_images`, polls for completion, then polls the thumbnail until `idSignal` changes
+   - Fires `SIGNAL_CAMERA_UPDATE` on success (rotates access token so frontend re-fetches), or `SIGNAL_CAMERA_STATE` on failure (clears spinner without rotating token)
 
-**Extra state attributes:** `image_timestamp` — when the thumbnail was captured.
+**Signals:**
+- `SIGNAL_CAMERA_UPDATE` — new image available; camera entity rotates its access token so the frontend re-fetches
+- `SIGNAL_CAMERA_STATE` — capturing state changed (no image update); entity writes state without rotating token
+
+**Extra state attributes:** `image_timestamp` — when the thumbnail was captured; `capturing` — True while a capture is in progress.
 
 ### Buttons (`button.py`)
 

@@ -128,8 +128,10 @@ class SecuritasCameraCard extends HTMLElement {
     const newToken = hass?.states[this._config.entity]?.attributes?.access_token;
     this._hass = hass;
     this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
-    // Clear spinner when the image token rotates (new image available)
-    if (this._refreshing && newToken && newToken !== prevToken) {
+    // Clear spinner when the image token rotates (new image available) and
+    // the capture is no longer in progress (capturing=false means final image).
+    const capturing = hass?.states[this._config.entity]?.attributes?.capturing;
+    if (this._refreshing && newToken && newToken !== prevToken && !capturing) {
       clearTimeout(this._fallbackTimer);
       this._refreshing = false;
     }
@@ -278,7 +280,9 @@ class SecuritasCameraCard extends HTMLElement {
     clearTimeout(this._fallbackTimer);
     if (!this._captureEntityId || this._refreshing) return;
     this._refreshing = true;
-    this._render();
+    // Update just the button class — avoid full re-render which destroys the
+    // focused element and causes the page to jump to the top.
+    this.shadowRoot.getElementById("refresh-btn")?.classList.add("spinning");
     try {
       await this._hass.callService("button", "press", {
         entity_id: this._captureEntityId,

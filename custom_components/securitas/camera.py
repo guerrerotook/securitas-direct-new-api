@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import DOMAIN, SIGNAL_CAMERA_UPDATE, SecuritasHub
+from . import DOMAIN, SIGNAL_CAMERA_STATE, SIGNAL_CAMERA_UPDATE, SecuritasHub
 from .entity import camera_device_info
 from .securitas_direct_new_api import Installation
 from .securitas_direct_new_api.dataTypes import CameraDevice
@@ -76,19 +76,25 @@ class SecuritasCamera(Camera):
         timestamp = self._client.get_camera_timestamp(
             self._installation.number, self._camera_device.zone_id
         )
-        return {"image_timestamp": timestamp}
+        capturing = self._client.is_capturing(
+            self._installation.number, self._camera_device.zone_id
+        )
+        return {"image_timestamp": timestamp, "capturing": capturing}
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to camera update signal."""
+        """Subscribe to camera update signals."""
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, SIGNAL_CAMERA_UPDATE, self._handle_update
             )
         )
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, SIGNAL_CAMERA_STATE, self._handle_state)
+        )
 
     @callback
     def _handle_update(self, installation_number: str, zone_id: str) -> None:
-        """Handle new image availability."""
+        """Handle new image availability — rotate token so frontend re-fetches."""
         if (
             installation_number != self._installation.number
             or zone_id != self._camera_device.zone_id
@@ -97,4 +103,14 @@ class SecuritasCamera(Camera):
         # Rotate the access token so the frontend knows the image changed
         # and re-fetches from the proxy endpoint.
         self.async_update_token()
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_state(self, installation_number: str, zone_id: str) -> None:
+        """Handle capturing state change — write state without rotating token."""
+        if (
+            installation_number != self._installation.number
+            or zone_id != self._camera_device.zone_id
+        ):
+            return
         self.async_write_ha_state()

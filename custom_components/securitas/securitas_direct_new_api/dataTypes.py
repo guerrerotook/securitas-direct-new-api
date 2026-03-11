@@ -196,7 +196,7 @@ class DanalockConfig:
 
 @dataclass
 class CameraDevice:
-    """A camera device from xSDeviceList (type QR)."""
+    """A camera device from xSDeviceList (type YR for PIR cameras, QR in some regions)."""
 
     id: str = ""
     code: int = 0

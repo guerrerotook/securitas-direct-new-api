@@ -27,6 +27,7 @@ from .const import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     DOMAIN,
+    SIGNAL_CAMERA_STATE,
     SIGNAL_CAMERA_UPDATE,
     SIGNAL_XSSTATUS_UPDATE,
 )
@@ -155,6 +156,7 @@ class SecuritasHub:
         self.camera_images: dict[str, bytes] = {}
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
+        self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
 
     async def login(self):
         """Login to Securitas."""
@@ -210,11 +212,20 @@ class SecuritasHub:
         self._camera_devices_cache[key] = devices
         return devices
 
+    def is_capturing(self, installation_number: str, zone_id: str) -> bool:
+        """Return True if a capture is in progress for this camera."""
+        return f"{installation_number}_{zone_id}" in self._camera_capturing
+
     async def capture_image(
         self, installation: Installation, camera_device: CameraDevice
     ) -> bytes | None:
         """Request a new image capture and fetch the result."""
         device = camera_device
+        capture_key = f"{installation.number}_{device.zone_id}"
+        self._camera_capturing.add(capture_key)
+        async_dispatcher_send(
+            self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
+        )
 
         # Get the baseline thumbnail idSignal so we can detect when it changes
         baseline = await self._api_queue.submit(
@@ -225,6 +236,26 @@ class SecuritasHub:
             priority=ApiQueue.FOREGROUND,
         )
         baseline_id = baseline.id_signal
+
+        # If the baseline image differs from what we have stored, we missed a previous
+        # update — show it now while waiting for the new capture to arrive.
+        # The baseline is fetched before the new capture is requested, so it can never
+        # be the photo we're about to take.
+        key = f"{installation.number}_{device.zone_id}"
+        stored_timestamp = self.camera_timestamps.get(key)
+        if baseline.image and baseline.timestamp != stored_timestamp:
+            _LOGGER.debug(
+                "[hub] Storing missed image for %s (server: %s, stored: %s)",
+                device.name,
+                baseline.timestamp,
+                stored_timestamp,
+            )
+            self._validate_and_store_image(
+                baseline, installation, device, log_warnings=False
+            )
+            async_dispatcher_send(
+                self.hass, SIGNAL_CAMERA_UPDATE, installation.number, device.zone_id
+            )
 
         reference_id = await self._api_queue.submit(
             self.session.request_images,
@@ -280,9 +311,15 @@ class SecuritasHub:
             thumbnail, installation, device, log_warnings=True
         )
 
+        self._camera_capturing.discard(capture_key)
         if image_bytes is not None:
             async_dispatcher_send(
                 self.hass, SIGNAL_CAMERA_UPDATE, installation.number, device.zone_id
+            )
+        else:
+            # Even if no image arrived, clear the capturing state on the frontend
+            async_dispatcher_send(
+                self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
             )
         return image_bytes
 

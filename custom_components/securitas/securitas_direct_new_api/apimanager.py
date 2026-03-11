@@ -80,8 +80,8 @@ ALARM_STATUS_SERVICE_ID = "11"
 
 # Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
 
-# Device type for camera devices in xSDeviceList
-CAMERA_DEVICE_TYPE = "QR"
+# Device types for camera devices in xSDeviceList (YR = PIR camera, QR used in some regions)
+CAMERA_DEVICE_TYPES = {"QR", "YR"}
 
 # Image request parameters
 IMAGE_RESOLUTION = 0
@@ -360,7 +360,7 @@ class ApiManager(SecuritasHttpClient):
         }
         await self._check_authentication_token()
         self._register_installation(installation)
-        response = await self._execute_request(content, "Srv")
+        response = await self._execute_request(content, "Srv", installation)
 
         installation_data = (response.get("data") or {}).get("xSSrv") or {}
         installation_data = installation_data.get("installation")
@@ -1065,12 +1065,12 @@ class ApiManager(SecuritasHttpClient):
             CameraDevice(
                 id=d["id"],
                 code=int(d["code"]),
-                zone_id=d["zoneId"],
+                zone_id=d["zoneId"] or d["id"],
                 name=d["name"],
                 serial_number=d.get("serialNumber"),
             )
             for d in devices
-            if d.get("type") == CAMERA_DEVICE_TYPE and d.get("isActive", False)
+            if d.get("type") in CAMERA_DEVICE_TYPES and d.get("isActive") is not False
         ]
 
     async def request_images(self, installation: Installation, device_code: int) -> str:

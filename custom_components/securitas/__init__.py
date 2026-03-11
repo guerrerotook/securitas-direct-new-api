@@ -53,6 +53,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
+    SIGNAL_CAMERA_STATE,
     SIGNAL_CAMERA_UPDATE,
     SIGNAL_XSSTATUS_UPDATE,
 )
@@ -372,7 +373,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ]
         )
         await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
-        await _register_card_resource(hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id")
+        await _register_card_resource(
+            hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
+        )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
     hass.data.setdefault(DOMAIN, {})
@@ -440,15 +443,37 @@ async def _discover_cameras(
     from .button import SecuritasCaptureButton
     from .camera import SecuritasCamera
 
+    _LOGGER.debug(
+        "[camera_discovery] Fetching camera devices for installation %s (%s)",
+        installation.number,
+        installation.alias,
+    )
     try:
         cameras = await hub.get_camera_devices(installation)
     except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
-        _LOGGER.warning("Failed to get camera devices for %s", installation.number)
+        _LOGGER.warning(
+            "[camera_discovery] Failed to get camera devices for %s",
+            installation.number,
+            exc_info=True,
+        )
         cameras = []
+
+    _LOGGER.debug(
+        "[camera_discovery] Installation %s: found %d camera(s): %s",
+        installation.number,
+        len(cameras),
+        [c.zone_id for c in cameras],
+    )
 
     if cameras:
         camera_add = entry_data.get("camera_add_entities")
         button_add = entry_data.get("button_add_entities")
+        _LOGGER.debug(
+            "[camera_discovery] Installation %s: camera_add=%s button_add=%s",
+            installation.number,
+            camera_add is not None,
+            button_add is not None,
+        )
         if camera_add:
             camera_add(
                 [SecuritasCamera(hub, installation, cam) for cam in cameras],
@@ -646,7 +671,9 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
                 handler.removeFilter(log_filter)
 
         await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
-        await _unregister_card_resource(hass, CAMERA_CARD_URL, "camera_card_resource_id")
+        await _unregister_card_resource(
+            hass, CAMERA_CARD_URL, "camera_card_resource_id"
+        )
         hass.data.pop(DOMAIN, None)
 
     return unload_ok

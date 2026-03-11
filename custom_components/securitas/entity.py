@@ -28,10 +28,17 @@ def securitas_device_info(installation: Installation) -> DeviceInfo:
     )
 
 
-def camera_device_info(installation: Installation, camera_device: CameraDevice) -> DeviceInfo:
+def camera_device_info(
+    installation: Installation, camera_device: CameraDevice
+) -> DeviceInfo:
     """Build DeviceInfo for a per-camera child device."""
     return DeviceInfo(
-        identifiers={(DOMAIN, f"v4_securitas_direct.{installation.number}_camera_{camera_device.zone_id}")},
+        identifiers={
+            (
+                DOMAIN,
+                f"v4_securitas_direct.{installation.number}_camera_{camera_device.zone_id}",
+            )
+        },
         name=camera_device.name,
         manufacturer="Securitas Direct",
         model="Camera",

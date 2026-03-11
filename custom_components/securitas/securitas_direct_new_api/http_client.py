@@ -34,6 +34,31 @@ _LOGGER = logging.getLogger(__name__)
 API_CALLBY = "OWA_10"
 API_ID_PREFIX = "OWA_______________"
 
+# Keys whose values should be replaced with a placeholder in debug logs
+_LOG_TRUNCATE_KEYS = {"hours", "image"}
+
+
+def _sanitize_response_for_log(response_text: str) -> str:
+    """Replace large fields in a JSON response with a placeholder for logging."""
+    try:
+        data = json.loads(response_text)
+    except (json.JSONDecodeError, ValueError):
+        return response_text
+
+    def _truncate(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {
+                k: (["..."] if isinstance(v, list) else "...")
+                if k in _LOG_TRUNCATE_KEYS
+                else _truncate(v)
+                for k, v in obj.items()
+            }
+        if isinstance(obj, list):
+            return [_truncate(item) for item in obj]
+        return obj
+
+    return json.dumps(_truncate(data))
+
 
 class SecuritasHttpClient:
     """HTTP transport layer for the Securitas Direct API.
@@ -200,7 +225,12 @@ class SecuritasHttpClient:
                     getattr(err.os_error, "errno", None) if err.os_error else None,
                     getattr(err.os_error, "strerror", None) if err.os_error else None,
                     repr(err.__cause__),
-                    {k: v for k, v in headers.items() if k not in ("auth", "X-Capabilities")},
+                    {
+                        k: v
+                        for k, v in headers.items()
+                        if k not in ("auth", "X-Capabilities")
+                    },
+                    exc_info=True,
                 )
                 # --- END TEMPORARY DEBUG ---
                 raise SecuritasDirectError(
@@ -210,7 +240,11 @@ class SecuritasHttpClient:
                     content,
                 ) from err
 
-            _LOGGER.debug("%s response=%s", log_prefix, response_text)
+            _LOGGER.debug(
+                "%s response=%s",
+                log_prefix,
+                _sanitize_response_for_log(response_text),
+            )
 
             if http_status == 403 and attempt == 0:
                 # Incapsula WAF blocks return HTML — retrying immediately

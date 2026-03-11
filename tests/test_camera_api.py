@@ -147,7 +147,7 @@ class TestGetDeviceList:
         }
     }
 
-    async def test_returns_only_active_qr_devices(
+    async def test_returns_only_active_camera_devices(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = self.DEVICE_LIST_RESPONSE
@@ -165,6 +165,42 @@ class TestGetDeviceList:
         assert salon.zone_id == "QR10"
         assert salon.name == "Salon"
         assert salon.serial_number == "36NEYYER"
+
+    async def test_yr_pir_camera_with_null_zone_id(
+        self, authed_api, mock_execute, installation
+    ):
+        """YR (PIR camera) devices have zoneId=null; zone_id should fall back to device id."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "11",
+                            "code": "5",
+                            "zoneId": None,
+                            "name": "Pl_Home_Entrada_Fotoentrada",
+                            "type": "YR",
+                            "isActive": None,
+                            "serialNumber": None,
+                        },
+                        {
+                            "id": "12",
+                            "code": "6",
+                            "zoneId": None,
+                            "name": "Pl_Home_Habitacion_Hab",
+                            "type": "YR",
+                            "isActive": None,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 2
+        assert result[0].zone_id == "11"
+        assert result[1].zone_id == "12"
 
     async def test_empty_device_list(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
@@ -273,11 +309,67 @@ class TestGetThumbnail:
         assert result.id_signal is None
 
 
+class TestSanitizeResponseForLog:
+    """Tests for _sanitize_response_for_log in http_client."""
+
+    def setup_method(self):
+        from custom_components.securitas.securitas_direct_new_api.http_client import (
+            _sanitize_response_for_log,
+        )
+
+        self.fn = _sanitize_response_for_log
+
+    def test_truncates_image_field(self):
+        import json
+
+        raw = json.dumps({"image": "very_long_base64_data=="})
+        result = json.loads(self.fn(raw))
+        assert result["image"] == "..."
+
+    def test_truncates_hours_list_field(self):
+        import json
+
+        raw = json.dumps({"hours": [1, 2, 3, 4, 5]})
+        result = json.loads(self.fn(raw))
+        assert result["hours"] == ["..."]
+
+    def test_does_not_modify_other_fields(self):
+        import json
+
+        raw = json.dumps({"name": "Salon", "code": 42})
+        result = json.loads(self.fn(raw))
+        assert result["name"] == "Salon"
+        assert result["code"] == 42
+
+    def test_returns_non_json_as_is(self):
+        raw = "not valid json {"
+        assert self.fn(raw) == raw
+
+    def test_nested_truncation(self):
+        import json
+
+        raw = json.dumps(
+            {"data": {"xSGetThumbnail": {"image": "base64==", "type": "BINARY"}}}
+        )
+        result = json.loads(self.fn(raw))
+        assert result["data"]["xSGetThumbnail"]["image"] == "..."
+        assert result["data"]["xSGetThumbnail"]["type"] == "BINARY"
+
+
 class TestHubCameraOperations:
     def test_signal_constant_exists(self):
         from custom_components.securitas import SIGNAL_CAMERA_UPDATE
 
         assert isinstance(SIGNAL_CAMERA_UPDATE, str)
+
+    def test_signal_camera_state_constant_exists(self):
+        from custom_components.securitas import (
+            SIGNAL_CAMERA_STATE,
+            SIGNAL_CAMERA_UPDATE,
+        )
+
+        assert isinstance(SIGNAL_CAMERA_STATE, str)
+        assert SIGNAL_CAMERA_STATE != SIGNAL_CAMERA_UPDATE
 
     def test_get_camera_image_returns_none_when_empty(self):
         """Test that get_camera_image returns None for missing keys."""

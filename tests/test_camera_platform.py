@@ -14,7 +14,9 @@ from custom_components.securitas.entity import camera_device_info
 class TestCameraDeviceInfo:
     def test_identifiers_include_zone_id(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info[
+            "identifiers"
+        ]
 
     def test_name_is_camera_device_name(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
@@ -100,13 +102,17 @@ class TestSecuritasCamera:
         result = await cam.async_camera_image()
         assert result == _PLACEHOLDER_IMAGE
 
-    def test_device_info_uses_camera_sub_device(self, mock_hub, installation, camera_device):
+    def test_device_info_uses_camera_sub_device(
+        self, mock_hub, installation, camera_device
+    ):
         from custom_components.securitas.camera import SecuritasCamera
         from custom_components.securitas import DOMAIN
 
         cam = SecuritasCamera(mock_hub, installation, camera_device)
         info = cam.device_info
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info[
+            "identifiers"
+        ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
 
 
@@ -150,11 +156,15 @@ class TestSecuritasCaptureButton:
         # Should not raise
         await btn.async_press()
 
-    def test_device_info_uses_camera_sub_device(self, mock_hub, installation, camera_device):
+    def test_device_info_uses_camera_sub_device(
+        self, mock_hub, installation, camera_device
+    ):
         from custom_components.securitas.button import SecuritasCaptureButton
         from custom_components.securitas import DOMAIN
 
         btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
         info = btn.device_info
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info[
+            "identifiers"
+        ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
