@@ -11,6 +11,7 @@ from homeassistant.components import lock
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -20,8 +21,6 @@ from . import (
     SecuritasHub,
 )
 from .entity import SecuritasEntity
-from homeassistant.helpers.device_registry import DeviceInfo
-
 from .securitas_direct_new_api import (
     DanalockConfig,
     Installation,
