@@ -120,15 +120,161 @@ class SecuritasCameraCard extends HTMLElement {
     this._render();
   }
 
-  // Stub — full implementation added in Task 4
   _render() {
     const entityId = this._config.entity;
     const stateObj = this._hass?.states[entityId];
+
     if (!stateObj) {
-      this.shadowRoot.innerHTML = `<ha-card><div style="padding:16px;color:var(--error-color)">Entity not found: ${entityId}</div></ha-card>`;
+      this.shadowRoot.innerHTML = `
+      <ha-card>
+        <div style="padding:16px;color:var(--error-color)">
+          Entity not found: ${entityId}
+        </div>
+      </ha-card>`;
       return;
     }
-    this.shadowRoot.innerHTML = `<ha-card><div style="padding:16px">Camera card stub: ${entityId}</div></ha-card>`;
+
+    const token = stateObj.attributes.access_token || "";
+    const imgUrl = `/api/camera_proxy/${entityId}?token=${token}`;
+    const name = this._config.name || stateObj.attributes.friendly_name || entityId;
+    const timestamp = stateObj.attributes.image_timestamp;
+    const { relative, absolute } = this._formatTimestamp(timestamp);
+    const hasCapture = !!this._captureEntityId;
+
+    this.shadowRoot.innerHTML = `
+    <style>
+      ha-card {
+        position: relative;
+        overflow: hidden;
+        cursor: pointer;
+        padding: 0;
+      }
+      .img-wrapper {
+        width: 100%;
+        display: block;
+        position: relative;
+      }
+      .camera-img {
+        width: 100%;
+        display: block;
+        object-fit: cover;
+      }
+      .overlay {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 8px 12px;
+        background: linear-gradient(transparent, rgba(0,0,0,0.55));
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        pointer-events: none;
+      }
+      .name {
+        color: #fff;
+        font-size: 0.95em;
+        font-weight: 500;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+      }
+      .timestamp {
+        color: rgba(255,255,255,0.85);
+        font-size: 0.8em;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+        cursor: default;
+        pointer-events: all;
+      }
+      .refresh-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0,0,0,0.45);
+        border: none;
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        color: #fff;
+        transition: background 0.2s;
+        z-index: 2;
+      }
+      .refresh-btn:hover { background: rgba(0,0,0,0.65); }
+      .refresh-btn[hidden] { display: none; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .refresh-btn.spinning ha-icon { animation: spin 1s linear infinite; }
+    </style>
+    <ha-card>
+      <div class="img-wrapper" id="img-wrapper">
+        <img class="camera-img" src="${imgUrl}" alt="${name}" />
+        <div class="overlay">
+          <span class="name">${name}</span>
+          ${timestamp ? `<span class="timestamp" title="${absolute}">${relative}</span>` : ""}
+        </div>
+        <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn" ${hasCapture ? "" : "hidden"}>
+          <ha-icon icon="mdi:refresh"></ha-icon>
+        </button>
+      </div>
+    </ha-card>`;
+
+    // Click image → more-info dialog (but not if clicking the refresh button)
+    this.shadowRoot.getElementById("img-wrapper").addEventListener("click", (e) => {
+      if (e.target.closest("#refresh-btn")) return;
+      this._openMoreInfo();
+    });
+
+    // Refresh button
+    const refreshBtn = this.shadowRoot.getElementById("refresh-btn");
+    if (refreshBtn && !refreshBtn.hasAttribute("hidden")) {
+      refreshBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._handleRefresh();
+      });
+    }
+  }
+
+  _formatTimestamp(timestamp) {
+    if (!timestamp) return { relative: "", absolute: "" };
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) return { relative: timestamp, absolute: timestamp };
+    const absolute = date.toLocaleString();
+    const diffMs = Date.now() - date.getTime();
+    const diffSec = Math.round(diffMs / 1000);
+    if (diffSec < 60) return { relative: `${diffSec}s ago`, absolute };
+    const diffMin = Math.round(diffSec / 60);
+    if (diffMin < 60) return { relative: `${diffMin} min ago`, absolute };
+    const diffHr = Math.round(diffMin / 60);
+    if (diffHr < 24) return { relative: `${diffHr}h ago`, absolute };
+    return { relative: `${Math.round(diffHr / 24)}d ago`, absolute };
+  }
+
+  _openMoreInfo() {
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      detail: { entityId: this._config.entity },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  async _handleRefresh() {
+    if (!this._captureEntityId || this._refreshing) return;
+    this._refreshing = true;
+    this._render();
+    try {
+      await this._hass.callService("button", "press", {
+        entity_id: this._captureEntityId,
+      });
+    } finally {
+      // Fallback: clear spinner after 15s if no token rotation arrives
+      setTimeout(() => {
+        if (this._refreshing) {
+          this._refreshing = false;
+          this._render();
+        }
+      }, 15000);
+    }
   }
 
   _findCaptureButton(hass, cameraEntityId) {
