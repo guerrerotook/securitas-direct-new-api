@@ -7,6 +7,30 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     CameraDevice,
 )
 from custom_components.securitas.securitas_direct_new_api import Installation
+from custom_components.securitas import DOMAIN
+from custom_components.securitas.entity import camera_device_info
+
+
+class TestCameraDeviceInfo:
+    def test_identifiers_include_zone_id(self, installation, camera_device):
+        info = camera_device_info(installation, camera_device)
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+
+    def test_name_is_camera_device_name(self, installation, camera_device):
+        info = camera_device_info(installation, camera_device)
+        assert info["name"] == "Salon"
+
+    def test_manufacturer(self, installation, camera_device):
+        info = camera_device_info(installation, camera_device)
+        assert info["manufacturer"] == "Securitas Direct"
+
+    def test_model(self, installation, camera_device):
+        info = camera_device_info(installation, camera_device)
+        assert info["model"] == "Camera"
+
+    def test_via_device_points_to_installation(self, installation, camera_device):
+        info = camera_device_info(installation, camera_device)
+        assert info["via_device"] == (DOMAIN, "v4_securitas_direct.2654190")
 
 
 @pytest.fixture
