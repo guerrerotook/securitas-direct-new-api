@@ -111,6 +111,7 @@ class SecuritasCameraCard extends HTMLElement {
     this._hass = null;
     this._captureEntityId = null;
     this._refreshing = false;
+    this._fallbackTimer = null;
   }
 
   setConfig(config) {
@@ -125,6 +126,7 @@ class SecuritasCameraCard extends HTMLElement {
     this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
     // Clear spinner when the image token rotates (new image available)
     if (this._refreshing && newToken && newToken !== prevToken) {
+      clearTimeout(this._fallbackTimer);
       this._refreshing = false;
     }
     this._render();
@@ -218,10 +220,10 @@ class SecuritasCameraCard extends HTMLElement {
     </style>
     <ha-card>
       <div class="img-wrapper" id="img-wrapper">
-        <img class="camera-img" src="${imgUrl}" alt="${_escHtml(name)}" />
+        <img class="camera-img" src="${_escHtml(imgUrl)}" alt="${_escHtml(name)}" />
         <div class="overlay">
           <span class="name">${_escHtml(name)}</span>
-          ${timestamp ? `<span class="timestamp" title="${absolute}">${relative}</span>` : ""}
+          ${timestamp ? `<span class="timestamp" title="${_escHtml(absolute)}">${_escHtml(relative)}</span>` : ""}
         </div>
         <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn" ${hasCapture ? "" : "hidden"}>
           <ha-icon icon="mdi:refresh"></ha-icon>
@@ -269,6 +271,7 @@ class SecuritasCameraCard extends HTMLElement {
   }
 
   async _handleRefresh() {
+    clearTimeout(this._fallbackTimer);
     if (!this._captureEntityId || this._refreshing) return;
     this._refreshing = true;
     this._render();
@@ -278,7 +281,7 @@ class SecuritasCameraCard extends HTMLElement {
       });
     } finally {
       // Fallback: clear spinner after 15s if no token rotation arrives
-      setTimeout(() => {
+      this._fallbackTimer = setTimeout(() => {
         if (this._refreshing) {
           this._refreshing = false;
           this._render();
