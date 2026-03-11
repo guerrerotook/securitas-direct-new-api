@@ -622,6 +622,17 @@ class SecuritasHub:
             priority=ApiQueue.FOREGROUND,
         )
 
+    async def get_smart_lock_config(
+        self, installation: Installation, device_id: str
+    ) -> Any:
+        """Fetch smart lock config via queue-submitted API calls."""
+        return await self._api_queue.submit(
+            self.session.get_smart_lock_config,
+            installation,
+            device_id,
+            priority=ApiQueue.FOREGROUND,
+        )
+
     @property
     def api_queue(self) -> ApiQueue:
         """Return the API queue."""
