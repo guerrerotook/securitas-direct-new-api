@@ -30,31 +30,36 @@ class SecuritasCameraCardEditor extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
-    this._updating = false;
   }
 
   set hass(hass) {
     this._hass = hass;
-    // Propagate to ha-form elements already in DOM
     const entityForm = this.shadowRoot.getElementById("entity-form");
     if (entityForm) entityForm.hass = hass;
-    const nameForm = this.shadowRoot.getElementById("name-form");
-    if (nameForm) nameForm.hass = hass;
   }
 
   setConfig(config) {
     this._config = { ...config };
-    if (!this._updating) this._render();
+    if (!this.shadowRoot.getElementById("entity-form")) {
+      // First call — build the DOM once
+      this._render();
+    } else {
+      // Subsequent calls (HA bouncing config back) — update entity picker in place,
+      // never touch the name textfield so focus is preserved while typing
+      const entityForm = this.shadowRoot.getElementById("entity-form");
+      if (entityForm) entityForm.data = { entity: this._config.entity || "" };
+    }
   }
 
   _render() {
     this.shadowRoot.innerHTML = `
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+        ha-textfield { display: block; width: 100%; }
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
-        <ha-form id="name-form"></ha-form>
+        <div id="name-slot"></div>
       </div>`;
 
     // Entity picker — filtered to camera domain
@@ -68,33 +73,27 @@ class SecuritasCameraCardEditor extends HTMLElement {
     entityForm.addEventListener("value-changed", (e) => {
       const newEntity = e.detail.value?.entity;
       if (newEntity !== undefined) {
-        this._updating = true;
         this._config = { ...this._config, entity: newEntity };
         this._fireChanged();
-        this._updating = false;
       }
     });
 
-    // Name field — optional, shows "+ Add" when empty (standard ha-form text behaviour)
-    const nameForm = this.shadowRoot.getElementById("name-form");
-    nameForm.hass = this._hass;
-    nameForm.data = { name: this._config.name || "" };
-    nameForm.schema = [
-      { name: "name", selector: { text: {} } },
-    ];
-    nameForm.computeLabel = () => "Name";
-    nameForm.addEventListener("value-changed", (e) => {
-      const val = e.detail.value?.name ?? "";
-      this._updating = true;
+    // Name field — ha-textfield with input event (no value-changed → no re-render cycle)
+    const nameTf = document.createElement("ha-textfield");
+    nameTf.label = "Name";
+    nameTf.value = this._config.name || "";
+    nameTf.placeholder = "Override friendly name";
+    nameTf.addEventListener("input", (e) => {
+      const val = e.target.value;
       if (val.trim()) {
-        this._config = { ...this._config, name: val.trim() };
+        this._config = { ...this._config, name: val };
       } else {
         const { name: _, ...rest } = this._config;
         this._config = rest;
       }
       this._fireChanged();
-      this._updating = false;
     });
+    this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
   }
 
   _fireChanged() {
