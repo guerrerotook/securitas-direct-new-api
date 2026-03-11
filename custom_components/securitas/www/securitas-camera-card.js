@@ -30,6 +30,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    this._updating = false;
   }
 
   set hass(hass) {
@@ -43,7 +44,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
 
   setConfig(config) {
     this._config = { ...config };
-    this._render();
+    if (!this._updating) this._render();
   }
 
   _render() {
@@ -67,8 +68,10 @@ class SecuritasCameraCardEditor extends HTMLElement {
     entityForm.addEventListener("value-changed", (e) => {
       const newEntity = e.detail.value?.entity;
       if (newEntity !== undefined) {
+        this._updating = true;
         this._config = { ...this._config, entity: newEntity };
         this._fireChanged();
+        this._updating = false;
       }
     });
 
@@ -82,6 +85,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
     nameForm.computeLabel = () => "Name";
     nameForm.addEventListener("value-changed", (e) => {
       const val = e.detail.value?.name ?? "";
+      this._updating = true;
       if (val.trim()) {
         this._config = { ...this._config, name: val.trim() };
       } else {
@@ -89,6 +93,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
         this._config = rest;
       }
       this._fireChanged();
+      this._updating = false;
     });
   }
 
