@@ -46,13 +46,16 @@ class ApiQueue:
         self._bg_event = asyncio.Event()
         self._bg_event.set()  # initially no foreground work pending
 
-    async def submit(self, coro_fn, *args, priority: int = BACKGROUND):
+    async def submit(
+        self, coro_fn, *args, priority: int = BACKGROUND, label: str | None = None
+    ):
         """Submit an API call and wait for its result.
 
         Args:
             coro_fn: Async callable (not a coroutine — the queue calls it).
             *args: Arguments passed to coro_fn.
             priority: FOREGROUND or BACKGROUND.
+            label: Human-readable name for log messages (defaults to coro_fn.__name__).
 
         Returns:
             The result of coro_fn(*args).
@@ -60,6 +63,8 @@ class ApiQueue:
         Raises:
             Whatever coro_fn raises — exceptions propagate to the caller.
         """
+        if label is None:
+            label = getattr(coro_fn, "__name__", str(coro_fn))
         # Safe without lock: asyncio is single-threaded and these are
         # synchronous operations with no await in between.
         if priority == self.FOREGROUND:
@@ -83,7 +88,7 @@ class ApiQueue:
                         "[queue] Throttling %.1fs (%s) for %s",
                         delay,
                         "fg" if priority == self.FOREGROUND else "bg",
-                        getattr(coro_fn, "__name__", coro_fn),
+                        label,
                     )
                     await asyncio.sleep(delay)
 

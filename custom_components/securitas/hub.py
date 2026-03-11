@@ -100,7 +100,7 @@ class SecuritasDirectDevice:
     def device_info(self) -> DeviceInfo:
         """Return a device description for device registry."""
         return DeviceInfo(
-            identifiers={(DOMAIN, f"securitas_direct.{self.installation.number}")},
+            identifiers={(DOMAIN, f"v4_securitas_direct.{self.installation.number}")},
             manufacturer="Securitas Direct",
             model=self.installation.panel,
             hw_version=self.installation.type,
@@ -437,7 +437,10 @@ class SecuritasHub:
             return await coro_fn(*call_args)
 
         result = await self._api_queue.submit(
-            _call_with_cache_recheck, *args, priority=priority
+            _call_with_cache_recheck,
+            *args,
+            priority=priority,
+            label=f"{getattr(coro_fn, '__name__', coro_fn)}[{cache_key}]",
         )
 
         if result is _sentinel:
