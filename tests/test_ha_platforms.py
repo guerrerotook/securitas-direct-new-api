@@ -13,6 +13,7 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     Installation,
     Sentinel,
     Service,
+    SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
 )
@@ -90,6 +91,7 @@ def make_lock(
     device_id: str = "01",
     initial_status: str = "2",
     danalock_config: DanalockConfig | None = None,
+    lock_config: SmartLock | None = None,
 ):
     """Create a SecuritasLock with mocked dependencies."""
     installation = make_installation()
@@ -109,6 +111,7 @@ def make_lock(
         device_id=device_id,
         initial_status=initial_status,
         danalock_config=danalock_config,
+        lock_config=lock_config,
     )
     lock_entity.entity_id = f"lock.securitas_{installation.number}_{device_id}"
     # Mock HA state-writing methods (no platform registered in unit tests)
@@ -515,23 +518,59 @@ class TestSecuritasLockConfig:
         lock = make_lock(device_id="02")
         assert lock._attr_unique_id == "securitas_direct.123456_lock_02"
 
-    def test_device_info_groups_under_installation(self):
-        """All locks share the installation device (same as alarm panel)."""
+    def test_device_info_creates_separate_lock_device_with_config(self):
+        """Lock with config gets its own device with metadata."""
+        config = SmartLock(
+            res="OK",
+            location="Front Door",
+            family="DR",
+            serialNumber="SN001",
+        )
+        lock = make_lock(device_id="01", lock_config=config)
+        info = lock._attr_device_info
+        assert info is not None
+        assert info["identifiers"] == {
+            ("securitas", "securitas_direct.123456_lock_01")
+        }
+        assert info["via_device"] == ("securitas", "securitas_direct.123456")
+        assert info["name"] == "Front Door"
+        assert info["model"] == "DR"
+        assert info["serial_number"] == "SN001"
+        assert info["manufacturer"] == "Securitas Direct"
+
+    def test_device_info_fallback_without_config(self):
+        """Lock without config falls back to installation-based device."""
+        lock = make_lock(device_id="01")
+        info = lock._attr_device_info
+        assert info is not None
+        assert info["identifiers"] == {
+            ("securitas", "securitas_direct.123456_lock_01")
+        }
+        assert info["via_device"] == ("securitas", "securitas_direct.123456")
+        assert info["name"] == "Home Lock 01"
+        assert info["manufacturer"] == "Securitas Direct"
+
+    def test_device_info_fallback_empty_location(self):
+        """Lock with config but empty location uses installation alias."""
+        config = SmartLock(res="OK", location="", family="DR")
+        lock = make_lock(device_id="02", lock_config=config)
+        info = lock._attr_device_info
+        assert info["name"] == "Home Lock 02"
+        assert info["model"] == "DR"
+
+    def test_device_info_different_devices_have_different_identifiers(self):
+        """Each lock gets its own device identifier."""
         lock01 = make_lock(device_id="01")
         lock02 = make_lock(device_id="02")
-        assert lock01._attr_device_info is not None
-        assert lock02._attr_device_info is not None
-        # Both locks share the same device identifier
         assert (
-            lock01._attr_device_info["identifiers"]  # type: ignore[typeddict-item]
-            == lock02._attr_device_info["identifiers"]  # type: ignore[typeddict-item]
+            lock01._attr_device_info["identifiers"]
+            != lock02._attr_device_info["identifiers"]
         )
-        # Identifier matches the alarm panel's pattern
-        assert lock01._attr_device_info["identifiers"] == {  # type: ignore[typeddict-item]
-            ("securitas", "securitas_direct.123456")
-        }
-        # Device name is the installation alias, not a lock-specific name
-        assert lock01._attr_device_info["name"] == "Home"  # type: ignore[typeddict-item]
+        # But both link to the same parent
+        assert (
+            lock01._attr_device_info["via_device"]
+            == lock02._attr_device_info["via_device"]
+        )
 
     def test_initial_status_unknown_defaults_to_locked(self):
         lock = make_lock(initial_status="0")

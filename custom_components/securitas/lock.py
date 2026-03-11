@@ -20,10 +20,13 @@ from . import (
     SecuritasHub,
 )
 from .entity import SecuritasEntity
+from homeassistant.helpers.device_registry import DeviceInfo
+
 from .securitas_direct_new_api import (
     DanalockConfig,
     Installation,
     SecuritasDirectError,
+    SmartLock,
 )
 from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
 
@@ -66,6 +69,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         device_id: str = SMARTLOCK_DEVICE_ID,
         initial_status: str = LOCK_STATUS_LOCKED,
         danalock_config: DanalockConfig | None = None,
+        lock_config: SmartLock | None = None,
     ) -> None:
         super().__init__(installation, client)
         self._state = (
@@ -80,10 +84,34 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._device_id: str = device_id
         self._danalock_config: DanalockConfig | None = danalock_config
         self._danalock_config_fetched: bool = danalock_config is not None
+        self._lock_config: SmartLock | None = lock_config
 
-        self._attr_name = f"{installation.alias} Lock {device_id}"
+        # Name: prefer lock_config.location if non-empty, else fallback
+        name = (
+            lock_config.location
+            if lock_config and lock_config.location
+            else f"{installation.alias} Lock {device_id}"
+        )
+        self._attr_name = name
         self._attr_unique_id = (
             f"securitas_direct.{installation.number}_lock_{device_id}"
+        )
+
+        # Override device_info: each lock gets its own device, linked to
+        # the installation device via via_device.
+        self._attr_device_info = DeviceInfo(
+            identifiers={
+                (DOMAIN, f"securitas_direct.{installation.number}_lock_{device_id}")
+            },
+            via_device=(DOMAIN, f"securitas_direct.{installation.number}"),
+            name=name,
+            manufacturer="Securitas Direct",
+            model=lock_config.family if lock_config and lock_config.family else None,
+            serial_number=(
+                lock_config.serialNumber
+                if lock_config and lock_config.serialNumber
+                else None
+            ),
         )
 
         self.hass: HomeAssistant = hass
