@@ -7,7 +7,6 @@ import time
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import (
     CONF_CODE,
@@ -51,20 +50,21 @@ from . import (
     SecuritasHub,
     generate_uuid,
 )
+from .api_queue import ApiQueue
 from .securitas_direct_new_api import (
+    PERI_DEFAULTS,
+    PERI_OPTIONS,
+    STATE_LABELS,
+    STD_DEFAULTS,
+    STD_OPTIONS,
     Attribute,
     Attributes,
     Installation,
     Login2FAError,
     LoginError,
     OtpPhone,
-    PERI_DEFAULTS,
-    PERI_OPTIONS,
     SecuritasDirectError,
     Service,
-    STD_DEFAULTS,
-    STD_OPTIONS,
-    STATE_LABELS,
 )
 
 VERSION = 3
@@ -441,7 +441,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         assert self.securitas is not None
         try:
-            services = await self.securitas.get_services(installation)
+            services = await self.securitas.get_services(
+                installation, priority=ApiQueue.FOREGROUND
+            )
         except SecuritasDirectError as err:
             _LOGGER.error(
                 "Failed to fetch services for %s: %s", installation.number, err
