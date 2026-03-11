@@ -132,6 +132,12 @@ class SmartLock:
     res: str | None = None
     location: str | None = None
     type: int | None = None
+    deviceId: str = ""
+    referenceId: str = ""
+    zoneId: str = ""
+    serialNumber: str = ""
+    family: str = ""
+    label: str = ""
 
 
 @dataclass

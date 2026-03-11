@@ -776,7 +776,9 @@ class ApiManager(SecuritasHttpClient):
         disarm_data = self._extract_response_data(response, "xSDisarmStatus")
         return disarm_data
 
-    async def get_smart_lock_config(self, installation: Installation) -> SmartLock:
+    async def get_smart_lock_config(
+        self, installation: Installation, device_id: str = SMARTLOCK_DEVICE_ID
+    ) -> SmartLock:
         """Fetch smart lock configuration for the installation."""
         content = {
             "operationName": "xSGetSmartlockConfig",
@@ -786,7 +788,7 @@ class ApiManager(SecuritasHttpClient):
                 "devices": [
                     {
                         "deviceType": SMARTLOCK_DEVICE_TYPE,
-                        "deviceId": SMARTLOCK_DEVICE_ID,
+                        "deviceId": device_id,
                         "keytype": SMARTLOCK_KEY_TYPE,
                     }
                 ],
@@ -800,8 +802,17 @@ class ApiManager(SecuritasHttpClient):
 
         raw_data = response.get("data", {}).get("xSGetSmartlockConfig")
         if raw_data is None:
-            return SmartLock(None, None, None)
-        return SmartLock(raw_data["res"], raw_data["location"], raw_data["type"])
+            return SmartLock()
+        return SmartLock(
+            res=raw_data.get("res"),
+            location=raw_data.get("location"),
+            type=raw_data.get("type"),
+            referenceId=raw_data.get("referenceId", ""),
+            zoneId=raw_data.get("zoneId", ""),
+            serialNumber=raw_data.get("serialNumber", ""),
+            family=raw_data.get("family", ""),
+            label=raw_data.get("label", ""),
+        )
 
     async def get_lock_current_mode(
         self, installation: Installation

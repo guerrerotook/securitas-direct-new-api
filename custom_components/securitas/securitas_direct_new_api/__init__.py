@@ -25,6 +25,7 @@ from .dataTypes import (  # noqa: F401
     OtpPhone,
     Service,
     SStatus,
+    SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
     ThumbnailResponse,

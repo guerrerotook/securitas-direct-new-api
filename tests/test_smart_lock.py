@@ -33,7 +33,7 @@ def authed_api(api):
 
 
 class TestGetSmartLockConfig:
-    async def test_success_returns_smart_lock(
+    async def test_success_returns_all_fields(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {
@@ -54,10 +54,56 @@ class TestGetSmartLockConfig:
 
         result = await authed_api.get_smart_lock_config(installation)
 
-        assert isinstance(result, SmartLock)
         assert result.res == "OK"
         assert result.location == "Front Door"
         assert result.type == 1
+        assert result.deviceId == ""  # not in response, uses default
+        assert result.referenceId == "ref1"
+        assert result.zoneId == "z1"
+        assert result.serialNumber == "SN001"
+        assert result.family == "DR"
+        assert result.label == "lock1"
+
+    async def test_device_id_passed_to_query(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetSmartlockConfig": {
+                    "res": "OK",
+                    "location": "Back Door",
+                    "type": 1,
+                }
+            }
+        }
+
+        await authed_api.get_smart_lock_config(installation, device_id="02")
+
+        call_args = mock_execute.call_args[0][0]
+        devices = call_args["variables"]["devices"]
+        assert devices[0]["deviceId"] == "02"
+
+    async def test_missing_fields_use_defaults(
+        self, authed_api, mock_execute, installation
+    ):
+        mock_execute.return_value = {
+            "data": {
+                "xSGetSmartlockConfig": {
+                    "res": "OK",
+                    "location": "Hall",
+                    "type": 2,
+                }
+            }
+        }
+
+        result = await authed_api.get_smart_lock_config(installation)
+
+        assert result.res == "OK"
+        assert result.location == "Hall"
+        assert result.referenceId == ""
+        assert result.serialNumber == ""
+        assert result.family == ""
+        assert result.label == ""
 
     async def test_error_in_response_returns_empty_smart_lock(
         self, authed_api, mock_execute, installation
