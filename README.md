@@ -9,11 +9,12 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 - **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Securitas alarm mode.
 - **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you and lets you force-arm via mobile notification, the `securitas.force_arm` service, or the custom alarm card.
 - **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI.
+- **Refresh button** — manually trigger an alarm status check.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
 - **Smart locks** — lock and unlock smart door locks. Multiple locks per installation supported, including Danalock configuration attributes (battery, auto-lock, arm-lock policies).
-- **Cameras** — view the latest captured image from Securitas cameras, with a capture button to request new images on demand.
-- **Refresh button** — manually trigger an alarm status check.
+- **Cameras** — view the latest captured image from Securitas cameras, with a capture button to request new images on demand, and a custom camera card for easy display
+- **Custom camera card** — a purpose-built Lovelace card to show photographs from the cameras with a refresh button to request a new photograph
 - **PIN code protection** — optional local PIN code for arming and/or disarming the alarm from Home Assistant (independent of your Securitas account).
 - **Two-factor authentication** — login via SMS verification code.
 
@@ -23,7 +24,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 
 **You will need to delete your existing installations and to re-add them after upgrading.**
 
-- **Entity IDs** have changed and sensors and locks are now listed as entities under the installation, rather than as top-level devices.
+- **Entity IDs** have changed. Locks and cameras are listed as sub-devices alongside the alarm control panel, and sensors and are now listed as entities under the installation, rather than as top-level devices.
 - **"Check alarm panel" option removed** — The integration now always uses the lightweight server-side status check for periodic polling. The more expensive panel query is still used for arm/disarm operations and the manual refresh button. If you had automations or scripts referencing this option, they will need to be updated.
 - **"Use 2FA" checkbox removed** — 2FA is now handled automatically during setup. If your account requires 2FA, you will be prompted; if not, the step is skipped.
 - **Per-installation config entries** — The integration now creates one config entry per installation instead of one per account. If your account has multiple installations, you add each one separately via the setup wizard (which now includes an installation picker step). Accounts with multiple installations previously had all installations bundled into a single config entry — this is no longer supported.
@@ -257,9 +258,29 @@ For Danalock locks, the entity exposes additional attributes: battery threshold,
 
 If your installation includes Securitas cameras, the integration creates a camera entity showing the last captured image. A **Capture** button entity is also created for each camera, allowing you to request a new image on demand.
 
-Both QR-type cameras (Italy and some regions) and YR-type PIR cameras (Spain) are supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
+Both QR-type cameras and YR-type PIR cameras are supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
 
 When the capture button is pressed, the integration checks whether any images were taken since the last update (e.g. via the Securitas app or web portal) and displays them immediately, even before the newly requested capture arrives.
+
+### Custom Camera Card
+
+The integration also ships with a custom Lovelace card (`securitas-camera-card`) purpose-built for Securitas cameras.
+
+![Camera Card](./docs/images/camera-card.png)
+
+It shows the latest image with:
+
+- **Capture button** — shown in the top-right corner, requests a new photograph
+- **Timestamp overlay** — displays when the image was taken, with a relative time and an absolute tooltip
+- **Click to open** — click the image to open a larger image
+
+The card is registered automatically when the integration loads. To add it to your dashboard, click **Add Card → Search for "Securitas Camera Card"** and pick your camera entity from the dropdown.
+
+```yaml
+type: custom:securitas-camera-card
+entity: camera.securitas_front_door
+name: Front Door # optional — overrides the entity friendly name
+```
 
 ## Troubleshooting
 

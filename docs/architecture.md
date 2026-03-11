@@ -754,4 +754,5 @@ Three parallel jobs run on every PR and push to main:
 | `securitas_direct_new_api/dataTypes.py` | 211 | Response dataclasses (including Danalock, Camera, SStatus) |
 | `securitas_direct_new_api/domains.py` | 49 | Country-to-URL routing |
 | `securitas_direct_new_api/exceptions.py` | 84 | Exception hierarchy with `http_status` and `ArmingExceptionError` |
-| `www/securitas-alarm-card.js` | 1169 | Custom Lovelace alarm card with WAF warning banner, multi-language |
+| `www/securitas-alarm-card.js` | 1175 | Custom Lovelace alarm card with WAF warning banner, multi-language |
+| `www/securitas-camera-card.js` | 344 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner |
