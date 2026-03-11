@@ -219,7 +219,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 - In-flight API calls are not cancelled; preemption happens between calls
 
 **Algorithm:**
-1. `submit(coro_fn, *args, priority)` accepts an async callable + args
+1. `submit(coro_fn, *args, priority, label)` accepts an async callable + args. The optional `label` overrides the function name in throttle log messages (used by `_cached_api_call` to log the real API method name + cache key instead of the inner wrapper name).
 2. Foreground increments `_pending_foreground` and clears `_bg_event`
 3. Background waits while `_pending_foreground > 0`
 4. Lock ensures minimum gap between calls: `interval - elapsed_since_last_api_time`
@@ -421,7 +421,7 @@ Sentinel sensors are discovered during platform setup by scanning services for o
 
 `SecuritasLock` controls DOORLOCK services. Supports multiple locks per installation — each lock is identified by a `device_id` (extracted from the API response, defaults to `"01"`).
 
-**Discovery:** Locks are discovered in the background task (`_async_discover_devices`). When a DOORLOCK service is found, `get_lock_modes()` returns all known lock devices. For each lock, `get_smart_lock_config(device_id)` is called to fetch metadata from the `xSGetSmartlockConfig` API response (location name, serial number, device family). Each lock creates a separate HA device with `via_device` linking to the installation device as parent; name, model, and serial number in the `DeviceInfo` come from the config response. If the config fetch fails, the lock still works but falls back to using the installation alias as the device name with no serial number or model. One `SecuritasLock` entity is created per device. Unique IDs follow the format `securitas_direct.{number}_lock_{device_id}`.
+**Discovery:** Locks are discovered in the background task (`_async_discover_devices`). When a DOORLOCK service is found, `get_lock_modes()` returns all known lock devices. For each lock, `get_smart_lock_config(device_id)` is called to fetch metadata from the `xSGetSmartlockConfig` API response (location name, serial number, device family). Each lock creates a separate HA device with `via_device` linking to the installation device as parent; name, model, and serial number in the `DeviceInfo` come from the config response. If the config fetch fails, the lock still works but falls back to using the installation alias as the device name with no serial number or model. One `SecuritasLock` entity is created per device. Unique IDs follow the format `v4_securitas_direct.{number}_lock_{device_id}`.
 
 **Lock states** (string codes from the API):
 - `"1"` = open/unlocked
@@ -473,7 +473,9 @@ Step 3 (otp_challenge, if 2FA): Enter the SMS code
 → finish_setup(): Login, list installations, get_services per installation
 Step 4 (select_installation, if multiple): Pick which installation to configure
   → Auto-detection of perimeter support from service attributes (PERI attribute)
+  → get_services uses FOREGROUND priority to avoid blocking behind background queue traffic
 Step 5 (options): PIN, code-required-to-arm, notify service
+  → Title shows installation name ("Options for {installation_name}")
   → Advanced section (collapsed): scan interval, delay between API requests
 Step 6 (mappings): Map HA alarm buttons to Securitas states
   Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
