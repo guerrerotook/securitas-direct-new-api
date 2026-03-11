@@ -184,13 +184,25 @@ class SecuritasHttpClient:
                     response_text: str = await response.text()
             except ClientConnectorError as err:
                 os_err = err.os_error or err.strerror or "unknown"
+                # --- TEMPORARY DEBUG: full connection failure diagnostics ---
                 _LOGGER.debug(
-                    "%s ClientConnectorError: %s (os_error=%r, type=%s)",
+                    "%s ClientConnectorError DETAIL: host=%r port=%r ssl=%r"
+                    " | err=%s"
+                    " | os_error class=%s errno=%r strerror=%r"
+                    " | cause=%r"
+                    " | request_headers=%s",
                     log_prefix,
+                    getattr(err, "host", "?"),
+                    getattr(err, "port", "?"),
+                    getattr(err, "ssl", "?"),
                     err,
-                    err.os_error,
                     type(err.os_error).__name__ if err.os_error else "None",
+                    getattr(err.os_error, "errno", None) if err.os_error else None,
+                    getattr(err.os_error, "strerror", None) if err.os_error else None,
+                    repr(err.__cause__),
+                    {k: v for k, v in headers.items() if k not in ("auth", "X-Capabilities")},
                 )
+                # --- END TEMPORARY DEBUG ---
                 raise SecuritasDirectError(
                     f"Connection error with URL {self.api_url}: {os_err}",
                     None,
