@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN, SecuritasDirectDevice, SecuritasHub
-from .entity import SecuritasEntity
+from .entity import SecuritasEntity, camera_device_info
 from .securitas_direct_new_api import (
     Installation,
     SecuritasDirectError,
@@ -132,6 +132,7 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
             f"v4_{installation.number}_capture_{camera_device.zone_id}"
         )
         self._attr_name = f"{installation.alias} Capture {camera_device.name}"
+        self._attr_device_info = camera_device_info(installation, camera_device)
 
     async def async_press(self) -> None:
         """Request a new image capture."""

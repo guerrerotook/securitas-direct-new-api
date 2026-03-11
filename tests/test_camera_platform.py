@@ -149,3 +149,12 @@ class TestSecuritasCaptureButton:
         btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
         # Should not raise
         await btn.async_press()
+
+    def test_device_info_uses_camera_sub_device(self, mock_hub, installation, camera_device):
+        from custom_components.securitas.button import SecuritasCaptureButton
+        from custom_components.securitas import DOMAIN
+
+        btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
+        info = btn.device_info
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
