@@ -34,13 +34,13 @@
             },
             "select_installation": {
                 "title": "Selecionar instalação",
-                "description": "Foram encontradas várias instalações. Selecione a que pretende configurar.",
+                "description": "Selecione a instalação a configurar.",
                 "data": {
                     "installation": "Instalação"
                 }
             },
             "options": {
-                "title": "Opções",
+                "title": "Opções para {installation_name}",
                 "description": "Configurar opções do alarme.",
                 "data": {
                     "code": "Código PIN (deixar vazio para não usar PIN)",
