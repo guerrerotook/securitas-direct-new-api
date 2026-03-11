@@ -11,6 +11,8 @@ SIGNAL_CAMERA_UPDATE = f"{DOMAIN}_camera_update"
 CARD_BASE_URL = "/securitas_panel/securitas-alarm-card.js"
 _MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text())
 CARD_URL = f"{CARD_BASE_URL}?v={_MANIFEST['version']}"
+CAMERA_CARD_BASE_URL = "/securitas_panel/securitas-camera-card.js"
+CAMERA_CARD_URL = f"{CAMERA_CARD_BASE_URL}?v={_MANIFEST['version']}"
 
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
