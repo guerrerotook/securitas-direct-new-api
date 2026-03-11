@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 def securitas_device_info(installation: Installation) -> DeviceInfo:
     """Build DeviceInfo that groups entities under the installation device."""
     return DeviceInfo(
-        identifiers={(DOMAIN, f"securitas_direct.{installation.number}")},
+        identifiers={(DOMAIN, f"v4_securitas_direct.{installation.number}")},
         manufacturer="Securitas Direct",
         model=installation.panel,
         name=installation.alias,

@@ -117,7 +117,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         super().__init__(installation, client)
         self._device: str = installation.address
         self._attr_name = installation.alias
-        self._attr_unique_id: str | None = f"securitas_direct.{installation.number}"
+        self._attr_unique_id: str | None = f"v4_securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}

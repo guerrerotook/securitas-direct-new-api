@@ -85,7 +85,7 @@ class SentinelTemperature(SecuritasEntity, SensorEntity):
     ) -> None:
         """Init the component."""
         super().__init__(installation, client)
-        self._attr_unique_id = f"{installation.number}_temperature_{service.id}"
+        self._attr_unique_id = f"v4_{installation.number}_temperature_{service.id}"
         self._attr_name = f"{installation.alias} Temperature"
         self._service: Service = service
 
@@ -122,7 +122,7 @@ class SentinelHumidity(SecuritasEntity, SensorEntity):
     ) -> None:
         """Init the component."""
         super().__init__(installation, client)
-        self._attr_unique_id = f"{installation.number}_humidity_{service.id}"
+        self._attr_unique_id = f"v4_{installation.number}_humidity_{service.id}"
         self._attr_name = f"{installation.alias} Humidity"
         self._service: Service = service
 
@@ -200,7 +200,9 @@ class SentinelAirQuality(SecuritasEntity, SensorEntity):
     ) -> None:
         super().__init__(installation, fetcher._client)
         self._fetcher = fetcher
-        self._attr_unique_id = f"{installation.number}_airquality_{fetcher._service.id}"
+        self._attr_unique_id = (
+            f"v4_{installation.number}_airquality_{fetcher._service.id}"
+        )
         self._attr_name = f"{installation.alias} Air Quality"
 
     async def async_update(self):
@@ -223,7 +225,7 @@ class SentinelAirQualityStatus(SecuritasEntity, SensorEntity):
         super().__init__(installation, fetcher._client)
         self._fetcher = fetcher
         self._attr_unique_id = (
-            f"{installation.number}_airquality_status_{fetcher._service.id}"
+            f"v4_{installation.number}_airquality_status_{fetcher._service.id}"
         )
         self._attr_name = f"{installation.alias} Air Quality Status"
 

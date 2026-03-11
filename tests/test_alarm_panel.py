@@ -702,7 +702,7 @@ class TestProperties:
     def test_unique_id(self):
         """unique_id is derived from installation number."""
         alarm = make_alarm()
-        assert alarm._attr_unique_id == "securitas_direct.123456"
+        assert alarm._attr_unique_id == "v4_securitas_direct.123456"
 
     def test_device_info(self):
         """device_info contains correct manufacturer, model, and name."""

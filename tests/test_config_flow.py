@@ -144,7 +144,7 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
     hub.send_sms_code = AsyncMock(side_effect=_send_sms_code)
 
     # get_services sets alarm_partitions on the installation (no peri by default)
-    async def _get_services(installation):
+    async def _get_services(installation, **kwargs):
         installation.alarm_partitions = []
         return []
 
@@ -1221,7 +1221,7 @@ async def test_peri_detected_from_service_attributes(hass):
     """When a service has a PERI attribute, CONF_HAS_PERI should be True."""
     mock_hub = _hub_factory()
 
-    async def _get_services_with_peri_attr(installation):
+    async def _get_services_with_peri_attr(installation, **kwargs):
         installation.alarm_partitions = []
         svc = MagicMock()
         svc.attributes = [

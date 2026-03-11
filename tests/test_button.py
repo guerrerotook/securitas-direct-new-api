@@ -53,13 +53,13 @@ class TestSecuritasRefreshButtonInit:
     def test_unique_id_format(self):
         """unique_id follows refresh_button_{number} format."""
         button = make_button()
-        assert button._attr_unique_id == "refresh_button_123456"
+        assert button._attr_unique_id == "v4_refresh_button_123456"
 
     def test_device_info_identifiers(self):
         """device_info contains correct identifiers, manufacturer, and model."""
         button = make_button()
         info = button._attr_device_info
-        assert (DOMAIN, "securitas_direct.123456") in info["identifiers"]  # type: ignore[typeddict-item]
+        assert (DOMAIN, "v4_securitas_direct.123456") in info["identifiers"]  # type: ignore[typeddict-item]
         assert info["manufacturer"] == "Securitas Direct"  # type: ignore[typeddict-item]
         assert info["model"] == "SDVFAST"  # type: ignore[typeddict-item]
         assert info["name"] == "Home"  # type: ignore[typeddict-item]
@@ -246,7 +246,7 @@ class TestAsyncSetupEntry:
         assert len(buttons) == 1
         assert isinstance(buttons[0], SecuritasRefreshButton)
         assert buttons[0]._attr_name == "Refresh Garage"
-        assert buttons[0]._attr_unique_id == "refresh_button_333"
+        assert buttons[0]._attr_unique_id == "v4_refresh_button_333"
 
     async def test_update_flag_passed_to_async_add_entities(self):
         """async_add_entities is called with update_before_add=True."""

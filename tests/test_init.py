@@ -244,7 +244,7 @@ class TestSecuritasDirectDevice:
         """device_info should return a valid DeviceInfo dict."""
         device = self._make_device(alias="MyHome", type="PREMIUM", panel="SDVFAST")
         info = device.device_info
-        assert info["identifiers"] == {(DOMAIN, "securitas_direct.123456")}  # type: ignore[typeddict-item]
+        assert info["identifiers"] == {(DOMAIN, "v4_securitas_direct.123456")}  # type: ignore[typeddict-item]
         assert info["manufacturer"] == "Securitas Direct"  # type: ignore[typeddict-item]
         assert info["model"] == "SDVFAST"  # type: ignore[typeddict-item]
         assert info["hw_version"] == "PREMIUM"  # type: ignore[typeddict-item]

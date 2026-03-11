@@ -41,7 +41,7 @@ class TestWifiConnectedSensorInit:
 
     def test_unique_id_format(self):
         sensor = make_sensor()
-        assert sensor._attr_unique_id == "123456_wifi_connected"
+        assert sensor._attr_unique_id == "v4_123456_wifi_connected"
 
     def test_name_includes_installation_alias(self):
         sensor = make_sensor()

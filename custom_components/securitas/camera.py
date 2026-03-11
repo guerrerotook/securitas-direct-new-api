@@ -48,7 +48,9 @@ class SecuritasCamera(Camera):
         self._client = client
         self._installation = installation
         self._camera_device = camera_device
-        self._attr_unique_id = f"{installation.number}_camera_{camera_device.zone_id}"
+        self._attr_unique_id = (
+            f"v4_{installation.number}_camera_{camera_device.zone_id}"
+        )
         self._attr_name = f"{installation.alias} {camera_device.name}"
         self._attr_device_info = securitas_device_info(installation)
         self._initial_fetch_done = False

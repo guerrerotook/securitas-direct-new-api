@@ -93,16 +93,16 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         )
         self._attr_name = name
         self._attr_unique_id = (
-            f"securitas_direct.{installation.number}_lock_{device_id}"
+            f"v4_securitas_direct.{installation.number}_lock_{device_id}"
         )
 
         # Override device_info: each lock gets its own device, linked to
         # the installation device via via_device.
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (DOMAIN, f"securitas_direct.{installation.number}_lock_{device_id}")
+                (DOMAIN, f"v4_securitas_direct.{installation.number}_lock_{device_id}")
             },
-            via_device=(DOMAIN, f"securitas_direct.{installation.number}"),
+            via_device=(DOMAIN, f"v4_securitas_direct.{installation.number}"),
             name=name,
             manufacturer="Securitas Direct",
             model=lock_config.family if lock_config and lock_config.family else None,

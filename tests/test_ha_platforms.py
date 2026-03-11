@@ -512,11 +512,11 @@ class TestSecuritasLockConfig:
 
     def test_unique_id_includes_device_id(self):
         lock = make_lock(device_id="01")
-        assert lock._attr_unique_id == "securitas_direct.123456_lock_01"
+        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_01"
 
     def test_unique_id_different_device(self):
         lock = make_lock(device_id="02")
-        assert lock._attr_unique_id == "securitas_direct.123456_lock_02"
+        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_02"
 
     def test_device_info_creates_separate_lock_device_with_config(self):
         """Lock with config gets its own device with metadata."""
@@ -529,8 +529,10 @@ class TestSecuritasLockConfig:
         lock = make_lock(device_id="01", lock_config=config)
         info = lock._attr_device_info
         assert info is not None
-        assert info["identifiers"] == {("securitas", "securitas_direct.123456_lock_01")}
-        assert info["via_device"] == ("securitas", "securitas_direct.123456")
+        assert info["identifiers"] == {
+            ("securitas", "v4_securitas_direct.123456_lock_01")
+        }
+        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
         assert info["name"] == "Front Door"
         assert info["model"] == "DR"
         assert info["serial_number"] == "SN001"
@@ -541,8 +543,10 @@ class TestSecuritasLockConfig:
         lock = make_lock(device_id="01")
         info = lock._attr_device_info
         assert info is not None
-        assert info["identifiers"] == {("securitas", "securitas_direct.123456_lock_01")}
-        assert info["via_device"] == ("securitas", "securitas_direct.123456")
+        assert info["identifiers"] == {
+            ("securitas", "v4_securitas_direct.123456_lock_01")
+        }
+        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
         assert info["name"] == "Home Lock 01"
         assert info["manufacturer"] == "Securitas Direct"
 

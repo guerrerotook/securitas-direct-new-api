@@ -42,7 +42,7 @@ class WifiConnectedSensor(SecuritasEntity, BinarySensorEntity):
 
     def __init__(self, client: SecuritasHub, installation: Installation) -> None:
         super().__init__(installation, client)
-        self._attr_unique_id = f"{installation.number}_wifi_connected"
+        self._attr_unique_id = f"v4_{installation.number}_wifi_connected"
         self._attr_name = f"{installation.alias} WiFi Connected"
 
     async def async_added_to_hass(self) -> None:

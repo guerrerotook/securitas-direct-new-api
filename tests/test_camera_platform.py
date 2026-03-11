@@ -35,7 +35,7 @@ class TestSecuritasCamera:
         from custom_components.securitas.camera import SecuritasCamera
 
         cam = SecuritasCamera(mock_hub, installation, camera_device)
-        assert cam.unique_id == "2654190_camera_QR10"
+        assert cam.unique_id == "v4_2654190_camera_QR10"
 
     def test_name(self, mock_hub, installation, camera_device):
         from custom_components.securitas.camera import SecuritasCamera
@@ -82,7 +82,7 @@ class TestSecuritasCaptureButton:
         from custom_components.securitas.button import SecuritasCaptureButton
 
         btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
-        assert btn.unique_id == "2654190_capture_QR10"
+        assert btn.unique_id == "v4_2654190_capture_QR10"
 
     def test_name(self, mock_hub, installation, camera_device):
         from custom_components.securitas.button import SecuritasCaptureButton

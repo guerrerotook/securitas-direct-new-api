@@ -533,9 +533,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             notify_options,
         )
         install_name = (
-            self._selected_installation.alias
-            if self._selected_installation
-            else ""
+            self._selected_installation.alias if self._selected_installation else ""
         )
         return self.async_show_form(
             step_id="options",
