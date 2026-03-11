@@ -115,6 +115,41 @@ class TestSecuritasCamera:
         ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
 
+    @pytest.mark.asyncio
+    async def test_async_added_to_hass_registers_interval(
+        self, mock_hub, installation, camera_device
+    ):
+        from unittest.mock import MagicMock, patch
+        from custom_components.securitas.camera import SecuritasCamera, SCAN_INTERVAL
+
+        cam = SecuritasCamera(mock_hub, installation, camera_device)
+        mock_hass = MagicMock()
+        mock_hass.async_create_task = MagicMock()
+        cam.hass = mock_hass
+
+        unsubscribe = MagicMock()
+        with patch(
+            "custom_components.securitas.camera.async_track_time_interval",
+            return_value=unsubscribe,
+        ) as mock_track:
+            with patch(
+                "custom_components.securitas.camera.async_dispatcher_connect",
+                return_value=MagicMock(),
+            ):
+                await cam.async_added_to_hass()
+
+        mock_track.assert_called_once()
+        args = mock_track.call_args
+        assert args[0][0] is mock_hass  # hass
+        assert args[0][2] == SCAN_INTERVAL  # interval
+
+        # Invoke the callback and confirm it delegates via async_create_task
+        callback_fn = args[0][1]
+        from datetime import datetime
+
+        callback_fn(datetime.now())
+        mock_hass.async_create_task.assert_called_once()
+
 
 class TestSecuritasCaptureButton:
     def test_unique_id(self, mock_hub, installation, camera_device):

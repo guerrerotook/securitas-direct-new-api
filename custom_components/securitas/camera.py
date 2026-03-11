@@ -1,6 +1,7 @@
 """Securitas Direct camera platform."""
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 
 from . import DOMAIN, SIGNAL_CAMERA_STATE, SIGNAL_CAMERA_UPDATE, SecuritasHub
 from .entity import camera_device_info
@@ -18,6 +20,8 @@ from .securitas_direct_new_api.dataTypes import CameraDevice
 _LOGGER = logging.getLogger(__name__)
 
 _PLACEHOLDER_IMAGE = (Path(__file__).parent / "placeholder.jpg").read_bytes()
+
+SCAN_INTERVAL = timedelta(minutes=30)
 
 
 async def async_setup_entry(
@@ -90,6 +94,17 @@ class SecuritasCamera(Camera):
         )
         self.async_on_remove(
             async_dispatcher_connect(self.hass, SIGNAL_CAMERA_STATE, self._handle_state)
+        )
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass,
+                lambda _now: self.hass.async_create_task(
+                    self._client.fetch_latest_thumbnail(
+                        self._installation, self._camera_device
+                    )
+                ),
+                SCAN_INTERVAL,
+            )
         )
 
     @callback
