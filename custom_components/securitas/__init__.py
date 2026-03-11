@@ -506,9 +506,7 @@ async def _discover_locks(
             device_id = mode.deviceId or SMARTLOCK_DEVICE_ID
             lock_config: SmartLock | None = None
             try:
-                lock_config = await hub.get_smart_lock_config(
-                    installation, device_id
-                )
+                lock_config = await hub.get_smart_lock_config(installation, device_id)
             except Exception:  # pylint: disable=broad-exception-caught
                 _LOGGER.debug(
                     "Could not fetch smart lock config for %s device %s",

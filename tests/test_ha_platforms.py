@@ -529,9 +529,7 @@ class TestSecuritasLockConfig:
         lock = make_lock(device_id="01", lock_config=config)
         info = lock._attr_device_info
         assert info is not None
-        assert info["identifiers"] == {
-            ("securitas", "securitas_direct.123456_lock_01")
-        }
+        assert info["identifiers"] == {("securitas", "securitas_direct.123456_lock_01")}
         assert info["via_device"] == ("securitas", "securitas_direct.123456")
         assert info["name"] == "Front Door"
         assert info["model"] == "DR"
@@ -543,9 +541,7 @@ class TestSecuritasLockConfig:
         lock = make_lock(device_id="01")
         info = lock._attr_device_info
         assert info is not None
-        assert info["identifiers"] == {
-            ("securitas", "securitas_direct.123456_lock_01")
-        }
+        assert info["identifiers"] == {("securitas", "securitas_direct.123456_lock_01")}
         assert info["via_device"] == ("securitas", "securitas_direct.123456")
         assert info["name"] == "Home Lock 01"
         assert info["manufacturer"] == "Securitas Direct"
