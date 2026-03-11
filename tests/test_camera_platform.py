@@ -143,12 +143,14 @@ class TestSecuritasCamera:
         assert args[0][0] is mock_hass  # hass
         assert args[0][2] == SCAN_INTERVAL  # interval
 
-        # Invoke the callback and confirm it delegates via async_create_task
+        # Invoke the callback and confirm it calls fetch_latest_thumbnail
         callback_fn = args[0][1]
         from datetime import datetime
 
-        callback_fn(datetime.now())
-        mock_hass.async_create_task.assert_called_once()
+        await callback_fn(datetime.now())
+        mock_hub.fetch_latest_thumbnail.assert_called_once_with(
+            installation, camera_device
+        )
 
 
 class TestSecuritasCaptureButton:

@@ -1,7 +1,7 @@
 """Securitas Direct camera platform."""
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -95,16 +95,14 @@ class SecuritasCamera(Camera):
         self.async_on_remove(
             async_dispatcher_connect(self.hass, SIGNAL_CAMERA_STATE, self._handle_state)
         )
-        self.async_on_remove(
-            async_track_time_interval(
-                self.hass,
-                lambda _now: self.hass.async_create_task(
-                    self._client.fetch_latest_thumbnail(
-                        self._installation, self._camera_device
-                    )
-                ),
-                SCAN_INTERVAL,
+
+        async def _refresh_thumbnail(_now: datetime) -> None:
+            await self._client.fetch_latest_thumbnail(
+                self._installation, self._camera_device
             )
+
+        self.async_on_remove(
+            async_track_time_interval(self.hass, _refresh_thumbnail, SCAN_INTERVAL)
         )
 
     @callback
