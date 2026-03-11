@@ -310,8 +310,9 @@ class SecuritasCameraCard extends HTMLElement {
     return document.createElement("securitas-camera-card-editor");
   }
 
-  static getStubConfig() {
-    return { entity: "" };
+  static getStubConfig(hass) {
+    const entity = Object.keys(hass?.states || {}).find(e => e.startsWith("camera."));
+    return { entity: entity || "" };
   }
 }
 
