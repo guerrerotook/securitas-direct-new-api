@@ -244,7 +244,7 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
   let holdFired = false;
   let downX = 0, downY = 0;
   let tapWindow = null;
-  let firstTapTime = 0;
+
 
   const HOLD_MS    = 500;
   const DOUBLE_MS  = 300;
@@ -279,17 +279,13 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
     cancelHold();
     if (holdFired) return;
 
-    const now = Date.now();
     if (tapWindow) {
       clearTimeout(tapWindow);
       tapWindow = null;
-      firstTapTime = 0;
       executeAction(doubleTapAction, hass, entityId, srcEl, callbacks);
     } else {
-      firstTapTime = now;
       tapWindow = setTimeout(() => {
         tapWindow = null;
-        firstTapTime = 0;
         executeAction(tapAction, hass, entityId, srcEl, callbacks);
       }, DOUBLE_MS);
     }
