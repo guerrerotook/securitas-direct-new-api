@@ -1207,6 +1207,10 @@ class SecuritasAlarmBadge extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._dialogOpen = false;
+    this._pinOverlay = null;   // floating PIN overlay element (or null)
+    this._pinState   = null;   // { service, labelKey } when PIN entry active
+    this._pin        = "";
+    this._gestureCleanup = null; // cleanup fn returned by attachGesture
   }
 
   setConfig(config) {
@@ -1263,9 +1267,142 @@ class SecuritasAlarmBadge extends HTMLElement {
         <ha-icon icon="${icons.icon}"></ha-icon>
       </div>`;
 
-    this.shadowRoot.getElementById("badge").addEventListener("click", () => {
-      this._openDialog();
+    // Clean up previous gesture listeners (badge re-renders on state change)
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+
+    const badgeEl = this.shadowRoot.getElementById("badge");
+    const gestureConfig = {
+      tap_action:        this._config.tap_action        || { action: "more-info" },
+      hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: _defaultArmState(this._hass, this._config.entity) },
+      double_tap_action: this._config.double_tap_action || { action: "none" },
+    };
+
+    this._gestureCleanup = attachGesture(
+      badgeEl,
+      gestureConfig,
+      this._hass,
+      this._config.entity,
+      this,
+      {
+        onMoreInfo:    () => this._openDialog(),
+        startPinEntry: (svcAction) => this._startBadgePinEntry(svcAction),
+      },
+    );
+  }
+
+  _startBadgePinEntry(svcAction) {
+    if (this._pinOverlay) return; // already showing
+
+    const hass   = this._hass;
+    const entity = this._config.entity;
+    const lang   = hass.language || "en";
+    const stateObj = hass.states[entity];
+    const codeFormat = stateObj?.attributes?.code_format || "number";
+
+    this._pinState = svcAction;
+    this._pin      = "";
+
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", top: "0", left: "0", right: "0", bottom: "0",
+      background: "rgba(0,0,0,0.5)", zIndex: "8",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "16px",
     });
+
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      width: "100%", maxWidth: "340px",
+      borderRadius: "16px",
+      background: "var(--card-background-color, var(--ha-card-background, #fff))",
+      boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+      padding: "20px",
+      fontFamily: "inherit",
+    });
+
+    const actionLabel = svcAction.labelKey ? _t(lang, svcAction.labelKey) : (svcAction.label || "");
+    const promptKey   = codeFormat === "number" ? "enter_pin" : "enter_code";
+
+    box.innerHTML = `
+      <div style="font-size:0.9em;font-weight:600;color:var(--primary-text-color);margin-bottom:12px">
+        ${_t(lang, promptKey, { action: actionLabel })}
+      </div>
+      ${codeFormat === "number" ? `
+        <input id="badge-pin-input" type="password" inputmode="numeric" autocomplete="off"
+               style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--divider-color);
+                      border-radius:8px;font-size:1.1em;margin-bottom:12px;background:var(--secondary-background-color);
+                      color:var(--primary-text-color)" placeholder="••••" />
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px">
+          ${[1,2,3,4,5,6,7,8,9].map(n =>
+            `<button data-badge-key="${n}" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${n}</button>`
+          ).join("")}
+          <button data-badge-key="cancel" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
+          <button data-badge-key="0" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">0</button>
+          <button data-badge-key="del" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
+        </div>
+      ` : `
+        <input id="badge-pin-input" type="password" autocomplete="off"
+               style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--divider-color);
+                      border-radius:8px;font-size:1em;margin-bottom:12px;background:var(--secondary-background-color);
+                      color:var(--primary-text-color)" placeholder="${_t(lang, "code")}" />
+      `}
+      <div style="display:flex;gap:8px">
+        <button id="badge-pin-cancel" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:0.9em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${_t(lang, "cancel")}</button>
+        <button id="badge-pin-confirm" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:0.9em;font-weight:600;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,#fff)">${_t(lang, "confirm")}</button>
+      </div>`;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    this._pinOverlay = overlay;
+
+    const close = () => {
+      overlay.remove();
+      this._pinOverlay = null;
+      this._pinState   = null;
+      this._pin        = "";
+    };
+
+    // Keypad
+    const pinInput = box.querySelector("#badge-pin-input");
+    const syncInput = () => { if (pinInput) pinInput.value = this._pin; };
+
+    box.querySelectorAll("[data-badge-key]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.badgeKey;
+        if (k === "cancel") { close(); return; }
+        if (k === "del")    { this._pin = this._pin.slice(0, -1); syncInput(); return; }
+        this._pin += k; syncInput();
+      });
+    });
+
+    if (pinInput) {
+      requestAnimationFrame(() => pinInput.focus());
+      pinInput.addEventListener("input", e => {
+        this._pin = codeFormat === "number"
+          ? e.target.value.replace(/\D/g, "")
+          : e.target.value;
+        if (codeFormat === "number") e.target.value = this._pin;
+      });
+      pinInput.addEventListener("keydown", e => {
+        if (e.key === "Enter")  this._submitBadgePin(close);
+        if (e.key === "Escape") close();
+      });
+    }
+
+    box.querySelector("#badge-pin-cancel").addEventListener("click", close);
+    box.querySelector("#badge-pin-confirm").addEventListener("click", () => this._submitBadgePin(close));
+
+    // Tap outside to close
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+  }
+
+  _submitBadgePin(closeFn) {
+    if (!this._pinState || !this._pin) return;
+    this._hass.callService("alarm_control_panel", this._pinState.service, {
+      entity_id: this._config.entity,
+      code: this._pin,
+    });
+    closeFn();
   }
 
   _openDialog() {
