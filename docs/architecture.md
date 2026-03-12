@@ -567,7 +567,7 @@ Periodic polling always uses the lightweight `xSStatus` (general status) endpoin
 
 ### Overview
 
-The test suite has 737 tests achieving 90% overall coverage. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
+The test suite has **824 tests** achieving **92% overall coverage**. Tests run on every PR via GitHub Actions with three parallel checks: Ruff lint/format, Pyright type checking, and pytest with a 90% coverage floor.
 
 ```bash
 # Run the full suite
@@ -700,23 +700,23 @@ Key design choices:
 
 | Module | Coverage | Key gaps |
 |--------|----------|----------|
-| `__init__.py` | 72% | Platform setup, session sharing, lock/camera discovery |
-| `hub.py` | — | SecuritasHub, SecuritasDirectDevice |
-| `entity.py` | — | SecuritasEntity base class |
-| `alarm_control_panel.py` | 95% | `async_setup_entry`, some HA callbacks |
+| `__init__.py` | 86% | Platform setup, session sharing, lock/camera discovery |
+| `hub.py` | 89% | Some camera/lock edge paths |
+| `entity.py` | 100% | — |
+| `alarm_control_panel.py` | 96% | `async_setup_entry`, some HA callbacks |
 | `api_queue.py` | 100% | — |
-| `binary_sensor.py` | — | WiFi diagnostic sensor |
+| `binary_sensor.py` | 100% | — |
 | `button.py` | 93% | Capture button edge cases |
-| `camera.py` | 85% | Image refresh, thumbnail fetch |
-| `config_flow.py` | 99% | One unreachable branch |
-| `http_client.py` | — | HTTP transport, auth, polling |
-| `apimanager.py` | 95% | Rare error paths, some polling branches |
-| `graphql_queries.py` | — | Query/mutation strings |
-| `lock.py` | 94% | Some state transitions |
-| `sensor.py` | 88% | `async_setup_entry`, sensor discovery |
+| `camera.py` | 83% | Signal handlers, extra state attributes |
+| `config_flow.py` | 88% | Some flow branches |
+| `http_client.py` | 97% | Rare error paths |
+| `apimanager.py` | 93% | Rare error paths, some polling branches |
+| `graphql_queries.py` | 100% | — |
+| `lock.py` | 95% | Timer setup, some error paths |
+| `sensor.py` | 91% | `async_setup_entry`, sensor discovery |
 | `command_resolver.py` | 92% | Rare fallback paths |
 | `log_filter.py` | 88% | Nested arg scanning |
-| `const.py` | 100% | — |
+| `const.py` | 100% | Includes `SentinelName` (moved from `constants.py`) |
 | `dataTypes.py` | 100% | — |
 | `domains.py` | 100% | — |
 | `exceptions.py` | 100% | — |
@@ -744,7 +744,7 @@ Three parallel jobs run on every PR and push to main:
 | `camera.py` | 98 | Camera entity with lazy thumbnail fetching |
 | `button.py` | 150 | Refresh button with WAF notification, capture button |
 | `api_queue.py` | 104 | Priority-based rate-limited API queue (FOREGROUND/BACKGROUND) |
-| `constants.py` | 21 | `SentinelName` language mapping |
+| `const.py` | 66 | Integration constants, signal names, config keys, platform list, card URLs, SentinelName language mapping |
 | `log_filter.py` | 86 | `SensitiveDataFilter` — log sanitization for secrets |
 | `securitas_direct_new_api/http_client.py` | 513 | `SecuritasHttpClient` — HTTP transport, auth tokens, request execution, polling |
 | `securitas_direct_new_api/apimanager.py` | 1292 | `ApiManager` — business operations (inherits SecuritasHttpClient) |
