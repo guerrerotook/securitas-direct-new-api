@@ -9,20 +9,18 @@ import pytest
 from .mock_graphql import MockGraphQLServer
 
 from custom_components.securitas import (
-    CONF_CHECK_ALARM_PANEL,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
-    CONF_INSTALLATION_KEY,
+    CONF_HAS_PERI,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
-    CONF_PERI_ALARM,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -188,7 +186,7 @@ def make_installation(**overrides) -> Installation:
         "phone": "555-1234",
     }
     defaults.update(overrides)
-    return Installation(**defaults)
+    return Installation(**defaults)  # type: ignore[arg-type]
 
 
 def make_config_entry_data(
@@ -197,9 +195,8 @@ def make_config_entry_data(
     password: str = "test-password",
     country: str = "ES",
     code: str = "",
-    peri_alarm: bool = False,
+    has_peri: bool = False,
     code_arm_required: bool = False,
-    check_alarm_panel: bool = True,
     scan_interval: int = DEFAULT_SCAN_INTERVAL,
     delay_check_operation: float = DEFAULT_DELAY_CHECK_OPERATION,
     device_id: str = "test-device-id",
@@ -213,15 +210,14 @@ def make_config_entry_data(
     notify_group: str = "",
 ) -> dict:
     """Build config entry data dict with sensible defaults."""
-    defaults = PERI_DEFAULTS if peri_alarm else STD_DEFAULTS
+    defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
     return {
         CONF_USERNAME: username,
         CONF_PASSWORD: password,
         CONF_COUNTRY: country,
         CONF_CODE: code,
-        CONF_PERI_ALARM: peri_alarm,
+        CONF_HAS_PERI: has_peri,
         CONF_CODE_ARM_REQUIRED: code_arm_required,
-        CONF_CHECK_ALARM_PANEL: check_alarm_panel,
         CONF_SCAN_INTERVAL: scan_interval,
         CONF_DELAY_CHECK_OPERATION: delay_check_operation,
         CONF_DEVICE_ID: device_id,
@@ -246,7 +242,6 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     """Create a MagicMock mimicking SecuritasHub."""
     hub = MagicMock(spec=SecuritasHub)
     hub.session = AsyncMock()
-    hub.check_alarm = True
     hub.country = "ES"
     hub.lang = "es"
     hub.config = {}
@@ -258,6 +253,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub.send_sms_code = AsyncMock()
     hub.refresh_token = AsyncMock()
     hub.send_opt = AsyncMock()
+    hub._services_cache = {}
     hub.get_services = AsyncMock(return_value=[])
     hub.logout = AsyncMock(return_value=True)
     hub.update_overview = AsyncMock()
@@ -287,8 +283,9 @@ def setup_integration_data(
     if devices is None:
         devices = [SecuritasDirectDevice(make_installation())]
     hass.data[DOMAIN] = {
-        SecuritasHub.__name__: client,
-        CONF_INSTALLATION_KEY: devices,
         CONF_ENTRY_ID: entry_id,
-        entry_id: client,
+        entry_id: {
+            "hub": client,
+            "devices": devices,
+        },
     }

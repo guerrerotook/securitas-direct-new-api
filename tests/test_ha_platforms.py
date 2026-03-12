@@ -1,15 +1,19 @@
 """Tests for sensor and lock platform entities."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     AirQuality,
     Attribute,
     Attributes,
+    DanalockAutolock,
+    DanalockConfig,
+    DanalockFeatures,
     Installation,
     Sentinel,
     Service,
+    SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
 )
@@ -17,7 +21,9 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
 )
 from custom_components.securitas.sensor import (
+    AirQualityFetcher,
     SentinelAirQuality,
+    SentinelAirQualityStatus,
     SentinelHumidity,
     SentinelTemperature,
 )
@@ -68,13 +74,8 @@ def make_service():
 def make_sentinel(temp=22, humidity=45):
     """Create a test Sentinel data object."""
     return Sentinel(
-        alias="Living", air_quality="GOOD", humidity=humidity, temperature=temp
+        alias="Living", air_quality="2", humidity=humidity, temperature=temp
     )
-
-
-def make_air_quality(value=85, message="Good"):
-    """Create a test AirQuality data object."""
-    return AirQuality(value=value, message=message)
 
 
 def make_client():
@@ -86,28 +87,36 @@ def make_client():
     return client
 
 
-def make_device():
-    """Create a test SecuritasDirectDevice."""
-    from custom_components.securitas import SecuritasDirectDevice
-
-    return SecuritasDirectDevice(make_installation())
-
-
-def make_lock():
+def make_lock(
+    device_id: str = "01",
+    initial_status: str = "2",
+    danalock_config: DanalockConfig | None = None,
+    lock_config: SmartLock | None = None,
+):
     """Create a SecuritasLock with mocked dependencies."""
     installation = make_installation()
     client = MagicMock()
     client.config = {"scan_interval": 120}
     client.session = AsyncMock()
+    client.change_lock_mode = AsyncMock()
+    client.get_danalock_config = AsyncMock(return_value=None)
     hass = MagicMock()
     hass.async_create_task = MagicMock()
     hass.services = MagicMock()
 
-    with patch(
-        "custom_components.securitas.lock.async_track_time_interval"
-    ) as mock_track:
-        mock_track.return_value = MagicMock()
-        lock_entity = SecuritasLock(installation=installation, client=client, hass=hass)
+    lock_entity = SecuritasLock(
+        installation=installation,
+        client=client,
+        hass=hass,
+        device_id=device_id,
+        initial_status=initial_status,
+        danalock_config=danalock_config,
+        lock_config=lock_config,
+    )
+    lock_entity.entity_id = f"lock.securitas_{installation.number}_{device_id}"
+    # Mock HA state-writing methods (no platform registered in unit tests)
+    lock_entity.async_write_ha_state = MagicMock()
+    lock_entity.async_schedule_update_ha_state = MagicMock()
     return lock_entity
 
 
@@ -119,61 +128,59 @@ def make_lock():
 class TestSentinelTemperature:
     """Tests for SentinelTemperature sensor entity."""
 
-    def test_init_sets_native_value_to_temperature(self):
-        sentinel = make_sentinel(temp=22)
-        sensor = SentinelTemperature(
-            sentinel, make_service(), make_client(), make_device()
-        )
-        assert sensor._attr_native_value == 22
+    def test_init_starts_with_no_value(self):
+        sensor = SentinelTemperature(make_service(), make_client(), make_installation())
+        assert sensor._attr_native_value is None
 
     def test_init_sets_device_class_to_temperature(self):
         from homeassistant.components.sensor import SensorDeviceClass
 
-        sensor = SentinelTemperature(
-            make_sentinel(), make_service(), make_client(), make_device()
-        )
+        sensor = SentinelTemperature(make_service(), make_client(), make_installation())
         assert sensor._attr_device_class == SensorDeviceClass.TEMPERATURE
 
     def test_init_sets_unit_to_celsius(self):
         from homeassistant.const import UnitOfTemperature
 
-        sensor = SentinelTemperature(
-            make_sentinel(), make_service(), make_client(), make_device()
-        )
+        sensor = SentinelTemperature(make_service(), make_client(), make_installation())
         assert sensor._attr_native_unit_of_measurement == UnitOfTemperature.CELSIUS
 
-    async def test_async_update_calls_get_sentinel_data_and_updates(self):
+    async def test_async_update_fetches_sentinel_and_sets_temperature(self):
         client = make_client()
         service = make_service()
-        sensor = SentinelTemperature(
-            make_sentinel(temp=22), service, client, make_device()
-        )
+        installation = make_installation()
+        sensor = SentinelTemperature(service, client, installation)
         sensor.hass = MagicMock()
-        assert sensor._attr_native_value == 22
+        assert sensor._attr_native_value is None
 
-        updated_sentinel = make_sentinel(temp=30)
-        client.session.get_sentinel_data = AsyncMock(return_value=updated_sentinel)
-
+        client.get_sentinel = AsyncMock(return_value=make_sentinel(temp=30))
         await sensor.async_update()
 
-        client.session.get_sentinel_data.assert_awaited_once_with(
-            service.installation, service
-        )
+        client.get_sentinel.assert_awaited_once_with(installation, service)
         assert sensor._attr_native_value == 30
 
-    def test_unique_id_contains_alias_and_service_id(self):
-        sentinel = make_sentinel()
-        service = make_service()
-        sensor = SentinelTemperature(sentinel, service, make_client(), make_device())
-        assert sentinel.alias in sensor._attr_unique_id
-        assert str(service.id) in sensor._attr_unique_id
+    async def test_async_update_handles_error_gracefully(self):
+        client = make_client()
+        sensor = SentinelTemperature(make_service(), client, make_installation())
+        sensor.hass = MagicMock()
 
-    def test_name_contains_alias(self):
-        sentinel = make_sentinel()
-        sensor = SentinelTemperature(
-            sentinel, make_service(), make_client(), make_device()
-        )
-        assert "Living" in sensor._attr_name
+        client.get_sentinel = AsyncMock(side_effect=SecuritasDirectError("API error"))
+        await sensor.async_update()
+
+        assert sensor._attr_native_value is None
+
+    def test_unique_id_contains_installation_number_and_service_id(self):
+        service = make_service()
+        installation = make_installation()
+        sensor = SentinelTemperature(service, make_client(), installation)
+        assert installation.number in sensor._attr_unique_id  # type: ignore[operator]
+        assert str(service.id) in sensor._attr_unique_id  # type: ignore[operator]
+        assert "temperature" in sensor._attr_unique_id  # type: ignore[operator]
+
+    def test_name_contains_installation_alias(self):
+        installation = make_installation()
+        sensor = SentinelTemperature(make_service(), make_client(), installation)
+        assert installation.alias in sensor._attr_name  # type: ignore[operator]
+        assert "Temperature" in sensor._attr_name  # type: ignore[operator]
 
 
 # ===========================================================================
@@ -184,121 +191,237 @@ class TestSentinelTemperature:
 class TestSentinelHumidity:
     """Tests for SentinelHumidity sensor entity."""
 
-    def test_init_sets_native_value_to_humidity(self):
-        sentinel = make_sentinel(humidity=45)
-        sensor = SentinelHumidity(
-            sentinel, make_service(), make_client(), make_device()
-        )
-        assert sensor._attr_native_value == 45
+    def test_init_starts_with_no_value(self):
+        sensor = SentinelHumidity(make_service(), make_client(), make_installation())
+        assert sensor._attr_native_value is None
 
     def test_init_sets_device_class_to_humidity(self):
         from homeassistant.components.sensor import SensorDeviceClass
 
-        sensor = SentinelHumidity(
-            make_sentinel(), make_service(), make_client(), make_device()
-        )
+        sensor = SentinelHumidity(make_service(), make_client(), make_installation())
         assert sensor._attr_device_class == SensorDeviceClass.HUMIDITY
 
     def test_init_sets_unit_to_percentage(self):
         from homeassistant.const import PERCENTAGE
 
-        sensor = SentinelHumidity(
-            make_sentinel(), make_service(), make_client(), make_device()
-        )
+        sensor = SentinelHumidity(make_service(), make_client(), make_installation())
         assert sensor._attr_native_unit_of_measurement == PERCENTAGE
 
-    async def test_async_update_calls_get_sentinel_data_and_updates(self):
+    async def test_async_update_fetches_sentinel_and_sets_humidity(self):
         client = make_client()
         service = make_service()
-        sensor = SentinelHumidity(
-            make_sentinel(humidity=45), service, client, make_device()
-        )
+        installation = make_installation()
+        sensor = SentinelHumidity(service, client, installation)
         sensor.hass = MagicMock()
-        assert sensor._attr_native_value == 45
 
-        updated_sentinel = make_sentinel(humidity=60)
-        client.session.get_sentinel_data = AsyncMock(return_value=updated_sentinel)
-
+        client.get_sentinel = AsyncMock(return_value=make_sentinel(humidity=60))
         await sensor.async_update()
 
-        client.session.get_sentinel_data.assert_awaited_once_with(
-            service.installation, service
-        )
+        client.get_sentinel.assert_awaited_once_with(installation, service)
         assert sensor._attr_native_value == 60
 
-    def test_unique_id_contains_alias_and_service_id(self):
-        sentinel = make_sentinel()
+    async def test_async_update_handles_error_gracefully(self):
+        client = make_client()
+        sensor = SentinelHumidity(make_service(), client, make_installation())
+        sensor.hass = MagicMock()
+
+        client.get_sentinel = AsyncMock(side_effect=SecuritasDirectError("API error"))
+        await sensor.async_update()
+
+        assert sensor._attr_native_value is None
+
+    def test_unique_id_contains_installation_number_and_service_id(self):
         service = make_service()
-        sensor = SentinelHumidity(sentinel, service, make_client(), make_device())
-        assert sentinel.alias in sensor._attr_unique_id
-        assert str(service.id) in sensor._attr_unique_id
+        installation = make_installation()
+        sensor = SentinelHumidity(service, make_client(), installation)
+        assert installation.number in sensor._attr_unique_id  # type: ignore[operator]
+        assert str(service.id) in sensor._attr_unique_id  # type: ignore[operator]
+        assert "humidity" in sensor._attr_unique_id  # type: ignore[operator]
 
 
 # ===========================================================================
-# SentinelAirQuality tests
+# AirQualityFetcher + SentinelAirQuality + SentinelAirQualityStatus tests
 # ===========================================================================
+
+
+def _mock_sentinel_with_zone(zone="JX01"):
+    """Create a Sentinel with a device zone."""
+    return Sentinel(
+        alias="Living", air_quality="1", humidity=63, temperature=22, zone=zone
+    )
+
+
+def _make_fetcher(client=None, service=None, installation=None):
+    """Create an AirQualityFetcher with mocked dependencies."""
+    return AirQualityFetcher(
+        service or make_service(),
+        client or make_client(),
+        installation or make_installation(),
+    )
+
+
+class TestAirQualityFetcher:
+    """Tests for AirQualityFetcher — shared fetch for both entities."""
+
+    async def test_fetch_returns_air_quality(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=122, status_current=1)
+        )
+        fetcher = _make_fetcher(client=client)
+        result = await fetcher.fetch()
+        assert result is not None
+        assert result.value == 122
+        assert result.status_current == 1
+
+    async def test_fetch_returns_none_on_sentinel_error(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(side_effect=SecuritasDirectError("err"))
+        fetcher = _make_fetcher(client=client)
+        assert await fetcher.fetch() is None
+
+    async def test_fetch_returns_none_on_air_quality_error(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(side_effect=SecuritasDirectError("err"))
+        fetcher = _make_fetcher(client=client)
+        assert await fetcher.fetch() is None
+
+    async def test_fetch_returns_none_when_api_returns_none(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(return_value=None)
+        fetcher = _make_fetcher(client=client)
+        assert await fetcher.fetch() is None
+
+    async def test_fetch_uses_zone_from_sentinel(self):
+        client = make_client()
+        installation = make_installation()
+        client.get_sentinel = AsyncMock(
+            return_value=_mock_sentinel_with_zone(zone="ZZ99")
+        )
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=10, status_current=1)
+        )
+        fetcher = _make_fetcher(client=client, installation=installation)
+        await fetcher.fetch()
+        client.get_air_quality.assert_awaited_once_with(installation, "ZZ99")
 
 
 class TestSentinelAirQuality:
-    """Tests for SentinelAirQuality sensor entity."""
+    """Tests for SentinelAirQuality numeric sensor."""
 
-    def test_init_sets_native_value_to_air_quality_message(self):
-        air_quality = make_air_quality(value=85, message="Good")
-        sensor = SentinelAirQuality(
-            air_quality, make_sentinel(), make_service(), make_client(), make_device()
-        )
-        assert sensor._attr_native_value == "Good"
+    def test_init_starts_with_no_value(self):
+        fetcher = _make_fetcher()
+        sensor = SentinelAirQuality(fetcher, make_installation())
+        assert sensor._attr_native_value is None
 
-    async def test_async_update_calls_get_air_quality_data_and_updates(self):
+    async def test_async_update_sets_value(self):
         client = make_client()
-        service = make_service()
-        air_quality = make_air_quality(value=85, message="Good")
-        sensor = SentinelAirQuality(
-            air_quality, make_sentinel(), service, client, make_device()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=122, status_current=1)
         )
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQuality(fetcher, make_installation())
         sensor.hass = MagicMock()
-        assert sensor._attr_native_value == "Good"
-
-        updated_air_quality = make_air_quality(value=40, message="Poor")
-        client.session.get_air_quality_data = AsyncMock(
-            return_value=updated_air_quality
-        )
 
         await sensor.async_update()
+        assert sensor._attr_native_value == 122
 
-        client.session.get_air_quality_data.assert_awaited_once_with(
-            service.installation, service
+    async def test_async_update_none_keeps_old_value(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(return_value=None)
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQuality(fetcher, make_installation())
+        sensor.hass = MagicMock()
+
+        await sensor.async_update()
+        assert sensor._attr_native_value is None
+
+    def test_unique_id_contains_airquality(self):
+        service = make_service()
+        installation = make_installation()
+        fetcher = _make_fetcher(service=service, installation=installation)
+        sensor = SentinelAirQuality(fetcher, installation)
+        assert installation.number in sensor._attr_unique_id  # type: ignore[operator]
+        assert "airquality" in sensor._attr_unique_id  # type: ignore[operator]
+
+
+class TestSentinelAirQualityStatus:
+    """Tests for SentinelAirQualityStatus categorical sensor."""
+
+    def test_init_starts_with_no_value(self):
+        fetcher = _make_fetcher()
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        assert sensor._attr_native_value is None
+
+    async def test_async_update_sets_status_label(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=122, status_current=1)
         )
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        sensor.hass = MagicMock()
+
+        await sensor.async_update()
+        assert sensor._attr_native_value == "Good"
+
+    async def test_status_poor(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=200, status_current=2)
+        )
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        sensor.hass = MagicMock()
+
+        await sensor.async_update()
         assert sensor._attr_native_value == "Poor"
 
-    def test_extra_state_attributes_returns_value_and_message(self):
-        air_quality = make_air_quality(value=85, message="Good")
-        sensor = SentinelAirQuality(
-            air_quality, make_sentinel(), make_service(), make_client(), make_device()
+    async def test_unknown_status_code(self, caplog):
+        """Unknown codes fall back to the raw code string and log a warning."""
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=200, status_current=99)
         )
-        attrs = sensor.extra_state_attributes
-        assert attrs["value"] == 85
-        assert attrs["message"] == "Good"
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        sensor.hass = MagicMock()
 
-    def test_extra_state_attributes_updates_after_new_data(self):
-        air_quality = make_air_quality(value=85, message="Good")
-        sensor = SentinelAirQuality(
-            air_quality, make_sentinel(), make_service(), make_client(), make_device()
-        )
-        # The extra_state_attributes reads from self._air_quality, which is set
-        # at init time. Verify the initial values are correct.
-        attrs = sensor.extra_state_attributes
-        assert attrs["value"] == 85
-        assert attrs["message"] == "Good"
+        await sensor.async_update()
+        assert sensor._attr_native_value == "99"
+        assert "Unknown air quality status code '99'" in caplog.text
 
-    def test_unique_id_contains_alias_and_service_id(self):
-        sentinel = make_sentinel()
-        service = make_service()
-        sensor = SentinelAirQuality(
-            make_air_quality(), sentinel, service, make_client(), make_device()
+    def test_unique_id_contains_status(self):
+        fetcher = _make_fetcher()
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        assert "airquality_status" in sensor._attr_unique_id  # type: ignore[operator]
+
+    async def test_both_entities_use_same_fetcher(self):
+        """Both numeric and status entities get consistent data."""
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=92, status_current=1)
         )
-        assert sentinel.alias in sensor._attr_unique_id
-        assert str(service.id) in sensor._attr_unique_id
+        fetcher = _make_fetcher(client=client)
+        numeric = SentinelAirQuality(fetcher, make_installation())
+        status = SentinelAirQualityStatus(fetcher, make_installation())
+        numeric.hass = MagicMock()
+        status.hass = MagicMock()
+
+        await numeric.async_update()
+        await status.async_update()
+
+        assert numeric._attr_native_value == 92
+        assert status._attr_native_value == "Good"
 
 
 # ===========================================================================
@@ -350,18 +473,11 @@ class TestSecuritasLockInit:
                 f"Expected is_locking=False for state={state}"
             )
 
-    def test_is_opening_returns_true_when_state_is_3(self):
+    def test_is_opening_always_returns_false(self):
         lock = make_lock()
-        lock._state = "3"
-        assert lock.is_opening is True
-
-    def test_is_opening_returns_false_when_state_is_not_3(self):
-        lock = make_lock()
-        for state in ("1", "2", "4", "0"):
+        for state in ("1", "2", "3", "4", "0"):
             lock._state = state
-            assert lock.is_opening is False, (
-                f"Expected is_opening=False for state={state}"
-            )
+            assert lock.is_opening is False
 
     def test_is_jammed_always_returns_false(self):
         lock = make_lock()
@@ -369,15 +485,179 @@ class TestSecuritasLockInit:
             lock._state = state
             assert lock.is_jammed is False
 
-    def test_is_unlocking_always_returns_false(self):
+    def test_is_unlocking_returns_true_when_state_is_3(self):
         lock = make_lock()
-        for state in ("1", "2", "3", "4", "0"):
-            lock._state = state
-            assert lock.is_unlocking is False
+        lock._state = "3"
+        assert lock.is_unlocking is True
 
-    def test_name_returns_installation_alias(self):
+    def test_is_unlocking_returns_false_when_state_is_not_3(self):
         lock = make_lock()
-        assert lock.name == "Home"
+        for state in ("1", "2", "4", "0"):
+            lock._state = state
+            assert lock.is_unlocking is False, (
+                f"Expected is_unlocking=False for state={state}"
+            )
+
+    def test_name_returns_installation_alias_with_device_id(self):
+        lock = make_lock()
+        assert lock.name == "Home Lock 01"
+
+    def test_name_includes_custom_device_id(self):
+        lock = make_lock(device_id="02")
+        assert lock.name == "Home Lock 02"
+
+
+class TestSecuritasLockConfig:
+    """Tests for SecuritasLock unique_id, device_info, and extra_state_attributes."""
+
+    def test_unique_id_includes_device_id(self):
+        lock = make_lock(device_id="01")
+        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_01"
+
+    def test_unique_id_different_device(self):
+        lock = make_lock(device_id="02")
+        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_02"
+
+    def test_device_info_creates_separate_lock_device_with_config(self):
+        """Lock with config gets its own device with metadata."""
+        config = SmartLock(
+            res="OK",
+            location="Front Door",
+            family="DR",
+            serialNumber="SN001",
+        )
+        lock = make_lock(device_id="01", lock_config=config)
+        info = lock._attr_device_info
+        assert info is not None
+        assert info["identifiers"] == {
+            ("securitas", "v4_securitas_direct.123456_lock_01")
+        }
+        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
+        assert info["name"] == "Front Door"
+        assert info["model"] == "DR"
+        assert info["serial_number"] == "SN001"
+        assert info["manufacturer"] == "Securitas Direct"
+
+    def test_device_info_fallback_without_config(self):
+        """Lock without config falls back to installation-based device."""
+        lock = make_lock(device_id="01")
+        info = lock._attr_device_info
+        assert info is not None
+        assert info["identifiers"] == {
+            ("securitas", "v4_securitas_direct.123456_lock_01")
+        }
+        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
+        assert info["name"] == "Home Lock 01"
+        assert info["manufacturer"] == "Securitas Direct"
+
+    def test_device_info_fallback_empty_location(self):
+        """Lock with config but empty location uses installation alias."""
+        config = SmartLock(res="OK", location="", family="DR")
+        lock = make_lock(device_id="02", lock_config=config)
+        info = lock._attr_device_info
+        assert info["name"] == "Home Lock 02"
+        assert info["model"] == "DR"
+
+    def test_device_info_different_devices_have_different_identifiers(self):
+        """Each lock gets its own device identifier."""
+        lock01 = make_lock(device_id="01")
+        lock02 = make_lock(device_id="02")
+        assert (
+            lock01._attr_device_info["identifiers"]
+            != lock02._attr_device_info["identifiers"]
+        )
+        # But both link to the same parent
+        assert (
+            lock01._attr_device_info["via_device"]
+            == lock02._attr_device_info["via_device"]
+        )
+
+    def test_initial_status_unknown_defaults_to_locked(self):
+        lock = make_lock(initial_status="0")
+        assert lock._state == "2"
+
+    def test_initial_status_preserved_when_not_unknown(self):
+        lock = make_lock(initial_status="1")
+        assert lock._state == "1"
+
+    def test_extra_state_attributes_empty_without_danalock_config(self):
+        lock = make_lock()
+        assert lock.extra_state_attributes == {}
+
+    def test_extra_state_attributes_with_danalock_config(self):
+        config = DanalockConfig(
+            batteryLowPercentage="40",
+            lockBeforeFullArm="1",
+            lockBeforePartialArm="1",
+            lockBeforePerimeterArm="1",
+            unlockAfterDisarm="0",
+            autoLockTime="000",
+            features=DanalockFeatures(
+                holdBackLatchTime=3,
+                calibrationType=0,
+                autolock=DanalockAutolock(active=True, timeout=30),
+            ),
+        )
+        lock = make_lock(danalock_config=config)
+        attrs = lock.extra_state_attributes
+        assert attrs is not None
+        assert attrs["battery_low_threshold"] == "40"
+        assert attrs["lock_before_full_arm"] is True
+        assert attrs["lock_before_partial_arm"] is True
+        assert attrs["lock_before_perimeter_arm"] is True
+        assert attrs["unlock_after_disarm"] is False
+        assert attrs["auto_lock_time"] == "000"
+        assert attrs["hold_back_latch_time"] == 3
+        assert attrs["autolock_active"] is True
+        assert attrs["autolock_timeout"] == 30
+
+    def test_extra_state_attributes_with_no_features(self):
+        config = DanalockConfig(
+            batteryLowPercentage="40",
+            lockBeforeFullArm="1",
+            lockBeforePartialArm="0",
+            lockBeforePerimeterArm="0",
+            unlockAfterDisarm="1",
+            autoLockTime="060",
+        )
+        lock = make_lock(danalock_config=config)
+        attrs = lock.extra_state_attributes
+        assert attrs is not None
+        assert attrs["battery_low_threshold"] == "40"
+        assert attrs["lock_before_partial_arm"] is False
+        assert attrs["unlock_after_disarm"] is True
+        assert "hold_back_latch_time" not in attrs
+
+    def test_supported_features_no_config_returns_zero(self):
+        import homeassistant.components.lock as lock_mod
+
+        lock = make_lock()
+        assert lock.supported_features == lock_mod.LockEntityFeature(0)
+
+    def test_supported_features_with_holdback_returns_open(self):
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
+        lock = make_lock(danalock_config=config)
+        assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
+
+    def test_supported_features_holdback_zero_returns_zero(self):
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=0, calibrationType=0)
+        )
+        lock = make_lock(danalock_config=config)
+        assert lock.supported_features == lock_mod.LockEntityFeature(0)
+
+    def test_supported_features_no_features_returns_zero(self):
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(features=None)
+        lock = make_lock(danalock_config=config)
+        assert lock.supported_features == lock_mod.LockEntityFeature(0)
 
 
 class TestSecuritasLockActions:
@@ -385,71 +665,61 @@ class TestSecuritasLockActions:
 
     async def test_async_lock_sets_state_to_locking_then_locked_on_success(self):
         lock = make_lock()
-        lock.async_schedule_update_ha_state = MagicMock()
-        lock.client.session.change_lock_mode = AsyncMock(
-            return_value=SmartLockModeStatus()
-        )
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_lock()
 
         # After successful lock, final state should be "2" (locked)
         assert lock._state == "2"
-        # async_schedule_update_ha_state was called during __force_state("4")
-        lock.async_schedule_update_ha_state.assert_called()
+        # async_schedule_update_ha_state was called during _force_state("4")
+        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
+        # async_write_ha_state is called after successful state change
+        lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
 
     async def test_async_unlock_sets_state_to_opening_then_open_on_success(self):
         lock = make_lock()
-        lock.async_schedule_update_ha_state = MagicMock()
-        lock.client.session.change_lock_mode = AsyncMock(
-            return_value=SmartLockModeStatus()
-        )
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_unlock()
 
         # After successful unlock, final state should be "1" (open)
         assert lock._state == "1"
-        lock.async_schedule_update_ha_state.assert_called()
+        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
+        lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
 
-    async def test_async_lock_error_does_not_change_final_state(self):
+    async def test_async_lock_error_restores_previous_state(self):
         lock = make_lock()
-        lock.async_schedule_update_ha_state = MagicMock()
-        lock.client.session.change_lock_mode = AsyncMock(
+        lock.client.change_lock_mode = AsyncMock(
             side_effect=SecuritasDirectError("API error")
         )
 
         await lock.async_lock()
 
-        # __force_state("4") was called, but then the error caused early return.
-        # State remains "4" (locking) — it does NOT reach "2" (locked).
-        assert lock._state == "4"
+        # On error, state is restored from _last_state (initial "2" = locked)
+        assert lock._state == "2"
 
-    async def test_async_unlock_error_does_not_change_final_state(self):
+    async def test_async_unlock_error_restores_previous_state(self):
         lock = make_lock()
-        lock.async_schedule_update_ha_state = MagicMock()
-        lock.client.session.change_lock_mode = AsyncMock(
+        lock.client.change_lock_mode = AsyncMock(
             side_effect=SecuritasDirectError("API error")
         )
 
         await lock.async_unlock()
 
-        # __force_state("3") was called, but then the error caused early return.
-        # State remains "3" (opening) — it does NOT reach "1" (open).
-        assert lock._state == "3"
+        # On error, state is restored from _last_state (initial "2" = locked)
+        assert lock._state == "2"
 
     async def test_async_lock_intermediate_state_is_locking(self):
         """Verify __force_state is called with '4' (locking) before the API call."""
         lock = make_lock()
         observed_states = []
 
-        original_schedule = MagicMock()
-        lock.async_schedule_update_ha_state = original_schedule
-
-        async def capture_state(installation, lock_mode):
+        async def capture_state(installation, lock_mode, device_id=None):
             """Capture state at the moment the API call is made."""
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
-        lock.client.session.change_lock_mode = AsyncMock(side_effect=capture_state)
+        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
 
         await lock.async_lock()
 
@@ -463,15 +733,59 @@ class TestSecuritasLockActions:
         lock = make_lock()
         observed_states = []
 
-        lock.async_schedule_update_ha_state = MagicMock()
-
-        async def capture_state(installation, lock_mode):
+        async def capture_state(installation, lock_mode, device_id=None):
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
-        lock.client.session.change_lock_mode = AsyncMock(side_effect=capture_state)
+        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
 
         await lock.async_unlock()
+
+        assert observed_states == ["3"]
+        assert lock._state == "1"
+
+    async def test_async_open_sets_state_to_opening_then_open_on_success(self):
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_open()
+
+        assert lock._state == "1"
+        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
+        lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
+
+    async def test_async_open_error_restores_previous_state(self):
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(
+            side_effect=SecuritasDirectError("API error")
+        )
+
+        await lock.async_open()
+
+        assert lock._state == "2"
+
+    async def test_async_open_calls_change_lock_mode_with_false(self):
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_open()
+
+        lock.client.change_lock_mode.assert_awaited_once_with(
+            lock.installation, False, "01"
+        )
+
+    async def test_async_open_intermediate_state_is_opening(self):
+        """Verify _force_state is called with '3' (opening) before the API call."""
+        lock = make_lock()
+        observed_states = []
+
+        async def capture_state(installation, lock_mode, device_id=None):
+            observed_states.append(lock._state)
+            return SmartLockModeStatus()
+
+        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
+
+        await lock.async_open()
 
         assert observed_states == ["3"]
         assert lock._state == "1"
@@ -482,8 +796,8 @@ class TestSecuritasLockUpdateStatus:
 
     async def test_async_update_status_updates_state_from_api(self):
         lock = make_lock()
-        lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="1")
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
         )
 
         await lock.async_update_status()
@@ -495,8 +809,8 @@ class TestSecuritasLockUpdateStatus:
         # Initial state is "2" (locked)
         assert lock._state == "2"
 
-        lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="0")
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(res="OK", lockStatus="0", deviceId="01")]
         )
 
         await lock.async_update_status()
@@ -506,24 +820,69 @@ class TestSecuritasLockUpdateStatus:
 
     async def test_async_update_status_updates_on_non_zero(self):
         lock = make_lock()
-        lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="3")
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(res="OK", lockStatus="3", deviceId="01")]
         )
 
         await lock.async_update_status()
 
         assert lock._state == "3"
 
+    async def test_async_update_status_ignores_other_device_ids(self):
+        """Only status for the lock's own device_id is used."""
+        lock = make_lock(device_id="01")
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[
+                SmartLockMode(res="OK", lockStatus="1", deviceId="02"),
+            ]
+        )
+
+        await lock.async_update_status()
+
+        # No matching device_id → get_lock_state returns "0" (unknown) → ignored
+        assert lock._state == "2"
+
+    async def test_config_fetch_with_holdback_triggers_state_write(self):
+        """After fetching config with holdBackLatchTime, HA state is refreshed
+        so supported_features picks up the OPEN flag."""
+        import homeassistant.components.lock as lock_mod
+
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(return_value=config)
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+
+        assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
+
+    async def test_danalock_config_fetched_only_once(self):
+        """get_danalock_config must be called exactly once even across multiple updates."""
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(return_value=None)
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+        await lock.async_update_status()
+
+        lock.client.get_danalock_config.assert_awaited_once()
+
     async def test_async_update_delegates_to_update_status(self):
         """async_update just calls async_update_status."""
         lock = make_lock()
-        lock.client.session.get_lock_current_mode = AsyncMock(
-            return_value=SmartLockMode(res="OK", lockStatus="1")
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
         )
 
         await lock.async_update()
 
-        lock.client.session.get_lock_current_mode.assert_awaited_once()
+        lock.client.get_lock_modes.assert_awaited_once()
         assert lock._state == "1"
 
 
@@ -557,55 +916,49 @@ class TestHassNoneGuards:
 
     async def test_lock_update_status_skips_when_hass_is_none(self):
         lock = make_lock()
-        lock.hass = None
-        lock.client.session.get_lock_current_mode = AsyncMock()
+        lock.hass = None  # type: ignore[attr-defined]
+        lock.client.get_lock_modes = AsyncMock()
 
         await lock.async_update_status()
 
-        lock.client.session.get_lock_current_mode.assert_not_awaited()
+        lock.client.get_lock_modes.assert_not_awaited()
 
     def test_lock_force_state_skips_schedule_when_hass_is_none(self):
         lock = make_lock()
-        lock.async_schedule_update_ha_state = MagicMock()
-        lock.hass = None
+        lock.hass = None  # type: ignore[attr-defined]
 
-        lock._SecuritasLock__force_state("1")
+        lock._force_state("1")
 
         assert lock._state == "1"
-        lock.async_schedule_update_ha_state.assert_not_called()
+        lock.async_schedule_update_ha_state.assert_not_called()  # type: ignore[attr-defined]
 
     async def test_temperature_update_skips_when_hass_is_none(self):
         client = make_client()
-        sensor = SentinelTemperature(
-            make_sentinel(temp=22), make_service(), client, make_device()
-        )
-        sensor.hass = None
-        client.session.get_sentinel_data = AsyncMock()
+        sensor = SentinelTemperature(make_service(), client, make_installation())
+        sensor.hass = None  # type: ignore[attr-defined]
+        client.get_sentinel = AsyncMock()
 
         await sensor.async_update()
 
-        client.session.get_sentinel_data.assert_not_awaited()
+        client.get_sentinel.assert_not_awaited()
 
     async def test_humidity_update_skips_when_hass_is_none(self):
         client = make_client()
-        sensor = SentinelHumidity(
-            make_sentinel(humidity=45), make_service(), client, make_device()
-        )
-        sensor.hass = None
-        client.session.get_sentinel_data = AsyncMock()
+        sensor = SentinelHumidity(make_service(), client, make_installation())
+        sensor.hass = None  # type: ignore[attr-defined]
+        client.get_sentinel = AsyncMock()
 
         await sensor.async_update()
 
-        client.session.get_sentinel_data.assert_not_awaited()
+        client.get_sentinel.assert_not_awaited()
 
     async def test_air_quality_update_skips_when_hass_is_none(self):
         client = make_client()
-        sensor = SentinelAirQuality(
-            make_air_quality(), make_sentinel(), make_service(), client, make_device()
-        )
-        sensor.hass = None
-        client.session.get_air_quality_data = AsyncMock()
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQuality(fetcher, make_installation())
+        sensor.hass = None  # type: ignore[attr-defined]
+        client.get_sentinel = AsyncMock()
 
         await sensor.async_update()
 
-        client.session.get_air_quality_data.assert_not_awaited()
+        client.get_sentinel.assert_not_awaited()

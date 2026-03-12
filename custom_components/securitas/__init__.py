@@ -2,93 +2,78 @@
 
 import asyncio
 from collections import OrderedDict
-import json
 import logging
 from pathlib import Path
 import time
 from uuid import uuid4
 
-from aiohttp import ClientSession
 import voluptuous as vol
 
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
-    CONF_ERROR,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_UNIQUE_ID,
     CONF_USERNAME,
-    Platform,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.device_registry import DeviceInfo
 
+from .api_queue import ApiQueue
+from .const import (  # noqa: F401 — re-exported for backwards compatibility
+    API_CACHE_TTL,
+    CAMERA_CARD_BASE_URL,
+    CAMERA_CARD_URL,
+    CARD_BASE_URL,
+    CARD_URL,
+    CONF_ADVANCED,
+    CONF_CODE_ARM_REQUIRED,
+    CONF_COUNTRY,
+    CONF_DELAY_CHECK_OPERATION,
+    CONF_DEVICE_INDIGITALL,
+    CONF_ENTRY_ID,
+    CONF_HAS_PERI,
+    CONF_INSTALLATION,
+    CONF_MAP_AWAY,
+    CONF_MAP_CUSTOM,
+    CONF_MAP_HOME,
+    CONF_MAP_NIGHT,
+    CONF_MAP_VACATION,
+    CONF_NOTIFY_GROUP,
+    COUNTRY_CODES,
+    DEFAULT_CODE,
+    DEFAULT_CODE_ARM_REQUIRED,
+    DEFAULT_COUNTRY,
+    DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    PLATFORMS,
+    SIGNAL_CAMERA_STATE,
+    SIGNAL_CAMERA_UPDATE,
+    SIGNAL_XSSTATUS_UPDATE,
+)
+from .hub import (  # noqa: F401 — re-exported for backwards compatibility
+    SecuritasDirectDevice,
+    SecuritasHub,
+    _notify_error,
+)
 from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
-    ALARM_STATUS_POLL_DELAY,
     ApiDomains,
-    ApiManager,
-    CheckAlarmStatus,
     Installation,
     Login2FAError,
     LoginError,
-    OtpPhone,
-    PERI_DEFAULTS,
     SecuritasDirectError,
-    Service,
-    SStatus,
-    STD_DEFAULTS,
     generate_device_id,
     generate_uuid,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-DOMAIN = "securitas"
-CARD_BASE_URL = "/securitas_panel/securitas-alarm-card.js"
-_MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text())
-CARD_URL = f"{CARD_BASE_URL}?v={_MANIFEST['version']}"
-
-CONF_COUNTRY = "country"
-CONF_CODE_ARM_REQUIRED = "code_arm_required"
-CONF_CHECK_ALARM_PANEL = "check_alarm_panel"
-CONF_USE_2FA = "use_2FA"
-CONF_PERI_ALARM = "PERI_alarm"
-CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
-CONF_ENTRY_ID = "entry_id"
-CONF_INSTALLATION_KEY = "instalation"
-CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
-CONF_MAP_HOME = "map_home"
-CONF_MAP_AWAY = "map_away"
-CONF_MAP_NIGHT = "map_night"
-CONF_MAP_CUSTOM = "map_custom"
-CONF_MAP_VACATION = "map_vacation"
-CONF_NOTIFY_GROUP = "notify_group"
-
-DEFAULT_USE_2FA = True
-DEFAULT_SCAN_INTERVAL = 120
-DEFAULT_CODE_ARM_REQUIRED = False
-DEFAULT_CHECK_ALARM_PANEL = True
-DEFAULT_DELAY_CHECK_OPERATION = 2
-DEFAULT_CODE = ""
-DEFAULT_PERI_ALARM = False
-DEFAULT_COUNTRY = "ES"
-
-
-PLATFORMS = [
-    Platform.ALARM_CONTROL_PANEL,
-    Platform.BUTTON,
-    Platform.SENSOR,
-    Platform.LOCK,
-]
-HUB = None
-
 
 CONFIG_SCHEMA = vol.Schema(
     {
@@ -96,15 +81,10 @@ CONFIG_SCHEMA = vol.Schema(
             {
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
-                vol.Optional(CONF_USE_2FA, default=DEFAULT_USE_2FA): bool,
                 vol.Optional(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
                 vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
-                vol.Optional(CONF_PERI_ALARM, default=DEFAULT_PERI_ALARM): bool,
                 vol.Optional(
                     CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED
-                ): bool,
-                vol.Optional(
-                    CONF_CHECK_ALARM_PANEL, default=DEFAULT_CHECK_ALARM_PANEL
                 ): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
             }
@@ -136,8 +116,6 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_CODE,
             CONF_CODE_ARM_REQUIRED,
             CONF_SCAN_INTERVAL,
-            CONF_CHECK_ALARM_PANEL,
-            CONF_PERI_ALARM,
             CONF_MAP_HOME,
             CONF_MAP_AWAY,
             CONF_MAP_NIGHT,
@@ -153,76 +131,62 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Establish connection with Securitas Direct."""
-    need_sign_in: bool = False
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Reject old config entries — users must delete and re-add."""
+    if config_entry.version < 3:
+        _LOGGER.error(
+            "Config entry %s uses format v%s which is no longer supported. "
+            "Please remove this integration entry and re-add it.",
+            config_entry.entry_id,
+            config_entry.version,
+        )
+        _notify_error(
+            hass,
+            "migration_required",
+            "Securitas Direct",
+            "Your Securitas Direct configuration uses an old format. "
+            "Please remove the integration entry and re-add it.",
+        )
+        return False
+    return True
+
+
+def _build_config_dict(entry: ConfigEntry) -> tuple[dict, bool]:
+    """Build config dict from entry.data + entry.options.
+
+    Returns the config dict and a flag indicating whether sign-in is needed
+    (True if any device ID fields are missing from entry.data).
+    """
+
+    def _opt(key, default=None):
+        """Read from options first, then data, then default."""
+        return entry.options.get(key, entry.data.get(key, default))
 
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
-    config[CONF_USE_2FA] = entry.data.get(CONF_USE_2FA, DEFAULT_USE_2FA)
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
-    config[CONF_CODE] = entry.data.get(CONF_CODE, DEFAULT_CODE)
-    config[CONF_PERI_ALARM] = entry.data.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
-    config[CONF_CODE_ARM_REQUIRED] = entry.data.get(
+    config[CONF_CODE] = _opt(CONF_CODE, DEFAULT_CODE)
+    config[CONF_HAS_PERI] = entry.data.get(CONF_HAS_PERI, False)
+    config[CONF_CODE_ARM_REQUIRED] = _opt(
         CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
     )
-    config[CONF_CHECK_ALARM_PANEL] = entry.data.get(
-        CONF_CHECK_ALARM_PANEL, DEFAULT_CHECK_ALARM_PANEL
-    )
-    config[CONF_SCAN_INTERVAL] = entry.data.get(
-        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-    )
-    config[CONF_DELAY_CHECK_OPERATION] = entry.data.get(
+    config[CONF_SCAN_INTERVAL] = _opt(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    config[CONF_DELAY_CHECK_OPERATION] = _opt(
         CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
     )
     config[CONF_ENTRY_ID] = entry.entry_id
-    config[CONF_NOTIFY_GROUP] = entry.data.get(CONF_NOTIFY_GROUP, "")
+    config[CONF_NOTIFY_GROUP] = _opt(CONF_NOTIFY_GROUP, "")
     config = add_device_information(config)
 
-    # Register card static path + Lovelace resource early so the card
-    # is available even when login fails (ConfigEntryNotReady).
-    if hass.http and not hass.data.get(DOMAIN, {}).get("card_registered"):
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    "/securitas_panel",
-                    str(Path(__file__).parent / "www"),
-                    cache_headers=False,
-                )
-            ]
-        )
-        await _register_card_resource(hass)
-        hass.data.setdefault(DOMAIN, {})["card_registered"] = True
+    # Read mapping config (options override data)
+    config[CONF_MAP_HOME] = _opt(CONF_MAP_HOME)
+    config[CONF_MAP_AWAY] = _opt(CONF_MAP_AWAY)
+    config[CONF_MAP_NIGHT] = _opt(CONF_MAP_NIGHT)
+    config[CONF_MAP_CUSTOM] = _opt(CONF_MAP_CUSTOM)
+    config[CONF_MAP_VACATION] = _opt(CONF_MAP_VACATION)
 
-    # Read mapping config from entry data
-    config[CONF_MAP_HOME] = entry.data.get(CONF_MAP_HOME)
-    config[CONF_MAP_AWAY] = entry.data.get(CONF_MAP_AWAY)
-    config[CONF_MAP_NIGHT] = entry.data.get(CONF_MAP_NIGHT)
-    config[CONF_MAP_CUSTOM] = entry.data.get(CONF_MAP_CUSTOM)
-    config[CONF_MAP_VACATION] = entry.data.get(CONF_MAP_VACATION)
-
-    # Migrate old config: derive per-button mappings from PERI_alarm checkbox
-    if config[CONF_MAP_HOME] is None:
-        is_peri = config.get(CONF_PERI_ALARM, DEFAULT_PERI_ALARM)
-        defaults = PERI_DEFAULTS if is_peri else STD_DEFAULTS
-        config[CONF_MAP_HOME] = defaults[CONF_MAP_HOME]
-        config[CONF_MAP_AWAY] = defaults[CONF_MAP_AWAY]
-        config[CONF_MAP_NIGHT] = defaults[CONF_MAP_NIGHT]
-        config[CONF_MAP_CUSTOM] = defaults[CONF_MAP_CUSTOM]
-        config[CONF_MAP_VACATION] = defaults[CONF_MAP_VACATION]
-        hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF_MAP_HOME: config[CONF_MAP_HOME],
-                CONF_MAP_AWAY: config[CONF_MAP_AWAY],
-                CONF_MAP_NIGHT: config[CONF_MAP_NIGHT],
-                CONF_MAP_CUSTOM: config[CONF_MAP_CUSTOM],
-                CONF_MAP_VACATION: config[CONF_MAP_VACATION],
-            },
-        )
-
+    need_sign_in = False
     if CONF_DEVICE_ID in entry.data:
         config[CONF_DEVICE_ID] = entry.data[CONF_DEVICE_ID]
     else:
@@ -236,20 +200,200 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         need_sign_in = True
 
-    _card_registered = hass.data.get(DOMAIN, {}).get("card_registered", False)
-    _card_resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
-    hass.data[DOMAIN] = {}
-    if _card_registered:
-        hass.data[DOMAIN]["card_registered"] = True
-    if _card_resource_id is not None:
-        hass.data[DOMAIN]["card_resource_id"] = _card_resource_id
+    return config, need_sign_in
+
+
+async def _get_or_create_session(
+    hass: HomeAssistant, config: dict, entry: ConfigEntry
+) -> SecuritasHub:
+    """Get or create a shared SecuritasHub session with reference counting.
+
+    Multiple config entries for the same username share a single
+    SecuritasHub / ApiManager session to avoid duplicate logins
+    and WAF rate-limit blocks.  A per-username lock prevents concurrent
+    async_setup_entry calls from creating duplicate hubs.
+    """
+    username = config[CONF_USERNAME]
+    sessions = hass.data[DOMAIN].setdefault("sessions", {})
+    setup_locks = hass.data[DOMAIN].setdefault("setup_locks", {})
+    if username not in setup_locks:
+        setup_locks[username] = asyncio.Lock()
+
+    async with setup_locks[username]:
+        if username in sessions:
+            # Reuse existing session
+            client: SecuritasHub = sessions[username]["hub"]
+            sessions[username]["ref_count"] += 1
+        else:
+            # Create new session and log in
+            client = SecuritasHub(config, entry, async_get_clientsession(hass), hass)
+            try:
+                await client.login()
+            except Login2FAError:
+                msg = (
+                    "Securitas Direct need a 2FA SMS code."
+                    "Please login again with your phone"
+                )
+                _notify_error(hass, "2fa_error", "Securitas Direct", msg)
+                raise
+            except LoginError as err:
+                _notify_error(hass, "login_error", "Securitas Direct", str(err))
+                _LOGGER.error(
+                    "Could not log in to Securitas: %s",
+                    err.log_detail(),
+                )
+                raise
+            except SecuritasDirectError as err:
+                detail = err.log_detail()
+                _LOGGER.error(
+                    "Unable to connect to Securitas Direct: %s",
+                    detail,
+                )
+                raise ConfigEntryNotReady(
+                    f"Unable to connect to Securitas Direct: {detail}"
+                ) from None
+            sessions[username] = {"hub": client, "ref_count": 1}
+
+    return client
+
+
+def _get_or_create_api_queue(
+    hass: HomeAssistant,
+    session: SecuritasHub,
+    config: dict,
+    entry: ConfigEntry,
+) -> None:
+    """Create or reuse an ApiQueue for the session's API domain.
+
+    WAF rate-limits by IP per domain, so entries sharing a domain share a queue.
+    Sets session.api_queue as a side effect.
+    """
+    domain_url = ApiDomains().get_url(config[CONF_COUNTRY])
+    api_queues = hass.data[DOMAIN].setdefault("api_queues", {})
+    if domain_url not in api_queues:
+        api_queues[domain_url] = ApiQueue(
+            interval=config[CONF_DELAY_CHECK_OPERATION],
+        )
+        _LOGGER.debug(
+            "[setup] Created ApiQueue %s for domain %s (country=%s, entry=%s)",
+            id(api_queues[domain_url]),
+            domain_url,
+            config[CONF_COUNTRY],
+            entry.entry_id,
+        )
+    else:
+        _LOGGER.info(
+            "Reusing ApiQueue %s for domain %s (country=%s, entry=%s)",
+            id(api_queues[domain_url]),
+            domain_url,
+            config[CONF_COUNTRY],
+            entry.entry_id,
+        )
+    session.api_queue = api_queues[domain_url]
+
+
+async def _fetch_and_cache_installations(
+    hass: HomeAssistant,
+    hub: SecuritasHub,
+    entry: ConfigEntry,
+) -> list[SecuritasDirectDevice]:
+    """Fetch installations and services, populating caches.
+
+    Uses cached data from the config flow when available, otherwise
+    fetches from the API (e.g. on HA restart).
+
+    Returns a list of SecuritasDirectDevice wrappers for this entry's
+    installations.
+    """
+    # Cache keyed by username so that entries for different accounts (e.g.
+    # Italian and Spanish installations on separate Verisure accounts) do not
+    # accidentally share each other's installation list.
+    username = entry.data.get(CONF_USERNAME, entry.entry_id)
+    install_cache_key = f"installations_cache_{username}"
+    install_cache = hass.data[DOMAIN].get(install_cache_key)
+    if (
+        install_cache is not None
+        and time.monotonic() - install_cache["time"] < API_CACHE_TTL
+    ):
+        all_installations: list[Installation] = install_cache["data"]
+    else:
+        all_installations = await hub.api_queue.submit(
+            hub.session.list_installations,
+            priority=ApiQueue.FOREGROUND,
+        )
+        hass.data[DOMAIN][install_cache_key] = {
+            "data": all_installations,
+            "time": time.monotonic(),
+        }
+    target_number = entry.data.get(CONF_INSTALLATION)
+    if target_number:
+        entry_installations = [
+            inst for inst in all_installations if inst.number == target_number
+        ]
+    else:
+        # Legacy entries without CONF_INSTALLATION get all
+        entry_installations = all_installations
+
+    # Use cached services from config flow if available and fresh,
+    # otherwise fetch from API (e.g. on HA restart).
+    svc_cache = hass.data[DOMAIN].get("cached_services")
+    cached_services = (
+        svc_cache["data"]
+        if svc_cache is not None
+        and time.monotonic() - svc_cache["time"] < API_CACHE_TTL
+        else None
+    )
+
+    devices: list[SecuritasDirectDevice] = []
+    for installation in entry_installations:
+        if cached_services and installation.number in cached_services:
+            # Pre-populate from config flow cache
+            hub.services_cache[installation.number] = cached_services[
+                installation.number
+            ]
+        elif installation.number not in hub.services_cache:
+            # HA restart: fetch directly (bypass queue — we just logged
+            # in, no WAF risk yet) so platforms don't block on queue.
+            hub.services_cache[
+                installation.number
+            ] = await hub.session.get_all_services(installation)
+        devices.append(SecuritasDirectDevice(installation))
+    return devices
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Establish connection with Securitas Direct."""
+    config, need_sign_in = _build_config_dict(entry)
+
+    # Register card static path + Lovelace resource early so the card
+    # is available even when login fails (ConfigEntryNotReady).
+    if hass.http and not hass.data.get(DOMAIN, {}).get("card_registered"):
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    "/securitas_panel",
+                    str(Path(__file__).parent / "www"),
+                    cache_headers=False,
+                )
+            ]
+        )
+        await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
+        await _register_card_resource(
+            hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
+        )
+        hass.data.setdefault(DOMAIN, {})["card_registered"] = True
+
+    hass.data.setdefault(DOMAIN, {})
 
     # Set up log sanitization filter — must be on handlers, not the logger,
     # because logger-level filters don't apply to child logger records.
-    log_filter = SensitiveDataFilter()
-    for handler in logging.getLogger().handlers:
-        handler.addFilter(log_filter)
-    hass.data[DOMAIN]["log_filter"] = log_filter
+    if "log_filter" not in hass.data[DOMAIN]:
+        log_filter = SensitiveDataFilter()
+        for handler in logging.getLogger().handlers:
+            handler.addFilter(log_filter)
+        hass.data[DOMAIN]["log_filter"] = log_filter
+    else:
+        log_filter = hass.data[DOMAIN]["log_filter"]
 
     # Register credentials immediately
     log_filter.update_secret("username", config[CONF_USERNAME])
@@ -257,127 +401,234 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:
-        client: SecuritasHub = SecuritasHub(
-            config, entry, async_get_clientsession(hass), hass
-        )
-        entry.async_on_unload(entry.add_update_listener(async_update_options))
-        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
         try:
-            await client.login()
+            client = await _get_or_create_session(hass, config, entry)
         except Login2FAError:
-            msg = (
-                "Securitas Direct need a 2FA SMS code."
-                "Please login again with your phone"
-            )
-            _notify_error(hass, "2fa_error", "Securitas Direct", msg)
-            config[CONF_ERROR] = "2FA"
-            hass.async_create_task(
-                hass.config_entries.flow.async_init(
-                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
-                )
-            )
             return False
-        except LoginError as err:
-            _notify_error(hass, "login_error", "Securitas Direct", str(err))
-            config[CONF_ERROR] = "login"
-            hass.async_create_task(
-                hass.config_entries.flow.async_init(
-                    DOMAIN, context={"source": SOURCE_IMPORT}, data=config
-                )
-            )
-            _LOGGER.error(
-                "Could not log in to Securitas: %s",
-                err.args[0] if err.args else err,
-            )
+        except LoginError:
             return False
+
+        _get_or_create_api_queue(hass, client, config, entry)
+
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
+
+        try:
+            devices = await _fetch_and_cache_installations(hass, client, entry)
         except SecuritasDirectError as err:
-            _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
+            _LOGGER.error("Unable to connect to Securitas Direct: %s", err.log_detail())
             raise ConfigEntryNotReady("Unable to connect to Securitas Direct") from None
-        else:
-            hass.data[DOMAIN][SecuritasHub.__name__] = client
-            try:
-                installations: list[
-                    Installation
-                ] = await client.session.list_installations()
-                devices: list[SecuritasDirectDevice] = []
-                for installation in installations:
-                    await client.get_services(installation)
-                    devices.append(SecuritasDirectDevice(installation))
-            except SecuritasDirectError as err:
-                _LOGGER.error("Unable to connect to Securitas Direct: %s", err.args[0])
-                raise ConfigEntryNotReady(
-                    "Unable to connect to Securitas Direct"
-                ) from None
 
-            hass.data.setdefault(DOMAIN, {})[entry.unique_id] = config
-            hass.data.setdefault(DOMAIN, {})[CONF_INSTALLATION_KEY] = devices
+        # Store per-entry data
+        hass.data[DOMAIN][entry.entry_id] = {
+            "hub": client,
+            "devices": devices,
+        }
 
-            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-            return True
-    else:
-        config = add_device_information(entry.data.copy())
-        config[CONF_SCAN_INTERVAL] = entry.data.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+        # Discover cameras and locks in the background after setup completes.
+        # This avoids blocking startup with API calls.
+        entry.async_create_background_task(
+            hass,
+            _async_discover_devices(hass, entry),
+            f"securitas_discover_{entry.entry_id}",
         )
-        hass.async_create_task(
-            hass.config_entries.flow.async_init(
-                DOMAIN, context={"source": SOURCE_IMPORT}, data=config
+        return True
+    raise ConfigEntryNotReady(
+        "Config entry missing device IDs. Delete and re-add the integration."
+    )
+
+
+async def _discover_cameras(
+    hub: SecuritasHub,
+    installation: Installation,
+    entry_data: dict,
+) -> None:
+    """Discover camera devices for an installation and add entities."""
+    from .button import SecuritasCaptureButton
+    from .camera import SecuritasCamera
+
+    _LOGGER.debug(
+        "[camera_discovery] Fetching camera devices for installation %s (%s)",
+        installation.number,
+        installation.alias,
+    )
+    try:
+        cameras = await hub.get_camera_devices(installation)
+    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
+        _LOGGER.warning(
+            "[camera_discovery] Failed to get camera devices for %s",
+            installation.number,
+            exc_info=True,
+        )
+        cameras = []
+
+    _LOGGER.debug(
+        "[camera_discovery] Installation %s: found %d camera(s): %s",
+        installation.number,
+        len(cameras),
+        [c.zone_id for c in cameras],
+    )
+
+    if cameras:
+        camera_add = entry_data.get("camera_add_entities")
+        button_add = entry_data.get("button_add_entities")
+        _LOGGER.debug(
+            "[camera_discovery] Installation %s: camera_add=%s button_add=%s",
+            installation.number,
+            camera_add is not None,
+            button_add is not None,
+        )
+        if camera_add:
+            camera_add(
+                [SecuritasCamera(hub, installation, cam) for cam in cameras],
+                False,
             )
-        )
-        return False
+        if button_add:
+            button_add(
+                [SecuritasCaptureButton(hub, installation, cam) for cam in cameras],
+                True,
+            )
 
 
-async def _register_card_resource(hass: HomeAssistant) -> None:
-    """Register the alarm card as a Lovelace resource for proper load ordering.
+async def _discover_locks(
+    hass: HomeAssistant,
+    hub: SecuritasHub,
+    installation: Installation,
+    entry_data: dict,
+) -> None:
+    """Discover lock devices for an installation and add entities."""
+    from .entity import schedule_initial_updates
+    from .lock import (
+        DOORLOCK_SERVICE,
+        LOCK_STATUS_UNKNOWN,
+        SecuritasLock,
+    )
+    from .securitas_direct_new_api import SmartLock, SmartLockMode
+    from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
 
-    Using add_extra_js_url injects the script asynchronously, causing a race
-    condition on cold start where Lovelace renders cards before the custom
-    element is registered. Registering as a Lovelace resource gives Lovelace
-    explicit load ordering and avoids the "Configuration error" on first load.
+    try:
+        services = await hub.get_services(installation)
+    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
+        _LOGGER.warning("Failed to get services for %s", installation.number)
+        return
+
+    has_doorlock = any(s.request == DOORLOCK_SERVICE for s in services)
+    if not has_doorlock:
+        return
+
+    try:
+        lock_modes: list[SmartLockMode] = await hub.get_lock_modes(installation)
+    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
+        _LOGGER.warning("Failed to get lock modes for %s", installation.number)
+        lock_modes = []
+
+    if not lock_modes:
+        lock_modes = [
+            SmartLockMode(
+                res=None,
+                lockStatus=LOCK_STATUS_UNKNOWN,
+                deviceId=SMARTLOCK_DEVICE_ID,
+            )
+        ]
+
+    lock_add = entry_data.get("lock_add_entities")
+    if lock_add:
+        locks = []
+        for mode in lock_modes:
+            device_id = mode.deviceId or SMARTLOCK_DEVICE_ID
+            lock_config: SmartLock | None = None
+            try:
+                lock_config = await hub.get_smart_lock_config(installation, device_id)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOGGER.debug(
+                    "Could not fetch smart lock config for %s device %s",
+                    installation.number,
+                    device_id,
+                )
+            locks.append(
+                SecuritasLock(
+                    installation,
+                    client=hub,
+                    hass=hass,
+                    device_id=device_id,
+                    initial_status=mode.lockStatus,
+                    lock_config=lock_config,
+                )
+            )
+        lock_add(locks, False)
+        schedule_initial_updates(hass, locks)
+
+
+async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Discover cameras and locks in the background after setup."""
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if entry_data is None:
+        return
+
+    client: SecuritasHub = entry_data["hub"]
+    devices: list[SecuritasDirectDevice] = entry_data["devices"]
+
+    for device in devices:
+        installation = device.installation
+        await _discover_cameras(client, installation, entry_data)
+        await _discover_locks(hass, client, installation, entry_data)
+
+
+async def _register_card_resource(
+    hass: HomeAssistant,
+    base_url: str,
+    card_url: str,
+    storage_key: str,
+) -> None:
+    """Register a card JS file as a Lovelace resource.
+
     Falls back to add_extra_js_url if Lovelace resources are unavailable.
+    ``storage_key`` is used to track the resource ID in hass.data[DOMAIN].
     """
     try:
         lovelace_data = hass.data.get("lovelace")
         if lovelace_data and hasattr(lovelace_data, "resources"):
             resources = lovelace_data.resources
             if hasattr(resources, "async_create_item"):
-                # Storage mode — can add programmatically
                 if not resources.loaded:
                     await resources.async_load()
                     resources.loaded = True
-                # Update or skip if already registered
                 for item in resources.async_items():
                     url = item.get("url", "")
-                    if url == CARD_URL:
+                    if url == card_url:
                         return  # Already current version
-                    if url.startswith(CARD_BASE_URL):
-                        # Old version — update the URL
-                        await resources.async_update_item(item["id"], {"url": CARD_URL})
-                        hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item[
-                            "id"
-                        ]
+                    if url.startswith(base_url):
+                        await resources.async_update_item(item["id"], {"url": card_url})
+                        hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
                         return
                 item = await resources.async_create_item(
-                    {"res_type": "module", "url": CARD_URL}
+                    {"res_type": "module", "url": card_url}
                 )
-                hass.data.setdefault(DOMAIN, {})["card_resource_id"] = item["id"]
+                hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
                 return
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         _LOGGER.debug(
-            "Could not register as Lovelace resource, falling back to add_extra_js_url"
+            "[setup] Could not register %s as Lovelace resource, falling back to add_extra_js_url",
+            base_url,
         )
-    # Fallback: YAML mode or Lovelace not available
-    frontend.add_extra_js_url(hass, CARD_URL)
+    try:
+        frontend.add_extra_js_url(hass, card_url)
+    except (KeyError, Exception):  # pylint: disable=broad-exception-caught
+        _LOGGER.debug("[setup] Could not register %s via add_extra_js_url", base_url)
 
 
-async def _unregister_card_resource(hass: HomeAssistant) -> None:
-    """Remove the alarm card Lovelace resource on unload."""
-    resource_id = hass.data.get(DOMAIN, {}).get("card_resource_id")
+async def _unregister_card_resource(
+    hass: HomeAssistant,
+    card_url: str,
+    storage_key: str,
+) -> None:
+    """Remove a card Lovelace resource on unload."""
+    resource_id = hass.data.get(DOMAIN, {}).get(storage_key)
     if not resource_id:
-        # Was using add_extra_js_url fallback or user-managed resource
         try:
-            frontend.remove_extra_js_url(hass, CARD_URL)
-        except Exception:
+            frontend.remove_extra_js_url(hass, card_url)
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
         return
     try:
@@ -386,228 +637,48 @@ async def _unregister_card_resource(hass: HomeAssistant) -> None:
             resources = lovelace_data.resources
             if hasattr(resources, "async_delete_item"):
                 await resources.async_delete_item(resource_id)
-    except Exception:
-        _LOGGER.debug("Could not remove Lovelace resource %s", resource_id)
+    except Exception:  # pylint: disable=broad-exception-caught
+        _LOGGER.debug("[teardown] Could not remove Lovelace resource %s", resource_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    log_filter = hass.data[DOMAIN].get("log_filter")
-    if log_filter:
-        for handler in logging.getLogger().handlers:
-            handler.removeFilter(log_filter)
-
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )
 
-    await _unregister_card_resource(hass)
+    # Decrement shared session ref count (under the same lock used for creation)
+    username = config_entry.data.get(CONF_USERNAME)
+    sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
+    setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
+    if username and username in sessions:
+        lock = setup_locks.get(username)
+        if lock:
+            async with lock:
+                sessions[username]["ref_count"] -= 1
+                if sessions[username]["ref_count"] <= 0:
+                    sessions.pop(username)
+        else:
+            sessions[username]["ref_count"] -= 1
+            if sessions[username]["ref_count"] <= 0:
+                sessions.pop(username)
 
+    # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
-    hass.data[DOMAIN].pop("log_filter", None)
-    hass.data[DOMAIN].pop("card_resource_id", None)
-    if not hass.data[DOMAIN]:
-        hass.data.pop(DOMAIN)
+
+    # Check if any sessions remain — if not, do full cleanup
+    remaining_sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
+    if not remaining_sessions:
+        # Last entry unloaded — full cleanup
+        log_filter = hass.data[DOMAIN].get("log_filter")
+        if log_filter:
+            for handler in logging.getLogger().handlers:
+                handler.removeFilter(log_filter)
+
+        await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
+        await _unregister_card_resource(
+            hass, CAMERA_CARD_URL, "camera_card_resource_id"
+        )
+        hass.data.pop(DOMAIN, None)
+
     return unload_ok
-
-
-def _notify_error(
-    hass: HomeAssistant, notification_id, title: str, message: str
-) -> None:
-    """Notify user with persistent notification."""
-    hass.async_create_task(
-        hass.services.async_call(
-            domain="persistent_notification",
-            service="create",
-            service_data={
-                "title": title,
-                "message": message,
-                "notification_id": f"{DOMAIN}.{notification_id}",
-            },
-        )
-    )
-
-
-class SecuritasDirectDevice:
-    """Securitas direct device instance."""
-
-    def __init__(self, installation: Installation) -> None:
-        """Construct a device wrapper."""
-        self.installation = installation
-        self.name = installation.alias
-        self._available = True
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return True
-
-    @property
-    def device_id(self) -> str:
-        """Return device ID."""
-        return self.installation.number
-
-    @property
-    def address(self) -> str:
-        """Return the address of the instalation."""
-        return self.installation.address
-
-    @property
-    def city(self) -> str:
-        """Return the city of the instalation."""
-        return self.installation.city
-
-    @property
-    def postal_code(self) -> str:
-        """Return the postalCode of the instalation."""
-        return self.installation.postalCode
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return a device description for device registry."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, f"{self.installation.alias}")},
-            manufacturer="Securitas Direct",
-            model=self.installation.type,
-            hw_version=self.installation.panel,
-            name=self.name,
-        )
-
-
-class SecuritasHub:
-    """A Securitas hub wrapper class."""
-
-    def __init__(
-        self,
-        domain_config: dict,
-        config_entry: ConfigEntry | None,
-        http_client: ClientSession,
-        hass: HomeAssistant,
-    ) -> None:
-        """Initialize the Securitas hub."""
-        self.overview: CheckAlarmStatus | dict = {}
-        self.config = domain_config
-        self.config_entry: ConfigEntry | None = config_entry
-        self.sentinel_services: list[Service] = []
-        self.check_alarm: bool = domain_config[CONF_CHECK_ALARM_PANEL]
-        self.country: str = domain_config[CONF_COUNTRY].upper()
-        self.lang: str = ApiDomains().get_language(self.country)
-        self.hass: HomeAssistant = hass
-        self.services: dict[int, list[Service]] = {1: []}
-        self.log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get(
-            "log_filter"
-        )
-        self.session: ApiManager = ApiManager(
-            domain_config[CONF_USERNAME],
-            domain_config[CONF_PASSWORD],
-            self.country,
-            http_client,
-            domain_config[CONF_DEVICE_ID],
-            domain_config[CONF_UNIQUE_ID],
-            domain_config[CONF_DEVICE_INDIGITALL],
-            domain_config[CONF_DELAY_CHECK_OPERATION],
-            log_filter=self.log_filter,
-        )
-        self.installations: list[Installation] = []
-        self._api_lock = asyncio.Lock()
-        self._last_api_time: float = 0
-
-    async def login(self):
-        """Login to Securitas."""
-        await self.session.login()
-
-    async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
-        """Validate the current device."""
-        return await self.session.validate_device(False, "", "")
-
-    async def send_sms_code(
-        self, auth_otp_hash: str, sms_code: str
-    ) -> tuple[str | None, list[OtpPhone] | None]:
-        """Send the SMS."""
-        return await self.session.validate_device(True, auth_otp_hash, sms_code)
-
-    async def refresh_token(self) -> bool:
-        """Refresh the token."""
-        return await self.session.refresh_token()
-
-    async def send_opt(self, challange: str, phone_index: int):
-        """Call for the SMS challange."""
-        return await self.session.send_otp(phone_index, challange)
-
-    async def get_services(self, instalation: Installation) -> list[Service]:
-        """Get the list of services from the instalation."""
-        return await self.session.get_all_services(instalation)
-
-    def get_authentication_token(self) -> str | None:
-        """Get the authentication token."""
-        return self.session.authentication_token
-
-    def set_authentication_token(self, value: str):
-        """Set the authentication token."""
-        self.session.authentication_token = value
-
-    async def logout(self):
-        """Logout from Securitas."""
-        ret = await self.session.logout()
-        if not ret:
-            _LOGGER.error("Could not log out from Securitas: %s", ret)
-            return False
-        return True
-
-    async def update_overview(self, installation: Installation) -> CheckAlarmStatus:
-        """Update the overview.
-
-        Uses a lock to serialize API calls across installations, preventing
-        concurrent request bursts that trigger the Securitas WAF.
-        """
-        _MIN_API_INTERVAL = 5  # seconds between API call bursts
-        async with self._api_lock:
-            elapsed = time.monotonic() - self._last_api_time
-            if elapsed < _MIN_API_INTERVAL:
-                await asyncio.sleep(_MIN_API_INTERVAL - elapsed)
-
-            if self.check_alarm is not True:
-                status: SStatus = SStatus()
-                try:
-                    status = await self.session.check_general_status(installation)
-                except SecuritasDirectError as err:
-                    _LOGGER.warning(
-                        "Error checking general status: %s",
-                        err.args[0] if err.args else err,
-                    )
-                    if getattr(err, "http_status", None) == 403:
-                        raise
-                finally:
-                    self._last_api_time = time.monotonic()
-
-                return CheckAlarmStatus(
-                    status.status or "",
-                    "",
-                    status.status or "",
-                    installation.number,
-                    status.status or "",
-                    status.timestampUpdate or "",
-                )
-
-            alarm_status = CheckAlarmStatus()
-            try:
-                reference_id: str = await self.session.check_alarm(installation)
-                await asyncio.sleep(ALARM_STATUS_POLL_DELAY)
-                alarm_status = await self.session.check_alarm_status(
-                    installation, reference_id
-                )
-            except SecuritasDirectError as err:
-                _LOGGER.error(
-                    "Error checking alarm status: %s",
-                    err.args[0] if err.args else err,
-                )
-                if getattr(err, "http_status", None) == 403:
-                    raise
-            finally:
-                self._last_api_time = time.monotonic()
-
-            return alarm_status
-
-    @property
-    def get_config_entry(self) -> ConfigEntry | None:
-        return self.config_entry

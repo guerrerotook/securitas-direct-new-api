@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.securitas.constants import SentinelName
+from custom_components.securitas.const import SentinelName
 from custom_components.securitas.securitas_direct_new_api.const import (
     CommandType,
     PERI_DEFAULTS,
