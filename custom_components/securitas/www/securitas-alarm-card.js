@@ -1054,10 +1054,16 @@ class SecuritasAlarmCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
+    const prev = this._config;
     this._config = { ...config };
-    if (!this._selfUpdate) {
-      this._render();
-    }
+    // Only rebuild the DOM when something structural changes. Text-field edits
+    // update existing DOM nodes directly, so a full re-render isn't needed and
+    // would destroy the focused element on every keystroke.
+    const needsRender = !prev
+      || prev.entity !== config.entity
+      || prev.type   !== config.type
+      || !this.shadowRoot.querySelector(".editor");
+    if (needsRender) this._render();
   }
 
   set hass(hass) {
@@ -1388,13 +1394,11 @@ class SecuritasAlarmCardEditor extends HTMLElement {
 
 
   _fireChanged() {
-    this._selfUpdate = true;
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: this._config },
       bubbles: true,
       composed: true,
     }));
-    this._selfUpdate = false;
   }
 }
 
