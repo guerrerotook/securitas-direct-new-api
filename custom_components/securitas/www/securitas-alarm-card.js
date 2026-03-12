@@ -206,6 +206,118 @@ const ARM_ACTIONS = [
   { key: "arm_custom_bypass", labelKey: "arm_custom",   feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
 ];
 
+// ── Gesture helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Returns the first arm state key supported by the entity, or "arm_away".
+ * Used as the fallback arm_state for arm_or_disarm when none is configured.
+ */
+function _defaultArmState(hass, entityId) {
+  const features = hass.states[entityId]?.attributes?.supported_features || 0;
+  const first = ARM_ACTIONS.find(a => features & a.feature);
+  return first ? first.key : "arm_away";
+}
+
+/**
+ * Attaches pointer-based gesture listeners to `el`.
+ *
+ * Gesture logic:
+ *  - Long-press  : pointerdown → 500 ms timer. Cancel on >10 px move or
+ *                  pointerup/cancel before timer fires. When timer fires,
+ *                  executes hold_action and suppresses the next click.
+ *  - Double-tap  : first pointerup starts a 300 ms window. Second pointerup
+ *                  within the window executes double_tap_action. Window
+ *                  expiry executes tap_action.
+ *  - Single tap  : click event executes tap_action (unless suppressed by
+ *                  long-press).
+ *
+ * @param {HTMLElement}   el         - Element to attach listeners to
+ * @param {object}        config     - Card/badge config (tap_action etc.)
+ * @param {object}        hass       - Home Assistant hass object
+ * @param {string}        entityId   - Alarm entity id
+ * @param {HTMLElement}   srcEl      - Element to dispatch events from
+ * @param {object}        callbacks  - { startPinEntry(action), onMoreInfo() }
+ * @returns {Function}               - Cleanup function (removes listeners)
+ */
+function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
+  let holdTimer = null;
+  let holdFired = false;
+  let downX = 0, downY = 0;
+  let tapWindow = null;
+  let firstTapTime = 0;
+
+  const HOLD_MS    = 500;
+  const DOUBLE_MS  = 300;
+  const MOVE_PX    = 10;
+
+  const tapAction       = config.tap_action       || { action: "more-info" };
+  const holdAction      = config.hold_action      || { action: "none" };
+  const doubleTapAction = config.double_tap_action || { action: "none" };
+
+  function cancelHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  }
+
+  function onPointerDown(e) {
+    holdFired = false;
+    downX = e.clientX; downY = e.clientY;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      holdFired = true;
+      executeAction(holdAction, hass, entityId, srcEl, callbacks);
+    }, HOLD_MS);
+  }
+
+  function onPointerMove(e) {
+    if (holdTimer) {
+      const dx = e.clientX - downX, dy = e.clientY - downY;
+      if (Math.sqrt(dx * dx + dy * dy) > MOVE_PX) cancelHold();
+    }
+  }
+
+  function onPointerUp() {
+    cancelHold();
+    if (holdFired) return;
+
+    const now = Date.now();
+    if (tapWindow) {
+      clearTimeout(tapWindow);
+      tapWindow = null;
+      firstTapTime = 0;
+      executeAction(doubleTapAction, hass, entityId, srcEl, callbacks);
+    } else {
+      firstTapTime = now;
+      tapWindow = setTimeout(() => {
+        tapWindow = null;
+        firstTapTime = 0;
+        executeAction(tapAction, hass, entityId, srcEl, callbacks);
+      }, DOUBLE_MS);
+    }
+  }
+
+  function onPointerCancel() { cancelHold(); }
+
+  function onClick(e) {
+    if (holdFired) { holdFired = false; e.stopImmediatePropagation(); }
+  }
+
+  el.addEventListener("pointerdown",   onPointerDown);
+  el.addEventListener("pointermove",   onPointerMove);
+  el.addEventListener("pointerup",     onPointerUp);
+  el.addEventListener("pointercancel", onPointerCancel);
+  el.addEventListener("click",         onClick, true);
+
+  return function cleanup() {
+    el.removeEventListener("pointerdown",   onPointerDown);
+    el.removeEventListener("pointermove",   onPointerMove);
+    el.removeEventListener("pointerup",     onPointerUp);
+    el.removeEventListener("pointercancel", onPointerCancel);
+    el.removeEventListener("click",         onClick, true);
+    cancelHold();
+    if (tapWindow) { clearTimeout(tapWindow); tapWindow = null; }
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SecuritasAlarmCard extends HTMLElement {
