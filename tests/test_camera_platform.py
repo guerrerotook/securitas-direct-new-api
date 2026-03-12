@@ -102,6 +102,38 @@ class TestSecuritasCamera:
         result = await cam.async_camera_image()
         assert result == _PLACEHOLDER_IMAGE
 
+    @pytest.mark.asyncio
+    async def test_camera_image_calls_fetch_on_first_call(
+        self, mock_hub, installation, camera_device
+    ):
+        from custom_components.securitas.camera import SecuritasCamera
+
+        mock_hub.get_camera_image.return_value = b"\xff\xd8"
+        cam = SecuritasCamera(mock_hub, installation, camera_device)
+        assert cam._initial_fetch_done is False
+
+        await cam.async_camera_image()
+
+        mock_hub.fetch_latest_thumbnail.assert_awaited_once_with(installation, camera_device)
+        assert cam._initial_fetch_done is True
+
+    @pytest.mark.asyncio
+    async def test_camera_image_skips_fetch_on_subsequent_calls(
+        self, mock_hub, installation, camera_device
+    ):
+        from custom_components.securitas.camera import SecuritasCamera
+
+        mock_hub.get_camera_image.return_value = b"\xff\xd8"
+        cam = SecuritasCamera(mock_hub, installation, camera_device)
+
+        # First call — triggers the lazy fetch
+        await cam.async_camera_image()
+        assert mock_hub.fetch_latest_thumbnail.await_count == 1
+
+        # Second call — must NOT trigger fetch again
+        await cam.async_camera_image()
+        assert mock_hub.fetch_latest_thumbnail.await_count == 1
+
     def test_device_info_uses_camera_sub_device(
         self, mock_hub, installation, camera_device
     ):
