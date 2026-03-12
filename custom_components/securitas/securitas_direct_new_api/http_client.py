@@ -210,9 +210,7 @@ class SecuritasHttpClient:
             except ClientConnectorError as err:
                 os_err = err.os_error or err.strerror or "unknown"
                 if isinstance(err, ClientConnectorDNSError) and attempt == 0:
-                    _LOGGER.debug(
-                        "%s DNS timeout, retrying once: %s", log_prefix, err
-                    )
+                    _LOGGER.debug("%s DNS timeout, retrying once: %s", log_prefix, err)
                     await asyncio.sleep(2)
                     continue
                 raise SecuritasDirectError(
