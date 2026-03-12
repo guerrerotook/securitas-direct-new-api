@@ -314,6 +314,84 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
   };
 }
 
+/**
+ * Executes a HA-style action config object.
+ *
+ * @param {object}      action     - { action, navigation_path, perform_action, data, arm_state }
+ * @param {object}      hass       - Home Assistant hass object
+ * @param {string}      entityId   - Alarm entity id
+ * @param {HTMLElement} srcEl      - Element to dispatch events from (for more-info)
+ * @param {object}      callbacks  - { startPinEntry(serviceAction), onMoreInfo() }
+ */
+function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
+  if (!action || action.action === "none") return;
+
+  switch (action.action) {
+
+    case "more-info":
+      if (callbacks.onMoreInfo) {
+        callbacks.onMoreInfo();
+      } else {
+        srcEl.dispatchEvent(new CustomEvent("hass-more-info", {
+          detail: { entityId },
+          bubbles: true,
+          composed: true,
+        }));
+      }
+      break;
+
+    case "navigate": {
+      const path = action.navigation_path;
+      if (path) {
+        history.pushState({}, "", path);
+        window.dispatchEvent(new Event("location-changed"));
+      }
+      break;
+    }
+
+    case "perform-action": {
+      const call = action.perform_action || "";
+      const dot  = call.indexOf(".");
+      if (dot > 0) {
+        hass.callService(call.slice(0, dot), call.slice(dot + 1), action.data || {});
+      }
+      break;
+    }
+
+    case "arm_or_disarm": {
+      const stateObj = hass.states[entityId];
+      if (!stateObj) return;
+      const state          = stateObj.state;
+      const attrs          = stateObj.attributes;
+      const isArmed        = !INACTIVE_STATES.has(state);
+      const hasCode        = !!attrs.code_format;
+      const codeArmReq     = attrs.code_arm_required === true;
+
+      if (isArmed || state === "arming" || state === "pending" || state === "triggered") {
+        // Disarm
+        const svcAction = { service: "alarm_disarm", labelKey: "disarm" };
+        if (hasCode && callbacks.startPinEntry) {
+          callbacks.startPinEntry(svcAction);
+        } else {
+          hass.callService("alarm_control_panel", "alarm_disarm", { entity_id: entityId });
+        }
+      } else if (state === "disarmed") {
+        // Arm
+        const armKey = action.arm_state || _defaultArmState(hass, entityId);
+        const armDef = ARM_ACTIONS.find(a => a.key === armKey);
+        if (!armDef) return;
+        const svcAction = { service: armDef.service, labelKey: armDef.labelKey };
+        if (hasCode && codeArmReq && callbacks.startPinEntry) {
+          callbacks.startPinEntry(svcAction);
+        } else {
+          hass.callService("alarm_control_panel", armDef.service, { entity_id: entityId });
+        }
+      }
+      break;
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SecuritasAlarmCard extends HTMLElement {
