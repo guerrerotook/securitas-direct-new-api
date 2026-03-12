@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from custom_components.securitas.log_filter import SensitiveDataFilter
 
-from aiohttp import ClientConnectorError, ClientSession
+from aiohttp import ClientConnectorDNSError, ClientConnectorError, ClientSession
 import jwt
 
 from .dataTypes import Installation
@@ -198,7 +198,7 @@ class SecuritasHttpClient:
             if installation is not None
             else f"[{operation}]"
         )
-        # Retry once on HTTP 403 (Incapsula WAF rate limiting)
+        # Retry loop: once on DNS timeout (spurious resolver failures) or HTTP 403
         response_text = ""
         for attempt in range(2):
             try:
@@ -209,30 +209,12 @@ class SecuritasHttpClient:
                     response_text: str = await response.text()
             except ClientConnectorError as err:
                 os_err = err.os_error or err.strerror or "unknown"
-                # --- TEMPORARY DEBUG: full connection failure diagnostics ---
-                _LOGGER.debug(
-                    "%s ClientConnectorError DETAIL: host=%r port=%r ssl=%r"
-                    " | err=%s"
-                    " | os_error class=%s errno=%r strerror=%r"
-                    " | cause=%r"
-                    " | request_headers=%s",
-                    log_prefix,
-                    getattr(err, "host", "?"),
-                    getattr(err, "port", "?"),
-                    getattr(err, "ssl", "?"),
-                    err,
-                    type(err.os_error).__name__ if err.os_error else "None",
-                    getattr(err.os_error, "errno", None) if err.os_error else None,
-                    getattr(err.os_error, "strerror", None) if err.os_error else None,
-                    repr(err.__cause__),
-                    {
-                        k: v
-                        for k, v in headers.items()
-                        if k not in ("auth", "X-Capabilities")
-                    },
-                    exc_info=True,
-                )
-                # --- END TEMPORARY DEBUG ---
+                if isinstance(err, ClientConnectorDNSError) and attempt == 0:
+                    _LOGGER.debug(
+                        "%s DNS timeout, retrying once: %s", log_prefix, err
+                    )
+                    await asyncio.sleep(2)
+                    continue
                 raise SecuritasDirectError(
                     f"Connection error with URL {self.api_url}: {os_err}",
                     None,
