@@ -1090,12 +1090,6 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     const section = document.createElement("div");
     section.className = "gesture-section";
 
-    // Section heading
-    const heading = document.createElement("div");
-    heading.className = "section-title";
-    heading.textContent = title;
-    section.appendChild(heading);
-
     // ── Action selector (ha-form with select) ────────────────────────────────
     const actionForm = document.createElement("ha-form");
     actionForm.hass   = this._hass;
@@ -1115,7 +1109,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         },
       },
     }];
-    actionForm.computeLabel = () => "Action";
+    actionForm.computeLabel = () => title;
     section.appendChild(actionForm);
 
     // ── Navigate sub-fields ──────────────────────────────────────────────────
