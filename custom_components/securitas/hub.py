@@ -264,10 +264,17 @@ class SecuritasHub:
             priority=ApiQueue.FOREGROUND,
         )
 
-        # Poll for completion — continue while "processing" (image not yet ready)
-        max_attempts = self._max_poll_attempts(timeout_seconds=60)
-        try:
-            for attempt in range(1, max_attempts + 1):
+        # Poll for capture completion then wait for the thumbnail to update.
+        # Both loops together are bounded by a hard 30-second wall-clock timeout.
+        thumbnail = None
+
+        async def _poll_capture_result() -> None:
+            nonlocal thumbnail
+            attempt = 0
+
+            # Wait until the image request stops being "processing"
+            while True:
+                attempt += 1
                 raw = await self._api_queue.submit(
                     self.session.check_request_images_status,
                     installation,
@@ -279,33 +286,36 @@ class SecuritasHub:
                 msg = raw.get("msg", "")
                 if "processing" not in msg and raw.get("res") != "WAIT":
                     break
-            else:
-                raise TimeoutError("Image request poll timed out")
-        except (TimeoutError, SecuritasDirectError):
-            _LOGGER.warning(
-                "Image request polling timed out for %s, fetching thumbnail anyway",
-                device.name,
-            )
+                await asyncio.sleep(self.session.delay_check_operation)
 
-        # Poll the thumbnail until idSignal changes (CDN propagation delay)
-        thumbnail = None
-        for attempt in range(max_attempts):
-            if attempt > 0:
+            # Wait until the thumbnail idSignal changes (CDN propagation delay)
+            while True:
+                thumbnail = await self._api_queue.submit(
+                    self.session.get_thumbnail,
+                    installation,
+                    device.name,
+                    device.zone_id,
+                    priority=ApiQueue.FOREGROUND,
+                )
+                if thumbnail.id_signal != baseline_id:
+                    return
                 await asyncio.sleep(max(5, self.session.delay_check_operation))
-            thumbnail = await self._api_queue.submit(
-                self.session.get_thumbnail,
-                installation,
-                device.name,
-                device.zone_id,
-                priority=ApiQueue.FOREGROUND,
-            )
-            if thumbnail.id_signal != baseline_id:
-                break
-        else:
+
+        try:
+            await asyncio.wait_for(_poll_capture_result(), timeout=30)
+        except TimeoutError:
             _LOGGER.warning(
-                "Thumbnail idSignal did not change for %s after capture",
+                "Image capture timed out for %s after 30 seconds",
                 device.name,
             )
+            if thumbnail is None:
+                thumbnail = await self._api_queue.submit(
+                    self.session.get_thumbnail,
+                    installation,
+                    device.name,
+                    device.zone_id,
+                    priority=ApiQueue.FOREGROUND,
+                )
 
         image_bytes = self._validate_and_store_image(
             thumbnail, installation, device, log_warnings=True

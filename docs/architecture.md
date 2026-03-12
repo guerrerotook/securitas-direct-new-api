@@ -448,7 +448,7 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
    - Sets the `capturing` state and dispatches `SIGNAL_CAMERA_STATE` so the frontend shows a spinner
    - Fetches the current baseline thumbnail to detect missed intermediate images
    - If the baseline image differs from the locally stored image, stores and displays it immediately (before the new capture arrives), then fires `SIGNAL_CAMERA_UPDATE`
-   - Requests a new capture via `request_images`, polls for completion, then polls the thumbnail until `idSignal` changes
+   - Requests a new capture via `request_images`, then runs two polling loops under a single **30-second `asyncio.wait_for` deadline**: first waits for the status to leave "processing", then waits for the thumbnail `idSignal` to change (CDN propagation). If the deadline fires, fetches one final thumbnail as a fallback.
    - Fires `SIGNAL_CAMERA_UPDATE` on success (rotates access token so frontend re-fetches), or `SIGNAL_CAMERA_STATE` on failure (clears spinner without rotating token)
 
 **Signals:**

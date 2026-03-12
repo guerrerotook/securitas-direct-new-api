@@ -482,3 +482,125 @@ class TestCaptureImage:
 
         # _validate_and_store_image called once (only for new thumbnail, not baseline)
         assert hub._validate_and_store_image.call_count == 1
+
+    async def test_timeout_during_status_poll_fetches_thumbnail_and_returns(self):
+        """When the 30-second wall-clock timeout fires during status polling,
+        capture_image fetches one final thumbnail and returns without raising."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
+        fallback = make_thumbnail(
+            id_signal="sig1", image="stale_data", timestamp="2026-03-11 10:00:00"
+        )
+        # First get_thumbnail = baseline; second = fallback fetch after timeout
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, fallback])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        # Status check always returns "processing" — would loop forever without timeout
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "alarm-manager.photo-request.processing"}
+        )
+        hub._validate_and_store_image = MagicMock(return_value=None)
+
+        async def _immediate_timeout(coro, *, timeout):
+            coro.close()
+            raise TimeoutError
+
+        with (
+            patch("custom_components.securitas.hub.async_dispatcher_send"),
+            patch(
+                "custom_components.securitas.hub.asyncio.wait_for", _immediate_timeout
+            ),
+        ):
+            await hub.capture_image(installation, device)
+
+        # Fallback thumbnail fetched after timeout
+        assert hub.session.get_thumbnail.await_count == 2
+        # capturing flag cleared even on timeout
+        assert not hub.is_capturing(installation.number, device.zone_id)
+
+    async def test_timeout_during_thumbnail_poll_uses_last_seen_thumbnail(self):
+        """When timeout fires during thumbnail polling, capturing is always cleared."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
+        # idSignal never changes — thumbnail poll would loop forever without timeout
+        hub.session.get_thumbnail = AsyncMock(return_value=baseline)
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        )
+        hub._validate_and_store_image = MagicMock(return_value=None)
+
+        async def _immediate_timeout(coro, *, timeout):
+            coro.close()
+            raise TimeoutError
+
+        with (
+            patch("custom_components.securitas.hub.async_dispatcher_send"),
+            patch(
+                "custom_components.securitas.hub.asyncio.wait_for", _immediate_timeout
+            ),
+        ):
+            await hub.capture_image(installation, device)
+
+        # capturing cleared regardless
+        assert not hub.is_capturing(installation.number, device.zone_id)
+
+    async def test_polling_stops_after_status_success(self):
+        """Status poll exits as soon as the response no longer contains 'processing'."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
+        new_thumb = make_thumbnail(
+            id_signal="sig2", image="newdata", timestamp="2026-03-11 10:01:00"
+        )
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            side_effect=[
+                {"res": "OK", "msg": "alarm-manager.photo-request.processing"},
+                {"res": "OK", "msg": "alarm-manager.photo-request.processing"},
+                {"res": "OK", "msg": "alarm-manager.photo-request.success"},
+            ]
+        )
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        assert hub.session.check_request_images_status.await_count == 3
+
+    async def test_capturing_cleared_on_timeout(self):
+        """The capturing flag is always cleared, even when the timeout fires."""
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
+        fallback = make_thumbnail(id_signal="sig1", image=None, timestamp=None)
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, fallback])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "processing"}
+        )
+        hub._validate_and_store_image = MagicMock(return_value=None)
+
+        async def _immediate_timeout(coro, *, timeout):
+            coro.close()
+            raise TimeoutError
+
+        with (
+            patch("custom_components.securitas.hub.async_dispatcher_send"),
+            patch(
+                "custom_components.securitas.hub.asyncio.wait_for", _immediate_timeout
+            ),
+        ):
+            await hub.capture_image(installation, device)
+
+        assert not hub.is_capturing(installation.number, device.zone_id)
