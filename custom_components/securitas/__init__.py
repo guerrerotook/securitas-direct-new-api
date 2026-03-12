@@ -305,7 +305,12 @@ async def _fetch_and_cache_installations(
     Returns a list of SecuritasDirectDevice wrappers for this entry's
     installations.
     """
-    install_cache = hass.data[DOMAIN].get("installations_cache")
+    # Cache keyed by username so that entries for different accounts (e.g.
+    # Italian and Spanish installations on separate Verisure accounts) do not
+    # accidentally share each other's installation list.
+    username = entry.data.get(CONF_USERNAME, entry.entry_id)
+    install_cache_key = f"installations_cache_{username}"
+    install_cache = hass.data[DOMAIN].get(install_cache_key)
     if (
         install_cache is not None
         and time.monotonic() - install_cache["time"] < API_CACHE_TTL
@@ -316,7 +321,7 @@ async def _fetch_and_cache_installations(
             hub.session.list_installations,
             priority=ApiQueue.FOREGROUND,
         )
-        hass.data[DOMAIN]["installations_cache"] = {
+        hass.data[DOMAIN][install_cache_key] = {
             "data": all_installations,
             "time": time.monotonic(),
         }
