@@ -860,6 +860,19 @@ class TestSecuritasLockUpdateStatus:
 
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
 
+    async def test_danalock_config_fetched_only_once(self):
+        """get_danalock_config must be called exactly once even across multiple updates."""
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(return_value=None)
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+        await lock.async_update_status()
+
+        lock.client.get_danalock_config.assert_awaited_once()
+
     async def test_async_update_delegates_to_update_status(self):
         """async_update just calls async_update_status."""
         lock = make_lock()
