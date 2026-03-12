@@ -250,20 +250,22 @@ To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and
 
 Both the **alarm card** and the **badge** support configurable tap, hold, and double-tap actions. These are set in the card/badge editor under the **Tap action**, **Hold action**, and **Double-tap action** sections.
 
-| Action         | Badge default      | Card default |
-| -------------- | ------------------ | ------------ |
-| Tap            | Open alarm card    | _(none)_     |
-| Hold           | _(none)_           | _(none)_     |
-| Double-tap     | _(none)_           | _(none)_     |
+![Gesture Actions](./docs/images/card-gestures.png)
+
+| Action     | Badge default   | Card default |
+| ---------- | --------------- | ------------ |
+| Tap        | Open alarm card | _(none)_     |
+| Hold       | _(none)_        | _(none)_     |
+| Double-tap | _(none)_        | _(none)_     |
 
 Each action can be set to one of the following:
 
-| Option     | Description                                                                                             |
-| ---------- | ------------------------------------------------------------------------------------------------------- |
-| None       | Do nothing.                                                                                             |
-| Navigate   | Navigate to a dashboard path. A path selector appears to choose the destination.                        |
-| Arm        | Arm the alarm to a chosen state (Home, Away, Night, Custom, or Vacation). Only fires when disarmed.     |
-| Disarm     | Disarm the alarm. Only fires when armed.                                                                |
+| Option   | Description                                                                                         |
+| -------- | --------------------------------------------------------------------------------------------------- |
+| None     | Do nothing.                                                                                         |
+| Navigate | Navigate to a dashboard path. A path selector appears to choose the destination.                    |
+| Arm      | Arm the alarm to a chosen state (Home, Away, Night, Custom, or Vacation). Only fires when disarmed. |
+| Disarm   | Disarm the alarm. Only fires when armed.                                                            |
 
 Example: set **Hold** to **Disarm** on the badge to disarm with a long press, without opening the card popup.
 
