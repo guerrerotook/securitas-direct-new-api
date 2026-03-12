@@ -401,6 +401,11 @@ class SecuritasAlarmCard extends HTMLElement {
     this._uiState = "normal";   // normal | pin | force_arm
     this._pendingAction = null; // { service, label }
     this._pin = "";
+    this._gestureCleanup = null;
+  }
+
+  disconnectedCallback() {
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
   }
 
   setConfig(config) {
@@ -475,6 +480,7 @@ class SecuritasAlarmCard extends HTMLElement {
   // ── Main render ─────────────────────────────────────────────────────────────
   _render() {
     if (!this._hass || !this._config) return;
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
 
     const lang = this._hass.language || "en";
     const stateObj = this._hass.states[this._config.entity];
@@ -561,6 +567,31 @@ class SecuritasAlarmCard extends HTMLElement {
 
         </div>
       </ha-card>`;
+
+    // Attach gesture actions to the header icon (always-visible touch target)
+    const iconWrap = this.shadowRoot.querySelector(".icon-wrap");
+    if (iconWrap) {
+      const gestureConfig = {
+        tap_action:        this._config.tap_action        || { action: "none" },
+        hold_action:       this._config.hold_action       || { action: "none" },
+        double_tap_action: this._config.double_tap_action || { action: "none" },
+      };
+      this._gestureCleanup = attachGesture(
+        iconWrap,
+        gestureConfig,
+        this._hass,
+        this._config.entity,
+        this,
+        {
+          onMoreInfo: () => this.dispatchEvent(new CustomEvent("hass-more-info", {
+            detail: { entityId: this._config.entity },
+            bubbles: true,
+            composed: true,
+          })),
+          startPinEntry: (svcAction) => this._startPinEntry(svcAction),
+        },
+      );
+    }
 
     this._attachListeners(stateObj, codeFormat, codeArmRequired, hasCode, isArmed);
   }
