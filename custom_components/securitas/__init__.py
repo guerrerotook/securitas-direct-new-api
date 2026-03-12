@@ -274,8 +274,8 @@ def _get_or_create_api_queue(
         api_queues[domain_url] = ApiQueue(
             interval=config[CONF_DELAY_CHECK_OPERATION],
         )
-        _LOGGER.info(
-            "Created ApiQueue %s for domain %s (country=%s, entry=%s)",
+        _LOGGER.debug(
+            "[setup] Created ApiQueue %s for domain %s (country=%s, entry=%s)",
             id(api_queues[domain_url]),
             domain_url,
             config[CONF_COUNTRY],
