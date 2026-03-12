@@ -1074,6 +1074,149 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     }
   }
 
+  _buildGestureSection(gesture, title, defaults) {
+    const configKey     = `${gesture}_action`;
+    const current       = this._config[configKey] || defaults;
+    const currentAction = current.action || defaults.action;
+
+    const stateObj  = this._hass?.states[this._config.entity];
+    const features  = stateObj?.attributes?.supported_features || 0;
+    const supported = ARM_ACTIONS.filter(a => features & a.feature);
+    const armOptions = supported.length > 0 ? supported : ARM_ACTIONS; // fallback: show all
+
+    const section = document.createElement("div");
+    section.className = "gesture-section";
+
+    // Section heading
+    const heading = document.createElement("div");
+    heading.className = "section-title";
+    heading.textContent = title;
+    section.appendChild(heading);
+
+    // Action selector row
+    const row = document.createElement("div");
+    row.className = "gesture-row";
+    const label = document.createElement("span");
+    label.className = "gesture-label";
+    label.textContent = "Action";
+    const sel = document.createElement("select");
+    sel.className = "gesture-select";
+    [
+      { value: "none",           label: "None" },
+      { value: "more-info",      label: "Open dialog" },
+      { value: "navigate",       label: "Navigate" },
+      { value: "perform-action", label: "Perform action" },
+      { value: "arm_or_disarm",  label: "Arm or disarm" },
+    ].forEach(({ value, label: text }) => {
+      const opt = document.createElement("option");
+      opt.value = value; opt.textContent = text;
+      sel.appendChild(opt);
+    });
+    sel.value = currentAction;
+    row.appendChild(label);
+    row.appendChild(sel);
+    section.appendChild(row);
+
+    // Navigate fields
+    const navFields = document.createElement("div");
+    navFields.className = "conditional-fields";
+    navFields.style.display = currentAction === "navigate" ? "" : "none";
+    const navLabel = document.createElement("span");
+    navLabel.className = "gesture-label";
+    navLabel.textContent = "Navigation path";
+    const navInput = document.createElement("input");
+    navInput.type = "text";
+    navInput.className = "gesture-text";
+    navInput.placeholder = "/lovelace/0";
+    navInput.value = current.navigation_path || "";
+    navFields.appendChild(navLabel);
+    navFields.appendChild(navInput);
+    section.appendChild(navFields);
+
+    // Perform action fields
+    const perfFields = document.createElement("div");
+    perfFields.className = "conditional-fields";
+    perfFields.style.display = currentAction === "perform-action" ? "" : "none";
+    const perfLabel = document.createElement("span");
+    perfLabel.className = "gesture-label";
+    perfLabel.textContent = "Action";
+    const perfInput = document.createElement("input");
+    perfInput.type = "text";
+    perfInput.className = "gesture-text";
+    perfInput.placeholder = "light.turn_on";
+    perfInput.value = current.perform_action || "";
+    const perfDataLabel = document.createElement("span");
+    perfDataLabel.className = "gesture-label";
+    perfDataLabel.textContent = "Data (JSON)";
+    const perfTextarea = document.createElement("textarea");
+    perfTextarea.className = "gesture-textarea";
+    perfTextarea.placeholder = '{"entity_id": "light.living_room"}';
+    perfTextarea.value = current.data ? JSON.stringify(current.data, null, 2) : "";
+    perfFields.appendChild(perfLabel);
+    perfFields.appendChild(perfInput);
+    perfFields.appendChild(perfDataLabel);
+    perfFields.appendChild(perfTextarea);
+    section.appendChild(perfFields);
+
+    // Arm or disarm fields
+    const armFields = document.createElement("div");
+    armFields.className = "conditional-fields";
+    armFields.style.display = currentAction === "arm_or_disarm" ? "" : "none";
+    const armLabel = document.createElement("span");
+    armLabel.className = "gesture-label";
+    armLabel.textContent = "Arm state";
+    const armSel = document.createElement("select");
+    armSel.className = "gesture-select";
+    armOptions.forEach(a => {
+      const opt = document.createElement("option");
+      opt.value = a.key;
+      opt.textContent = a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      armSel.appendChild(opt);
+    });
+    armSel.value = current.arm_state || _defaultArmState(this._hass, this._config.entity);
+    armFields.appendChild(armLabel);
+    armFields.appendChild(armSel);
+    section.appendChild(armFields);
+
+    // Show/hide conditional fields on action change
+    const showFields = (action) => {
+      navFields.style.display  = action === "navigate"        ? "" : "none";
+      perfFields.style.display = action === "perform-action"  ? "" : "none";
+      armFields.style.display  = action === "arm_or_disarm"   ? "" : "none";
+    };
+
+    // Write config on any change
+    const writeConfig = () => {
+      const action = sel.value;
+      const cfg = { action };
+      if (action === "navigate") {
+        const path = navInput.value.trim();
+        if (path) cfg.navigation_path = path;
+      }
+      if (action === "perform-action") {
+        const call = perfInput.value.trim();
+        if (call) cfg.perform_action = call;
+        const raw = perfTextarea.value.trim();
+        if (raw) {
+          try { cfg.data = JSON.parse(raw); } catch (_) { /* invalid JSON — omit */ }
+        }
+      }
+      if (action === "arm_or_disarm") {
+        cfg.arm_state = armSel.value;
+      }
+      this._config = { ...this._config, [configKey]: cfg };
+      this._fireChanged();
+    };
+
+    sel.addEventListener("change", () => { showFields(sel.value); writeConfig(); });
+    navInput.addEventListener("input", writeConfig);
+    perfInput.addEventListener("input", writeConfig);
+    perfTextarea.addEventListener("input", writeConfig);
+    armSel.addEventListener("change", writeConfig);
+
+    return section;
+  }
+
   _render() {
     if (!this._hass) return;
 
@@ -1134,6 +1277,55 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         }
         .reset-btn:hover { color: var(--error-color); }
         .reset-btn[hidden] { visibility: hidden; display: flex; }
+        .gesture-section { display: flex; flex-direction: column; gap: 8px; }
+        .gesture-row { display: flex; align-items: center; gap: 12px; }
+        .gesture-label {
+          font-size: 0.85em;
+          color: var(--secondary-text-color);
+          min-width: 80px;
+          flex-shrink: 0;
+        }
+        .gesture-select {
+          flex: 1;
+          padding: 6px 10px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          font-size: 0.85em;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          cursor: pointer;
+        }
+        .gesture-text {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 6px 10px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          font-size: 0.85em;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+        }
+        .gesture-textarea {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 6px 10px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          font-size: 0.85em;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          font-family: monospace;
+          min-height: 60px;
+          resize: vertical;
+        }
+        .conditional-fields {
+          padding: 8px 10px;
+          background: color-mix(in srgb, var(--primary-color) 5%, transparent);
+          border-radius: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
@@ -1150,6 +1342,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
               <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
           }).join("")}
         </div>
+        <div id="gesture-slot"></div>
       </div>`;
 
     // ── Entity picker (via ha-form — handles lazy-loading internally) ────────
@@ -1221,6 +1414,22 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         this._fireChanged();
       });
     });
+
+    // ── Gesture action sections ──────────────────────────────────────────────
+    const gestureSlot = this.shadowRoot.getElementById("gesture-slot");
+    if (gestureSlot) {
+      const isBadge = this._config.type === "custom:securitas-alarm-badge";
+      const tapDefaults  = isBadge ? { action: "more-info" } : { action: "none" };
+      const holdDefaults = {
+        action: "arm_or_disarm",
+        arm_state: _defaultArmState(this._hass, this._config.entity),
+      };
+      const dblDefaults  = { action: "none" };
+
+      gestureSlot.appendChild(this._buildGestureSection("tap",        "Tap action",        tapDefaults));
+      gestureSlot.appendChild(this._buildGestureSection("hold",       "Hold action",       holdDefaults));
+      gestureSlot.appendChild(this._buildGestureSection("double_tap", "Double-tap action", dblDefaults));
+    }
   }
 
 
