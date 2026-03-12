@@ -63,11 +63,19 @@ class TestSecuritasCamera:
         cam = SecuritasCamera(mock_hub, installation, camera_device)
         assert cam.unique_id == "v4_2654190_camera_QR10"
 
-    def test_name(self, mock_hub, installation, camera_device):
+    def test_has_entity_name(self, mock_hub, installation, camera_device):
         from custom_components.securitas.camera import SecuritasCamera
 
         cam = SecuritasCamera(mock_hub, installation, camera_device)
-        assert cam.name == "Casa Salon"
+        assert cam._attr_has_entity_name is True
+
+    def test_no_entity_name_suffix(self, mock_hub, installation, camera_device):
+        """Camera is the primary entity of its device — no name suffix is set."""
+        from homeassistant.helpers.entity import UNDEFINED
+        from custom_components.securitas.camera import SecuritasCamera
+
+        cam = SecuritasCamera(mock_hub, installation, camera_device)
+        assert cam.name is UNDEFINED
 
     def test_should_not_poll(self, mock_hub, installation, camera_device):
         from custom_components.securitas.camera import SecuritasCamera
@@ -194,11 +202,18 @@ class TestSecuritasCaptureButton:
         btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
         assert btn.unique_id == "v4_2654190_capture_QR10"
 
-    def test_name(self, mock_hub, installation, camera_device):
+    def test_has_entity_name(self, mock_hub, installation, camera_device):
         from custom_components.securitas.button import SecuritasCaptureButton
 
         btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
-        assert btn.name == "Casa Capture Salon"
+        assert btn._attr_has_entity_name is True
+
+    def test_name_is_capture(self, mock_hub, installation, camera_device):
+        """Button name is the entity-specific suffix; device name is prepended by HA."""
+        from custom_components.securitas.button import SecuritasCaptureButton
+
+        btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
+        assert btn.name == "Capture"
 
     def test_icon(self, mock_hub, installation, camera_device):
         from custom_components.securitas.button import SecuritasCaptureButton
