@@ -1225,17 +1225,9 @@ class SecuritasAlarmCardEditor extends HTMLElement {
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
         ha-entity-picker, ha-textfield { width: 100%; display: block; }
-        .section-title {
-          font-weight: 600;
-          font-size: 0.9em;
-          color: var(--primary-text-color);
-          padding-bottom: 6px;
-          border-bottom: 1px solid var(--divider-color);
-        }
         .section-hint {
           font-size: 0.8em;
           color: var(--secondary-text-color);
-          margin-top: -8px;
         }
         /* Flat 3-column grid: label | picker | reset — all rows perfectly aligned */
         .color-grid {
@@ -1243,10 +1235,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           grid-template-columns: 1fr 44px 28px;
           gap: 10px 12px;
           align-items: center;
-        }
-        .color-label {
-          font-size: 0.85em;
-          color: var(--primary-text-color);
+          margin-top: 10px;
         }
         input[type="color"] {
           width: 44px;
@@ -1274,41 +1263,41 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         }
         .reset-btn:hover { color: var(--error-color); }
         .reset-btn[hidden] { visibility: hidden; display: flex; }
-        details > summary { cursor: pointer; user-select: none; }
-        details > summary::-webkit-details-marker { display: none; }
-        details > summary::marker { display: none; }
-        details > summary::after { content: " ▸"; font-size: 0.75em; }
-        details[open] > summary::after { content: " ▾"; }
-        .gesture-section { display: flex; flex-direction: column; gap: 8px; }
+        #gesture-slot { display: flex; flex-direction: column; gap: 16px; }
+        .gesture-section { display: flex; flex-direction: column; }
         .gesture-section ha-form, .gesture-section ha-textfield { display: block; width: 100%; }
         .conditional-fields {
-          padding: 8px 0 0 0;
           display: flex;
           flex-direction: column;
-          gap: 8px;
         }
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
-        <details>
-          <summary class="section-title">State Colors</summary>
-          <div style="padding-top:10px">
-            <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
-            <div class="color-grid" style="margin-top:10px">
-              ${COLOR_EDITOR_STATES.map(({ state, label }) => {
-                const override = colors[state];
-                const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
-                return `
-                  <span class="color-label">${label}</span>
-                  <input type="color" data-state="${state}" value="${pickerVal}" />
-                  <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
-              }).join("")}
-            </div>
-          </div>
-        </details>
+        <div id="colors-slot"></div>
         <div id="gesture-slot"></div>
       </div>`;
+
+    // ── State colors (ha-expansion-panel) ────────────────────────────────────
+    const colorsSlot = this.shadowRoot.getElementById("colors-slot");
+    const expansionPanel = document.createElement("ha-expansion-panel");
+    expansionPanel.header = "State Colors";
+    const colorsContent = document.createElement("div");
+    colorsContent.style.padding = "8px 0 4px 0";
+    colorsContent.innerHTML = `
+      <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
+      <div class="color-grid">
+        ${COLOR_EDITOR_STATES.map(({ state, label }) => {
+          const override = colors[state];
+          const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
+          return `
+            <span>${label}</span>
+            <input type="color" data-state="${state}" value="${pickerVal}" />
+            <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
+        }).join("")}
+      </div>`;
+    expansionPanel.appendChild(colorsContent);
+    colorsSlot.appendChild(expansionPanel);
 
     // ── Entity picker (via ha-form — handles lazy-loading internally) ────────
     const entityForm = this.shadowRoot.getElementById("entity-form");
