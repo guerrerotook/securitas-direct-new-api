@@ -118,6 +118,8 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
     """Button to capture a new image from a Securitas camera."""
 
     _attr_icon = "mdi:camera"
+    _attr_has_entity_name = True
+    _attr_name = "Capture"
 
     def __init__(
         self,
@@ -131,7 +133,6 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
         self._attr_unique_id = (
             f"v4_{installation.number}_capture_{camera_device.zone_id}"
         )
-        self._attr_name = f"{installation.alias} Capture {camera_device.name}"
         self._attr_device_info = camera_device_info(installation, camera_device)
 
     async def async_press(self) -> None:

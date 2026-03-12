@@ -40,6 +40,7 @@ class SecuritasCamera(Camera):
     """A Securitas Direct camera entity showing the last captured image."""
 
     _attr_should_poll = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -55,7 +56,6 @@ class SecuritasCamera(Camera):
         self._attr_unique_id = (
             f"v4_{installation.number}_camera_{camera_device.zone_id}"
         )
-        self._attr_name = f"{installation.alias} {camera_device.name}"
         self._attr_device_info = camera_device_info(installation, camera_device)
         self._initial_fetch_done = False
 
@@ -83,11 +83,7 @@ class SecuritasCamera(Camera):
         capturing = self._client.is_capturing(
             self._installation.number, self._camera_device.zone_id
         )
-        return {
-            "camera_name": self._camera_device.name,
-            "image_timestamp": timestamp,
-            "capturing": capturing,
-        }
+        return {"image_timestamp": timestamp, "capturing": capturing}
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to camera update signals."""
