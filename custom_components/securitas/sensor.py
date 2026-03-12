@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN, SecuritasDirectDevice, SecuritasHub
-from .constants import SentinelName
+from .const import SentinelName
 from .entity import SecuritasEntity, schedule_initial_updates
 from .securitas_direct_new_api import Installation, SecuritasDirectError
 from .securitas_direct_new_api.dataTypes import AirQuality, Service
