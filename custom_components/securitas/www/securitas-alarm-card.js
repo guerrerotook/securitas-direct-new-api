@@ -1122,12 +1122,12 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     const navFields = document.createElement("div");
     navFields.className = "conditional-fields";
     navFields.style.display = currentAction === "navigate" ? "" : "none";
-    const navInput = document.createElement("ha-textfield");
-    navInput.label       = "Navigation path";
-    navInput.placeholder = "/lovelace/0";
-    navInput.value       = current.navigation_path || "";
-    navInput.style.width = "100%";
-    navFields.appendChild(navInput);
+    const navForm = document.createElement("ha-form");
+    navForm.hass   = this._hass;
+    navForm.data   = { navigation_path: current.navigation_path || "" };
+    navForm.schema = [{ name: "navigation_path", selector: { navigation: {} } }];
+    navForm.computeLabel = () => "Navigation path";
+    navFields.appendChild(navForm);
     section.appendChild(navFields);
 
     // ── Perform-action sub-fields ────────────────────────────────────────────
@@ -1182,7 +1182,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     const writeConfig = () => {
       const cfg = { action: actionValue };
       if (actionValue === "navigate") {
-        const path = navInput.value.trim();
+        const path = (navForm.data?.navigation_path || "").trim();
         if (path) cfg.navigation_path = path;
       }
       if (actionValue === "perform-action") {
@@ -1213,7 +1213,10 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         writeConfig();
       }
     });
-    navInput.addEventListener("input", writeConfig);
+    navForm.addEventListener("value-changed", (e) => {
+      navForm.data = e.detail.value;
+      writeConfig();
+    });
     perfInput.addEventListener("input", writeConfig);
     perfDataInput.addEventListener("input", writeConfig);
 
