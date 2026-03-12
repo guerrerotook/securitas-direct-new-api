@@ -83,7 +83,11 @@ class SecuritasCamera(Camera):
         capturing = self._client.is_capturing(
             self._installation.number, self._camera_device.zone_id
         )
-        return {"image_timestamp": timestamp, "capturing": capturing}
+        return {
+            "camera_name": self._camera_device.name,
+            "image_timestamp": timestamp,
+            "capturing": capturing,
+        }
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to camera update signals."""

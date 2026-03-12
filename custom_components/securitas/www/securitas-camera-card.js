@@ -9,7 +9,7 @@
  * Card config:
  *   type: custom:securitas-camera-card
  *   entity: camera.securitas_front_door
- *   name: Front Door   # optional — overrides friendly_name
+ *   name: Front Door   # optional — overrides the camera device name
  */
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ class SecuritasCameraCard extends HTMLElement {
 
     const token = stateObj.attributes.access_token || "";
     const imgUrl = `/api/camera_proxy/${entityId}?token=${token}`;
-    const name = this._config.name || stateObj.attributes.friendly_name || entityId;
+    const name = this._config.name || stateObj.attributes.camera_name || stateObj.attributes.friendly_name || entityId;
     const timestamp = stateObj.attributes.image_timestamp;
     const { relative, absolute } = this._formatTimestamp(timestamp);
     const hasCapture = !!this._captureEntityId;
