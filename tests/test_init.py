@@ -1657,8 +1657,9 @@ class TestDiscoverCameras:
         button_add.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_exception_from_get_camera_devices_is_caught(self):
-        """An exception in get_camera_devices must not propagate — log and continue."""
+    async def test_exception_from_get_camera_devices_is_caught(self, caplog):
+        """An exception in get_camera_devices must not propagate — log warning and continue."""
+        import logging
         from custom_components.securitas import _discover_cameras
         from tests.conftest import make_installation
 
@@ -1673,9 +1674,10 @@ class TestDiscoverCameras:
             "button_add_entities": button_add,
         }
 
-        # Must not raise
-        await _discover_cameras(hub, make_installation(), entry_data)
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
+            # Must not raise
+            await _discover_cameras(hub, make_installation(), entry_data)
 
-        # And must not have added any entities
+        assert "Failed to get camera devices" in caplog.text
         camera_add.assert_not_called()
         button_add.assert_not_called()
