@@ -600,7 +600,7 @@ tests/
 ├── test_camera_platform.py  Camera entity platform setup and image serving
 ├── test_config_flow.py      Config flow (setup + 2FA) and options flow
 ├── test_command_resolver.py  CommandResolver state transitions, fallback chains
-├── test_constants.py        SecuritasState enum, mapping tables
+├── test_constants.py        SentinelName language mapping, SecuritasState enum, mapping tables
 ├── test_domains.py          Country-to-URL routing
 ├── test_execute_request.py  HTTP request execution, headers, error handling, http_status
 ├── test_ha_platforms.py     Platform async_setup_entry for all entity types
