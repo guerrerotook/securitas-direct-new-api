@@ -331,7 +331,7 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
     case "more-info":
       if (callbacks.onMoreInfo) {
         callbacks.onMoreInfo();
-      } else {
+      } else if (srcEl) {
         srcEl.dispatchEvent(new CustomEvent("hass-more-info", {
           detail: { entityId },
           bubbles: true,
