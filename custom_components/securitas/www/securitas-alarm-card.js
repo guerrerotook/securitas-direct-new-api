@@ -1055,10 +1055,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
 
   setConfig(config) {
     this._config = { ...config };
-    if (!this._initialized) {
-      this._initialized = true;
-      this._render();
-    }
+    this._render();
   }
 
   set hass(hass) {
