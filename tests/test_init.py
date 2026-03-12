@@ -1664,9 +1664,7 @@ class TestDiscoverCameras:
         from tests.conftest import make_installation
 
         hub = MagicMock()
-        hub.get_camera_devices = AsyncMock(
-            side_effect=Exception("network failure")
-        )
+        hub.get_camera_devices = AsyncMock(side_effect=Exception("network failure"))
         camera_add = MagicMock()
         button_add = MagicMock()
         entry_data = {

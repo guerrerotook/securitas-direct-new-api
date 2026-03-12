@@ -114,7 +114,9 @@ class TestSecuritasCamera:
 
         await cam.async_camera_image()
 
-        mock_hub.fetch_latest_thumbnail.assert_awaited_once_with(installation, camera_device)
+        mock_hub.fetch_latest_thumbnail.assert_awaited_once_with(
+            installation, camera_device
+        )
         assert cam._initial_fetch_done is True
 
     @pytest.mark.asyncio
