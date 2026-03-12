@@ -1055,7 +1055,9 @@ class SecuritasAlarmCardEditor extends HTMLElement {
 
   setConfig(config) {
     this._config = { ...config };
-    this._render();
+    if (!this._selfUpdate) {
+      this._render();
+    }
   }
 
   set hass(hass) {
@@ -1431,11 +1433,13 @@ class SecuritasAlarmCardEditor extends HTMLElement {
 
 
   _fireChanged() {
+    this._selfUpdate = true;
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: this._config },
       bubbles: true,
       composed: true,
     }));
+    this._selfUpdate = false;
   }
 }
 
