@@ -240,7 +240,9 @@ To add the card to your dashboard, click **Add Card → Search for "Securitas Al
 
 ### Badge
 
-A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails. Tap the badge to open the full alarm card in a popup overlay.
+A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails.
+
+By default, tapping the badge opens the full alarm card in a popup overlay. You can also configure hold and double-tap actions — for example, to arm or disarm directly from the badge without opening the card. See [Gesture Actions](#gesture-actions) below.
 
 To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and pick your alarm panel entity from the dropdown.
 
