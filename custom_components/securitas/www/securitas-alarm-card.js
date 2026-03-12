@@ -1081,7 +1081,11 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     const stateObj  = this._hass?.states[this._config.entity];
     const features  = stateObj?.attributes?.supported_features || 0;
     const supported = ARM_ACTIONS.filter(a => features & a.feature);
-    const armOptions = supported.length > 0 ? supported : ARM_ACTIONS; // fallback: show all
+    const armOptions = supported.length > 0 ? supported : ARM_ACTIONS;
+
+    // Mutable state (avoids re-reading form.data which may lag)
+    let actionValue   = currentAction;
+    let armStateValue = current.arm_state || _defaultArmState(this._hass, this._config.entity);
 
     const section = document.createElement("div");
     section.className = "gesture-section";
@@ -1092,126 +1096,124 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     heading.textContent = title;
     section.appendChild(heading);
 
-    // Action selector row
-    const row = document.createElement("div");
-    row.className = "gesture-row";
-    const label = document.createElement("span");
-    label.className = "gesture-label";
-    label.textContent = "Action";
-    const sel = document.createElement("select");
-    sel.className = "gesture-select";
-    [
-      { value: "none",           label: "None" },
-      { value: "more-info",      label: "Open dialog" },
-      { value: "navigate",       label: "Navigate" },
-      { value: "perform-action", label: "Perform action" },
-      { value: "arm_or_disarm",  label: "Arm or disarm" },
-    ].forEach(({ value, label: text }) => {
-      const opt = document.createElement("option");
-      opt.value = value; opt.textContent = text;
-      sel.appendChild(opt);
-    });
-    sel.value = currentAction;
-    row.appendChild(label);
-    row.appendChild(sel);
-    section.appendChild(row);
+    // ── Action selector (ha-form with select) ────────────────────────────────
+    const actionForm = document.createElement("ha-form");
+    actionForm.hass   = this._hass;
+    actionForm.data   = { action: actionValue };
+    actionForm.schema = [{
+      name: "action",
+      selector: {
+        select: {
+          options: [
+            { value: "none",           label: "None" },
+            { value: "more-info",      label: "Open dialog" },
+            { value: "navigate",       label: "Navigate" },
+            { value: "perform-action", label: "Perform action" },
+            { value: "arm_or_disarm",  label: "Arm or disarm" },
+          ],
+        },
+      },
+    }];
+    actionForm.computeLabel = () => "Action";
+    section.appendChild(actionForm);
 
-    // Navigate fields
+    // ── Navigate sub-fields ──────────────────────────────────────────────────
     const navFields = document.createElement("div");
     navFields.className = "conditional-fields";
     navFields.style.display = currentAction === "navigate" ? "" : "none";
-    const navLabel = document.createElement("span");
-    navLabel.className = "gesture-label";
-    navLabel.textContent = "Navigation path";
-    const navInput = document.createElement("input");
-    navInput.type = "text";
-    navInput.className = "gesture-text";
+    const navInput = document.createElement("ha-textfield");
+    navInput.label       = "Navigation path";
     navInput.placeholder = "/lovelace/0";
-    navInput.value = current.navigation_path || "";
-    navFields.appendChild(navLabel);
+    navInput.value       = current.navigation_path || "";
+    navInput.style.width = "100%";
     navFields.appendChild(navInput);
     section.appendChild(navFields);
 
-    // Perform action fields
+    // ── Perform-action sub-fields ────────────────────────────────────────────
     const perfFields = document.createElement("div");
     perfFields.className = "conditional-fields";
     perfFields.style.display = currentAction === "perform-action" ? "" : "none";
-    const perfLabel = document.createElement("span");
-    perfLabel.className = "gesture-label";
-    perfLabel.textContent = "Action";
-    const perfInput = document.createElement("input");
-    perfInput.type = "text";
-    perfInput.className = "gesture-text";
-    perfInput.placeholder = "light.turn_on";
-    perfInput.value = current.perform_action || "";
-    const perfDataLabel = document.createElement("span");
-    perfDataLabel.className = "gesture-label";
-    perfDataLabel.textContent = "Data (JSON)";
-    const perfTextarea = document.createElement("textarea");
-    perfTextarea.className = "gesture-textarea";
-    perfTextarea.placeholder = '{"entity_id": "light.living_room"}';
-    perfTextarea.value = current.data ? JSON.stringify(current.data, null, 2) : "";
-    perfFields.appendChild(perfLabel);
+    const perfInput = document.createElement("ha-textfield");
+    perfInput.label       = "Action (e.g. light.turn_on)";
+    perfInput.placeholder = "domain.service";
+    perfInput.value       = current.perform_action || "";
+    perfInput.style.width = "100%";
+    const perfDataInput = document.createElement("ha-textfield");
+    perfDataInput.label       = "Data (JSON, optional)";
+    perfDataInput.placeholder = '{"entity_id": "light.living_room"}';
+    perfDataInput.value       = current.data ? JSON.stringify(current.data) : "";
+    perfDataInput.style.width = "100%";
     perfFields.appendChild(perfInput);
-    perfFields.appendChild(perfDataLabel);
-    perfFields.appendChild(perfTextarea);
+    perfFields.appendChild(perfDataInput);
     section.appendChild(perfFields);
 
-    // Arm or disarm fields
+    // ── Arm-or-disarm sub-fields ─────────────────────────────────────────────
     const armFields = document.createElement("div");
     armFields.className = "conditional-fields";
     armFields.style.display = currentAction === "arm_or_disarm" ? "" : "none";
-    const armLabel = document.createElement("span");
-    armLabel.className = "gesture-label";
-    armLabel.textContent = "Arm state";
-    const armSel = document.createElement("select");
-    armSel.className = "gesture-select";
-    armOptions.forEach(a => {
-      const opt = document.createElement("option");
-      opt.value = a.key;
-      opt.textContent = a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-      armSel.appendChild(opt);
-    });
-    armSel.value = current.arm_state || _defaultArmState(this._hass, this._config.entity);
-    armFields.appendChild(armLabel);
-    armFields.appendChild(armSel);
+    const armForm = document.createElement("ha-form");
+    armForm.hass   = this._hass;
+    armForm.data   = { arm_state: armStateValue };
+    armForm.schema = [{
+      name: "arm_state",
+      selector: {
+        select: {
+          options: armOptions.map(a => ({
+            value: a.key,
+            label: a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          })),
+        },
+      },
+    }];
+    armForm.computeLabel = () => "Arm state";
+    armFields.appendChild(armForm);
     section.appendChild(armFields);
 
-    // Show/hide conditional fields on action change
+    // Show/hide conditional fields
     const showFields = (action) => {
       navFields.style.display  = action === "navigate"        ? "" : "none";
       perfFields.style.display = action === "perform-action"  ? "" : "none";
       armFields.style.display  = action === "arm_or_disarm"   ? "" : "none";
     };
 
-    // Write config on any change
+    // Write config
     const writeConfig = () => {
-      const action = sel.value;
-      const cfg = { action };
-      if (action === "navigate") {
+      const cfg = { action: actionValue };
+      if (actionValue === "navigate") {
         const path = navInput.value.trim();
         if (path) cfg.navigation_path = path;
       }
-      if (action === "perform-action") {
+      if (actionValue === "perform-action") {
         const call = perfInput.value.trim();
         if (call) cfg.perform_action = call;
-        const raw = perfTextarea.value.trim();
-        if (raw) {
-          try { cfg.data = JSON.parse(raw); } catch (_) { /* invalid JSON — omit */ }
-        }
+        const raw = perfDataInput.value.trim();
+        if (raw) { try { cfg.data = JSON.parse(raw); } catch (_) {} }
       }
-      if (action === "arm_or_disarm") {
-        cfg.arm_state = armSel.value;
-      }
+      if (actionValue === "arm_or_disarm") cfg.arm_state = armStateValue;
       this._config = { ...this._config, [configKey]: cfg };
       this._fireChanged();
     };
 
-    sel.addEventListener("change", () => { showFields(sel.value); writeConfig(); });
+    actionForm.addEventListener("value-changed", (e) => {
+      const v = e.detail?.value?.action;
+      if (v !== undefined) {
+        actionValue = v;
+        actionForm.data = { action: actionValue };
+        showFields(actionValue);
+        writeConfig();
+      }
+    });
+    armForm.addEventListener("value-changed", (e) => {
+      const v = e.detail?.value?.arm_state;
+      if (v !== undefined) {
+        armStateValue = v;
+        armForm.data = { arm_state: armStateValue };
+        writeConfig();
+      }
+    });
     navInput.addEventListener("input", writeConfig);
     perfInput.addEventListener("input", writeConfig);
-    perfTextarea.addEventListener("input", writeConfig);
-    armSel.addEventListener("change", writeConfig);
+    perfDataInput.addEventListener("input", writeConfig);
 
     return section;
   }
@@ -1276,71 +1278,39 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         }
         .reset-btn:hover { color: var(--error-color); }
         .reset-btn[hidden] { visibility: hidden; display: flex; }
+        details > summary { cursor: pointer; user-select: none; }
+        details > summary::-webkit-details-marker { display: none; }
+        details > summary::marker { display: none; }
+        details > summary::after { content: " ▸"; font-size: 0.75em; }
+        details[open] > summary::after { content: " ▾"; }
         .gesture-section { display: flex; flex-direction: column; gap: 8px; }
-        .gesture-row { display: flex; align-items: center; gap: 12px; }
-        .gesture-label {
-          font-size: 0.85em;
-          color: var(--secondary-text-color);
-          min-width: 80px;
-          flex-shrink: 0;
-        }
-        .gesture-select {
-          flex: 1;
-          padding: 6px 10px;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          font-size: 0.85em;
-          background: var(--secondary-background-color);
-          color: var(--primary-text-color);
-          cursor: pointer;
-        }
-        .gesture-text {
-          width: 100%;
-          box-sizing: border-box;
-          padding: 6px 10px;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          font-size: 0.85em;
-          background: var(--secondary-background-color);
-          color: var(--primary-text-color);
-        }
-        .gesture-textarea {
-          width: 100%;
-          box-sizing: border-box;
-          padding: 6px 10px;
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          font-size: 0.85em;
-          background: var(--secondary-background-color);
-          color: var(--primary-text-color);
-          font-family: monospace;
-          min-height: 60px;
-          resize: vertical;
-        }
+        .gesture-section ha-form, .gesture-section ha-textfield { display: block; width: 100%; }
         .conditional-fields {
-          padding: 8px 10px;
-          background: color-mix(in srgb, var(--primary-color) 5%, transparent);
-          border-radius: 8px;
+          padding: 8px 0 0 0;
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 8px;
         }
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
-        <div class="section-title">State Colors</div>
-        <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
-        <div class="color-grid">
-          ${COLOR_EDITOR_STATES.map(({ state, label }) => {
-            const override = colors[state];
-            const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
-            return `
-              <span class="color-label">${label}</span>
-              <input type="color" data-state="${state}" value="${pickerVal}" />
-              <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
-          }).join("")}
-        </div>
+        <details>
+          <summary class="section-title">State Colors</summary>
+          <div style="padding-top:10px">
+            <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
+            <div class="color-grid" style="margin-top:10px">
+              ${COLOR_EDITOR_STATES.map(({ state, label }) => {
+                const override = colors[state];
+                const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
+                return `
+                  <span class="color-label">${label}</span>
+                  <input type="color" data-state="${state}" value="${pickerVal}" />
+                  <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
+              }).join("")}
+            </div>
+          </div>
+        </details>
         <div id="gesture-slot"></div>
       </div>`;
 
