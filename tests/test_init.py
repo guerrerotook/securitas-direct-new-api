@@ -1626,3 +1626,56 @@ class TestPerDomainQueueSharing:
         hub_es = hass.data[DOMAIN][entry_es.entry_id]["hub"]
         hub_it = hass.data[DOMAIN][entry_it.entry_id]["hub"]
         assert hub_es.api_queue is not hub_it.api_queue
+
+
+# ===========================================================================
+# _discover_cameras tests
+# ===========================================================================
+
+
+class TestDiscoverCameras:
+    """Tests for _discover_cameras() background discovery function."""
+
+    @pytest.mark.asyncio
+    async def test_empty_camera_list_adds_no_entities(self):
+        """When no cameras are found, camera_add_entities must not be called."""
+        from custom_components.securitas import _discover_cameras
+        from tests.conftest import make_installation
+
+        hub = MagicMock()
+        hub.get_camera_devices = AsyncMock(return_value=[])
+        camera_add = MagicMock()
+        button_add = MagicMock()
+        entry_data = {
+            "camera_add_entities": camera_add,
+            "button_add_entities": button_add,
+        }
+
+        await _discover_cameras(hub, make_installation(), entry_data)
+
+        camera_add.assert_not_called()
+        button_add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_exception_from_get_camera_devices_is_caught(self):
+        """An exception in get_camera_devices must not propagate — log and continue."""
+        from custom_components.securitas import _discover_cameras
+        from tests.conftest import make_installation
+
+        hub = MagicMock()
+        hub.get_camera_devices = AsyncMock(
+            side_effect=Exception("network failure")
+        )
+        camera_add = MagicMock()
+        button_add = MagicMock()
+        entry_data = {
+            "camera_add_entities": camera_add,
+            "button_add_entities": button_add,
+        }
+
+        # Must not raise
+        await _discover_cameras(hub, make_installation(), entry_data)
+
+        # And must not have added any entities
+        camera_add.assert_not_called()
+        button_add.assert_not_called()
