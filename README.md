@@ -8,7 +8,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
 - **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Securitas alarm mode.
 - **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you and lets you force-arm via mobile notification, the `securitas.force_arm` service, or the custom alarm card.
-- **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI.
+- **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI, plus a badge.
 - **Refresh button** — manually trigger an alarm status check.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
@@ -240,9 +240,30 @@ To add the card to your dashboard, click **Add Card → Search for "Securitas Al
 
 ### Badge
 
-A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails. Click the badge to open the full alarm card in a popup overlay.
+A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails. Tap the badge to open the full alarm card in a popup overlay.
 
 To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and pick your alarm panel entity from the dropdown.
+
+### Gesture Actions
+
+Both the **alarm card** and the **badge** support configurable tap, hold, and double-tap actions. These are set in the card/badge editor under the **Tap action**, **Hold action**, and **Double-tap action** sections.
+
+| Action         | Badge default      | Card default |
+| -------------- | ------------------ | ------------ |
+| Tap            | Open alarm card    | _(none)_     |
+| Hold           | _(none)_           | _(none)_     |
+| Double-tap     | _(none)_           | _(none)_     |
+
+Each action can be set to one of the following:
+
+| Option     | Description                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| None       | Do nothing.                                                                                             |
+| Navigate   | Navigate to a dashboard path. A path selector appears to choose the destination.                        |
+| Arm        | Arm the alarm to a chosen state (Home, Away, Night, Custom, or Vacation). Only fires when disarmed.     |
+| Disarm     | Disarm the alarm. Only fires when armed.                                                                |
+
+Example: set **Hold** to **Disarm** on the badge to disarm with a long press, without opening the card popup.
 
 ## Sentinel Sensors
 
