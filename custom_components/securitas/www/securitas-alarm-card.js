@@ -1213,6 +1213,11 @@ class SecuritasAlarmBadge extends HTMLElement {
     this._gestureCleanup = null; // cleanup fn returned by attachGesture
   }
 
+  disconnectedCallback() {
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; this._pinState = null; this._pin = ""; }
+  }
+
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
