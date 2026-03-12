@@ -764,6 +764,76 @@ class TestAsyncSetupEntry:
             for u in js_urls
         )
 
+    async def test_two_accounts_each_fetches_own_installations(self, hass):
+        """Two entries with different usernames must not share installations_cache.
+
+        Regression test: previously installations_cache was a single global key,
+        so the second entry would reuse the first entry's (wrong) list, find no
+        matching installation number, and leave its entities unavailable.
+        """
+        italian_installation = make_installation(number="1111", alias="Gran Via")
+        spanish_installation = make_installation(number="2222", alias="Rome")
+
+        italian_hub = make_securitas_hub_mock()
+        italian_hub.session.list_installations = AsyncMock(
+            return_value=[italian_installation]
+        )
+        italian_hub.session.get_all_services = AsyncMock(return_value=[])
+
+        spanish_hub = make_securitas_hub_mock()
+        spanish_hub.session.list_installations = AsyncMock(
+            return_value=[spanish_installation]
+        )
+        spanish_hub.session.get_all_services = AsyncMock(return_value=[])
+
+        italian_data = make_config_entry_data(username="italian@example.com")
+        italian_data[CONF_INSTALLATION] = "1111"
+        spanish_data = make_config_entry_data(username="spanish@example.com")
+        spanish_data[CONF_INSTALLATION] = "2222"
+
+        entry_it = MockConfigEntry(domain=DOMAIN, data=italian_data)
+        entry_it.add_to_hass(hass)
+        entry_es = MockConfigEntry(domain=DOMAIN, data=spanish_data)
+        entry_es.add_to_hass(hass)
+
+        hubs_by_username = {
+            "italian@example.com": italian_hub,
+            "spanish@example.com": spanish_hub,
+        }
+
+        def hub_factory(config, entry, *args, **kwargs):
+            return hubs_by_username[config[CONF_USERNAME]]
+
+        mock_hub_cls = MagicMock(side_effect=hub_factory)
+        mock_hub_cls.__name__ = "SecuritasHub"
+
+        with (
+            patch("custom_components.securitas.SecuritasHub", mock_hub_cls),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result_it = await async_setup_entry(hass, entry_it)
+            result_es = await async_setup_entry(hass, entry_es)
+
+        assert result_it is True
+        assert result_es is True
+
+        # Each hub must have fetched its own installation list exactly once
+        italian_hub.session.list_installations.assert_awaited_once()
+        spanish_hub.session.list_installations.assert_awaited_once()
+
+        # Each entry must have exactly one device (its own installation)
+        it_devices = hass.data[DOMAIN][entry_it.entry_id]["devices"]
+        es_devices = hass.data[DOMAIN][entry_es.entry_id]["devices"]
+        assert len(it_devices) == 1
+        assert it_devices[0].installation.number == "1111"
+        assert len(es_devices) == 1
+        assert es_devices[0].installation.number == "2222"
+
 
 # ===========================================================================
 # 5b. TestBuildConfigDict
