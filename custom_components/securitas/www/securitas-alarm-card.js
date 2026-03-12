@@ -828,6 +828,8 @@ class SecuritasAlarmCard extends HTMLElement {
         background: color-mix(in srgb, ${cfg.color} 13%, transparent);
         display: flex; align-items: center; justify-content: center;
         flex-shrink: 0;
+        cursor: pointer;
+        touch-action: none;
       }
       .icon-wrap ha-icon {
         --mdc-icon-size: 28px;
