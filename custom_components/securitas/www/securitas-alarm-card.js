@@ -1104,6 +1104,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
       name: "action",
       selector: {
         select: {
+          mode: "dropdown",
           options: [
             { value: "none",           label: "None" },
             { value: "more-info",      label: "Open dialog" },
@@ -1158,6 +1159,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
       name: "arm_state",
       selector: {
         select: {
+          mode: "dropdown",
           options: armOptions.map(a => ({
             value: a.key,
             label: a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
