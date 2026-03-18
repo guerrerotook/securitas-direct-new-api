@@ -1,32 +1,72 @@
 {
     "config": {
+        "error": {
+            "invalid_auth": "Invalid username or password",
+            "cannot_connect": "Unable to connect to Securitas Direct",
+            "invalid_otp": "Invalid verification code",
+            "otp_expired": "Verification code expired — a new code will be sent",
+            "otp_send_failed": "Failed to send verification code — please try again",
+            "service_error": "Securitas Direct service error: {error}"
+        },
         "abort": {
             "already_configured": "Service is already configured"
         },
         "step": {
             "user": {
                 "data": {
+                    "country": "Country",
                     "username": "Username",
-                    "password": "Password",
-                    "use_2FA": "Use 2FA",
-                    "country": "Country Code",
-                    "code": "PIN Code (leave empty for no PIN)",
-                    "code_arm_required": "Also require PIN code (if any) to arm alarm",
-                    "PERI_alarm": "Is there a Perimetral alarm?",
-                    "check_alarm_panel": "Check alarm panel's status in every request",
-                    "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
-                    "delay_check_operation": "Delay to check the arming and disarming operations (sec)"
+                    "password": "Password"
                 },
                 "description": "Login into Securitas Direct.",
                 "title": "Login"
             },
             "phone_list": {
-                "description": "Please select the phone to send the 2FA code",
-                "title": "Securitas Direct 2FA"
+                "description": "Which phone number should we use to send you a code via SMS?",
+                "title": "Securitas Direct 2FA",
+                "data": {
+                    "phones": "Phone number"
+                }
             },
             "otp_challenge": {
                 "description": "Enter the code you received on your phone",
                 "title": "Securitas Direct 2FA"
+            },
+            "select_installation": {
+                "title": "Select Installation",
+                "description": "Select the installation to configure.",
+                "data": {
+                    "installation": "Installation"
+                }
+            },
+            "options": {
+                "title": "Options for {installation_name}",
+                "description": "Configure alarm options.",
+                "data": {
+                    "code": "PIN Code (leave empty for no PIN)",
+                    "code_arm_required": "Also require PIN code (if any) to arm alarm",
+                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "Advanced",
+                        "data": {
+                            "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
+                            "delay_check_operation": "Delay between API requests (sec)"
+                        }
+                    }
+                }
+            },
+            "mappings": {
+                "title": "Alarm State Mappings",
+                "description": "Map each Home Assistant alarm action to a Securitas alarm mode. Set to 'Not used' to disable a button.",
+                "data": {
+                    "map_home": "Home",
+                    "map_away": "Away",
+                    "map_night": "Night",
+                    "map_vacation": "Vacation",
+                    "map_custom": "Custom"
+                }
             }
         }
     },
@@ -36,11 +76,16 @@
                 "data": {
                     "code": "PIN Code (leave empty for no PIN)",
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
-                    "PERI_alarm": "Is there a Perimetral alarm?",
-                    "check_alarm_panel": "Check alarm panel's status in every request (not recommended)",
-                    "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
-                    "delay_check_operation": "Delay to check the arming and disarming operation (sec)",
                     "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "Advanced",
+                        "data": {
+                            "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
+                            "delay_check_operation": "Delay between API requests (sec)"
+                        }
+                    }
                 }
             },
             "mappings": {

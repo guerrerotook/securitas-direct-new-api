@@ -1,32 +1,72 @@
 {
     "config": {
+        "error": {
+            "invalid_auth": "Nome utente o password non validi",
+            "cannot_connect": "Impossibile connettersi a Securitas Direct",
+            "invalid_otp": "Codice di verifica non valido",
+            "otp_expired": "Il codice di verifica è scaduto — verrà inviato un nuovo codice",
+            "otp_send_failed": "Invio del codice di verifica non riuscito — riprova",
+            "service_error": "Errore del servizio Securitas Direct: {error}"
+        },
         "abort": {
             "already_configured": "Il servizio è già configurato"
         },
         "step": {
             "user": {
                 "data": {
-                    "username": "Nome utente",
-                    "password": "Password",
-                    "use_2FA": "Usa 2FA",
                     "country": "Codice paese",
-                    "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
-                    "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
-                    "PERI_alarm": "È presente un allarme perimetrale?",
-                    "check_alarm_panel": "Controlla lo stato del pannello di allarme ad ogni richiesta",
-                    "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
-                    "delay_check_operation": "Ritardo per verificare le operazioni di attivazione e disattivazione (sec)"
+                    "username": "Nome utente",
+                    "password": "Password"
                 },
                 "description": "Accedi a Securitas Direct.",
                 "title": "Accesso"
             },
             "phone_list": {
-                "description": "Seleziona il telefono per ricevere il codice 2FA",
-                "title": "Securitas Direct 2FA"
+                "description": "A quale numero di telefono dobbiamo inviare il codice via SMS?",
+                "title": "Securitas Direct 2FA",
+                "data": {
+                    "phones": "Numero di telefono"
+                }
             },
             "otp_challenge": {
                 "description": "Inserisci il codice ricevuto sul tuo telefono",
                 "title": "Securitas Direct 2FA"
+            },
+            "select_installation": {
+                "title": "Seleziona installazione",
+                "description": "Seleziona l'installazione da configurare.",
+                "data": {
+                    "installation": "Installazione"
+                }
+            },
+            "options": {
+                "title": "Opzioni per {installation_name}",
+                "description": "Configura le opzioni dell'allarme.",
+                "data": {
+                    "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
+                    "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
+                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "Avanzato",
+                        "data": {
+                            "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
+                            "delay_check_operation": "Ritardo tra le richieste API (sec)"
+                        }
+                    }
+                }
+            },
+            "mappings": {
+                "title": "Mappatura degli stati di allarme",
+                "description": "Associa ogni azione di allarme di Home Assistant a una modalità di allarme Securitas. Imposta su « Non utilizzato » per disattivare un pulsante.",
+                "data": {
+                    "map_home": "Casa",
+                    "map_away": "Fuori casa",
+                    "map_night": "Notte",
+                    "map_vacation": "Vacanza",
+                    "map_custom": "Personalizzato"
+                }
             }
         }
     },
@@ -36,11 +76,16 @@
                 "data": {
                     "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
                     "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
-                    "PERI_alarm": "È presente un allarme perimetrale?",
-                    "check_alarm_panel": "Controlla lo stato del pannello di allarme ad ogni richiesta (non consigliato)",
-                    "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
-                    "delay_check_operation": "Ritardo per verificare le operazioni di attivazione e disattivazione (sec)",
                     "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "Avanzato",
+                        "data": {
+                            "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
+                            "delay_check_operation": "Ritardo tra le richieste API (sec)"
+                        }
+                    }
                 }
             },
             "mappings": {

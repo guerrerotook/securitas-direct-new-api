@@ -77,7 +77,7 @@ class TestLogin:
             await api.login()
 
     async def test_null_hash_sets_timestamp_for_2fa(self, api, mock_execute):
-        mock_execute.return_value = login_response(hash_token=None)
+        mock_execute.return_value = login_response(hash_token=None)  # type: ignore[arg-type]
 
         await api.login()
 
@@ -360,7 +360,7 @@ class TestLoginEdgeCases:
 
     async def test_login_stores_empty_token_for_null_hash(self, api, mock_execute):
         """When hash is None (2FA flow), auth token stays empty but timestamp is set."""
-        mock_execute.return_value = login_response(hash_token=None)
+        mock_execute.return_value = login_response(hash_token=None)  # type: ignore[arg-type]
 
         await api.login()
 

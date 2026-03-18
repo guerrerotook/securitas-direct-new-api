@@ -46,6 +46,7 @@ const TRANSLATIONS = {
     code: "Code", confirm: "Confirm",
     refresh: "Refresh status",
     waf_blocked: "Rate limited by Securitas servers. Please wait a few minutes.",
+    refresh_failed: "Refresh timed out — data may be stale.",
     entity_not_found: "Entity not found: {entity}",
     editor_entity: "Entity", editor_select: "\u2014 Select alarm panel \u2014",
     editor_name: "Name (optional)", editor_name_placeholder: "Override friendly name",
@@ -66,6 +67,7 @@ const TRANSLATIONS = {
     code: "C\u00f3digo", confirm: "Confirmar",
     refresh: "Actualizar estado",
     waf_blocked: "Bloqueado por los servidores de Securitas. Espere unos minutos.",
+    refresh_failed: "La actualización ha caducado — los datos pueden estar desactualizados.",
     entity_not_found: "Entidad no encontrada: {entity}",
     editor_entity: "Entidad", editor_select: "\u2014 Seleccionar panel de alarma \u2014",
     editor_name: "Nombre (opcional)", editor_name_placeholder: "Nombre personalizado",
@@ -86,6 +88,7 @@ const TRANSLATIONS = {
     code: "Code", confirm: "Confirmer",
     refresh: "Actualiser le statut",
     waf_blocked: "Bloqu\u00e9 par les serveurs Securitas. Veuillez patienter quelques minutes.",
+    refresh_failed: "L\u2019actualisation a expir\u00e9 — les donn\u00e9es peuvent \u00eatre obsol\u00e8tes.",
     entity_not_found: "Entit\u00e9 introuvable\u00a0: {entity}",
     editor_entity: "Entit\u00e9", editor_select: "\u2014 S\u00e9lectionner le panneau d\u2019alarme \u2014",
     editor_name: "Nom (facultatif)", editor_name_placeholder: "Remplacer le nom",
@@ -106,6 +109,7 @@ const TRANSLATIONS = {
     code: "Codice", confirm: "Conferma",
     refresh: "Aggiorna stato",
     waf_blocked: "Bloccato dai server Securitas. Attendere qualche minuto.",
+    refresh_failed: "Aggiornamento scaduto — i dati potrebbero non essere aggiornati.",
     entity_not_found: "Entit\u00e0 non trovata: {entity}",
     editor_entity: "Entit\u00e0", editor_select: "\u2014 Seleziona pannello allarme \u2014",
     editor_name: "Nome (facoltativo)", editor_name_placeholder: "Nome personalizzato",
@@ -126,6 +130,7 @@ const TRANSLATIONS = {
     code: "C\u00f3digo", confirm: "Confirmar",
     refresh: "Atualizar estado",
     waf_blocked: "Bloqueado pelos servidores da Securitas. Aguarde alguns minutos.",
+    refresh_failed: "A atualiza\u00e7\u00e3o expirou — os dados podem estar desatualizados.",
     entity_not_found: "Entidade n\u00e3o encontrada: {entity}",
     editor_entity: "Entidade", editor_select: "\u2014 Selecionar painel de alarme \u2014",
     editor_name: "Nome (opcional)", editor_name_placeholder: "Nome personalizado",
@@ -201,6 +206,192 @@ const ARM_ACTIONS = [
   { key: "arm_custom_bypass", labelKey: "arm_custom",   feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
 ];
 
+// ── Gesture helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Returns the first arm state key supported by the entity, or "arm_away".
+ * Used as the fallback arm_state for arm_or_disarm when none is configured.
+ */
+function _defaultArmState(hass, entityId) {
+  const features = hass.states[entityId]?.attributes?.supported_features || 0;
+  const first = ARM_ACTIONS.find(a => features & a.feature);
+  return first ? first.key : "arm_away";
+}
+
+/**
+ * Attaches pointer-based gesture listeners to `el`.
+ *
+ * Gesture logic:
+ *  - Long-press  : pointerdown → 500 ms timer. Cancel on >10 px move or
+ *                  pointerup/cancel before timer fires. When timer fires,
+ *                  executes hold_action and suppresses the next click.
+ *  - Double-tap  : first pointerup starts a 300 ms window. Second pointerup
+ *                  within the window executes double_tap_action. Window
+ *                  expiry executes tap_action.
+ *  - Single tap  : click event executes tap_action (unless suppressed by
+ *                  long-press).
+ *
+ * @param {HTMLElement}   el         - Element to attach listeners to
+ * @param {object}        config     - Card/badge config (tap_action etc.)
+ * @param {object}        hass       - Home Assistant hass object
+ * @param {string}        entityId   - Alarm entity id
+ * @param {HTMLElement}   srcEl      - Element to dispatch events from
+ * @param {object}        callbacks  - { startPinEntry(action), onMoreInfo() }
+ * @returns {Function}               - Cleanup function (removes listeners)
+ */
+function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
+  let holdTimer = null;
+  let holdFired = false;
+  let downX = 0, downY = 0;
+  let tapWindow = null;
+
+
+  const HOLD_MS    = 500;
+  const DOUBLE_MS  = 300;
+  const MOVE_PX    = 10;
+
+  const tapAction       = config.tap_action       || { action: "more-info" };
+  const holdAction      = config.hold_action      || { action: "none" };
+  const doubleTapAction = config.double_tap_action || { action: "none" };
+
+  function cancelHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  }
+
+  function onPointerDown(e) {
+    holdFired = false;
+    downX = e.clientX; downY = e.clientY;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      holdFired = true;
+      executeAction(holdAction, hass, entityId, srcEl, callbacks);
+    }, HOLD_MS);
+  }
+
+  function onPointerMove(e) {
+    if (holdTimer) {
+      const dx = e.clientX - downX, dy = e.clientY - downY;
+      if (Math.sqrt(dx * dx + dy * dy) > MOVE_PX) cancelHold();
+    }
+  }
+
+  function onPointerUp() {
+    cancelHold();
+    if (holdFired) return;
+
+    if (tapWindow) {
+      clearTimeout(tapWindow);
+      tapWindow = null;
+      executeAction(doubleTapAction, hass, entityId, srcEl, callbacks);
+    } else {
+      tapWindow = setTimeout(() => {
+        tapWindow = null;
+        executeAction(tapAction, hass, entityId, srcEl, callbacks);
+      }, DOUBLE_MS);
+    }
+  }
+
+  function onPointerCancel() { cancelHold(); }
+
+  function onClick(e) {
+    if (holdFired) { holdFired = false; e.stopImmediatePropagation(); }
+  }
+
+  el.addEventListener("pointerdown",   onPointerDown);
+  el.addEventListener("pointermove",   onPointerMove);
+  el.addEventListener("pointerup",     onPointerUp);
+  el.addEventListener("pointercancel", onPointerCancel);
+  el.addEventListener("click",         onClick, true);
+
+  return function cleanup() {
+    el.removeEventListener("pointerdown",   onPointerDown);
+    el.removeEventListener("pointermove",   onPointerMove);
+    el.removeEventListener("pointerup",     onPointerUp);
+    el.removeEventListener("pointercancel", onPointerCancel);
+    el.removeEventListener("click",         onClick, true);
+    cancelHold();
+    if (tapWindow) { clearTimeout(tapWindow); tapWindow = null; }
+  };
+}
+
+/**
+ * Executes a HA-style action config object.
+ *
+ * @param {object}      action     - { action, navigation_path, perform_action, data, arm_state }
+ * @param {object}      hass       - Home Assistant hass object
+ * @param {string}      entityId   - Alarm entity id
+ * @param {HTMLElement} srcEl      - Element to dispatch events from (for more-info)
+ * @param {object}      callbacks  - { startPinEntry(serviceAction), onMoreInfo() }
+ */
+function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
+  if (!action || action.action === "none") return;
+
+  switch (action.action) {
+
+    case "more-info":
+      if (callbacks.onMoreInfo) {
+        callbacks.onMoreInfo();
+      } else if (srcEl) {
+        srcEl.dispatchEvent(new CustomEvent("hass-more-info", {
+          detail: { entityId },
+          bubbles: true,
+          composed: true,
+        }));
+      }
+      break;
+
+    case "navigate": {
+      const path = action.navigation_path;
+      if (path) {
+        history.pushState({}, "", path);
+        window.dispatchEvent(new Event("location-changed"));
+      }
+      break;
+    }
+
+    case "perform-action": {
+      const call = action.perform_action || "";
+      const dot  = call.indexOf(".");
+      if (dot > 0) {
+        hass.callService(call.slice(0, dot), call.slice(dot + 1), action.data || {});
+      }
+      break;
+    }
+
+    case "arm_or_disarm": {
+      const stateObj = hass.states[entityId];
+      if (!stateObj) return;
+      const state          = stateObj.state;
+      const attrs          = stateObj.attributes;
+      const isArmed        = !INACTIVE_STATES.has(state);
+      const hasCode        = !!attrs.code_format;
+      const codeArmReq     = attrs.code_arm_required === true;
+
+      if (isArmed || state === "arming" || state === "pending" || state === "triggered") {
+        // Disarm
+        const svcAction = { service: "alarm_disarm", labelKey: "disarm" };
+        if (hasCode && callbacks.startPinEntry) {
+          callbacks.startPinEntry(svcAction);
+        } else {
+          hass.callService("alarm_control_panel", "alarm_disarm", { entity_id: entityId });
+        }
+      } else if (state === "disarmed") {
+        // Arm
+        const armKey = action.arm_state || _defaultArmState(hass, entityId);
+        const armDef = ARM_ACTIONS.find(a => a.key === armKey);
+        if (!armDef) return;
+        const svcAction = { service: armDef.service, labelKey: armDef.labelKey };
+        if (hasCode && codeArmReq && callbacks.startPinEntry) {
+          callbacks.startPinEntry(svcAction);
+        } else {
+          hass.callService("alarm_control_panel", armDef.service, { entity_id: entityId });
+        }
+      }
+      break;
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SecuritasAlarmCard extends HTMLElement {
@@ -210,6 +401,11 @@ class SecuritasAlarmCard extends HTMLElement {
     this._uiState = "normal";   // normal | pin | force_arm
     this._pendingAction = null; // { service, label }
     this._pin = "";
+    this._gestureCleanup = null;
+  }
+
+  disconnectedCallback() {
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
   }
 
   setConfig(config) {
@@ -230,7 +426,7 @@ class SecuritasAlarmCard extends HTMLElement {
     const stateObj = hass.states[this._config.entity];
     const refreshKey = this._findRefreshEntity() || "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${refreshKey}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${refreshKey}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -269,19 +465,22 @@ class SecuritasAlarmCard extends HTMLElement {
   // ── Find the refresh button entity for this alarm panel ─────────────────────
   _findRefreshEntity() {
     if (!this._hass) return null;
-    // Explicit config takes priority
     if (this._config.refresh_entity) return this._config.refresh_entity;
-    // Only auto-select when there is a single candidate to avoid binding
-    // to the wrong installation in multi-panel setups.
-    const candidates = Object.keys(this._hass.states).filter(
-      e => e.startsWith("button.refresh_") && this._hass.states[e]
+    // Find the refresh button on the same device as the configured entity
+    const entities = this._hass.entities;
+    if (!entities) return null;
+    const panelEntry = entities[this._config.entity];
+    if (!panelEntry || !panelEntry.device_id) return null;
+    const match = Object.keys(entities).find(
+      e => e.startsWith("button.refresh_") && entities[e].device_id === panelEntry.device_id
     );
-    return candidates.length === 1 ? candidates[0] : null;
+    return match || null;
   }
 
   // ── Main render ─────────────────────────────────────────────────────────────
   _render() {
     if (!this._hass || !this._config) return;
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
 
     const lang = this._hass.language || "en";
     const stateObj = this._hass.states[this._config.entity];
@@ -301,6 +500,7 @@ class SecuritasAlarmCard extends HTMLElement {
     const forceArmAvailable = attrs.force_arm_available === true;
     const openSensors       = attrs.arm_exceptions || [];
     const wafBlocked        = attrs.waf_blocked === true;
+    const refreshFailed     = attrs.refresh_failed === true;
 
     const codeFormat      = attrs.code_format || null;        // "number" | "text" | null
     const codeArmRequired = attrs.code_arm_required === true; // need code to arm?
@@ -340,6 +540,9 @@ class SecuritasAlarmCard extends HTMLElement {
           <!-- ── WAF rate-limit banner ── -->
           ${wafBlocked ? `<div class="waf-banner"><ha-icon icon="mdi:shield-alert"></ha-icon> ${_t(lang, "waf_blocked")}</div>` : ""}
 
+          <!-- ── Refresh failed banner ── -->
+          ${refreshFailed ? `<div class="stale-banner"><ha-icon icon="mdi:clock-alert-outline"></ha-icon> ${_t(lang, "refresh_failed")}</div>` : ""}
+
           <!-- ── Force arm section ── -->
           ${!isUnavailable && forceArmAvailable ? `
             ${this._renderForceArm(openSensors, lang)}
@@ -364,6 +567,31 @@ class SecuritasAlarmCard extends HTMLElement {
 
         </div>
       </ha-card>`;
+
+    // Attach gesture actions to the header icon (always-visible touch target)
+    const iconWrap = this.shadowRoot.querySelector(".icon-wrap");
+    if (iconWrap) {
+      const gestureConfig = {
+        tap_action:        this._config.tap_action        || { action: "none" },
+        hold_action:       this._config.hold_action       || { action: "none" },
+        double_tap_action: this._config.double_tap_action || { action: "none" },
+      };
+      this._gestureCleanup = attachGesture(
+        iconWrap,
+        gestureConfig,
+        this._hass,
+        this._config.entity,
+        this,
+        {
+          onMoreInfo: () => this.dispatchEvent(new CustomEvent("hass-more-info", {
+            detail: { entityId: this._config.entity },
+            bubbles: true,
+            composed: true,
+          })),
+          startPinEntry: (svcAction) => this._startPinEntry(svcAction),
+        },
+      );
+    }
 
     this._attachListeners(stateObj, codeFormat, codeArmRequired, hasCode, isArmed);
   }
@@ -429,22 +657,9 @@ class SecuritasAlarmCard extends HTMLElement {
   _attachListeners(stateObj, codeFormat, codeArmRequired, hasCode, isArmed) {
     const entity = this._config.entity;
 
-    // Header click → open HA more-info dialog (history, attributes, etc.)
-    const header = this.shadowRoot.querySelector(".header");
-    if (header) {
-      header.addEventListener("click", () => {
-        this.dispatchEvent(new CustomEvent("hass-more-info", {
-          detail: { entityId: entity },
-          bubbles: true,
-          composed: true,
-        }));
-      });
-    }
-
     // Arm / Disarm / Refresh buttons
     this.shadowRoot.querySelectorAll("[data-action]").forEach(btn => {
       btn.addEventListener("click", (e) => {
-        e.stopPropagation(); // prevent header's more-info handler
         const action = btn.dataset.action;
         this._handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity);
       });
@@ -575,6 +790,21 @@ class SecuritasAlarmCard extends HTMLElement {
         --mdc-icon-size: 18px;
         flex-shrink: 0;
       }
+      .stale-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        margin: 4px 0 8px;
+        border-radius: 8px;
+        font-size: 0.85em;
+        background: var(--info-color, #039BE5);
+        color: var(--text-primary-color, #fff);
+      }
+      .stale-banner ha-icon {
+        --mdc-icon-size: 18px;
+        flex-shrink: 0;
+      }
 
       /* colour accent strip at top */
       .top-bar {
@@ -591,7 +821,6 @@ class SecuritasAlarmCard extends HTMLElement {
         align-items: center;
         gap: 14px;
         margin-bottom: 20px;
-        cursor: pointer;
       }
       .icon-wrap {
         width: 48px; height: 48px;
@@ -599,6 +828,8 @@ class SecuritasAlarmCard extends HTMLElement {
         background: color-mix(in srgb, ${cfg.color} 13%, transparent);
         display: flex; align-items: center; justify-content: center;
         flex-shrink: 0;
+        cursor: pointer;
+        touch-action: none;
       }
       .icon-wrap ha-icon {
         --mdc-icon-size: 28px;
@@ -823,11 +1054,16 @@ class SecuritasAlarmCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
+    const prev = this._config;
     this._config = { ...config };
-    if (!this._initialized) {
-      this._initialized = true;
-      this._render();
-    }
+    // Only rebuild the DOM when something structural changes. Text-field edits
+    // update existing DOM nodes directly, so a full re-render isn't needed and
+    // would destroy the focused element on every keystroke.
+    const needsRender = !prev
+      || prev.entity !== config.entity
+      || prev.type   !== config.type
+      || !this.shadowRoot.querySelector(".editor");
+    if (needsRender) this._render();
   }
 
   set hass(hass) {
@@ -843,6 +1079,150 @@ class SecuritasAlarmCardEditor extends HTMLElement {
     }
   }
 
+  _buildGestureSection(gesture, title, defaults) {
+    const configKey     = `${gesture}_action`;
+    const current       = this._config[configKey] || defaults;
+    const currentAction = current.action || defaults.action;
+
+    const stateObj  = this._hass?.states[this._config.entity];
+    const features  = stateObj?.attributes?.supported_features || 0;
+    const supported = ARM_ACTIONS.filter(a => features & a.feature);
+    const armOptions = supported.length > 0 ? supported : ARM_ACTIONS;
+
+    // Mutable state (avoids re-reading form.data which may lag)
+    let actionValue   = currentAction;
+    let armStateValue = current.arm_state || _defaultArmState(this._hass, this._config.entity);
+
+    const section = document.createElement("div");
+    section.className = "gesture-section";
+
+    // ── Action selector (ha-form with select) ────────────────────────────────
+    const actionForm = document.createElement("ha-form");
+    actionForm.hass   = this._hass;
+    actionForm.data   = { action: actionValue };
+    actionForm.schema = [{
+      name: "action",
+      selector: {
+        select: {
+          mode: "dropdown",
+          options: [
+            { value: "none",           label: "None" },
+            { value: "more-info",      label: "Open dialog" },
+            { value: "navigate",       label: "Navigate" },
+            { value: "perform-action", label: "Perform action" },
+            { value: "arm_or_disarm",  label: "Arm or disarm" },
+          ],
+        },
+      },
+    }];
+    actionForm.computeLabel = () => title;
+    section.appendChild(actionForm);
+
+    // ── Navigate sub-fields ──────────────────────────────────────────────────
+    const navFields = document.createElement("div");
+    navFields.className = "conditional-fields";
+    navFields.style.display = currentAction === "navigate" ? "" : "none";
+    const navForm = document.createElement("ha-form");
+    navForm.hass   = this._hass;
+    navForm.data   = { navigation_path: current.navigation_path || "" };
+    navForm.schema = [{ name: "navigation_path", selector: { navigation: {} } }];
+    navForm.computeLabel = () => "Navigation path";
+    navFields.appendChild(navForm);
+    section.appendChild(navFields);
+
+    // ── Perform-action sub-fields ────────────────────────────────────────────
+    const perfFields = document.createElement("div");
+    perfFields.className = "conditional-fields";
+    perfFields.style.display = currentAction === "perform-action" ? "" : "none";
+    const perfInput = document.createElement("ha-textfield");
+    perfInput.label       = "Action (e.g. light.turn_on)";
+    perfInput.placeholder = "domain.service";
+    perfInput.value       = current.perform_action || "";
+    perfInput.style.width = "100%";
+    const perfDataInput = document.createElement("ha-textfield");
+    perfDataInput.label       = "Data (JSON, optional)";
+    perfDataInput.placeholder = '{"entity_id": "light.living_room"}';
+    perfDataInput.value       = current.data ? JSON.stringify(current.data) : "";
+    perfDataInput.style.width = "100%";
+    perfFields.appendChild(perfInput);
+    perfFields.appendChild(perfDataInput);
+    section.appendChild(perfFields);
+
+    // ── Arm-or-disarm sub-fields ─────────────────────────────────────────────
+    const armFields = document.createElement("div");
+    armFields.className = "conditional-fields";
+    armFields.style.display = currentAction === "arm_or_disarm" ? "" : "none";
+    const armForm = document.createElement("ha-form");
+    armForm.hass   = this._hass;
+    armForm.data   = { arm_state: armStateValue };
+    armForm.schema = [{
+      name: "arm_state",
+      selector: {
+        select: {
+          mode: "dropdown",
+          options: armOptions.map(a => ({
+            value: a.key,
+            label: a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          })),
+        },
+      },
+    }];
+    armForm.computeLabel = () => "Arm state";
+    armFields.appendChild(armForm);
+    section.appendChild(armFields);
+
+    // Show/hide conditional fields
+    const showFields = (action) => {
+      navFields.style.display  = action === "navigate"        ? "" : "none";
+      perfFields.style.display = action === "perform-action"  ? "" : "none";
+      armFields.style.display  = action === "arm_or_disarm"   ? "" : "none";
+    };
+
+    // Write config
+    const writeConfig = () => {
+      const cfg = { action: actionValue };
+      if (actionValue === "navigate") {
+        const path = (navForm.data?.navigation_path || "").trim();
+        if (path) cfg.navigation_path = path;
+      }
+      if (actionValue === "perform-action") {
+        const call = perfInput.value.trim();
+        if (call) cfg.perform_action = call;
+        const raw = perfDataInput.value.trim();
+        if (raw) { try { cfg.data = JSON.parse(raw); } catch (_) {} }
+      }
+      if (actionValue === "arm_or_disarm") cfg.arm_state = armStateValue;
+      this._config = { ...this._config, [configKey]: cfg };
+      this._fireChanged();
+    };
+
+    actionForm.addEventListener("value-changed", (e) => {
+      const v = e.detail?.value?.action;
+      if (v !== undefined) {
+        actionValue = v;
+        actionForm.data = { action: actionValue };
+        showFields(actionValue);
+        writeConfig();
+      }
+    });
+    armForm.addEventListener("value-changed", (e) => {
+      const v = e.detail?.value?.arm_state;
+      if (v !== undefined) {
+        armStateValue = v;
+        armForm.data = { arm_state: armStateValue };
+        writeConfig();
+      }
+    });
+    navForm.addEventListener("value-changed", (e) => {
+      navForm.data = e.detail.value;
+      writeConfig();
+    });
+    perfInput.addEventListener("input", writeConfig);
+    perfDataInput.addEventListener("input", writeConfig);
+
+    return section;
+  }
+
   _render() {
     if (!this._hass) return;
 
@@ -854,17 +1234,9 @@ class SecuritasAlarmCardEditor extends HTMLElement {
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
         ha-entity-picker, ha-textfield { width: 100%; display: block; }
-        .section-title {
-          font-weight: 600;
-          font-size: 0.9em;
-          color: var(--primary-text-color);
-          padding-bottom: 6px;
-          border-bottom: 1px solid var(--divider-color);
-        }
         .section-hint {
           font-size: 0.8em;
           color: var(--secondary-text-color);
-          margin-top: -8px;
         }
         /* Flat 3-column grid: label | picker | reset — all rows perfectly aligned */
         .color-grid {
@@ -872,10 +1244,7 @@ class SecuritasAlarmCardEditor extends HTMLElement {
           grid-template-columns: 1fr 44px 28px;
           gap: 10px 12px;
           align-items: center;
-        }
-        .color-label {
-          font-size: 0.85em;
-          color: var(--primary-text-color);
+          margin-top: 10px;
         }
         input[type="color"] {
           width: 44px;
@@ -903,38 +1272,62 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         }
         .reset-btn:hover { color: var(--error-color); }
         .reset-btn[hidden] { visibility: hidden; display: flex; }
+        #gesture-slot { display: flex; flex-direction: column; gap: 16px; }
+        .gesture-section { display: flex; flex-direction: column; }
+        .gesture-section ha-form, .gesture-section ha-textfield { display: block; width: 100%; }
+        .conditional-fields {
+          display: flex;
+          flex-direction: column;
+        }
       </style>
       <div class="editor">
-        <div id="entity-slot"></div>
+        <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
-        <div class="section-title">State Colors</div>
-        <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
-        <div class="color-grid">
-          ${COLOR_EDITOR_STATES.map(({ state, label }) => {
-            const override = colors[state];
-            const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
-            return `
-              <span class="color-label">${label}</span>
-              <input type="color" data-state="${state}" value="${pickerVal}" />
-              <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
-          }).join("")}
-        </div>
+        <div id="colors-slot"></div>
+        <div id="gesture-slot"></div>
       </div>`;
 
-    // ── Entity picker (HA native) ────────────────────────────────────────────
-    const entityPicker = document.createElement("ha-entity-picker");
-    entityPicker.hass = this._hass;
-    entityPicker.value = this._config.entity || "";
-    entityPicker.label = _t(lang, "editor_entity");
-    entityPicker.includeDomains = ["alarm_control_panel"];
-    entityPicker.allowCustomEntity = false;
-    entityPicker.addEventListener("value-changed", (e) => {
-      if (e.detail.value !== undefined) {
-        this._config = { ...this._config, entity: e.detail.value };
+    // ── State colors (ha-expansion-panel) ────────────────────────────────────
+    const colorsSlot = this.shadowRoot.getElementById("colors-slot");
+    const expansionPanel = document.createElement("ha-expansion-panel");
+    expansionPanel.header = "State Colors";
+    const colorsContent = document.createElement("div");
+    colorsContent.style.padding = "8px 0 4px 0";
+    colorsContent.innerHTML = `
+      <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
+      <div class="color-grid">
+        ${COLOR_EDITOR_STATES.map(({ state, label }) => {
+          const override = colors[state];
+          const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
+          return `
+            <span>${label}</span>
+            <input type="color" data-state="${state}" value="${pickerVal}" />
+            <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
+        }).join("")}
+      </div>`;
+    expansionPanel.appendChild(colorsContent);
+    colorsSlot.appendChild(expansionPanel);
+
+    // ── Entity picker (via ha-form — handles lazy-loading internally) ────────
+    const entityForm = this.shadowRoot.getElementById("entity-form");
+    entityForm.hass = this._hass;
+    entityForm.data = { entity: this._config.entity || "" };
+    entityForm.schema = [
+      {
+        name: "entity",
+        selector: {
+          entity: { domain: "alarm_control_panel" },
+        },
+      },
+    ];
+    entityForm.computeLabel = () => _t(lang, "editor_entity");
+    entityForm.addEventListener("value-changed", (e) => {
+      const newEntity = e.detail.value?.entity;
+      if (newEntity !== undefined) {
+        this._config = { ...this._config, entity: newEntity };
         this._fireChanged();
       }
     });
-    this.shadowRoot.getElementById("entity-slot").appendChild(entityPicker);
 
     // ── Name field (HA native) ───────────────────────────────────────────────
     const nameTf = document.createElement("ha-textfield");
@@ -984,6 +1377,22 @@ class SecuritasAlarmCardEditor extends HTMLElement {
         this._fireChanged();
       });
     });
+
+    // ── Gesture action sections ──────────────────────────────────────────────
+    const gestureSlot = this.shadowRoot.getElementById("gesture-slot");
+    if (gestureSlot) {
+      const isBadge = this._config.type === "custom:securitas-alarm-badge";
+      const tapDefaults  = isBadge ? { action: "more-info" } : { action: "none" };
+      const holdDefaults = {
+        action: "arm_or_disarm",
+        arm_state: _defaultArmState(this._hass, this._config.entity),
+      };
+      const dblDefaults  = { action: "none" };
+
+      gestureSlot.appendChild(this._buildGestureSection("tap",        "Tap action",        tapDefaults));
+      gestureSlot.appendChild(this._buildGestureSection("hold",       "Hold action",       holdDefaults));
+      gestureSlot.appendChild(this._buildGestureSection("double_tap", "Double-tap action", dblDefaults));
+    }
   }
 
 
@@ -1003,6 +1412,15 @@ class SecuritasAlarmBadge extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._dialogOpen = false;
+    this._pinOverlay = null;   // floating PIN overlay element (or null)
+    this._pinState   = null;   // { service, labelKey } when PIN entry active
+    this._pin        = "";
+    this._gestureCleanup = null; // cleanup fn returned by attachGesture
+  }
+
+  disconnectedCallback() {
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; this._pinState = null; this._pin = ""; }
   }
 
   setConfig(config) {
@@ -1059,9 +1477,142 @@ class SecuritasAlarmBadge extends HTMLElement {
         <ha-icon icon="${icons.icon}"></ha-icon>
       </div>`;
 
-    this.shadowRoot.getElementById("badge").addEventListener("click", () => {
-      this._openDialog();
+    // Clean up previous gesture listeners (badge re-renders on state change)
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+
+    const badgeEl = this.shadowRoot.getElementById("badge");
+    const gestureConfig = {
+      tap_action:        this._config.tap_action        || { action: "more-info" },
+      hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: _defaultArmState(this._hass, this._config.entity) },
+      double_tap_action: this._config.double_tap_action || { action: "none" },
+    };
+
+    this._gestureCleanup = attachGesture(
+      badgeEl,
+      gestureConfig,
+      this._hass,
+      this._config.entity,
+      this,
+      {
+        onMoreInfo:    () => this._openDialog(),
+        startPinEntry: (svcAction) => this._startBadgePinEntry(svcAction),
+      },
+    );
+  }
+
+  _startBadgePinEntry(svcAction) {
+    if (this._pinOverlay) return; // already showing
+
+    const hass   = this._hass;
+    const entity = this._config.entity;
+    const lang   = hass.language || "en";
+    const stateObj = hass.states[entity];
+    const codeFormat = stateObj?.attributes?.code_format || "number";
+
+    this._pinState = svcAction;
+    this._pin      = "";
+
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed", top: "0", left: "0", right: "0", bottom: "0",
+      background: "rgba(0,0,0,0.5)", zIndex: "8",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: "16px",
     });
+
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      width: "100%", maxWidth: "340px",
+      borderRadius: "16px",
+      background: "var(--card-background-color, var(--ha-card-background, #fff))",
+      boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+      padding: "20px",
+      fontFamily: "inherit",
+    });
+
+    const actionLabel = svcAction.labelKey ? _t(lang, svcAction.labelKey) : (svcAction.label || "");
+    const promptKey   = codeFormat === "number" ? "enter_pin" : "enter_code";
+
+    box.innerHTML = `
+      <div style="font-size:0.9em;font-weight:600;color:var(--primary-text-color);margin-bottom:12px">
+        ${_t(lang, promptKey, { action: actionLabel })}
+      </div>
+      ${codeFormat === "number" ? `
+        <input id="badge-pin-input" type="password" inputmode="numeric" autocomplete="off"
+               style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--divider-color);
+                      border-radius:8px;font-size:1.1em;margin-bottom:12px;background:var(--secondary-background-color);
+                      color:var(--primary-text-color)" placeholder="••••" />
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px">
+          ${[1,2,3,4,5,6,7,8,9].map(n =>
+            `<button data-badge-key="${n}" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${n}</button>`
+          ).join("")}
+          <button data-badge-key="cancel" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
+          <button data-badge-key="0" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">0</button>
+          <button data-badge-key="del" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
+        </div>
+      ` : `
+        <input id="badge-pin-input" type="password" autocomplete="off"
+               style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--divider-color);
+                      border-radius:8px;font-size:1em;margin-bottom:12px;background:var(--secondary-background-color);
+                      color:var(--primary-text-color)" placeholder="${_t(lang, "code")}" />
+      `}
+      <div style="display:flex;gap:8px">
+        <button id="badge-pin-cancel" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:0.9em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${_t(lang, "cancel")}</button>
+        <button id="badge-pin-confirm" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:0.9em;font-weight:600;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,#fff)">${_t(lang, "confirm")}</button>
+      </div>`;
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    this._pinOverlay = overlay;
+
+    const close = () => {
+      overlay.remove();
+      this._pinOverlay = null;
+      this._pinState   = null;
+      this._pin        = "";
+    };
+
+    // Keypad
+    const pinInput = box.querySelector("#badge-pin-input");
+    const syncInput = () => { if (pinInput) pinInput.value = this._pin; };
+
+    box.querySelectorAll("[data-badge-key]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.badgeKey;
+        if (k === "cancel") { close(); return; }
+        if (k === "del")    { this._pin = this._pin.slice(0, -1); syncInput(); return; }
+        this._pin += k; syncInput();
+      });
+    });
+
+    if (pinInput) {
+      requestAnimationFrame(() => pinInput.focus());
+      pinInput.addEventListener("input", e => {
+        this._pin = codeFormat === "number"
+          ? e.target.value.replace(/\D/g, "")
+          : e.target.value;
+        if (codeFormat === "number") e.target.value = this._pin;
+      });
+      pinInput.addEventListener("keydown", e => {
+        if (e.key === "Enter")  this._submitBadgePin(close);
+        if (e.key === "Escape") close();
+      });
+    }
+
+    box.querySelector("#badge-pin-cancel").addEventListener("click", close);
+    box.querySelector("#badge-pin-confirm").addEventListener("click", () => this._submitBadgePin(close));
+
+    // Tap outside to close
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+  }
+
+  _submitBadgePin(closeFn) {
+    if (!this._pinState || !this._pin) return;
+    this._hass.callService("alarm_control_panel", this._pinState.service, {
+      entity_id: this._config.entity,
+      code: this._pin,
+    });
+    closeFn();
   }
 
   _openDialog() {

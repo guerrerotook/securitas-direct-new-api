@@ -265,6 +265,7 @@ def graphql_services(
     services: list[dict] | None = None,
     numinst: str = "123456",
     alias: str = "Home",
+    alarm_partitions: list | None = None,
 ) -> dict:
     """Srv (get_all_services) response."""
     if capabilities_jwt is None:
@@ -286,7 +287,11 @@ def graphql_services(
                     "sim": "",
                     "instIbs": False,
                     "services": services,
-                    "configRepoUser": {"alarmPartitions": []},
+                    "configRepoUser": {
+                        "alarmPartitions": alarm_partitions
+                        if alarm_partitions is not None
+                        else []
+                    },
                     "capabilities": capabilities_jwt,
                 },
             }
@@ -500,47 +505,36 @@ def graphql_sentinel(
 
 def graphql_air_quality(
     *,
-    current: int = 42,
-    message: str = "Good",
+    hour_value: str = "114",
+    hour_id: str = "18:00",
+    status_current: int = 1,
 ) -> dict:
-    """AirQualityGraph response."""
+    """xSAirQuality response."""
     return {
         "data": {
-            "xSAirQ": {
+            "xSAirQuality": {
                 "res": "OK",
-                "msg": "",
-                "graphData": {
+                "data": {
                     "status": {
-                        "current": current,
-                        "currentMsg": message,
-                        "avg6h": 40,
-                        "avg6hMsg": "Good",
-                        "avg24h": 38,
-                        "avg24hMsg": "Good",
-                        "avg7d": 35,
-                        "avg7dMsg": "Good",
-                        "avg4w": 33,
-                        "avg4wMsg": "Good",
+                        "current": status_current,
                     },
-                    "daysTotal": 7,
-                    "days": [],
-                    "hoursTotal": 24,
-                    "hours": [],
-                    "weeksTotal": 4,
-                    "weeks": [],
+                    "hours": [
+                        {"id": "17:00", "value": "110"},
+                        {"id": hour_id, "value": hour_value},
+                    ],
                 },
             }
         }
     }
 
 
-def graphql_lock_current_mode(*, lock_status: str = "2") -> dict:
+def graphql_lock_current_mode(*, lock_status: str = "2", device_id: str = "01") -> dict:
     """xSGetLockCurrentMode response."""
     return {
         "data": {
             "xSGetLockCurrentMode": {
                 "res": "OK",
-                "smartlockInfo": [{"lockStatus": lock_status, "deviceId": "01"}],
+                "smartlockInfo": [{"lockStatus": lock_status, "deviceId": device_id}],
             }
         }
     }
@@ -572,6 +566,69 @@ def graphql_change_lock_mode_status(
                 "msg": "",
                 "protomResponse": proto,
                 "status": "",
+            }
+        }
+    }
+
+
+def graphql_danalock_config(*, reference_id: str = "ref-danalock-123") -> dict:
+    """xSGetDanalockConfig response."""
+    return {
+        "data": {
+            "xSGetDanalockConfig": {
+                "res": "OK",
+                "msg": "alarm-manager.processed.request",
+                "referenceId": reference_id,
+            }
+        }
+    }
+
+
+def graphql_danalock_config_status(
+    *,
+    res: str = "OK",
+    action: str = "0",
+    device_number: str = "001",
+    battery_low: str = "40",
+    lock_before_partial: str = "1",
+    lock_before_full: str = "1",
+    unlock_after_disarm: str = "0",
+    lock_before_perimeter: str = "1",
+    periodic_bit_extension: str = "10080",
+    auto_lock_time: str = "000",
+    hold_back_latch_time: int = 3,
+    calibration_type: int = 0,
+    autolock_active: bool | None = None,
+    autolock_timeout: int | None = None,
+) -> dict:
+    """xSGetDanalockConfigStatus response."""
+    return {
+        "data": {
+            "xSGetDanalockConfigStatus": {
+                "res": res,
+                "msg": "peripherals.lock-configuration-request.success"
+                if res == "OK"
+                else "peripherals.processing.request",
+                "action": action if res == "OK" else None,
+                "deviceNumber": device_number if res == "OK" else None,
+                "asyncCylinder": "0" if res == "OK" else None,
+                "batteryLowPercenteage": battery_low if res == "OK" else None,
+                "lockBeforePartialArm": lock_before_partial if res == "OK" else None,
+                "lockBeforeFullArm": lock_before_full if res == "OK" else None,
+                "unlockAfterDisarm": unlock_after_disarm if res == "OK" else None,
+                "lockBeforePerimeterArm": lock_before_perimeter
+                if res == "OK"
+                else None,
+                "periodicBitExtension": periodic_bit_extension if res == "OK" else None,
+                "autoLockTime": auto_lock_time if res == "OK" else None,
+                "features": {
+                    "holdBackLatchTime": hold_back_latch_time if res == "OK" else None,
+                    "calibrationType": calibration_type if res == "OK" else None,
+                    "autolock": {
+                        "active": autolock_active,
+                        "timeout": autolock_timeout,
+                    },
+                },
             }
         }
     }

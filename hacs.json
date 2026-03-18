@@ -1,5 +1,5 @@
 {
-    "name": "Securitas Direct Alarm",
-    "content_in_root": false,
-    "homeassistant": "2021.9.0"
+  "name": "Securitas Direct Alarm",
+  "content_in_root": false,
+  "homeassistant": "2025.2.0"
 }

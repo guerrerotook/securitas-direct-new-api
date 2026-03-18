@@ -34,7 +34,6 @@ from .mock_graphql import (
     graphql_login_error,
     graphql_services,
     graphql_sentinel,
-    graphql_air_quality,
     make_doorlock_service,
     make_jwt,
     make_sentinel_service,
@@ -53,7 +52,9 @@ def _make_entry(hass: HomeAssistant, **overrides) -> MockConfigEntry:
     return entry
 
 
-async def _setup(hass: HomeAssistant, server: MockGraphQLServer) -> MockConfigEntry:
+async def _setup(
+    hass: HomeAssistant, server: MockGraphQLServer
+) -> tuple[MockConfigEntry, bool]:
     """Create an entry and run full async_setup_entry with the mock server."""
     entry = _make_entry(hass)
     mock_http = server.make_http_client()
@@ -95,31 +96,63 @@ async def test_setup_calls_list_installations(
     assert mock_server.call_count("mkInstallationList") == 1
 
 
-async def test_setup_calls_get_services(
+async def test_setup_makes_only_expected_api_calls(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Setup calls Srv to get installation services."""
+    """Setup phase must only call login, list_installations, and get_all_services.
+
+    This is a guardrail: if a new API call is added to async_setup_entry or
+    synchronous platform setup, this test will fail — forcing the developer to
+    either move the call to the background discovery task or explicitly update
+    the allowed list.
+    """
     queue_standard_setup(mock_server)
-    await _setup(hass, mock_server)
-    assert mock_server.call_count("Srv") >= 1
+
+    # Run setup but capture calls before background tasks execute.
+    entry = _make_entry(hass)
+    mock_http = mock_server.make_http_client()
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+        ) as mock_fwd,
+        patch(
+            "custom_components.securitas._async_discover_devices",
+        ),
+    ):
+        mock_fwd.return_value = True
+        await async_setup_entry(hass, entry)
+
+    operations = [op for op, _, _ in mock_server.calls]
+    assert operations == ["mkLoginToken", "mkInstallationList", "Srv"], (
+        f"Unexpected API calls during setup: {operations}. "
+        "New calls should run in _async_discover_devices, not during setup."
+    )
 
 
-async def test_setup_check_alarm_via_update_overview(
+async def test_setup_general_status_via_update_overview(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """update_overview() triggers CheckAlarm when check_alarm_panel=True."""
+    """update_overview() uses check_general_status (Status), not CheckAlarm."""
+    from .mock_graphql import graphql_general_status
+
     queue_standard_setup(mock_server)
+    mock_server.set_default_response("Status", graphql_general_status(status="D"))
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
 
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
-
-    # update_overview drives the full check_alarm → check_alarm_status flow
+    # Reset call log to only count calls from update_overview
+    mock_server.reset()
     status = await hub.update_overview(devices[0].installation)
-    assert mock_server.call_count("CheckAlarm") >= 1
-    assert status.protomResponse is not None
+    assert mock_server.call_count("Status") >= 1
+    assert mock_server.call_count("CheckAlarm") == 0
+    assert status.protomResponse == "D"
 
 
 async def test_login_sets_auth_token(
@@ -129,32 +162,27 @@ async def test_login_sets_auth_token(
     queue_standard_setup(mock_server, proto="D")
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
+    hub = hass.data[DOMAIN][entry.entry_id]["hub"]
     assert hub.session.authentication_token == FAKE_JWT
 
 
 async def test_login_token_stored(hass: HomeAssistant, mock_server: MockGraphQLServer):
-    """setup_entry stores the hub in hass.data[DOMAIN]."""
+    """setup_entry stores the hub in per-entry data."""
     queue_standard_setup(mock_server)
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub
-
-    assert SecuritasHub.__name__ in hass.data[DOMAIN]
+    assert entry.entry_id in hass.data[DOMAIN]
+    assert "hub" in hass.data[DOMAIN][entry.entry_id]
 
 
 async def test_installations_stored(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Discovered installations are stored in hass.data[DOMAIN]."""
-    from custom_components.securitas import CONF_INSTALLATION_KEY
-
+    """Discovered installations are stored in per-entry data."""
     queue_standard_setup(mock_server, numinst="999")
     entry, _ = await _setup(hass, mock_server)
 
-    devices = hass.data[DOMAIN].get(CONF_INSTALLATION_KEY)
+    devices = hass.data[DOMAIN][entry.entry_id]["devices"]
     assert devices is not None
     assert len(devices) == 1
     assert devices[0].installation.number == "999"
@@ -164,8 +192,6 @@ async def test_multiple_installations_stored(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
     """Multiple installations all become devices."""
-    from custom_components.securitas import CONF_INSTALLATION_KEY
-
     caps = make_jwt(exp_minutes=60)
     mock_server.add_response("mkLoginToken", graphql_login())
     mock_server.add_response(
@@ -216,7 +242,7 @@ async def test_multiple_installations_stored(
 
     entry, result = await _setup(hass, mock_server)
     assert result is True
-    devices = hass.data[DOMAIN].get(CONF_INSTALLATION_KEY)
+    devices = hass.data[DOMAIN][entry.entry_id]["devices"]
     assert len(devices) == 2
 
 
@@ -246,10 +272,9 @@ async def test_installation_scoped_requests_carry_numinst(
     queue_standard_setup(mock_server, numinst="123456", panel="SDVFAST")
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
 
     # Trigger a scoped call by calling check_alarm directly
     await hub.session.check_alarm(devices[0].installation)
@@ -335,16 +360,16 @@ async def test_setup_connection_error_raises_not_ready(
 ):
     """Network error during setup raises ConfigEntryNotReady."""
     from aiohttp import ClientConnectorError
+    from aiohttp.client_reqrep import ConnectionKey
 
     entry = _make_entry(hass)
-    mock_http = mock_server.make_http_client()
-    mock_http.post = None  # will cause AttributeError / TypeError
 
     # Use a proper ClientConnectorError-raising mock
+    _conn_key = ConnectionKey("example.com", 443, False, True, None, None, None)
 
     class _FailPost:
         def post(self, url, **kwargs):
-            raise ClientConnectorError(None, OSError("connection refused"))
+            raise ClientConnectorError(_conn_key, OSError("connection refused"))
 
     with patch(
         "custom_components.securitas.async_get_clientsession",
@@ -360,17 +385,17 @@ async def test_setup_connection_error_raises_not_ready(
 async def test_initial_state_disarmed(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Proto 'D' from CheckAlarmStatus → alarm state is disarmed."""
+    """Status 'D' from check_general_status → alarm state is disarmed."""
+    from .mock_graphql import graphql_general_status
+
     queue_standard_setup(mock_server, proto="D")
+    mock_server.set_default_response("Status", graphql_general_status(status="D"))
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     assert len(devices) == 1
-
-    # update_overview was called with proto D
 
     status = await hub.update_overview(devices[0].installation)
     assert status.protomResponse == "D"
@@ -379,56 +404,40 @@ async def test_initial_state_disarmed(
 async def test_initial_state_armed_away(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Proto 'T' from CheckAlarmStatus → total armed."""
+    """Status 'T' from check_general_status → total armed."""
+    from .mock_graphql import graphql_general_status
+
     queue_standard_setup(mock_server, proto="T")
-    _, result = await _setup(hass, mock_server)
+    mock_server.set_default_response("Status", graphql_general_status(status="T"))
+    entry, result = await _setup(hass, mock_server)
     assert result is True
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
 
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
-
-    mock_server.add_response("CheckAlarm", graphql_check_alarm())
-    mock_server.add_response("CheckAlarmStatus", graphql_alarm_status(proto="T"))
     status = await hub.update_overview(devices[0].installation)
     assert status.protomResponse == "T"
 
 
-async def test_general_status_used_when_check_alarm_disabled(
+async def test_general_status_used_by_update_overview(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """When check_alarm_panel=False, update_overview() uses Status, not CheckAlarm."""
+    """update_overview() always uses Status (check_general_status), not CheckAlarm."""
     from .mock_graphql import graphql_general_status
 
-    caps = make_jwt(exp_minutes=60)
-    mock_server.add_response("mkLoginToken", graphql_login())
-    mock_server.add_response("mkInstallationList", graphql_installations())
-    srv = graphql_services(capabilities_jwt=caps)
-    mock_server.add_response("Srv", srv)
-    mock_server.set_default_response("Srv", srv)
+    queue_standard_setup(mock_server)
     mock_server.set_default_response("Status", graphql_general_status(status="T"))
 
-    entry = _make_entry(hass, check_alarm_panel=False)
-    mock_http = mock_server.make_http_client()
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=mock_http,
-    ):
-        with patch(
-            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
-            return_value=True,
-        ):
-            result = await async_setup_entry(hass, entry)
-
+    entry, result = await _setup(hass, mock_server)
     assert result is True
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
 
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
-
-    # Directly call update_overview — with check_alarm=False it should use Status
+    # Reset call log to only count calls from update_overview
+    mock_server.reset()
     status = await hub.update_overview(devices[0].installation)
     assert mock_server.call_count("Status") >= 1
     assert mock_server.call_count("CheckAlarm") == 0
@@ -447,10 +456,9 @@ async def test_services_with_doorlock(
     entry, result = await _setup(hass, mock_server)
     assert result is True
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     services = await hub.get_services(devices[0].installation)
     doorlock_services = [s for s in services if s.request == "DOORLOCK"]
     assert len(doorlock_services) == 1
@@ -464,10 +472,9 @@ async def test_services_without_doorlock(
     entry, result = await _setup(hass, mock_server)
     assert result is True
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     services = await hub.get_services(devices[0].installation)
     assert all(s.request != "DOORLOCK" for s in services)
 
@@ -481,10 +488,9 @@ async def test_services_with_sentinel(
     entry, result = await _setup(hass, mock_server)
     assert result is True
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     services = await hub.get_services(devices[0].installation)
     sentinel_services = [s for s in services if s.request == "CONFORT"]
     assert len(sentinel_services) == 1
@@ -498,20 +504,16 @@ async def test_arm_away_api_call(hass: HomeAssistant, mock_server: MockGraphQLSe
     queue_standard_setup(mock_server)
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     installation = devices[0].installation
 
-    # Queue arm sequence
-    mock_server.add_response("Srv", graphql_services(capabilities_jwt=make_jwt(60)))
-    mock_server.add_response("CheckAlarm", graphql_check_alarm())
-    mock_server.add_response("CheckAlarmStatus", graphql_alarm_status(proto="T"))
+    # Queue arm sequence: submit + poll
     mock_server.add_response("xSArmPanel", graphql_arm())
     mock_server.add_response("ArmStatus", graphql_arm_status(proto="T"))
 
-    status = await hub.session.arm_alarm(installation, "ARM1")
+    status = await hub.arm_alarm(installation, "ARM1")
     assert status.protomResponse == "T"
     assert mock_server.call_count("xSArmPanel") == 1
     assert mock_server.call_count("ArmStatus") >= 1
@@ -522,19 +524,16 @@ async def test_disarm_api_call(hass: HomeAssistant, mock_server: MockGraphQLServ
     queue_standard_setup(mock_server)
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     installation = devices[0].installation
 
-    mock_server.add_response("Srv", graphql_services(capabilities_jwt=make_jwt(60)))
-    mock_server.add_response("CheckAlarm", graphql_check_alarm())
-    mock_server.add_response("CheckAlarmStatus", graphql_alarm_status(proto="D"))
+    # Queue disarm sequence: submit + poll
     mock_server.add_response("xSDisarmPanel", graphql_disarm())
     mock_server.add_response("DisarmStatus", graphql_disarm_status(proto="D"))
 
-    status = await hub.session.disarm_alarm(installation, "DARM1")
+    status = await hub.disarm_alarm(installation, "DARM1")
     assert status.protomResponse == "D"
     assert mock_server.call_count("xSDisarmPanel") == 1
 
@@ -546,22 +545,18 @@ async def test_arm_poll_waits_for_ok(
     queue_standard_setup(mock_server)
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     installation = devices[0].installation
 
-    mock_server.add_response("Srv", graphql_services(capabilities_jwt=make_jwt(60)))
-    mock_server.add_response("CheckAlarm", graphql_check_alarm())
-    mock_server.add_response("CheckAlarmStatus", graphql_alarm_status(proto="T"))
+    # Queue arm sequence: submit + 3 polls (2 WAIT, then OK)
     mock_server.add_response("xSArmPanel", graphql_arm())
-    # First two polls return WAIT, third returns OK
     mock_server.add_response("ArmStatus", graphql_arm_status(res="WAIT", proto=""))
     mock_server.add_response("ArmStatus", graphql_arm_status(res="WAIT", proto=""))
     mock_server.add_response("ArmStatus", graphql_arm_status(res="OK", proto="T"))
 
-    status = await hub.session.arm_alarm(installation, "ARM1")
+    status = await hub.arm_alarm(installation, "ARM1")
     assert status.protomResponse == "T"
     assert mock_server.call_count("ArmStatus") == 3
 
@@ -577,10 +572,9 @@ async def test_sentinel_data_returned(
     queue_standard_setup(mock_server, extra_services=[sentinel_svc])
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     installation = devices[0].installation
     services = await hub.get_services(installation)
     svc = next(s for s in services if s.request == "CONFORT")
@@ -595,34 +589,6 @@ async def test_sentinel_data_returned(
     sentinel = await hub.session.get_sentinel_data(installation, svc)
     assert sentinel.temperature == 23
     assert sentinel.humidity == 60
-
-
-async def test_air_quality_data_returned(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """get_air_quality_data() parses current AQI value."""
-    sentinel_svc = make_sentinel_service(zone="1")
-    queue_standard_setup(mock_server, extra_services=[sentinel_svc])
-    entry, _ = await _setup(hass, mock_server)
-
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
-    installation = devices[0].installation
-    services = await hub.get_services(installation)
-    svc = next(s for s in services if s.request == "CONFORT")
-
-    mock_server.add_response("Srv", graphql_services(capabilities_jwt=make_jwt(60)))
-    mock_server.add_response("CheckAlarm", graphql_check_alarm())
-    mock_server.add_response("CheckAlarmStatus", graphql_alarm_status())
-    mock_server.add_response(
-        "AirQualityGraph", graphql_air_quality(current=75, message="Moderate")
-    )
-
-    aq = await hub.session.get_air_quality_data(installation, svc)
-    assert aq.value == 75
-    assert aq.message == "Moderate"
 
 
 # ── Unload ────────────────────────────────────────────────────────────────────
@@ -678,10 +644,9 @@ async def test_graphql_error_response_raises(
     queue_standard_setup(mock_server)
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     installation = devices[0].installation
 
     # Queue an error for the next CheckAlarm call (overrides the default)
@@ -700,10 +665,9 @@ async def test_malformed_json_raises(
     queue_standard_setup(mock_server)
     entry, _ = await _setup(hass, mock_server)
 
-    from custom_components.securitas import SecuritasHub, CONF_INSTALLATION_KEY
-
-    hub = hass.data[DOMAIN][SecuritasHub.__name__]
-    devices = hass.data[DOMAIN][CONF_INSTALLATION_KEY]
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    hub = entry_data["hub"]
+    devices = entry_data["devices"]
     installation = devices[0].installation
 
     # Patch http_client.post to return invalid JSON

@@ -24,6 +24,24 @@ jobs:
       - name: Ruff format
         run: ruff format --check .
 
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements_test.txt pylint
+
+      - name: Pylint
+        run: pylint custom_components/securitas/
+
   typecheck:
     name: Pyright
     runs-on: ubuntu-latest
@@ -52,6 +70,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libturbojpeg0-dev
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -70,7 +91,7 @@ jobs:
           # phcc 0.13.210 pins homeassistant==2025.2.0 (our declared minimum)
           # Install phcc first — it pins exact versions of pytest, pytest-asyncio,
           # coverage etc. that conflict with the ~= ranges in requirements_test.txt
-          pip install pytest-homeassistant-custom-component==0.13.210 pytest-cov PyJWT~=2.10
+          pip install pytest-homeassistant-custom-component==0.13.210 pytest-cov PyJWT~=2.10 PyTurboJPEG~=1.7
 
       - name: Install dependencies (dev)
         if: matrix.ha-channel == 'dev'
