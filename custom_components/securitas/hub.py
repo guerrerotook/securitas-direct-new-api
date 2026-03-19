@@ -46,6 +46,9 @@ from .securitas_direct_new_api import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# API error message that indicates the lock hasn't responded yet (transient)
+_ERR_NO_RESPONSE = "alarm-manager.error_no_response_to_request"
+
 
 def _notify_error(
     hass: HomeAssistant, notification_id, title: str, message: str
@@ -647,18 +650,36 @@ class SecuritasHub:
         )
 
         max_attempts = self._max_poll_attempts(timeout_seconds=30)
+        last_err: SecuritasDirectError | None = None
         for attempt in range(1, max_attempts + 1):
-            raw = await self._api_queue.submit(
-                self.session.check_change_lock_mode,
-                installation,
-                reference_id,
-                attempt,
-                device_id,
-                priority=ApiQueue.FOREGROUND,
-            )
+            try:
+                raw = await self._api_queue.submit(
+                    self.session.check_change_lock_mode,
+                    installation,
+                    reference_id,
+                    attempt,
+                    device_id,
+                    priority=ApiQueue.FOREGROUND,
+                )
+            except SecuritasDirectError as err:
+                if err.message != _ERR_NO_RESPONSE:
+                    raise
+                _LOGGER.warning(
+                    "Lock mode change for %s device %s: panel has not received "
+                    "lock response yet (attempt %d/%d): %s",
+                    installation.number,
+                    device_id,
+                    attempt,
+                    max_attempts,
+                    err.log_detail(),
+                )
+                last_err = err
+                continue
             if raw.get("res") != "WAIT":
                 return self.session.process_lock_mode_result(raw)
 
+        if last_err is not None:
+            raise last_err
         raise TimeoutError("Lock mode change timed out")
 
     async def get_danalock_config(

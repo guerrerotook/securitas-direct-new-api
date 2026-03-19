@@ -60,6 +60,8 @@ async def async_setup_entry(
 class SecuritasLock(SecuritasEntity, lock.LockEntity):
     """Representation of a Securitas Direct smart lock."""
 
+    _MAX_DANALOCK_RETRIES = 3
+
     def __init__(
         self,
         installation: Installation,
@@ -82,7 +84,9 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._device: str = installation.address
         self._device_id: str = device_id
         self._danalock_config: DanalockConfig | None = danalock_config
-        self._danalock_config_fetched: bool = danalock_config is not None
+        self._danalock_config_retries: int = (
+            0 if danalock_config is None else self._MAX_DANALOCK_RETRIES
+        )
         self._lock_config: SmartLock | None = lock_config
 
         # Name: prefer lock_config.location if non-empty, else fallback
@@ -146,9 +150,12 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         if self.hass is None:
             return
 
-        # Lazily fetch Danalock config on first update (avoids blocking setup)
-        if not self._danalock_config_fetched:
-            self._danalock_config_fetched = True
+        # Lazily fetch Danalock config (retry up to _MAX_DANALOCK_RETRIES times)
+        if (
+            self._danalock_config is None
+            and self._danalock_config_retries < self._MAX_DANALOCK_RETRIES
+        ):
+            self._danalock_config_retries += 1
             try:
                 self._danalock_config = await self.client.get_danalock_config(
                     self.installation, self._device_id
@@ -164,9 +171,13 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
                     )
             except (SecuritasDirectError, KeyError, TypeError):
                 _LOGGER.debug(
-                    "[%s] Could not fetch Danalock config for device %s",
+                    "[%s] Could not fetch Danalock config for device %s "
+                    "(attempt %d/%d)",
                     self.entity_id,
                     self._device_id,
+                    self._danalock_config_retries,
+                    self._MAX_DANALOCK_RETRIES,
+                    exc_info=True,
                 )
 
         try:
