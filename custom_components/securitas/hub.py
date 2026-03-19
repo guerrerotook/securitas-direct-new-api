@@ -662,7 +662,7 @@ class SecuritasHub:
                     priority=ApiQueue.FOREGROUND,
                 )
             except SecuritasDirectError as err:
-                if _ERR_NO_RESPONSE not in err.message:
+                if err.message != _ERR_NO_RESPONSE:
                     raise
                 _LOGGER.warning(
                     "Lock mode change for %s device %s: panel has not received "

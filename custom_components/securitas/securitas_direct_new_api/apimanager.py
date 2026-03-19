@@ -885,7 +885,9 @@ class ApiManager(SecuritasHttpClient):
             )
         except SecuritasDirectError as err:
             _LOGGER.warning(
-                "Could not initiate Danalock config request: %s",
+                "Could not initiate Danalock config request for %s device %s: %s",
+                installation.number,
+                device_id,
                 err.log_detail(),
             )
             return None

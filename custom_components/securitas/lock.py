@@ -177,6 +177,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
                     self._device_id,
                     self._danalock_config_retries,
                     self._MAX_DANALOCK_RETRIES,
+                    exc_info=True,
                 )
 
         try:
