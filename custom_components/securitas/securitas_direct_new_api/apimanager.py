@@ -883,8 +883,11 @@ class ApiManager(SecuritasHttpClient):
             reference_id = await self.submit_danalock_config_request(
                 installation, device_id
             )
-        except SecuritasDirectError:
-            _LOGGER.warning("Could not initiate Danalock config request")
+        except SecuritasDirectError as err:
+            _LOGGER.warning(
+                "Could not initiate Danalock config request: %s",
+                err.log_detail(),
+            )
             return None
         count = 0
 

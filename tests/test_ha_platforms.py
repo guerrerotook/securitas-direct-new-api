@@ -860,10 +860,13 @@ class TestSecuritasLockUpdateStatus:
 
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
 
-    async def test_danalock_config_fetched_only_once(self):
-        """get_danalock_config must be called exactly once even across multiple updates."""
+    async def test_danalock_config_not_retried_after_success(self):
+        """get_danalock_config is not retried once config is fetched."""
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
         lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(return_value=None)
+        lock.client.get_danalock_config = AsyncMock(return_value=config)
         lock.client.get_lock_modes = AsyncMock(
             return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
         )
@@ -872,6 +875,62 @@ class TestSecuritasLockUpdateStatus:
         await lock.async_update_status()
 
         lock.client.get_danalock_config.assert_awaited_once()
+
+    async def test_danalock_config_retried_on_failure(self):
+        """Failed config fetch is retried on next update."""
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(
+            side_effect=[SecuritasDirectError("test error"), config]
+        )
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+        assert lock._danalock_config is None
+
+        await lock.async_update_status()
+        assert lock._danalock_config is config
+        assert lock.client.get_danalock_config.await_count == 2
+
+    async def test_danalock_config_retried_on_none_return(self):
+        """API returning None (not exception) also triggers retry."""
+        config = DanalockConfig(
+            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        )
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(
+            side_effect=[None, config]
+        )
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+        assert lock._danalock_config is None
+
+        await lock.async_update_status()
+        assert lock._danalock_config is config
+        assert lock.client.get_danalock_config.await_count == 2
+
+    async def test_danalock_config_gives_up_after_max_retries(self):
+        """After 3 failed attempts, no more retries."""
+        lock = make_lock()
+        lock.client.get_danalock_config = AsyncMock(
+            side_effect=SecuritasDirectError("persistent error")
+        )
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+        )
+
+        for _ in range(5):
+            await lock.async_update_status()
+
+        assert lock.client.get_danalock_config.await_count == 3
+        assert lock._danalock_config is None
 
     async def test_async_update_delegates_to_update_status(self):
         """async_update just calls async_update_status."""
