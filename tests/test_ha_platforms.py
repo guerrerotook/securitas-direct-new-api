@@ -902,9 +902,7 @@ class TestSecuritasLockUpdateStatus:
             features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
         )
         lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(
-            side_effect=[None, config]
-        )
+        lock.client.get_danalock_config = AsyncMock(side_effect=[None, config])
         lock.client.get_lock_modes = AsyncMock(
             return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
         )
