@@ -170,6 +170,95 @@ class TestChangeLockMode:
         with pytest.raises(TimeoutError, match="Lock mode change timed out"):
             await hub.change_lock_mode(installation, False, "device-1")
 
+    async def test_retries_on_error_no_response_to_request(self):
+        """error_no_response_to_request is treated as transient; polling continues."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            side_effect=[
+                SecuritasDirectError(
+                    "alarm-manager.error_no_response_to_request",
+                    {"errors": [], "data": None},
+                    http_status=200,
+                ),
+                SecuritasDirectError(
+                    "alarm-manager.error_no_response_to_request",
+                    {"errors": [], "data": None},
+                    http_status=200,
+                ),
+                {"res": "OK", "msg": "done", "protomResponse": "p", "status": "2"},
+            ]
+        )
+        hub.session.process_lock_mode_result = MagicMock(return_value="done")
+
+        result = await hub.change_lock_mode(installation, True, "device-1")
+
+        assert result == "done"
+        assert hub.session.check_change_lock_mode.await_count == 3
+
+    async def test_error_no_response_exhausted_raises(self):
+        """If all attempts return error_no_response, the last error is raised."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            side_effect=SecuritasDirectError(
+                "alarm-manager.error_no_response_to_request",
+                {"errors": [], "data": None},
+                http_status=200,
+            )
+        )
+
+        with patch.object(hub, "_max_poll_attempts", return_value=3):
+            with pytest.raises(SecuritasDirectError, match="error_no_response"):
+                await hub.change_lock_mode(installation, False, "device-1")
+
+        assert hub.session.check_change_lock_mode.await_count == 3
+
+    async def test_mixed_wait_and_error_no_response(self):
+        """WAIT and error_no_response can alternate; polling continues for both."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            side_effect=[
+                {"res": "WAIT"},
+                SecuritasDirectError(
+                    "alarm-manager.error_no_response_to_request",
+                    {"errors": [], "data": None},
+                    http_status=200,
+                ),
+                {"res": "WAIT"},
+                {"res": "OK", "msg": "done", "protomResponse": "p", "status": "2"},
+            ]
+        )
+        hub.session.process_lock_mode_result = MagicMock(return_value="done")
+
+        result = await hub.change_lock_mode(installation, True, "device-1")
+
+        assert result == "done"
+        assert hub.session.check_change_lock_mode.await_count == 4
+
+    async def test_non_transient_error_propagates_immediately(self):
+        """Errors other than error_no_response_to_request are not retried."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            side_effect=SecuritasDirectError(
+                "some-other-error",
+                {"errors": [], "data": None},
+                http_status=500,
+            )
+        )
+
+        with pytest.raises(SecuritasDirectError, match="some-other-error"):
+            await hub.change_lock_mode(installation, True, "device-1")
+
+        # Should fail on first attempt, not retry
+        assert hub.session.check_change_lock_mode.await_count == 1
+
 
 # ── refresh_alarm_status tests ──────────────────────────────────────────────
 
