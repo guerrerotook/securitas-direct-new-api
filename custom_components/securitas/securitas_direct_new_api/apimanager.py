@@ -15,10 +15,9 @@ from .dataTypes import (
     AirQuality,
     Attribute,
     CameraDevice,
-    DanalockAutolock,
-    DanalockConfig,
-    DanalockFeatures,
     Installation,
+    LockAutolock,
+    LockFeatures,
     OperationStatus,
     OtpPhone,
     Sentinel,
@@ -43,8 +42,6 @@ from .graphql_queries import (
     CHANGE_LOCK_MODE_STATUS_QUERY,
     CHECK_ALARM_QUERY,
     CHECK_ALARM_STATUS_QUERY,
-    DANALOCK_CONFIG_QUERY,
-    DANALOCK_CONFIG_STATUS_QUERY,
     DEVICE_LIST_QUERY,
     DISARM_PANEL_MUTATION,
     DISARM_STATUS_QUERY,
@@ -785,13 +782,9 @@ class ApiManager(SecuritasHttpClient):
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "devices": [
-                    {
-                        "deviceType": SMARTLOCK_DEVICE_TYPE,
-                        "deviceId": device_id,
-                        "keytype": SMARTLOCK_KEY_TYPE,
-                    }
-                ],
+                "deviceType": SMARTLOCK_DEVICE_TYPE,
+                "deviceId": device_id,
+                "keytype": SMARTLOCK_KEY_TYPE,
             },
             "query": SMARTLOCK_CONFIG_QUERY,
         }
@@ -803,15 +796,30 @@ class ApiManager(SecuritasHttpClient):
         raw_data = response.get("data", {}).get("xSGetSmartlockConfig")
         if raw_data is None:
             return SmartLock()
+
+        features = None
+        if raw_features := raw_data.get("features"):
+            autolock = None
+            if raw_autolock := raw_features.get("autolock"):
+                autolock = LockAutolock(
+                    active=raw_autolock.get("active"),
+                    timeout=raw_autolock.get("timeout"),
+                )
+            features = LockFeatures(
+                holdBackLatchTime=raw_features.get("holdBackLatchTime", 0),
+                calibrationType=raw_features.get("calibrationType", 0),
+                autolock=autolock,
+            )
+
         return SmartLock(
             res=raw_data.get("res"),
             location=raw_data.get("location"),
-            type=raw_data.get("type"),
-            referenceId=raw_data.get("referenceId", ""),
-            zoneId=raw_data.get("zoneId", ""),
-            serialNumber=raw_data.get("serialNumber", ""),
-            family=raw_data.get("family", ""),
-            label=raw_data.get("label", ""),
+            referenceId=raw_data.get("referenceId") or "",
+            zoneId=raw_data.get("zoneId") or "",
+            serialNumber=raw_data.get("serialNumber") or "",
+            family=raw_data.get("family") or "",
+            label=raw_data.get("label") or "",
+            features=features,
         )
 
     async def get_lock_current_mode(
@@ -872,86 +880,6 @@ class ApiManager(SecuritasHttpClient):
             response, "xSChangeSmartlockModeStatus"
         )
         return lock_status_data
-
-    async def get_danalock_config(
-        self,
-        installation: Installation,
-        device_id: str = SMARTLOCK_DEVICE_ID,
-    ) -> DanalockConfig | None:
-        """Fetch Danalock configuration via xSGetDanalockConfig + polling."""
-        try:
-            reference_id = await self.submit_danalock_config_request(
-                installation, device_id
-            )
-        except SecuritasDirectError as err:
-            _LOGGER.warning(
-                "Could not initiate Danalock config request for %s device %s: %s",
-                installation.number,
-                device_id,
-                err.log_detail(),
-            )
-            return None
-        count = 0
-
-        async def _check() -> dict[str, Any]:
-            nonlocal count
-            count += 1
-            return await self.check_danalock_config_status(
-                installation, reference_id, count
-            )
-
-        raw_data = await self._poll_operation(_check)
-        return self._parse_danalock_config(raw_data)
-
-    async def check_danalock_config_status(
-        self,
-        installation: Installation,
-        reference_id: str,
-        counter: int,
-    ) -> dict[str, Any]:
-        """Check progress of Danalock config fetch operation."""
-        content = {
-            "operationName": "xSGetDanalockConfigStatus",
-            "variables": {
-                "numinst": installation.number,
-                "referenceId": reference_id,
-                "counter": counter,
-            },
-            "query": DANALOCK_CONFIG_STATUS_QUERY,
-        }
-        response = await self._execute_request(
-            content, "xSGetDanalockConfigStatus", installation
-        )
-        return self._extract_response_data(response, "xSGetDanalockConfigStatus")
-
-    @staticmethod
-    def _parse_danalock_config(raw_data: dict[str, Any]) -> DanalockConfig:
-        features = None
-        if raw_features := raw_data.get("features"):
-            autolock = None
-            if raw_autolock := raw_features.get("autolock"):
-                autolock = DanalockAutolock(
-                    active=raw_autolock.get("active"),
-                    timeout=raw_autolock.get("timeout"),
-                )
-            features = DanalockFeatures(
-                holdBackLatchTime=raw_features.get("holdBackLatchTime", 0),
-                calibrationType=raw_features.get("calibrationType", 0),
-                autolock=autolock,
-            )
-        return DanalockConfig(
-            action=raw_data.get("action", ""),
-            deviceNumber=raw_data.get("deviceNumber", ""),
-            asyncCylinder=raw_data.get("asyncCylinder"),
-            batteryLowPercentage=raw_data.get("batteryLowPercenteage", ""),
-            lockBeforePartialArm=raw_data.get("lockBeforePartialArm", ""),
-            lockBeforeFullArm=raw_data.get("lockBeforeFullArm", ""),
-            unlockAfterDisarm=raw_data.get("unlockAfterDisarm", ""),
-            lockBeforePerimeterArm=raw_data.get("lockBeforePerimeterArm", ""),
-            periodicBitExtension=raw_data.get("periodicBitExtension", ""),
-            autoLockTime=raw_data.get("autoLockTime", ""),
-            features=features,
-        )
 
     # ── Submit request + single-poll methods (for ApiQueue) ────────────
 
@@ -1029,27 +957,6 @@ class ApiManager(SecuritasHttpClient):
         )
         if "referenceId" not in data:
             raise SecuritasDirectError("No referenceId in response")
-        return data["referenceId"]
-
-    async def submit_danalock_config_request(
-        self,
-        installation: Installation,
-        device_id: str = SMARTLOCK_DEVICE_ID,
-    ) -> str:
-        """Send Danalock config request and return referenceId (no polling)."""
-        content = {
-            "operationName": "xSGetDanalockConfig",
-            "variables": {
-                "numinst": installation.number,
-                "panel": installation.panel,
-                "deviceType": SMARTLOCK_DEVICE_TYPE,
-                "deviceId": device_id,
-            },
-            "query": DANALOCK_CONFIG_QUERY,
-        }
-        data = await self._execute_graphql(
-            content, "xSGetDanalockConfig", "xSGetDanalockConfig", installation
-        )
         return data["referenceId"]
 
     async def get_device_list(self, installation: Installation) -> list[CameraDevice]:

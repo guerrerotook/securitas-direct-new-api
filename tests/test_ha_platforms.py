@@ -7,10 +7,9 @@ from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     AirQuality,
     Attribute,
     Attributes,
-    DanalockAutolock,
-    DanalockConfig,
-    DanalockFeatures,
     Installation,
+    LockAutolock,
+    LockFeatures,
     Sentinel,
     Service,
     SmartLock,
@@ -90,7 +89,6 @@ def make_client():
 def make_lock(
     device_id: str = "01",
     initial_status: str = "2",
-    danalock_config: DanalockConfig | None = None,
     lock_config: SmartLock | None = None,
 ):
     """Create a SecuritasLock with mocked dependencies."""
@@ -99,7 +97,6 @@ def make_lock(
     client.config = {"scan_interval": 120}
     client.session = AsyncMock()
     client.change_lock_mode = AsyncMock()
-    client.get_danalock_config = AsyncMock(return_value=None)
     hass = MagicMock()
     hass.async_create_task = MagicMock()
     hass.services = MagicMock()
@@ -110,7 +107,6 @@ def make_lock(
         hass=hass,
         device_id=device_id,
         initial_status=initial_status,
-        danalock_config=danalock_config,
         lock_config=lock_config,
     )
     lock_entity.entity_id = f"lock.securitas_{installation.number}_{device_id}"
@@ -580,53 +576,32 @@ class TestSecuritasLockConfig:
         lock = make_lock(initial_status="1")
         assert lock._state == "1"
 
-    def test_extra_state_attributes_empty_without_danalock_config(self):
+    def test_extra_state_attributes_empty_without_lock_features(self):
         lock = make_lock()
         assert lock.extra_state_attributes == {}
 
-    def test_extra_state_attributes_with_danalock_config(self):
-        config = DanalockConfig(
-            batteryLowPercentage="40",
-            lockBeforeFullArm="1",
-            lockBeforePartialArm="1",
-            lockBeforePerimeterArm="1",
-            unlockAfterDisarm="0",
-            autoLockTime="000",
-            features=DanalockFeatures(
+    def test_extra_state_attributes_with_lock_config(self):
+        lock_config = SmartLock(
+            res="OK",
+            location="Front Door",
+            features=LockFeatures(
                 holdBackLatchTime=3,
                 calibrationType=0,
-                autolock=DanalockAutolock(active=True, timeout=30),
+                autolock=LockAutolock(active=True, timeout=30),
             ),
         )
-        lock = make_lock(danalock_config=config)
+        lock = make_lock(lock_config=lock_config)
         attrs = lock.extra_state_attributes
         assert attrs is not None
-        assert attrs["battery_low_threshold"] == "40"
-        assert attrs["lock_before_full_arm"] is True
-        assert attrs["lock_before_partial_arm"] is True
-        assert attrs["lock_before_perimeter_arm"] is True
-        assert attrs["unlock_after_disarm"] is False
-        assert attrs["auto_lock_time"] == "000"
         assert attrs["hold_back_latch_time"] == 3
         assert attrs["autolock_active"] is True
         assert attrs["autolock_timeout"] == 30
 
     def test_extra_state_attributes_with_no_features(self):
-        config = DanalockConfig(
-            batteryLowPercentage="40",
-            lockBeforeFullArm="1",
-            lockBeforePartialArm="0",
-            lockBeforePerimeterArm="0",
-            unlockAfterDisarm="1",
-            autoLockTime="060",
-        )
-        lock = make_lock(danalock_config=config)
+        lock_config = SmartLock(res="OK", location="Front Door")
+        lock = make_lock(lock_config=lock_config)
         attrs = lock.extra_state_attributes
-        assert attrs is not None
-        assert attrs["battery_low_threshold"] == "40"
-        assert attrs["lock_before_partial_arm"] is False
-        assert attrs["unlock_after_disarm"] is True
-        assert "hold_back_latch_time" not in attrs
+        assert attrs == {}
 
     def test_supported_features_no_config_returns_zero(self):
         import homeassistant.components.lock as lock_mod
@@ -637,26 +612,28 @@ class TestSecuritasLockConfig:
     def test_supported_features_with_holdback_returns_open(self):
         import homeassistant.components.lock as lock_mod
 
-        config = DanalockConfig(
-            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        lock_config = SmartLock(
+            res="OK",
+            features=LockFeatures(holdBackLatchTime=3, calibrationType=0),
         )
-        lock = make_lock(danalock_config=config)
+        lock = make_lock(lock_config=lock_config)
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
 
     def test_supported_features_holdback_zero_returns_zero(self):
         import homeassistant.components.lock as lock_mod
 
-        config = DanalockConfig(
-            features=DanalockFeatures(holdBackLatchTime=0, calibrationType=0)
+        lock_config = SmartLock(
+            res="OK",
+            features=LockFeatures(holdBackLatchTime=0, calibrationType=0),
         )
-        lock = make_lock(danalock_config=config)
+        lock = make_lock(lock_config=lock_config)
         assert lock.supported_features == lock_mod.LockEntityFeature(0)
 
     def test_supported_features_no_features_returns_zero(self):
         import homeassistant.components.lock as lock_mod
 
-        config = DanalockConfig(features=None)
-        lock = make_lock(danalock_config=config)
+        lock_config = SmartLock(res="OK", features=None)
+        lock = make_lock(lock_config=lock_config)
         assert lock.supported_features == lock_mod.LockEntityFeature(0)
 
 
@@ -842,16 +819,15 @@ class TestSecuritasLockUpdateStatus:
         # No matching device_id → get_lock_state returns "0" (unknown) → ignored
         assert lock._state == "2"
 
-    async def test_config_fetch_with_holdback_triggers_state_write(self):
-        """After fetching config with holdBackLatchTime, HA state is refreshed
-        so supported_features picks up the OPEN flag."""
+    async def test_lock_config_with_holdback_gives_open_feature(self):
+        """Lock created with holdBackLatchTime exposes OPEN feature."""
         import homeassistant.components.lock as lock_mod
 
-        config = DanalockConfig(
-            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
+        lock_config = SmartLock(
+            res="OK",
+            features=LockFeatures(holdBackLatchTime=3, calibrationType=0),
         )
-        lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(return_value=config)
+        lock = make_lock(lock_config=lock_config)
         lock.client.get_lock_modes = AsyncMock(
             return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
         )
@@ -859,76 +835,6 @@ class TestSecuritasLockUpdateStatus:
         await lock.async_update_status()
 
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
-
-    async def test_danalock_config_not_retried_after_success(self):
-        """get_danalock_config is not retried once config is fetched."""
-        config = DanalockConfig(
-            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
-        )
-        lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(return_value=config)
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
-        )
-
-        await lock.async_update_status()
-        await lock.async_update_status()
-
-        lock.client.get_danalock_config.assert_awaited_once()
-
-    async def test_danalock_config_retried_on_failure(self):
-        """Failed config fetch is retried on next update."""
-        config = DanalockConfig(
-            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
-        )
-        lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(
-            side_effect=[SecuritasDirectError("test error"), config]
-        )
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
-        )
-
-        await lock.async_update_status()
-        assert lock._danalock_config is None
-
-        await lock.async_update_status()
-        assert lock._danalock_config is config
-        assert lock.client.get_danalock_config.await_count == 2
-
-    async def test_danalock_config_retried_on_none_return(self):
-        """API returning None (not exception) also triggers retry."""
-        config = DanalockConfig(
-            features=DanalockFeatures(holdBackLatchTime=3, calibrationType=0)
-        )
-        lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(side_effect=[None, config])
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
-        )
-
-        await lock.async_update_status()
-        assert lock._danalock_config is None
-
-        await lock.async_update_status()
-        assert lock._danalock_config is config
-        assert lock.client.get_danalock_config.await_count == 2
-
-    async def test_danalock_config_gives_up_after_max_retries(self):
-        """After 3 failed attempts, no more retries."""
-        lock = make_lock()
-        lock.client.get_danalock_config = AsyncMock(
-            side_effect=SecuritasDirectError("persistent error")
-        )
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
-        )
-
-        for _ in range(5):
-            await lock.async_update_status()
-
-        assert lock.client.get_danalock_config.await_count == 3
-        assert lock._danalock_config is None
 
     async def test_async_update_delegates_to_update_status(self):
         """async_update just calls async_update_status."""

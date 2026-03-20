@@ -149,13 +149,15 @@ DISARM_STATUS_QUERY = (
 )
 
 SMARTLOCK_CONFIG_QUERY = (
-    "query xSGetSmartlockConfig($numinst: String!, $panel: String!, $devices: "
-    "[SmartlockDevicesInfo]!) {\n"
-    "  xSGetSmartlockConfig(numinst: $numinst, panel: $panel, devices: "
-    "$devices) {\n    res\n    referenceId\n    zoneId\n    serialNumber\n"
-    "    location\n    family\n    type\n    label\n    features {\n"
-    "      holdBackLatchTime\n      calibrationType\n      autolock {\n"
-    "        active\n        timeout\n      }\n    }\n  }\n}"
+    "query xSGetSmartlockConfig($numinst: String!, $panel: String!, "
+    "$deviceId: String, $keytype: String, $deviceType: String) {\n"
+    "  xSGetSmartlockConfig(\n    numinst: $numinst\n    panel: $panel\n"
+    "    deviceId: $deviceId\n    keytype: $keytype\n"
+    "    deviceType: $deviceType\n  ) {\n    res\n    referenceId\n"
+    "    zoneId\n    serialNumber\n    location\n    family\n    label\n"
+    "    features {\n      holdBackLatchTime\n      calibrationType\n"
+    "      autolock {\n        active\n        timeout\n      }\n"
+    "    }\n  }\n}"
 )
 
 LOCK_CURRENT_MODE_QUERY = (
@@ -172,19 +174,6 @@ CHANGE_LOCK_MODE_STATUS_QUERY = (
     "    panel: $panel\n    referenceId: $referenceId\n    counter: $counter\n"
     "    deviceId: $deviceId\n  ) {\n    res\n    msg\n    protomResponse\n"
     "    status\n  }\n}"
-)
-
-DANALOCK_CONFIG_STATUS_QUERY = (
-    "query xSGetDanalockConfigStatus("
-    "$numinst: String!, $referenceId: String!, "
-    "$counter: Int!) {\n  xSGetDanalockConfigStatus(\n    numinst: $numinst\n"
-    "    referenceId: $referenceId\n    counter: $counter\n  ) {\n    res\n"
-    "    msg\n    action\n    deviceNumber\n    asyncCylinder\n"
-    "    batteryLowPercenteage\n    lockBeforePartialArm\n"
-    "    lockBeforeFullArm\n    unlockAfterDisarm\n"
-    "    lockBeforePerimeterArm\n    periodicBitExtension\n    autoLockTime\n"
-    "    features {\n      holdBackLatchTime\n      calibrationType\n"
-    "      autolock {\n        active\n        timeout\n      }\n    }\n  }\n}"
 )
 
 ARM_PANEL_MUTATION = (
@@ -211,14 +200,6 @@ CHANGE_LOCK_MODE_MUTATION = (
     "  xSChangeSmartlockMode(\n    numinst: $numinst\n    panel: $panel\n"
     "    deviceId: $deviceId\n    deviceType: $deviceType\n    lock: $lock\n"
     "  ) {\n    res\n    msg\n    referenceId\n  }\n}"
-)
-
-DANALOCK_CONFIG_QUERY = (
-    "query xSGetDanalockConfig($numinst: String!, $panel: String!, $deviceId: "
-    "String!, $deviceType: String) {\n  xSGetDanalockConfig(\n"
-    "    numinst: $numinst\n    panel: $panel\n    deviceId: $deviceId\n"
-    "    deviceType: $deviceType\n  ) {\n    res\n    msg\n    referenceId\n"
-    "  }\n}"
 )
 
 DEVICE_LIST_QUERY = (
