@@ -784,23 +784,6 @@ class TestSubmitRequestMethods:
         ref = await authed_api.submit_change_lock_mode_request(installation, True, "01")
         assert ref == "ref-lock"
 
-    async def test_submit_danalock_config_request_returns_reference_id(
-        self, authed_api, installation
-    ):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSGetDanalockConfig": {
-                        "res": "OK",
-                        "msg": "ok",
-                        "referenceId": "ref-cfg",
-                    }
-                }
-            }
-        )
-        ref = await authed_api.submit_danalock_config_request(installation, "01")
-        assert ref == "ref-cfg"
-
 
 # ── Result-processing helpers ────────────────────────────────────────────────
 

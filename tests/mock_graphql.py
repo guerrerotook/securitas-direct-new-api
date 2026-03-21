@@ -571,69 +571,6 @@ def graphql_change_lock_mode_status(
     }
 
 
-def graphql_danalock_config(*, reference_id: str = "ref-danalock-123") -> dict:
-    """xSGetDanalockConfig response."""
-    return {
-        "data": {
-            "xSGetDanalockConfig": {
-                "res": "OK",
-                "msg": "alarm-manager.processed.request",
-                "referenceId": reference_id,
-            }
-        }
-    }
-
-
-def graphql_danalock_config_status(
-    *,
-    res: str = "OK",
-    action: str = "0",
-    device_number: str = "001",
-    battery_low: str = "40",
-    lock_before_partial: str = "1",
-    lock_before_full: str = "1",
-    unlock_after_disarm: str = "0",
-    lock_before_perimeter: str = "1",
-    periodic_bit_extension: str = "10080",
-    auto_lock_time: str = "000",
-    hold_back_latch_time: int = 3,
-    calibration_type: int = 0,
-    autolock_active: bool | None = None,
-    autolock_timeout: int | None = None,
-) -> dict:
-    """xSGetDanalockConfigStatus response."""
-    return {
-        "data": {
-            "xSGetDanalockConfigStatus": {
-                "res": res,
-                "msg": "peripherals.lock-configuration-request.success"
-                if res == "OK"
-                else "peripherals.processing.request",
-                "action": action if res == "OK" else None,
-                "deviceNumber": device_number if res == "OK" else None,
-                "asyncCylinder": "0" if res == "OK" else None,
-                "batteryLowPercenteage": battery_low if res == "OK" else None,
-                "lockBeforePartialArm": lock_before_partial if res == "OK" else None,
-                "lockBeforeFullArm": lock_before_full if res == "OK" else None,
-                "unlockAfterDisarm": unlock_after_disarm if res == "OK" else None,
-                "lockBeforePerimeterArm": lock_before_perimeter
-                if res == "OK"
-                else None,
-                "periodicBitExtension": periodic_bit_extension if res == "OK" else None,
-                "autoLockTime": auto_lock_time if res == "OK" else None,
-                "features": {
-                    "holdBackLatchTime": hold_back_latch_time if res == "OK" else None,
-                    "calibrationType": calibration_type if res == "OK" else None,
-                    "autolock": {
-                        "active": autolock_active,
-                        "timeout": autolock_timeout,
-                    },
-                },
-            }
-        }
-    }
-
-
 def graphql_logout() -> dict:
     """Logout response."""
     return {"data": {"xSLogout": True}}

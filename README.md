@@ -12,7 +12,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 - **Refresh button** — manually trigger an alarm status check.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
-- **Smart locks** — lock and unlock smart door locks. Multiple locks per installation supported, including Danalock configuration attributes (battery, auto-lock, arm-lock policies).
+- **Smart locks** — lock and unlock smart door locks. Multiple locks per installation supported, with door-open (latch hold-back) and auto-lock configuration.
 - **Cameras** — view the latest captured image from Securitas cameras, with a capture button to request new images on demand, and a custom camera card for easy display
 - **Custom camera card** — a purpose-built Lovelace card to show photographs from the cameras with a refresh button to request a new photograph
 - **PIN code protection** — optional local PIN code for arming and/or disarming the alarm from Home Assistant (independent of your Securitas account).
@@ -277,7 +277,7 @@ If your installation includes Sentinel devices, the integration automatically cr
 
 If your installation includes smart door locks, the integration creates lock entities that you can lock and unlock from Home Assistant. Multiple locks per installation are supported — each lock gets its own entity.
 
-For Danalock locks, the entity exposes additional attributes: battery threshold, auto-lock timeout, arm-lock policies (lock before arm, unlock after disarm), and latch hold-back time.
+Lock features (latch hold-back time, auto-lock settings) are fetched from the lock configuration. When the lock supports latch hold-back, the entity exposes an "Open" action that unlatches the door without unlocking.
 
 ## Cameras
 

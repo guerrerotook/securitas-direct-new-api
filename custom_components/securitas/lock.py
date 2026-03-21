@@ -22,7 +22,6 @@ from . import (
 )
 from .entity import SecuritasEntity
 from .securitas_direct_new_api import (
-    DanalockConfig,
     Installation,
     SecuritasDirectError,
     SmartLock,
@@ -60,8 +59,6 @@ async def async_setup_entry(
 class SecuritasLock(SecuritasEntity, lock.LockEntity):
     """Representation of a Securitas Direct smart lock."""
 
-    _MAX_DANALOCK_RETRIES = 3
-
     def __init__(
         self,
         installation: Installation,
@@ -69,7 +66,6 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         hass: HomeAssistant,
         device_id: str = SMARTLOCK_DEVICE_ID,
         initial_status: str = LOCK_STATUS_LOCKED,
-        danalock_config: DanalockConfig | None = None,
         lock_config: SmartLock | None = None,
     ) -> None:
         super().__init__(installation, client)
@@ -83,10 +79,6 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._changed_by: str = ""
         self._device: str = installation.address
         self._device_id: str = device_id
-        self._danalock_config: DanalockConfig | None = danalock_config
-        self._danalock_config_retries: int = (
-            0 if danalock_config is None else self._MAX_DANALOCK_RETRIES
-        )
         self._lock_config: SmartLock | None = lock_config
 
         # Name: prefer lock_config.location if non-empty, else fallback
@@ -150,36 +142,6 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         if self.hass is None:
             return
 
-        # Lazily fetch Danalock config (retry up to _MAX_DANALOCK_RETRIES times)
-        if (
-            self._danalock_config is None
-            and self._danalock_config_retries < self._MAX_DANALOCK_RETRIES
-        ):
-            self._danalock_config_retries += 1
-            try:
-                self._danalock_config = await self.client.get_danalock_config(
-                    self.installation, self._device_id
-                )
-                cfg = self._danalock_config
-                if cfg and cfg.features and cfg.features.holdBackLatchTime > 0:
-                    _LOGGER.info(
-                        "Lock %s on %s supports latch hold-back (%ds) — "
-                        "open-door feature enabled",
-                        self._device_id,
-                        self.installation.number,
-                        cfg.features.holdBackLatchTime,
-                    )
-            except (SecuritasDirectError, KeyError, TypeError):
-                _LOGGER.debug(
-                    "[%s] Could not fetch Danalock config for device %s "
-                    "(attempt %d/%d)",
-                    self.entity_id,
-                    self._device_id,
-                    self._danalock_config_retries,
-                    self._MAX_DANALOCK_RETRIES,
-                    exc_info=True,
-                )
-
         try:
             self._new_state = await self.get_lock_state()
             if self._new_state != LOCK_STATUS_UNKNOWN:
@@ -235,19 +197,12 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:  # type: ignore[override]
         """Return lock configuration as state attributes."""
         attrs: dict[str, Any] = {}
-        if self._danalock_config:
-            cfg = self._danalock_config
-            attrs["battery_low_threshold"] = cfg.batteryLowPercentage
-            attrs["lock_before_full_arm"] = cfg.lockBeforeFullArm == "1"
-            attrs["lock_before_partial_arm"] = cfg.lockBeforePartialArm == "1"
-            attrs["lock_before_perimeter_arm"] = cfg.lockBeforePerimeterArm == "1"
-            attrs["unlock_after_disarm"] = cfg.unlockAfterDisarm == "1"
-            attrs["auto_lock_time"] = cfg.autoLockTime
-            if cfg.features:
-                attrs["hold_back_latch_time"] = cfg.features.holdBackLatchTime
-                if cfg.features.autolock:
-                    attrs["autolock_active"] = cfg.features.autolock.active
-                    attrs["autolock_timeout"] = cfg.features.autolock.timeout
+        cfg = self._lock_config
+        if cfg and cfg.features:
+            attrs["hold_back_latch_time"] = cfg.features.holdBackLatchTime
+            if cfg.features.autolock:
+                attrs["autolock_active"] = cfg.features.autolock.active
+                attrs["autolock_timeout"] = cfg.features.autolock.timeout
         return attrs
 
     async def async_lock(self, **kwargs):
@@ -311,7 +266,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
     @property
     def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
         """Return the list of supported features."""
-        cfg = self._danalock_config
+        cfg = self._lock_config
         if (
             cfg
             and cfg.features

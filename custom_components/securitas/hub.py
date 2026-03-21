@@ -682,17 +682,6 @@ class SecuritasHub:
             raise last_err
         raise TimeoutError("Lock mode change timed out")
 
-    async def get_danalock_config(
-        self, installation: Installation, device_id: str
-    ) -> Any:
-        """Fetch danalock config via queue-submitted API calls."""
-        return await self._api_queue.submit(
-            self.session.get_danalock_config,
-            installation,
-            device_id,
-            priority=ApiQueue.FOREGROUND,
-        )
-
     async def get_smart_lock_config(
         self, installation: Installation, device_id: str
     ) -> Any:
