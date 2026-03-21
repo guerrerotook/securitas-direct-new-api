@@ -676,6 +676,9 @@ class SecuritasHub:
                 last_err = err
                 continue
             if raw.get("res") != "WAIT":
+                # Invalidate cached lock status so the next periodic poll
+                # fetches fresh state instead of returning stale data.
+                self._lock_modes_time.pop(installation.number, None)
                 return self.session.process_lock_mode_result(raw)
 
         if last_err is not None:

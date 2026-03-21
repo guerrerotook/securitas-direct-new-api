@@ -205,63 +205,71 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
                 attrs["autolock_timeout"] = cfg.features.autolock.timeout
         return attrs
 
-    async def async_lock(self, **kwargs):
-        self._force_state(LOCK_STATUS_LOCKING)
+    async def _change_lock_mode(
+        self,
+        lock_state: bool,
+        transitional_state: str,
+        optimistic_state: str,
+        operation: str,
+    ) -> None:
+        """Send lock command, then poll for real status.
+
+        Sets a transitional state (e.g. LOCKING) immediately, sends the
+        command, then fetches the actual lock status from the API.  Falls
+        back to the optimistic state if the fresh poll returns UNKNOWN.
+        """
+        self._force_state(transitional_state)
         try:
-            await self.client.change_lock_mode(self.installation, True, self._device_id)
+            await self.client.change_lock_mode(
+                self.installation, lock_state, self._device_id
+            )
         except SecuritasDirectError as err:
             self._state = self._last_state
             self.async_write_ha_state()
             _LOGGER.error(
-                "Lock operation failed for %s device %s: %s",
+                "%s operation failed for %s device %s: %s",
+                operation,
                 self.installation.number,
                 self._device_id,
                 err.log_detail(),
             )
             return
 
-        self._state = LOCK_STATUS_LOCKED
+        # Fetch the real status from the API now that the command has
+        # been acknowledged.  Fall back to optimistic state on failure.
+        try:
+            real_state = await self.get_lock_state()
+        except SecuritasDirectError:
+            real_state = LOCK_STATUS_UNKNOWN
+
+        self._state = (
+            real_state if real_state != LOCK_STATUS_UNKNOWN else optimistic_state
+        )
         self.async_write_ha_state()
+
+    async def async_lock(self, **kwargs):
+        await self._change_lock_mode(
+            lock_state=True,
+            transitional_state=LOCK_STATUS_LOCKING,
+            optimistic_state=LOCK_STATUS_LOCKED,
+            operation="Lock",
+        )
 
     async def async_unlock(self, **kwargs):
-        self._force_state(LOCK_STATUS_OPENING)
-        try:
-            await self.client.change_lock_mode(
-                self.installation, False, self._device_id
-            )
-        except SecuritasDirectError as err:
-            self._state = self._last_state
-            self.async_write_ha_state()
-            _LOGGER.error(
-                "Unlock operation failed for %s device %s: %s",
-                self.installation.number,
-                self._device_id,
-                err.log_detail(),
-            )
-            return
-
-        self._state = LOCK_STATUS_OPEN
-        self.async_write_ha_state()
+        await self._change_lock_mode(
+            lock_state=False,
+            transitional_state=LOCK_STATUS_OPENING,
+            optimistic_state=LOCK_STATUS_OPEN,
+            operation="Unlock",
+        )
 
     async def async_open(self, **kwargs):
-        self._force_state(LOCK_STATUS_OPENING)
-        try:
-            await self.client.change_lock_mode(
-                self.installation, False, self._device_id
-            )
-        except SecuritasDirectError as err:
-            self._state = self._last_state
-            self.async_write_ha_state()
-            _LOGGER.error(
-                "Open operation failed for %s device %s: %s",
-                self.installation.number,
-                self._device_id,
-                err.log_detail(),
-            )
-            return
-
-        self._state = LOCK_STATUS_OPEN
-        self.async_write_ha_state()
+        await self._change_lock_mode(
+            lock_state=False,
+            transitional_state=LOCK_STATUS_OPENING,
+            optimistic_state=LOCK_STATUS_OPEN,
+            operation="Open",
+        )
 
     @property
     def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
