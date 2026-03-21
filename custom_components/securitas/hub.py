@@ -425,9 +425,14 @@ class SecuritasHub:
             return False
         return True
 
-    async def get_lock_modes(self, installation: Installation) -> list:
+    async def get_lock_modes(
+        self, installation: Installation, *, priority: int | None = None
+    ) -> list:
         """Get lock modes with caching, submitted via queue."""
         from .securitas_direct_new_api import SmartLockMode
+
+        if priority is None:
+            priority = ApiQueue.BACKGROUND
 
         _CACHE_TTL = API_CACHE_TTL
         now = time.monotonic()
@@ -439,7 +444,7 @@ class SecuritasHub:
             modes: list[SmartLockMode] = await self._api_queue.submit(
                 self.session.get_lock_current_mode,
                 installation,
-                priority=ApiQueue.BACKGROUND,
+                priority=priority,
             )
         except SecuritasDirectError as err:
             _LOGGER.warning(

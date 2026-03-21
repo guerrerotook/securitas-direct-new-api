@@ -26,6 +26,7 @@ from .securitas_direct_new_api import (
     SecuritasDirectError,
     SmartLock,
 )
+from .api_queue import ApiQueue
 from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
 
 if TYPE_CHECKING:
@@ -159,10 +160,10 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         if _now is not None:
             self.async_write_ha_state()
 
-    async def get_lock_state(self) -> str:
+    async def get_lock_state(self, *, priority: int | None = None) -> str:
         """Return the current lock status from the API."""
         lock_modes: list[SmartLockMode] = await self.client.get_lock_modes(
-            self.installation
+            self.installation, priority=priority
         )
         for mode in lock_modes:
             if mode.deviceId == self._device_id:
@@ -240,8 +241,8 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         # Catch broadly: aiohttp can raise TimeoutError, ClientError etc.
         # in addition to SecuritasDirectError.
         try:
-            real_state = await self.get_lock_state()
-        except Exception:  # noqa: BLE001
+            real_state = await self.get_lock_state(priority=ApiQueue.FOREGROUND)
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             real_state = LOCK_STATUS_UNKNOWN
 
         self._state = (

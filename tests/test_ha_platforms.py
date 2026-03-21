@@ -26,6 +26,7 @@ from custom_components.securitas.sensor import (
     SentinelHumidity,
     SentinelTemperature,
 )
+from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.lock import SecuritasLock
 
 pytestmark = pytest.mark.asyncio
@@ -666,8 +667,10 @@ class TestSecuritasLockActions:
         lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
         # async_write_ha_state is called after successful state change
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
-        # get_lock_modes was called to fetch real status
-        lock.client.get_lock_modes.assert_awaited_once()  # type: ignore[attr-defined]
+        # get_lock_modes was called with FOREGROUND priority to fetch real status
+        lock.client.get_lock_modes.assert_awaited_once_with(  # type: ignore[attr-defined]
+            lock.installation, priority=ApiQueue.FOREGROUND
+        )
 
     async def test_async_lock_uses_optimistic_state_when_poll_returns_unknown(self):
         lock = make_lock()  # no poll_status → get_lock_modes returns []
