@@ -237,9 +237,11 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
 
         # Fetch the real status from the API now that the command has
         # been acknowledged.  Fall back to optimistic state on failure.
+        # Catch broadly: aiohttp can raise TimeoutError, ClientError etc.
+        # in addition to SecuritasDirectError.
         try:
             real_state = await self.get_lock_state()
-        except SecuritasDirectError:
+        except Exception:  # noqa: BLE001
             real_state = LOCK_STATUS_UNKNOWN
 
         self._state = (
