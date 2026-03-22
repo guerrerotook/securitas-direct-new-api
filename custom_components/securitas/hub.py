@@ -46,8 +46,9 @@ from .securitas_direct_new_api import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# API error message that indicates the lock hasn't responded yet (transient)
+# API error messages that indicate the lock hasn't responded yet (transient)
 _ERR_NO_RESPONSE = "alarm-manager.error_no_response_to_request"
+_ERR_STATUS_NOT_FOUND = "alarm-manager.error_status_not_found"
 
 
 def _notify_error(
@@ -645,7 +646,11 @@ class SecuritasHub:
     async def change_lock_mode(
         self, installation: Installation, lock_state: bool, device_id: str
     ) -> Any:
-        """Change lock mode via queue-submitted API calls."""
+        """Change lock mode via queue-submitted API calls.
+
+        Returns the SmartLockModeStatus on success, or None if the command
+        was accepted but the backend did not confirm the new state in time.
+        """
         reference_id = await self._api_queue.submit(
             self.session.submit_change_lock_mode_request,
             installation,
@@ -680,15 +685,45 @@ class SecuritasHub:
                 )
                 last_err = err
                 continue
+
+            msg = raw.get("msg", "")
+            if msg == _ERR_STATUS_NOT_FOUND:
+                # The backend accepted the command but hasn't processed it
+                # yet — keep polling.
+                _LOGGER.debug(
+                    "Lock mode change for %s device %s: status not found "
+                    "yet (attempt %d/%d)",
+                    installation.number,
+                    device_id,
+                    attempt,
+                    max_attempts,
+                )
+                continue
+
             if raw.get("res") != "WAIT":
                 # Invalidate cached lock status so the next periodic poll
                 # fetches fresh state instead of returning stale data.
                 self._lock_modes_time.pop(installation.number, None)
                 return self.session.process_lock_mode_result(raw)
 
+        # Polling exhausted without confirmation.  Invalidate the cache so
+        # the caller (and background polls) fetch fresh state.
+        self._lock_modes_time.pop(installation.number, None)
+
         if last_err is not None:
             raise last_err
-        raise TimeoutError("Lock mode change timed out")
+
+        # Command was accepted but status never confirmed — return None so
+        # the lock entity can fall back to optimistic state and let the
+        # periodic poll pick up the real state later.
+        _LOGGER.warning(
+            "Lock mode change for %s device %s: command accepted but status "
+            "not confirmed after %d attempts",
+            installation.number,
+            device_id,
+            max_attempts,
+        )
+        return None
 
     async def get_smart_lock_config(
         self, installation: Installation, device_id: str

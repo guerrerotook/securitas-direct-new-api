@@ -160,15 +160,20 @@ class TestChangeLockMode:
         assert result == "done"
         assert hub.session.check_change_lock_mode.await_count == 3
 
-    async def test_timeout_raises(self):
-        """TimeoutError raised when all poll attempts return WAIT."""
+    async def test_wait_exhausted_returns_none(self):
+        """All WAIT responses exhaust attempts and return None."""
         hub = make_hub()
         installation = make_installation()
         hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
         hub.session.check_change_lock_mode = AsyncMock(return_value={"res": "WAIT"})
 
-        with pytest.raises(TimeoutError, match="Lock mode change timed out"):
-            await hub.change_lock_mode(installation, False, "device-1")
+        with patch.object(hub, "_max_poll_attempts", return_value=3):
+            result = await hub.change_lock_mode(installation, False, "device-1")
+
+        assert result is None
+        assert hub.session.check_change_lock_mode.await_count == 3
+        # Cache should be invalidated
+        assert installation.number not in hub._lock_modes_time
 
     async def test_retries_on_error_no_response_to_request(self):
         """error_no_response_to_request is treated as transient; polling continues."""
@@ -258,6 +263,111 @@ class TestChangeLockMode:
 
         # Should fail on first attempt, not retry
         assert hub.session.check_change_lock_mode.await_count == 1
+
+    async def test_error_status_not_found_treated_as_transient(self):
+        """error_status_not_found keeps polling instead of returning immediately."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            side_effect=[
+                {
+                    "res": "OK",
+                    "msg": "alarm-manager.error_status_not_found",
+                    "protomResponse": None,
+                    "status": None,
+                },
+                {
+                    "res": "OK",
+                    "msg": "alarm-manager.error_status_not_found",
+                    "protomResponse": None,
+                    "status": None,
+                },
+                {"res": "OK", "msg": "done", "protomResponse": "p", "status": "2"},
+            ]
+        )
+        hub.session.process_lock_mode_result = MagicMock(return_value="done")
+
+        result = await hub.change_lock_mode(installation, True, "device-1")
+
+        assert result == "done"
+        assert hub.session.check_change_lock_mode.await_count == 3
+
+    async def test_error_status_not_found_exhausted_returns_none(self):
+        """All error_status_not_found responses exhaust attempts and return None."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            return_value={
+                "res": "OK",
+                "msg": "alarm-manager.error_status_not_found",
+                "protomResponse": None,
+                "status": None,
+            }
+        )
+
+        with patch.object(hub, "_max_poll_attempts", return_value=3):
+            result = await hub.change_lock_mode(installation, False, "device-1")
+
+        assert result is None
+        assert hub.session.check_change_lock_mode.await_count == 3
+        # Cache should be invalidated
+        assert installation.number not in hub._lock_modes_time
+
+    async def test_mixed_status_not_found_and_wait(self):
+        """error_status_not_found and WAIT can alternate; polling continues."""
+        hub = make_hub()
+        installation = make_installation()
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            side_effect=[
+                {
+                    "res": "OK",
+                    "msg": "alarm-manager.error_status_not_found",
+                    "protomResponse": None,
+                    "status": None,
+                },
+                {"res": "WAIT"},
+                {
+                    "res": "OK",
+                    "msg": "alarm-manager.error_status_not_found",
+                    "protomResponse": None,
+                    "status": None,
+                },
+                {"res": "OK", "msg": "done", "protomResponse": "p", "status": "2"},
+            ]
+        )
+        hub.session.process_lock_mode_result = MagicMock(return_value="done")
+
+        result = await hub.change_lock_mode(installation, True, "device-1")
+
+        assert result == "done"
+        assert hub.session.check_change_lock_mode.await_count == 4
+
+    async def test_cache_invalidated_on_status_not_found_exhaustion(self):
+        """Cache is invalidated even when polling exhausts with error_status_not_found."""
+        hub = make_hub()
+        installation = make_installation()
+        # Pre-populate cache
+        hub._lock_modes_time[installation.number] = 12345.0
+        hub._lock_modes[installation.number] = ["stale"]
+
+        hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        hub.session.check_change_lock_mode = AsyncMock(
+            return_value={
+                "res": "OK",
+                "msg": "alarm-manager.error_status_not_found",
+                "protomResponse": None,
+                "status": None,
+            }
+        )
+
+        with patch.object(hub, "_max_poll_attempts", return_value=2):
+            result = await hub.change_lock_mode(installation, True, "device-1")
+
+        assert result is None
+        assert installation.number not in hub._lock_modes_time
 
 
 # ── refresh_alarm_status tests ──────────────────────────────────────────────

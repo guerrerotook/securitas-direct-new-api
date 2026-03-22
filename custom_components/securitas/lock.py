@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
@@ -114,7 +115,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         scan_seconds = client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         self._update_interval: timedelta = timedelta(seconds=scan_seconds)
         self._scan_seconds = scan_seconds
-        self._update_unsub = None
+        self._update_unsub: Callable[[], None] | None = None
 
     async def async_added_to_hass(self) -> None:
         """Register timer when entity is added to HA."""
@@ -217,9 +218,11 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
 
         Sets a transitional state (e.g. LOCKING) immediately, sends the
         command, then fetches the actual lock status from the API.  Falls
-        back to the optimistic state if the fresh poll returns UNKNOWN.
+        back to the optimistic state if the fresh poll returns UNKNOWN or
+        still shows the pre-command state (backend lag).
         """
         self._force_state(transitional_state)
+        pre_command_state = self._last_state
         try:
             await self.client.change_lock_mode(
                 self.installation, lock_state, self._device_id
@@ -245,9 +248,13 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             real_state = LOCK_STATUS_UNKNOWN
 
-        self._state = (
-            real_state if real_state != LOCK_STATUS_UNKNOWN else optimistic_state
-        )
+        if real_state == LOCK_STATUS_UNKNOWN or real_state == pre_command_state:
+            # The API still returns the old state — the backend hasn't
+            # caught up yet.  Use the optimistic state; the periodic poll
+            # will pick up the real state later.
+            self._state = optimistic_state
+        else:
+            self._state = real_state
         self.async_write_ha_state()
 
     async def async_lock(self, **kwargs):
