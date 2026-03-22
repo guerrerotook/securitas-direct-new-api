@@ -960,7 +960,7 @@ class ApiManager(SecuritasHttpClient):
         return data["referenceId"]
 
     async def get_device_list(self, installation: Installation) -> list[CameraDevice]:
-        """Get list of camera devices (type QR) for an installation."""
+        """Get list of camera devices (QR, YR, YP) for an installation."""
         content = {
             "operationName": "xSDeviceList",
             "variables": {
