@@ -430,7 +430,7 @@ Sentinel sensors are discovered during platform setup by scanning services for o
 - `"3"` = opening (transitional)
 - `"4"` = locking (transitional)
 
-Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows the same polling pattern as arm/disarm. The lock poll loop retries on `alarm-manager.error_no_response_to_request` (the panel hasn't heard back from the lock yet) rather than aborting — this is a transient condition. Status is polled via `get_lock_current_mode()` on the scan interval.
+Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows the same polling pattern as arm/disarm. The lock poll loop retries on `alarm-manager.error_no_response_to_request` (the panel hasn't heard back from the lock yet) rather than aborting — this is a transient condition. After the command is acknowledged, `change_lock_mode()` invalidates the lock-modes cache so stale data is not returned by subsequent polls. The entity then immediately fetches the real lock status via `get_lock_state()` and updates accordingly, falling back to an optimistic state if the fresh poll returns UNKNOWN. Periodic background polling via `get_lock_current_mode()` continues on the scan interval as a safety net.
 
 **Lock features:** Lock features are fetched via `xSGetSmartlockConfig` and exposed as `extra_state_attributes`, including `holdBackLatchTime` (latch hold-back for door opening). When `holdBackLatchTime > 0`, the entity advertises `LockEntityFeature.OPEN` so users can trigger door unlatching from the UI even when the lock is already unlocked. The `async_open()` method sends the same `change_lock_mode(lock=False)` command — there is no separate API mutation for opening.
 

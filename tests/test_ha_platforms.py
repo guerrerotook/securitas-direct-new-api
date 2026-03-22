@@ -26,6 +26,7 @@ from custom_components.securitas.sensor import (
     SentinelHumidity,
     SentinelTemperature,
 )
+from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.lock import SecuritasLock
 
 pytestmark = pytest.mark.asyncio
@@ -90,13 +91,27 @@ def make_lock(
     device_id: str = "01",
     initial_status: str = "2",
     lock_config: SmartLock | None = None,
+    poll_status: str | None = None,
 ):
-    """Create a SecuritasLock with mocked dependencies."""
+    """Create a SecuritasLock with mocked dependencies.
+
+    Args:
+        poll_status: If set, ``get_lock_modes`` returns a mode with this
+            lockStatus for the device.  If *None*, ``get_lock_modes``
+            returns an empty list (so ``get_lock_state`` returns UNKNOWN
+            and the optimistic fallback is used).
+    """
     installation = make_installation()
     client = MagicMock()
     client.config = {"scan_interval": 120}
     client.session = AsyncMock()
     client.change_lock_mode = AsyncMock()
+    if poll_status is not None:
+        client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(lockStatus=poll_status, deviceId=device_id)]
+        )
+    else:
+        client.get_lock_modes = AsyncMock(return_value=[])
     hass = MagicMock()
     hass.async_create_task = MagicMock()
     hass.services = MagicMock()
@@ -641,25 +656,38 @@ class TestSecuritasLockActions:
     """Tests for SecuritasLock async_lock / async_unlock actions."""
 
     async def test_async_lock_sets_state_to_locking_then_locked_on_success(self):
-        lock = make_lock()
+        lock = make_lock(poll_status="2")
         lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_lock()
 
-        # After successful lock, final state should be "2" (locked)
+        # After successful lock, state comes from the fresh API poll ("2")
         assert lock._state == "2"
         # async_schedule_update_ha_state was called during _force_state("4")
         lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
         # async_write_ha_state is called after successful state change
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
+        # get_lock_modes was called with FOREGROUND priority to fetch real status
+        lock.client.get_lock_modes.assert_awaited_once_with(  # type: ignore[attr-defined]
+            lock.installation, priority=ApiQueue.FOREGROUND
+        )
+
+    async def test_async_lock_uses_optimistic_state_when_poll_returns_unknown(self):
+        lock = make_lock()  # no poll_status → get_lock_modes returns []
+        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_lock()
+
+        # Falls back to optimistic "2" (locked) when poll returns UNKNOWN
+        assert lock._state == "2"
 
     async def test_async_unlock_sets_state_to_opening_then_open_on_success(self):
-        lock = make_lock()
+        lock = make_lock(poll_status="1")
         lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_unlock()
 
-        # After successful unlock, final state should be "1" (open)
+        # After successful unlock, state comes from fresh API poll ("1")
         assert lock._state == "1"
         lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
@@ -687,8 +715,8 @@ class TestSecuritasLockActions:
         assert lock._state == "2"
 
     async def test_async_lock_intermediate_state_is_locking(self):
-        """Verify __force_state is called with '4' (locking) before the API call."""
-        lock = make_lock()
+        """Verify _force_state is called with '4' (locking) before the API call."""
+        lock = make_lock(poll_status="2")
         observed_states = []
 
         async def capture_state(installation, lock_mode, device_id=None):
@@ -702,12 +730,12 @@ class TestSecuritasLockActions:
 
         # At the time of the API call, state should have been "4" (locking)
         assert observed_states == ["4"]
-        # After completion, state should be "2" (locked)
+        # After completion, state should be "2" (locked) from fresh poll
         assert lock._state == "2"
 
     async def test_async_unlock_intermediate_state_is_opening(self):
-        """Verify __force_state is called with '3' (opening) before the API call."""
-        lock = make_lock()
+        """Verify _force_state is called with '3' (opening) before the API call."""
+        lock = make_lock(poll_status="1")
         observed_states = []
 
         async def capture_state(installation, lock_mode, device_id=None):
@@ -722,7 +750,7 @@ class TestSecuritasLockActions:
         assert lock._state == "1"
 
     async def test_async_open_sets_state_to_opening_then_open_on_success(self):
-        lock = make_lock()
+        lock = make_lock(poll_status="1")
         lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_open()
@@ -742,7 +770,7 @@ class TestSecuritasLockActions:
         assert lock._state == "2"
 
     async def test_async_open_calls_change_lock_mode_with_false(self):
-        lock = make_lock()
+        lock = make_lock(poll_status="1")
         lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_open()
@@ -753,7 +781,7 @@ class TestSecuritasLockActions:
 
     async def test_async_open_intermediate_state_is_opening(self):
         """Verify _force_state is called with '3' (opening) before the API call."""
-        lock = make_lock()
+        lock = make_lock(poll_status="1")
         observed_states = []
 
         async def capture_state(installation, lock_mode, device_id=None):
