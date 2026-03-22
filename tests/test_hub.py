@@ -391,7 +391,13 @@ class TestGetLockModes:
 
 
 def make_camera_device(**overrides) -> CameraDevice:
-    defaults = {"id": "11", "code": 10, "zone_id": "QR10", "name": "Salon"}
+    defaults = {
+        "id": "11",
+        "code": 10,
+        "zone_id": "QR10",
+        "name": "Salon",
+        "device_type": "QR",
+    }
     defaults.update(overrides)
     return CameraDevice(**defaults)
 

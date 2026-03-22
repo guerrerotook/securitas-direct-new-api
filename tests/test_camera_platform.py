@@ -43,7 +43,12 @@ def installation():
 @pytest.fixture
 def camera_device():
     return CameraDevice(
-        id="11", code=10, zone_id="QR10", name="Salon", serial_number="36NEYYER"
+        id="11",
+        code=10,
+        zone_id="QR10",
+        name="Salon",
+        device_type="QR",
+        serial_number="36NEYYER",
     )
 
 
