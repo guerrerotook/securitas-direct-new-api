@@ -716,9 +716,9 @@ class SecuritasHub:
         # Command was accepted but status never confirmed — return None so
         # the lock entity can fall back to optimistic state and let the
         # periodic poll pick up the real state later.
-        _LOGGER.warning(
+        _LOGGER.debug(
             "Lock mode change for %s device %s: command accepted but status "
-            "not confirmed after %d attempts",
+            "not confirmed after %d attempts; using optimistic state",
             installation.number,
             device_id,
             max_attempts,

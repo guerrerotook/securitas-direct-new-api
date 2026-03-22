@@ -94,7 +94,7 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
-def add_device_information[T: dict](config: T) -> T:
+def add_device_information(config: dict) -> dict:
     """Add device information to the configuration."""
     if CONF_DEVICE_ID not in config:
         config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
