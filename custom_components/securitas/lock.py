@@ -248,7 +248,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             real_state = LOCK_STATUS_UNKNOWN
 
-        if real_state == LOCK_STATUS_UNKNOWN or real_state == pre_command_state:
+        if real_state in (LOCK_STATUS_UNKNOWN, pre_command_state):
             # The API still returns the old state — the backend hasn't
             # caught up yet.  Use the optimistic state; the periodic poll
             # will pick up the real state later.
