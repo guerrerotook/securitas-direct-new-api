@@ -234,7 +234,7 @@ class SecuritasHub:
         baseline = await self._api_queue.submit(
             self.session.get_thumbnail,
             installation,
-            device.name,
+            device.device_type,
             device.zone_id,
             priority=ApiQueue.FOREGROUND,
         )
@@ -297,7 +297,7 @@ class SecuritasHub:
                 thumbnail = await self._api_queue.submit(
                     self.session.get_thumbnail,
                     installation,
-                    device.name,
+                    device.device_type,
                     device.zone_id,
                     priority=ApiQueue.FOREGROUND,
                 )
@@ -316,7 +316,7 @@ class SecuritasHub:
                 thumbnail = await self._api_queue.submit(
                     self.session.get_thumbnail,
                     installation,
-                    device.name,
+                    device.device_type,
                     device.zone_id,
                     priority=ApiQueue.FOREGROUND,
                 )
@@ -345,7 +345,7 @@ class SecuritasHub:
             thumbnail = await self._api_queue.submit(
                 self.session.get_thumbnail,
                 installation,
-                camera_device.name,
+                camera_device.device_type,
                 camera_device.zone_id,
                 priority=ApiQueue.BACKGROUND,
             )

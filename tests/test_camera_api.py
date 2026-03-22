@@ -341,7 +341,7 @@ class TestGetThumbnail:
             }
         }
         result = await authed_api.get_thumbnail(
-            installation, device_name="Salon", zone_id="QR10"
+            installation, device_type="QR", zone_id="QR10"
         )
         assert isinstance(result, ThumbnailResponse)
         assert result.id_signal == "15681796423"
@@ -366,7 +366,7 @@ class TestGetThumbnail:
             }
         }
         result = await authed_api.get_thumbnail(
-            installation, device_name="Salon", zone_id="QR10"
+            installation, device_type="QR", zone_id="QR10"
         )
         assert result.image is None
         assert result.id_signal is None

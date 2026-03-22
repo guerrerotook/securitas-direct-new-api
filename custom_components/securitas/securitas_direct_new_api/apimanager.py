@@ -1032,7 +1032,7 @@ class ApiManager(SecuritasHttpClient):
         return self._extract_response_data(response, "xSRequestImagesStatus")
 
     async def get_thumbnail(
-        self, installation: Installation, device_name: str, zone_id: str
+        self, installation: Installation, device_type: str, zone_id: str
     ) -> ThumbnailResponse:
         """Fetch the latest thumbnail image for a camera device."""
         content = {
@@ -1040,7 +1040,7 @@ class ApiManager(SecuritasHttpClient):
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "device": device_name,
+                "device": device_type,
                 "zoneId": zone_id,
             },
             "query": GET_THUMBNAIL_QUERY,
