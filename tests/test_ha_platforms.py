@@ -795,6 +795,61 @@ class TestSecuritasLockActions:
         assert observed_states == ["3"]
         assert lock._state == "1"
 
+    async def test_async_lock_stale_poll_uses_optimistic_state(self):
+        """When API still returns pre-command state, optimistic state is used."""
+        # Lock starts open ("1"), we lock it, but the API still returns "1"
+        lock = make_lock(initial_status="1", poll_status="1")
+        lock.client.change_lock_mode = AsyncMock(return_value=None)
+
+        await lock.async_lock()
+
+        # Should use optimistic "2" (locked) since API returned stale "1"
+        assert lock._state == "2"
+
+    async def test_async_unlock_stale_poll_uses_optimistic_state(self):
+        """When API still returns pre-command state, optimistic state is used."""
+        # Lock starts locked ("2"), we unlock it, but the API still returns "2"
+        lock = make_lock(initial_status="2", poll_status="2")
+        lock.client.change_lock_mode = AsyncMock(return_value=None)
+
+        await lock.async_unlock()
+
+        # Should use optimistic "1" (open) since API returned stale "2"
+        assert lock._state == "1"
+
+    async def test_async_lock_confirmed_state_used_when_api_agrees(self):
+        """When API returns the expected new state, it is used directly."""
+        # Lock starts open ("1"), we lock it, API confirms "2"
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock.client.change_lock_mode = AsyncMock(return_value=None)
+
+        await lock.async_lock()
+
+        # API returned "2" which differs from pre-command "1" → use it
+        assert lock._state == "2"
+
+    async def test_async_unlock_confirmed_state_used_when_api_agrees(self):
+        """When API returns the expected new state, it is used directly."""
+        # Lock starts locked ("2"), we unlock it, API confirms "1"
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock.client.change_lock_mode = AsyncMock(return_value=None)
+
+        await lock.async_unlock()
+
+        # API returned "1" which differs from pre-command "2" → use it
+        assert lock._state == "1"
+
+    async def test_async_lock_poll_exception_uses_optimistic_state(self):
+        """When get_lock_state raises, optimistic state is used."""
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(return_value=None)
+        lock.client.get_lock_modes = AsyncMock(side_effect=Exception("network error"))
+
+        await lock.async_lock()
+
+        # Exception → UNKNOWN → optimistic "2" (locked)
+        assert lock._state == "2"
+
 
 class TestSecuritasLockUpdateStatus:
     """Tests for SecuritasLock async_update_status."""

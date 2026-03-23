@@ -206,7 +206,7 @@ class SecuritasHttpClient:
                     self.api_url, headers=headers, json=content
                 ) as response:
                     http_status: int = response.status
-                    response_text: str = await response.text()
+                    response_text = await response.text()
             except ClientConnectorError as err:
                 os_err = err.os_error or err.strerror or "unknown"
                 if isinstance(err, ClientConnectorDNSError) and attempt == 0:
