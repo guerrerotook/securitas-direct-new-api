@@ -77,13 +77,13 @@ ALARM_STATUS_SERVICE_ID = "11"
 
 # Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
 
-# Device types for camera devices in xSDeviceList (YR = PIR camera, QR used in some regions)
-CAMERA_DEVICE_TYPES = {"QR", "YR"}
+# Device types for camera devices in xSDeviceList
+CAMERA_DEVICE_TYPES = {"QR", "YR", "YP"}
 
 # Image request parameters
 IMAGE_RESOLUTION = 0
 IMAGE_MEDIA_TYPE = 1
-IMAGE_DEVICE_TYPE = 106
+IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103}
 
 
 def generate_uuid() -> str:
@@ -960,7 +960,7 @@ class ApiManager(SecuritasHttpClient):
         return data["referenceId"]
 
     async def get_device_list(self, installation: Installation) -> list[CameraDevice]:
-        """Get list of camera devices (type QR) for an installation."""
+        """Get list of camera devices (QR, YR, YP) for an installation."""
         content = {
             "operationName": "xSDeviceList",
             "variables": {
@@ -979,13 +979,16 @@ class ApiManager(SecuritasHttpClient):
                 code=int(d["code"]),
                 zone_id=d["zoneId"] or d["id"],
                 name=d["name"],
+                device_type=d["type"],
                 serial_number=d.get("serialNumber"),
             )
             for d in devices
             if d.get("type") in CAMERA_DEVICE_TYPES and d.get("isActive") is not False
         ]
 
-    async def request_images(self, installation: Installation, device_code: int) -> str:
+    async def request_images(
+        self, installation: Installation, device_code: int, device_type: str = "QR"
+    ) -> str:
         """Request the panel to capture a new image. Returns referenceId."""
         content = {
             "operationName": "RequestImages",
@@ -995,7 +998,7 @@ class ApiManager(SecuritasHttpClient):
                 "devices": [device_code],
                 "resolution": IMAGE_RESOLUTION,
                 "mediaType": IMAGE_MEDIA_TYPE,
-                "deviceType": IMAGE_DEVICE_TYPE,
+                "deviceType": IMAGE_DEVICE_TYPE_MAP.get(device_type, 106),
             },
             "query": REQUEST_IMAGES_MUTATION,
         }
@@ -1029,7 +1032,7 @@ class ApiManager(SecuritasHttpClient):
         return self._extract_response_data(response, "xSRequestImagesStatus")
 
     async def get_thumbnail(
-        self, installation: Installation, device_name: str, zone_id: str
+        self, installation: Installation, device_type: str, zone_id: str
     ) -> ThumbnailResponse:
         """Fetch the latest thumbnail image for a camera device."""
         content = {
@@ -1037,7 +1040,7 @@ class ApiManager(SecuritasHttpClient):
             "variables": {
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "device": device_name,
+                "device": device_type,
                 "zoneId": zone_id,
             },
             "query": GET_THUMBNAIL_QUERY,

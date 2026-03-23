@@ -42,6 +42,7 @@ class TestCameraDevice:
         assert camera.code == 0
         assert camera.zone_id == ""
         assert camera.name == ""
+        assert camera.device_type == ""
         assert camera.serial_number is None
 
     def test_with_values(self):
@@ -51,12 +52,14 @@ class TestCameraDevice:
             code=42,
             zone_id="Z3",
             name="Front Door Camera",
+            device_type="QR",
             serial_number="SN-123456",
         )
         assert camera.id == "CAM001"
         assert camera.code == 42
         assert camera.zone_id == "Z3"
         assert camera.name == "Front Door Camera"
+        assert camera.device_type == "QR"
         assert camera.serial_number == "SN-123456"
 
 
@@ -164,6 +167,7 @@ class TestGetDeviceList:
         assert salon.code == 10
         assert salon.zone_id == "QR10"
         assert salon.name == "Salon"
+        assert salon.device_type == "QR"
         assert salon.serial_number == "36NEYYER"
 
     async def test_yr_pir_camera_with_null_zone_id(
@@ -201,6 +205,33 @@ class TestGetDeviceList:
         assert len(result) == 2
         assert result[0].zone_id == "11"
         assert result[1].zone_id == "12"
+
+    async def test_yp_perimetral_camera(self, authed_api, mock_execute, installation):
+        """YP perimetral exterior cameras should be included."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "4",
+                            "code": "3",
+                            "zoneId": "YP03",
+                            "name": "Fachada",
+                            "type": "YP",
+                            "isActive": True,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 1
+        assert result[0].device_type == "YP"
+        assert result[0].zone_id == "YP03"
+        assert result[0].name == "Fachada"
+        assert result[0].code == 3
 
     async def test_empty_device_list(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
@@ -246,6 +277,38 @@ class TestRequestImages:
         ref_id = await authed_api.request_images(installation, device_code=10)
         assert ref_id == "4ebfe653-fa54-4805-874c-cea1c9ad927a"
 
+    async def test_yp_device_type(self, authed_api, mock_execute, installation):
+        """YP cameras should use deviceType 103."""
+        mock_execute.return_value = {
+            "data": {
+                "xSRequestImages": {
+                    "res": "OK",
+                    "msg": "alarm-manager.processed.request",
+                    "referenceId": "abc-123",
+                }
+            }
+        }
+        await authed_api.request_images(installation, device_code=3, device_type="YP")
+        call_args = mock_execute.call_args
+        variables = call_args[0][0]["variables"]
+        assert variables["deviceType"] == 103
+
+    async def test_qr_device_type(self, authed_api, mock_execute, installation):
+        """QR cameras should use deviceType 106."""
+        mock_execute.return_value = {
+            "data": {
+                "xSRequestImages": {
+                    "res": "OK",
+                    "msg": "alarm-manager.processed.request",
+                    "referenceId": "abc-123",
+                }
+            }
+        }
+        await authed_api.request_images(installation, device_code=1, device_type="QR")
+        call_args = mock_execute.call_args
+        variables = call_args[0][0]["variables"]
+        assert variables["deviceType"] == 106
+
     async def test_error_response(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
             "data": {
@@ -278,7 +341,7 @@ class TestGetThumbnail:
             }
         }
         result = await authed_api.get_thumbnail(
-            installation, device_name="Salon", zone_id="QR10"
+            installation, device_type="QR", zone_id="QR10"
         )
         assert isinstance(result, ThumbnailResponse)
         assert result.id_signal == "15681796423"
@@ -303,7 +366,7 @@ class TestGetThumbnail:
             }
         }
         result = await authed_api.get_thumbnail(
-            installation, device_name="Salon", zone_id="QR10"
+            installation, device_type="QR", zone_id="QR10"
         )
         assert result.image is None
         assert result.id_signal is None
