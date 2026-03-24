@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from homeassistant.core import HomeAssistant
+
+from custom_components.securitas.hub import SecuritasHub
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     CameraDevice,
     Installation,
@@ -534,19 +537,8 @@ class TestCaptureImagePolling:
     """Integration tests for hub.capture_image polling logic."""
 
     @pytest.fixture
-    def hub(self, hass: HomeAssistant) -> "SecuritasHub":
+    def hub(self, hass: HomeAssistant) -> SecuritasHub:
         """Create a SecuritasHub with mocked internals."""
-        from custom_components.securitas.hub import SecuritasHub
-
-        domain_config = {
-            "username": "test@example.com",
-            "password": "secret",
-            "country": "IT",
-            "device_id": "dev-1",
-            "unique_id": "uid-1",
-            "device_indigitall": "indi-1",
-            "delay_check_operation": 0,
-        }
         hub = SecuritasHub.__new__(SecuritasHub)
         hub.hass = hass
         hub.camera_images = {}
@@ -576,7 +568,7 @@ class TestCaptureImagePolling:
         return base64.b64encode(b"\xff\xd8\xff\xe0" + tag).decode()
 
     async def test_pircam_completes_when_image_changes(
-        self, hub: "SecuritasHub", installation: Installation, camera_device: CameraDevice
+        self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
     ):
         """When idSignal is always None, capture completes once image content changes."""
         old_image = self._jpeg_b64(b"OLD")
@@ -598,7 +590,7 @@ class TestCaptureImagePolling:
         assert hub._api_queue.submit.call_count == 4
 
     async def test_pircam_polls_until_image_differs(
-        self, hub: "SecuritasHub", installation: Installation, camera_device: CameraDevice
+        self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
     ):
         """With idSignal=None, polling continues while image content is unchanged."""
         old_image = self._jpeg_b64(b"SAME")
@@ -620,7 +612,7 @@ class TestCaptureImagePolling:
         assert hub._api_queue.submit.call_count == 5
 
     async def test_normal_camera_uses_id_signal(
-        self, hub: "SecuritasHub", installation: Installation, camera_device: CameraDevice
+        self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
     ):
         """Normal cameras (idSignal not None) complete via idSignal change."""
         image = self._jpeg_b64(b"IMG")
