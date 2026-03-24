@@ -566,6 +566,13 @@ class TestCaptureImagePolling:
 
         return base64.b64encode(b"\xff\xd8\xff\xe0" + tag).decode()
 
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Patch asyncio.sleep to avoid 5s waits in the thumbnail polling loop."""
+        monkeypatch.setattr(
+            "custom_components.securitas.hub.asyncio.sleep", AsyncMock()
+        )
+
     async def test_pircam_completes_when_image_changes(
         self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
     ):
