@@ -656,13 +656,15 @@ class SecuritasHub:
     ) -> None:
         """Send lock/unlock command and wait for acknowledgement.
 
-        Sends the command, polls until the backend acknowledges it (with
-        error_status_not_found) or until _LOCK_CMD_MIN_WAIT has elapsed,
-        whichever comes *last*.  Then invalidates the lock status cache so
-        the caller can immediately poll for the real state.
+        Sends the command and then polls for the backend response.  Normally,
+        polling continues until the backend acknowledges the command with
+        error_status_not_found and at least _LOCK_CMD_MIN_WAIT seconds have
+        elapsed, whichever comes *last*.  If the backend returns a non-WAIT
+        result (a final lock status), the method invalidates the cache and
+        returns immediately without waiting.  In all cases where the command
+        is accepted, the cache is invalidated so the caller can immediately
+        poll for the real state.
         """
-        start = time.monotonic()
-
         reference_id = await self._api_queue.submit(
             self.session.submit_change_lock_mode_request,
             installation,
@@ -670,6 +672,10 @@ class SecuritasHub:
             device_id,
             priority=ApiQueue.FOREGROUND,
         )
+
+        # Measure from after the command is dispatched, not before, so that
+        # any queue throttle time doesn't eat into the post-command wait.
+        start = time.monotonic()
 
         max_attempts = self._max_poll_attempts(timeout_seconds=30)
         acknowledged = False
