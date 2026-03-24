@@ -530,35 +530,110 @@ class TestHubCameraOperations:
         jpeg_data = b"\xff\xd8\xff\xe0\x00\x10JFIF"
         assert jpeg_data.startswith(b"\xff\xd8")
 
-    def test_pircam_fallback_detects_changed_image(self):
-        """When idSignal is always None, image content comparison detects new capture."""
-        baseline_id = None
-        baseline_image = "old_base64_image_data=="
-        # Simulate a thumbnail with new image content but still null idSignal
-        new_id_signal = None
-        new_image = "new_base64_image_data=="
+class TestCaptureImagePolling:
+    """Integration tests for hub.capture_image polling logic."""
 
-        # idSignal check would not detect change (None != None is False)
-        assert not (new_id_signal != baseline_id)
-        # Fallback: image content comparison detects the change
-        assert baseline_id is None and new_image != baseline_image
+    @pytest.fixture
+    def hub(self, hass: HomeAssistant) -> "SecuritasHub":
+        """Create a SecuritasHub with mocked internals."""
+        from custom_components.securitas.hub import SecuritasHub
 
-    def test_pircam_fallback_no_change_keeps_polling(self):
-        """When idSignal is None and image hasn't changed, polling should continue."""
-        baseline_id = None
-        baseline_image = "same_base64_image_data=="
-        new_id_signal = None
-        new_image = "same_base64_image_data=="
+        domain_config = {
+            "username": "test@example.com",
+            "password": "secret",
+            "country": "IT",
+            "device_id": "dev-1",
+            "unique_id": "uid-1",
+            "device_indigitall": "indi-1",
+            "delay_check_operation": 0,
+        }
+        hub = SecuritasHub.__new__(SecuritasHub)
+        hub.hass = hass
+        hub.camera_images = {}
+        hub.camera_timestamps = {}
+        hub._camera_capturing = set()
+        hub.session = AsyncMock()
+        hub.session.delay_check_operation = 0
+        hub._api_queue = AsyncMock()
+        return hub
 
-        id_changed = new_id_signal != baseline_id
-        image_changed = baseline_id is None and new_image != baseline_image
-        assert not id_changed
-        assert not image_changed
+    @pytest.fixture
+    def installation(self) -> Installation:
+        return Installation(
+            number="123456", alias="Home", panel="SDVFAST", type="PLUS"
+        )
 
-    def test_normal_camera_uses_id_signal_not_image_fallback(self):
-        """When idSignal is not None, only idSignal comparison is used."""
-        baseline_id = "SIG-001"
-        # Image fallback should not trigger when baseline_id is not None
-        assert baseline_id is not None
-        # Even if image changed, the fallback guard (baseline_id is None) prevents it
-        assert not (baseline_id is None and "new_img" != "old_img")
+    @pytest.fixture
+    def camera_device(self) -> CameraDevice:
+        return CameraDevice(
+            id="1", code=1, zone_id="QR01", name="Salone", device_type="QR"
+        )
+
+    def _jpeg_b64(self, tag: bytes = b"A") -> str:
+        """Return a base64-encoded minimal JPEG stub."""
+        import base64
+
+        return base64.b64encode(b"\xff\xd8\xff\xe0" + tag).decode()
+
+    async def test_pircam_completes_when_image_changes(
+        self, hub: "SecuritasHub", installation: Installation, camera_device: CameraDevice
+    ):
+        """When idSignal is always None, capture completes once image content changes."""
+        old_image = self._jpeg_b64(b"OLD")
+        new_image = self._jpeg_b64(b"NEW")
+
+        baseline_thumb = ThumbnailResponse(id_signal=None, image=old_image)
+        status_done = {"res": "OK", "msg": "alarm-manager.error_status_not_found"}
+        new_thumb = ThumbnailResponse(id_signal=None, image=new_image)
+
+        # submit() is called for: baseline thumbnail, request_images, status poll, new thumbnail
+        hub._api_queue.submit = AsyncMock(
+            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb]
+        )
+
+        result = await hub.capture_image(installation, camera_device)
+
+        assert result is not None
+        assert result.startswith(b"\xff\xd8")
+        assert hub._api_queue.submit.call_count == 4
+
+    async def test_pircam_polls_until_image_differs(
+        self, hub: "SecuritasHub", installation: Installation, camera_device: CameraDevice
+    ):
+        """With idSignal=None, polling continues while image content is unchanged."""
+        old_image = self._jpeg_b64(b"SAME")
+        new_image = self._jpeg_b64(b"DIFF")
+
+        baseline_thumb = ThumbnailResponse(id_signal=None, image=old_image)
+        status_done = {"res": "OK", "msg": "alarm-manager.error_status_not_found"}
+        stale_thumb = ThumbnailResponse(id_signal=None, image=old_image)
+        fresh_thumb = ThumbnailResponse(id_signal=None, image=new_image)
+
+        # Two thumbnail polls: first returns stale image, second returns new image
+        hub._api_queue.submit = AsyncMock(
+            side_effect=[baseline_thumb, "ref-id", status_done, stale_thumb, fresh_thumb]
+        )
+
+        result = await hub.capture_image(installation, camera_device)
+
+        assert result is not None
+        assert hub._api_queue.submit.call_count == 5
+
+    async def test_normal_camera_uses_id_signal(
+        self, hub: "SecuritasHub", installation: Installation, camera_device: CameraDevice
+    ):
+        """Normal cameras (idSignal not None) complete via idSignal change."""
+        image = self._jpeg_b64(b"IMG")
+
+        baseline_thumb = ThumbnailResponse(id_signal="SIG-001", image=image)
+        status_done = {"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        new_thumb = ThumbnailResponse(id_signal="SIG-002", image=image)
+
+        hub._api_queue.submit = AsyncMock(
+            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb]
+        )
+
+        result = await hub.capture_image(installation, camera_device)
+
+        assert result is not None
+        assert hub._api_queue.submit.call_count == 4
