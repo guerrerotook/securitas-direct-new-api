@@ -533,6 +533,7 @@ class TestHubCameraOperations:
         jpeg_data = b"\xff\xd8\xff\xe0\x00\x10JFIF"
         assert jpeg_data.startswith(b"\xff\xd8")
 
+
 class TestCaptureImagePolling:
     """Integration tests for hub.capture_image polling logic."""
 
@@ -551,9 +552,7 @@ class TestCaptureImagePolling:
 
     @pytest.fixture
     def installation(self) -> Installation:
-        return Installation(
-            number="123456", alias="Home", panel="SDVFAST", type="PLUS"
-        )
+        return Installation(number="123456", alias="Home", panel="SDVFAST", type="PLUS")
 
     @pytest.fixture
     def camera_device(self) -> CameraDevice:
@@ -603,7 +602,13 @@ class TestCaptureImagePolling:
 
         # Two thumbnail polls: first returns stale image, second returns new image
         hub._api_queue.submit = AsyncMock(
-            side_effect=[baseline_thumb, "ref-id", status_done, stale_thumb, fresh_thumb]
+            side_effect=[
+                baseline_thumb,
+                "ref-id",
+                status_done,
+                stale_thumb,
+                fresh_thumb,
+            ]
         )
 
         result = await hub.capture_image(installation, camera_device)
