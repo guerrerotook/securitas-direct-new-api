@@ -795,27 +795,26 @@ class TestSecuritasLockActions:
         assert observed_states == ["3"]
         assert lock._state == "1"
 
-    async def test_async_lock_stale_poll_uses_optimistic_state(self):
-        """When API still returns pre-command state, optimistic state is used."""
-        # Lock starts open ("1"), we lock it, but the API still returns "1"
+    async def test_async_lock_stale_poll_trusts_api(self):
+        """When API still returns pre-command state, we trust it."""
+        # Lock starts open ("1"), we lock it, but the API still returns "1".
+        # After the 6s wait the API should normally have the new state, but
+        # if it doesn't, we trust what the API says rather than guess.
         lock = make_lock(initial_status="1", poll_status="1")
         lock.client.change_lock_mode = AsyncMock(return_value=None)
 
         await lock.async_lock()
 
-        # Should use optimistic "2" (locked) since API returned stale "1"
-        assert lock._state == "2"
+        assert lock._state == "1"
 
-    async def test_async_unlock_stale_poll_uses_optimistic_state(self):
-        """When API still returns pre-command state, optimistic state is used."""
-        # Lock starts locked ("2"), we unlock it, but the API still returns "2"
+    async def test_async_unlock_stale_poll_trusts_api(self):
+        """When API still returns pre-command state, we trust it."""
         lock = make_lock(initial_status="2", poll_status="2")
         lock.client.change_lock_mode = AsyncMock(return_value=None)
 
         await lock.async_unlock()
 
-        # Should use optimistic "1" (open) since API returned stale "2"
-        assert lock._state == "1"
+        assert lock._state == "2"
 
     async def test_async_lock_confirmed_state_used_when_api_agrees(self):
         """When API returns the expected new state, it is used directly."""

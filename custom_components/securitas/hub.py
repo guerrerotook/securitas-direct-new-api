@@ -644,14 +644,25 @@ class SecuritasHub:
             protomResponseData=status.timestampUpdate or "",
         )
 
+    # Minimum time (seconds) to wait after sending a lock command before
+    # polling for the new lock status.  The backend typically returns
+    # error_status_not_found within ~3s, but the lock needs ~5s to
+    # physically act.  We wait at least this long (or until we get the
+    # acknowledgement, whichever is later) before reading the new state.
+    _LOCK_CMD_MIN_WAIT: float = 6.0
+
     async def change_lock_mode(
         self, installation: Installation, lock_state: bool, device_id: str
-    ) -> Any:
-        """Change lock mode via queue-submitted API calls.
+    ) -> None:
+        """Send lock/unlock command and wait for acknowledgement.
 
-        Returns the SmartLockModeStatus on success, or None if the command
-        was accepted but the backend did not confirm the new state in time.
+        Sends the command, polls until the backend acknowledges it (with
+        error_status_not_found) or until _LOCK_CMD_MIN_WAIT has elapsed,
+        whichever comes *last*.  Then invalidates the lock status cache so
+        the caller can immediately poll for the real state.
         """
+        start = time.monotonic()
+
         reference_id = await self._api_queue.submit(
             self.session.submit_change_lock_mode_request,
             installation,
@@ -661,6 +672,7 @@ class SecuritasHub:
         )
 
         max_attempts = self._max_poll_attempts(timeout_seconds=30)
+        acknowledged = False
         last_err: SecuritasDirectError | None = None
         for attempt in range(1, max_attempts + 1):
             try:
@@ -689,42 +701,43 @@ class SecuritasHub:
 
             msg = raw.get("msg", "")
             if msg == _ERR_STATUS_NOT_FOUND:
-                # The backend accepted the command but hasn't processed it
-                # yet — keep polling.
+                # The backend accepted the command and forwarded it to the
+                # lock, but there is no status update to report.  The lock
+                # is physically acting now.
                 _LOGGER.debug(
-                    "Lock mode change for %s device %s: status not found "
-                    "yet (attempt %d/%d)",
+                    "Lock mode change for %s device %s: command acknowledged "
+                    "(attempt %d)",
                     installation.number,
                     device_id,
                     attempt,
-                    max_attempts,
                 )
-                continue
+                acknowledged = True
+                break
 
             if raw.get("res") != "WAIT":
-                # Invalidate cached lock status so the next periodic poll
-                # fetches fresh state instead of returning stale data.
+                # Got a real status response (rare but possible on some
+                # panels).  Invalidate cache and return.
                 self._lock_modes_time.pop(installation.number, None)
-                return self.session.process_lock_mode_result(raw)
+                return
 
-        # Polling exhausted without confirmation.  Invalidate the cache so
-        # the caller (and background polls) fetch fresh state.
+        # Wait for the lock to physically act.  If we got the
+        # acknowledgement quickly (e.g. 3s), sleep the remaining time.
+        elapsed = time.monotonic() - start
+        remaining = self._LOCK_CMD_MIN_WAIT - elapsed
+        if remaining > 0:
+            _LOGGER.debug(
+                "Lock mode change for %s device %s: waiting %.1fs for lock to act",
+                installation.number,
+                device_id,
+                remaining,
+            )
+            await asyncio.sleep(remaining)
+
+        # Invalidate the cache so the caller fetches fresh state.
         self._lock_modes_time.pop(installation.number, None)
 
-        if last_err is not None:
+        if not acknowledged and last_err is not None:
             raise last_err
-
-        # Command was accepted but status never confirmed — return None so
-        # the lock entity can fall back to optimistic state and let the
-        # periodic poll pick up the real state later.
-        _LOGGER.debug(
-            "Lock mode change for %s device %s: command accepted but status "
-            "not confirmed after %d attempts; using optimistic state",
-            installation.number,
-            device_id,
-            max_attempts,
-        )
-        return None
 
     async def get_smart_lock_config(
         self, installation: Installation, device_id: str

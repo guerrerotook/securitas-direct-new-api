@@ -217,12 +217,10 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         """Send lock command, then poll for real status.
 
         Sets a transitional state (e.g. LOCKING) immediately, sends the
-        command, then fetches the actual lock status from the API.  Falls
-        back to the optimistic state if the fresh poll returns UNKNOWN or
-        still shows the pre-command state (backend lag).
+        command (which waits for the lock to physically act), then fetches
+        the actual lock status from the API.
         """
         self._force_state(transitional_state)
-        pre_command_state = self._last_state
         try:
             await self.client.change_lock_mode(
                 self.installation, lock_state, self._device_id
@@ -239,22 +237,18 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             )
             return
 
-        # Fetch the real status from the API now that the command has
-        # been acknowledged.  Fall back to optimistic state on failure.
-        # Catch broadly: aiohttp can raise TimeoutError, ClientError etc.
-        # in addition to SecuritasDirectError.
+        # Fetch the real status from the API now that the lock has had
+        # time to act.  Catch broadly: aiohttp can raise TimeoutError,
+        # ClientError etc. in addition to SecuritasDirectError.
         try:
             real_state = await self.get_lock_state(priority=ApiQueue.FOREGROUND)
         except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             real_state = LOCK_STATUS_UNKNOWN
 
-        if real_state in (LOCK_STATUS_UNKNOWN, pre_command_state):
-            # The API still returns the old state — the backend hasn't
-            # caught up yet.  Use the optimistic state; the periodic poll
-            # will pick up the real state later.
-            self._state = optimistic_state
-        else:
+        if real_state != LOCK_STATUS_UNKNOWN:
             self._state = real_state
+        else:
+            self._state = optimistic_state
         self.async_write_ha_state()
 
     async def async_lock(self, **kwargs):
