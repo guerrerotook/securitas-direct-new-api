@@ -293,7 +293,10 @@ class SecuritasHub:
                     break
                 await asyncio.sleep(self.session.delay_check_operation)
 
-            # Wait until the thumbnail idSignal changes (CDN propagation delay)
+            # Wait until the thumbnail idSignal changes (CDN propagation delay).
+            # Some cameras (e.g. PIRCAMs) always return idSignal=None, so fall
+            # back to comparing the raw base64 image content.
+            baseline_image = baseline.image
             while True:
                 thumbnail = await self._api_queue.submit(
                     self.session.get_thumbnail,
@@ -303,6 +306,8 @@ class SecuritasHub:
                     priority=ApiQueue.FOREGROUND,
                 )
                 if thumbnail.id_signal != baseline_id:
+                    return
+                if baseline_id is None and thumbnail.image != baseline_image:
                     return
                 await asyncio.sleep(max(5, self.session.delay_check_operation))
 

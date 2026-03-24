@@ -283,7 +283,7 @@ Lock features (latch hold-back time, auto-lock settings) are fetched from the lo
 
 If your installation includes Securitas cameras, the integration creates a camera entity showing the last captured image. A **Capture** button entity is also created for each camera, allowing you to request a new image on demand.
 
-Both QR-type cameras and YR-type PIR cameras are supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
+QR-type cameras, YR-type PIR cameras, and YP/QP perimetral (outdoor) cameras are all supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
 
 When the capture button is pressed, the integration checks whether any images were taken since the last update (e.g. via the Securitas app or web portal) and displays them immediately, even before the newly requested capture arrives.
 

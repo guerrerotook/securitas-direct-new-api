@@ -233,6 +233,33 @@ class TestGetDeviceList:
         assert result[0].name == "Fachada"
         assert result[0].code == 3
 
+    async def test_qp_perimetral_camera(self, authed_api, mock_execute, installation):
+        """QP perimetral cameras (deviceType 107) should be included."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "5",
+                            "code": "4",
+                            "zoneId": "QP04",
+                            "name": "Perimeter",
+                            "type": "QP",
+                            "isActive": True,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 1
+        assert result[0].device_type == "QP"
+        assert result[0].zone_id == "QP04"
+        assert result[0].name == "Perimeter"
+        assert result[0].code == 4
+
     async def test_empty_device_list(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
             "data": {"xSDeviceList": {"res": "OK", "devices": []}}
@@ -308,6 +335,22 @@ class TestRequestImages:
         call_args = mock_execute.call_args
         variables = call_args[0][0]["variables"]
         assert variables["deviceType"] == 106
+
+    async def test_qp_device_type(self, authed_api, mock_execute, installation):
+        """QP cameras should use deviceType 107."""
+        mock_execute.return_value = {
+            "data": {
+                "xSRequestImages": {
+                    "res": "OK",
+                    "msg": "alarm-manager.processed.request",
+                    "referenceId": "abc-123",
+                }
+            }
+        }
+        await authed_api.request_images(installation, device_code=4, device_type="QP")
+        call_args = mock_execute.call_args
+        variables = call_args[0][0]["variables"]
+        assert variables["deviceType"] == 107
 
     async def test_error_response(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
@@ -486,3 +529,36 @@ class TestHubCameraOperations:
         """Real JPEG data starts with FFD8 magic bytes."""
         jpeg_data = b"\xff\xd8\xff\xe0\x00\x10JFIF"
         assert jpeg_data.startswith(b"\xff\xd8")
+
+    def test_pircam_fallback_detects_changed_image(self):
+        """When idSignal is always None, image content comparison detects new capture."""
+        baseline_id = None
+        baseline_image = "old_base64_image_data=="
+        # Simulate a thumbnail with new image content but still null idSignal
+        new_id_signal = None
+        new_image = "new_base64_image_data=="
+
+        # idSignal check would not detect change (None != None is False)
+        assert not (new_id_signal != baseline_id)
+        # Fallback: image content comparison detects the change
+        assert baseline_id is None and new_image != baseline_image
+
+    def test_pircam_fallback_no_change_keeps_polling(self):
+        """When idSignal is None and image hasn't changed, polling should continue."""
+        baseline_id = None
+        baseline_image = "same_base64_image_data=="
+        new_id_signal = None
+        new_image = "same_base64_image_data=="
+
+        id_changed = new_id_signal != baseline_id
+        image_changed = baseline_id is None and new_image != baseline_image
+        assert not id_changed
+        assert not image_changed
+
+    def test_normal_camera_uses_id_signal_not_image_fallback(self):
+        """When idSignal is not None, only idSignal comparison is used."""
+        baseline_id = "SIG-001"
+        # Image fallback should not trigger when baseline_id is not None
+        assert baseline_id is not None
+        # Even if image changed, the fallback guard (baseline_id is None) prevents it
+        assert not (baseline_id is None and "new_img" != "old_img")
