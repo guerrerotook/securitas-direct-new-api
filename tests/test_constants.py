@@ -1,8 +1,7 @@
-"""Tests for SentinelName mapping and securitas_direct_new_api constants."""
+"""Tests for securitas_direct_new_api constants."""
 
 import pytest
 
-from custom_components.securitas.const import SentinelName
 from custom_components.securitas.securitas_direct_new_api.const import (
     CommandType,
     PERI_DEFAULTS,
@@ -14,33 +13,6 @@ from custom_components.securitas.securitas_direct_new_api.const import (
     STD_OPTIONS,
     SecuritasState,
 )
-
-
-# ── SentinelName ─────────────────────────────────────────────────────────────
-
-
-class TestSentinelName:
-    """Tests for SentinelName language mapping."""
-
-    def test_es_returns_confort(self):
-        sn = SentinelName()
-        assert sn.get_sentinel_name("es") == "CONFORT"
-
-    def test_br_returns_comforto(self):
-        sn = SentinelName()
-        assert sn.get_sentinel_name("br") == "COMFORTO"
-
-    def test_pt_returns_comforto(self):
-        sn = SentinelName()
-        assert sn.get_sentinel_name("pt") == "COMFORTO"
-
-    def test_unknown_language_returns_confort_default(self):
-        sn = SentinelName()
-        assert sn.get_sentinel_name("fr") == "CONFORT"
-
-    def test_another_unknown_language_returns_confort_default(self):
-        sn = SentinelName()
-        assert sn.get_sentinel_name("de") == "CONFORT"
 
 
 # ── CommandType ──────────────────────────────────────────────────────────────
