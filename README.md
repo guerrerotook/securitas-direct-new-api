@@ -327,24 +327,5 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
 5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Securitas Direct integration log messages (after enabling debug logging and reproducing the issue).
 
-### HAR file of GraphQL Requests
-
-It would be very helpful to include an HAR (HTTP Archive) file of the GraphQL requests sent by the Securitas website while you perform the task that is not working for you in Home Assistant, for instance setting the alarm, unlocking a lock, or taking a photograph with your camera.
-
-To record the HAR file:
-
-1. Log in to the Securitas website in Chrome.
-2. Click **View** > **Developer** > **Developer Tools**.
-3. Navigate to the **Network** tab.
-4. Tick the **Preserve Logs** checkbox.
-5. Filter on **graphql**.
-
-![Network tab](./docs/images/developer_console.png)
-
-6. Now carry out the actions you want to record.
-7. Click the **Download** icon to download the HAR file.
-
-![Download HAR file](./docs/images/download_har.png)
-
-> **WARNING**: The HAR file can contain private information. Either edit the file (it is just a JSON file) to remove the private info, or ask for one of the developers' email address to send it directly to us.
+6. If possible, include a [HAR file of GraphQL requests](./docs/how_to_capture.md) — this makes it much easier to debug issues with alarm, lock, and camera operations.
 
