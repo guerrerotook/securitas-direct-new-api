@@ -47,6 +47,12 @@ async def async_setup_entry(
                 err.log_detail(),
             )
             continue
+        _LOGGER.debug(
+            "Installation %s services (looking for sentinel=%r): %s",
+            device.installation.number,
+            sentinel_confort_name,
+            [s.request for s in services],
+        )
         first_sentinel_service: Service | None = None
         for service in services:
             if service.request == sentinel_confort_name:
