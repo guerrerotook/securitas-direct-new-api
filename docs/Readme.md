@@ -6,5 +6,4 @@ Thinks you may know.
 
 ## How to capture the API payloads safely to implement new operations.
 
-- [How to capture payloads with your Browser Developer Tools](how_to_capture.md)
 - [How the payload operations looks like](new_operations.md)

@@ -348,3 +348,5 @@ To record the HAR file:
 
 > **WARNING**: The HAR file can contain sensitive or personal information. Either edit the file (it is just a JSON file) to remove that information, or ask for one of the developers' email addresses to send it directly to us.
 
+You can also use this technique to [capture GraphQL payloads](./docs/new_operations.md) if you'd like to help implement support for new operations.
+
