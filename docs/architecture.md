@@ -438,7 +438,7 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
 
 `SecuritasCamera` shows the last captured image from a Securitas camera device. One entity per discovered camera, grouped under the installation device.
 
-**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions) or `"YR"` (PIR cameras, Spain). For each device a `SecuritasCamera` + `SecuritasCaptureButton` are created using stored `async_add_entities` callbacks. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
+**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `SecuritasCamera` + `SecuritasCaptureButton` are created using stored `async_add_entities` callbacks. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
 
 **Image lifecycle:**
 1. On first frontend request, `async_camera_image()` lazy-fetches the latest thumbnail via `fetch_latest_thumbnail()`
@@ -447,7 +447,7 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
    - Sets the `capturing` state and dispatches `SIGNAL_CAMERA_STATE` so the frontend shows a spinner
    - Fetches the current baseline thumbnail to detect missed intermediate images
    - If the baseline image differs from the locally stored image, stores and displays it immediately (before the new capture arrives), then fires `SIGNAL_CAMERA_UPDATE`
-   - Requests a new capture via `request_images`, then runs two polling loops under a single **30-second `asyncio.wait_for` deadline**: first waits for the status to leave "processing", then waits for the thumbnail `idSignal` to change (CDN propagation). If the deadline fires, fetches one final thumbnail as a fallback.
+   - Requests a new capture via `request_images`, then runs two polling loops under a single **30-second `asyncio.wait_for` deadline**: first waits for the status to leave "processing", then waits for the thumbnail `idSignal` to change (CDN propagation). Some cameras (e.g. PIRCAMs) always return `idSignal: null`; in that case the loop falls back to comparing the raw base64 image content against the baseline. If the deadline fires, fetches one final thumbnail as a fallback.
    - Fires `SIGNAL_CAMERA_UPDATE` on success (rotates access token so frontend re-fetches), or `SIGNAL_CAMERA_STATE` on failure (clears spinner without rotating token)
 
 **Signals:**

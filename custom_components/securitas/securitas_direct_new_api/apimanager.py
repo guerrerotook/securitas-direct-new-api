@@ -78,12 +78,12 @@ ALARM_STATUS_SERVICE_ID = "11"
 # Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
 
 # Device types for camera devices in xSDeviceList
-CAMERA_DEVICE_TYPES = {"QR", "YR", "YP"}
+CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
 
 # Image request parameters
 IMAGE_RESOLUTION = 0
 IMAGE_MEDIA_TYPE = 1
-IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103}
+IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
 
 
 def generate_uuid() -> str:

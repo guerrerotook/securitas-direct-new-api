@@ -4,6 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from homeassistant.core import HomeAssistant
+
+from custom_components.securitas.hub import SecuritasHub
 from custom_components.securitas.securitas_direct_new_api.dataTypes import (
     CameraDevice,
     Installation,
@@ -233,6 +236,33 @@ class TestGetDeviceList:
         assert result[0].name == "Fachada"
         assert result[0].code == 3
 
+    async def test_qp_perimetral_camera(self, authed_api, mock_execute, installation):
+        """QP perimetral cameras (deviceType 107) should be included."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "5",
+                            "code": "4",
+                            "zoneId": "QP04",
+                            "name": "Perimeter",
+                            "type": "QP",
+                            "isActive": True,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 1
+        assert result[0].device_type == "QP"
+        assert result[0].zone_id == "QP04"
+        assert result[0].name == "Perimeter"
+        assert result[0].code == 4
+
     async def test_empty_device_list(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
             "data": {"xSDeviceList": {"res": "OK", "devices": []}}
@@ -308,6 +338,22 @@ class TestRequestImages:
         call_args = mock_execute.call_args
         variables = call_args[0][0]["variables"]
         assert variables["deviceType"] == 106
+
+    async def test_qp_device_type(self, authed_api, mock_execute, installation):
+        """QP cameras should use deviceType 107."""
+        mock_execute.return_value = {
+            "data": {
+                "xSRequestImages": {
+                    "res": "OK",
+                    "msg": "alarm-manager.processed.request",
+                    "referenceId": "abc-123",
+                }
+            }
+        }
+        await authed_api.request_images(installation, device_code=4, device_type="QP")
+        call_args = mock_execute.call_args
+        variables = call_args[0][0]["variables"]
+        assert variables["deviceType"] == 107
 
     async def test_error_response(self, authed_api, mock_execute, installation):
         mock_execute.return_value = {
@@ -486,3 +532,112 @@ class TestHubCameraOperations:
         """Real JPEG data starts with FFD8 magic bytes."""
         jpeg_data = b"\xff\xd8\xff\xe0\x00\x10JFIF"
         assert jpeg_data.startswith(b"\xff\xd8")
+
+
+class TestCaptureImagePolling:
+    """Integration tests for hub.capture_image polling logic."""
+
+    @pytest.fixture
+    def hub(self, hass: HomeAssistant) -> SecuritasHub:
+        """Create a SecuritasHub with mocked internals."""
+        hub = SecuritasHub.__new__(SecuritasHub)
+        hub.hass = hass
+        hub.camera_images = {}
+        hub.camera_timestamps = {}
+        hub._camera_capturing = set()
+        hub.session = AsyncMock()
+        hub.session.delay_check_operation = 0
+        hub._api_queue = AsyncMock()
+        return hub
+
+    @pytest.fixture
+    def installation(self) -> Installation:
+        return Installation(number="123456", alias="Home", panel="SDVFAST", type="PLUS")
+
+    @pytest.fixture
+    def camera_device(self) -> CameraDevice:
+        return CameraDevice(
+            id="1", code=1, zone_id="QR01", name="Salone", device_type="QR"
+        )
+
+    def _jpeg_b64(self, tag: bytes = b"A") -> str:
+        """Return a base64-encoded minimal JPEG stub."""
+        import base64
+
+        return base64.b64encode(b"\xff\xd8\xff\xe0" + tag).decode()
+
+    @pytest.fixture(autouse=True)
+    def _no_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Patch asyncio.sleep to avoid 5s waits in the thumbnail polling loop."""
+        monkeypatch.setattr(
+            "custom_components.securitas.hub.asyncio.sleep", AsyncMock()
+        )
+
+    async def test_pircam_completes_when_image_changes(
+        self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
+    ):
+        """When idSignal is always None, capture completes once image content changes."""
+        old_image = self._jpeg_b64(b"OLD")
+        new_image = self._jpeg_b64(b"NEW")
+
+        baseline_thumb = ThumbnailResponse(id_signal=None, image=old_image)
+        status_done = {"res": "OK", "msg": "alarm-manager.error_status_not_found"}
+        new_thumb = ThumbnailResponse(id_signal=None, image=new_image)
+
+        # submit() is called for: baseline thumbnail, request_images, status poll, new thumbnail
+        hub._api_queue.submit = AsyncMock(
+            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb]
+        )
+
+        result = await hub.capture_image(installation, camera_device)
+
+        assert result is not None
+        assert result.startswith(b"\xff\xd8")
+        assert hub._api_queue.submit.call_count == 4
+
+    async def test_pircam_polls_until_image_differs(
+        self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
+    ):
+        """With idSignal=None, polling continues while image content is unchanged."""
+        old_image = self._jpeg_b64(b"SAME")
+        new_image = self._jpeg_b64(b"DIFF")
+
+        baseline_thumb = ThumbnailResponse(id_signal=None, image=old_image)
+        status_done = {"res": "OK", "msg": "alarm-manager.error_status_not_found"}
+        stale_thumb = ThumbnailResponse(id_signal=None, image=old_image)
+        fresh_thumb = ThumbnailResponse(id_signal=None, image=new_image)
+
+        # Two thumbnail polls: first returns stale image, second returns new image
+        hub._api_queue.submit = AsyncMock(
+            side_effect=[
+                baseline_thumb,
+                "ref-id",
+                status_done,
+                stale_thumb,
+                fresh_thumb,
+            ]
+        )
+
+        result = await hub.capture_image(installation, camera_device)
+
+        assert result is not None
+        assert hub._api_queue.submit.call_count == 5
+
+    async def test_normal_camera_uses_id_signal(
+        self, hub: SecuritasHub, installation: Installation, camera_device: CameraDevice
+    ):
+        """Normal cameras (idSignal not None) complete via idSignal change."""
+        image = self._jpeg_b64(b"IMG")
+
+        baseline_thumb = ThumbnailResponse(id_signal="SIG-001", image=image)
+        status_done = {"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        new_thumb = ThumbnailResponse(id_signal="SIG-002", image=image)
+
+        hub._api_queue.submit = AsyncMock(
+            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb]
+        )
+
+        result = await hub.capture_image(installation, camera_device)
+
+        assert result is not None
+        assert hub._api_queue.submit.call_count == 4

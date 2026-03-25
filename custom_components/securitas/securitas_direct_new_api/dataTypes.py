@@ -179,7 +179,7 @@ class SmartLockModeStatus:
 
 @dataclass
 class CameraDevice:
-    """A camera device from xSDeviceList (QR, YR, or YP perimetral cameras)."""
+    """A camera device from xSDeviceList (QR, YR, YP, or QP cameras)."""
 
     id: str = ""
     code: int = 0
