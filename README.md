@@ -335,16 +335,14 @@ To record the HAR file:
 
 1. Log in to the [Securitas Direct customer web site](https://customers.securitasdirect.es/owa-static/login) in your browser.
 2. Open **Developer Tools** (press **F12**, or **Ctrl+Shift+I** / **Cmd+Opt+I**, or use the browser menu → **More tools** → **Developer tools**).
-3. Navigate to the **Network** tab.
-4. Tick the **Preserve log** checkbox.
-5. Filter on **graphql**.
+3. Navigate to the **Network** tab, tick the **Preserve log** checkbox, and filter on **graphql**.
 
-![Network tab](./docs/images/developer_console.png)
+   ![Network tab](./docs/images/developer_console.png)
 
-6. Now carry out the actions you want to record.
-7. Click the **Download** icon to download the HAR file.
+4. Carry out the actions you want to record.
+5. Click the **Download** icon to download the HAR file.
 
-![Download HAR file](./docs/images/download_har.png)
+   ![Download HAR file](./docs/images/download_har.png)
 
 > **WARNING**: The HAR file can contain sensitive or personal information. Either edit the file (it is just a JSON file) to remove that information, or ask for one of the developers' email addresses to send it directly to us.
 
