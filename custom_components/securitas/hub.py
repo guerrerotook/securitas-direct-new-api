@@ -345,11 +345,12 @@ class SecuritasHub:
                 self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
             )
 
-        # Fetch and store the full-resolution image in the background using the
-        # idSignal obtained from the thumbnail.  PIR cameras return idSignal=None
-        # so we skip silently in that case.
+        # Fetch the full-resolution image as an independent background task so it
+        # is not cancelled if the camera-proxy request that triggered this times out.
         if thumbnail is not None and thumbnail.id_signal and thumbnail.signal_type:
-            await self._fetch_and_store_full_image(installation, device, thumbnail)
+            self.hass.async_create_task(
+                self._fetch_and_store_full_image(installation, device, thumbnail)
+            )
 
         return image_bytes
 
@@ -384,7 +385,9 @@ class SecuritasHub:
             )
 
         if thumbnail.id_signal and thumbnail.signal_type:
-            await self._fetch_and_store_full_image(installation, camera_device, thumbnail)
+            self.hass.async_create_task(
+                self._fetch_and_store_full_image(installation, camera_device, thumbnail)
+            )
 
     async def _fetch_and_store_full_image(
         self,

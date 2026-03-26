@@ -64,11 +64,15 @@ class SecuritasCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return the last captured image, or a placeholder if none exists."""
-        # Lazy-fetch the latest thumbnail on first request from the frontend
+        # Lazy-fetch the latest thumbnail on first request from the frontend.
+        # Fired as a background task so the camera-proxy request is not cancelled
+        # if the queue throttle takes longer than HA's proxy timeout.
         if not self._initial_fetch_done:
             self._initial_fetch_done = True
-            await self._client.fetch_latest_thumbnail(
-                self._installation, self._camera_device
+            self.hass.async_create_task(
+                self._client.fetch_latest_thumbnail(
+                    self._installation, self._camera_device
+                )
             )
         image = self._client.get_camera_image(
             self._installation.number, self._camera_device.zone_id
@@ -160,8 +164,10 @@ class SecuritasCameraFull(Camera):
         """Return the last full-resolution image, or a placeholder if none exists."""
         if not self._initial_fetch_done:
             self._initial_fetch_done = True
-            await self._client.fetch_latest_thumbnail(
-                self._installation, self._camera_device
+            self.hass.async_create_task(
+                self._client.fetch_latest_thumbnail(
+                    self._installation, self._camera_device
+                )
             )
         image = self._client.get_full_image(
             self._installation.number, self._camera_device.zone_id
