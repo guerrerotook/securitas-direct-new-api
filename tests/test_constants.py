@@ -1,7 +1,8 @@
-"""Tests for securitas_direct_new_api constants."""
+"""Tests for integration and securitas_direct_new_api constants."""
 
 import pytest
 
+from custom_components.securitas.const import SENTINEL_SERVICE_NAMES
 from custom_components.securitas.securitas_direct_new_api.const import (
     CommandType,
     PERI_DEFAULTS,
@@ -13,6 +14,25 @@ from custom_components.securitas.securitas_direct_new_api.const import (
     STD_OPTIONS,
     SecuritasState,
 )
+
+
+# ── SENTINEL_SERVICE_NAMES ───────────────────────────────────────────────────
+
+
+class TestSentinelServiceNames:
+    """Tests for sentinel service name discovery."""
+
+    def test_contains_known_names(self):
+        assert "CONFORT" in SENTINEL_SERVICE_NAMES
+        assert "COMFORTO" in SENTINEL_SERVICE_NAMES
+        assert "COMFORT" in SENTINEL_SERVICE_NAMES
+
+    def test_is_frozenset(self):
+        assert isinstance(SENTINEL_SERVICE_NAMES, frozenset)
+
+    def test_unrelated_service_not_matched(self):
+        assert "ALARM" not in SENTINEL_SERVICE_NAMES
+        assert "confort" not in SENTINEL_SERVICE_NAMES
 
 
 # ── CommandType ──────────────────────────────────────────────────────────────
