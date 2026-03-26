@@ -130,7 +130,7 @@ class SecuritasCameraCard extends HTMLElement {
     const newToken = hass?.states[this._config.entity]?.attributes?.access_token;
     this._hass = hass;
     this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
-    this._fullEntityId = this._findFullImageEntity(hass, this._config.entity);
+    this._fullEntityId = this._config.full_entity || null;
     // Clear spinner when the image token rotates (new image available) and
     // the capture is no longer in progress (capturing=false means final image).
     const capturing = hass?.states[this._config.entity]?.attributes?.capturing;
@@ -405,20 +405,6 @@ class SecuritasCameraCard extends HTMLElement {
       if (entry.device_id !== deviceId) continue;
       const stateObj = hass.states[eid];
       if (stateObj?.attributes?.icon === "mdi:camera") return eid;
-    }
-    return null;
-  }
-
-  _findFullImageEntity(hass, thumbnailEntityId) {
-    if (!hass?.entities || !thumbnailEntityId) return null;
-    const thumbEntry = hass.entities[thumbnailEntityId];
-    if (!thumbEntry?.unique_id) return null;
-    // Thumbnail unique_id: v4_{num}_camera_{zone_id}
-    // Full image unique_id: v4_{num}_camera_full_{zone_id}
-    const fullUniqueId = thumbEntry.unique_id.replace("_camera_", "_camera_full_");
-    if (fullUniqueId === thumbEntry.unique_id) return null;
-    for (const [eid, entry] of Object.entries(hass.entities)) {
-      if (entry.unique_id === fullUniqueId) return eid;
     }
     return null;
   }
