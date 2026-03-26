@@ -990,6 +990,8 @@ class ApiManager(SecuritasHttpClient):
         self, installation: Installation, device_code: int, device_type: str = "QR"
     ) -> str:
         """Request the panel to capture a new image. Returns referenceId."""
+        # NOTE: the Verisure website omits resolution, mediaType, and deviceType
+        # for YR (PIR camera) requests, but sending them works fine for all types.
         content = {
             "operationName": "RequestImages",
             "variables": {
