@@ -4,12 +4,15 @@
  * Displays the latest image from a Securitas Direct camera entity with:
  *  - Auto-discovered refresh (capture) button in the top-right corner
  *  - Image timestamp overlay (relative + absolute tooltip)
- *  - Click to open a lightbox with the full-resolution image (if available),
- *    otherwise falls back to the HA more-info dialog
+ *  - Click to open the HA more-info dialog: for the full-resolution entity
+ *    (camera.<name>_full_image) if `full_entity` is configured, otherwise
+ *    for the thumbnail entity itself
  *
  * Card config:
  *   type: custom:securitas-camera-card
- *   entity: camera.securitas_front_door
+ *   entity: camera.sala             # thumbnail entity (required)
+ *   full_entity: camera.sala_full_image  # full-res entity (optional)
+ *   name: Sala                       # optional display name
  *   name: Front Door   # optional — overrides the device name
  */
 
@@ -234,50 +237,6 @@ class SecuritasCameraCard extends HTMLElement {
       .refresh-btn[hidden] { display: none; }
       @keyframes spin { to { transform: rotate(360deg); } }
       .refresh-btn.spinning ha-icon { animation: spin 1s linear infinite; }
-      /* Lightbox */
-      dialog.lightbox {
-        padding: 0;
-        border: none;
-        background: rgba(0,0,0,0.92);
-        width: 100vw;
-        max-width: 100vw;
-        height: 100vh;
-        max-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: fixed;
-        inset: 0;
-      }
-      dialog.lightbox::backdrop {
-        background: rgba(0,0,0,0.85);
-      }
-      .lightbox-img {
-        max-width: 95vw;
-        max-height: 90vh;
-        object-fit: contain;
-        display: block;
-        border-radius: 4px;
-      }
-      .lightbox-close {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        background: rgba(255,255,255,0.15);
-        border: none;
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        color: #fff;
-        font-size: 20px;
-        z-index: 10;
-        transition: background 0.2s;
-      }
-      .lightbox-close:hover { background: rgba(255,255,255,0.3); }
     </style>
     <ha-card>
       <div class="img-wrapper" id="img-wrapper">
@@ -292,14 +251,10 @@ class SecuritasCameraCard extends HTMLElement {
       </div>
     </ha-card>`;
 
-    // Click image → lightbox (full entity) or more-info (fallback)
+    // Click image → more-info for full entity (if configured) or thumbnail entity
     this.shadowRoot.getElementById("img-wrapper").addEventListener("click", (e) => {
       if (e.target.closest("#refresh-btn")) return;
-      if (hasFull) {
-        this._openLightbox();
-      } else {
-        this._openMoreInfo();
-      }
+      this._openMoreInfo(hasFull ? this._fullEntityId : this._config.entity);
     });
 
     // Refresh button
@@ -310,42 +265,6 @@ class SecuritasCameraCard extends HTMLElement {
         this._handleRefresh();
       });
     }
-  }
-
-  _openLightbox() {
-    const fullState = this._hass?.states[this._fullEntityId];
-    if (!fullState) {
-      this._openMoreInfo();
-      return;
-    }
-    const fullToken = fullState.attributes.access_token || "";
-    const fullUrl = `/api/camera_proxy/${this._fullEntityId}?token=${fullToken}`;
-
-    // Remove any stale lightbox
-    this.shadowRoot.getElementById("securitas-lightbox")?.remove();
-
-    const dialog = document.createElement("dialog");
-    dialog.id = "securitas-lightbox";
-    dialog.className = "lightbox";
-    dialog.innerHTML = `
-      <button class="lightbox-close" id="lb-close" aria-label="Close">&#x2715;</button>
-      <img class="lightbox-img" src="${_escHtml(fullUrl)}" alt="Full image" />`;
-
-    this.shadowRoot.appendChild(dialog);
-    dialog.showModal();
-
-    const close = () => {
-      dialog.close();
-      dialog.remove();
-    };
-    dialog.querySelector("#lb-close").addEventListener("click", close);
-    dialog.addEventListener("click", (e) => {
-      // Close when clicking the backdrop (outside the image)
-      if (e.target === dialog) close();
-    });
-    dialog.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") close();
-    });
   }
 
   _formatTimestamp(timestamp) {
@@ -363,9 +282,9 @@ class SecuritasCameraCard extends HTMLElement {
     return { relative: `${Math.round(diffHr / 24)}d ago`, absolute };
   }
 
-  _openMoreInfo() {
+  _openMoreInfo(entityId) {
     this.dispatchEvent(new CustomEvent("hass-more-info", {
-      detail: { entityId: this._config.entity },
+      detail: { entityId: entityId || this._config.entity },
       bubbles: true,
       composed: true,
     }));
