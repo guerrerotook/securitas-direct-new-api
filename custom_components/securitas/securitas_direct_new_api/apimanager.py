@@ -977,7 +977,7 @@ class ApiManager(SecuritasHttpClient):
             CameraDevice(
                 id=d["id"],
                 code=int(d["code"]),
-                zone_id=d["zoneId"] or d["id"],
+                zone_id=d["zoneId"] or f"{d['type']}{int(d['code']):02d}",
                 name=d["name"],
                 device_type=d["type"],
                 serial_number=d.get("serialNumber"),

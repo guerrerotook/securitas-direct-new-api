@@ -176,7 +176,7 @@ class TestGetDeviceList:
     async def test_yr_pir_camera_with_null_zone_id(
         self, authed_api, mock_execute, installation
     ):
-        """YR (PIR camera) devices have zoneId=null; zone_id should fall back to device id."""
+        """YR (PIR camera) devices have zoneId=null; zone_id is constructed as type+code."""
         mock_execute.return_value = {
             "data": {
                 "xSDeviceList": {
@@ -206,8 +206,8 @@ class TestGetDeviceList:
         }
         result = await authed_api.get_device_list(installation)
         assert len(result) == 2
-        assert result[0].zone_id == "11"
-        assert result[1].zone_id == "12"
+        assert result[0].zone_id == "YR05"
+        assert result[1].zone_id == "YR06"
 
     async def test_yp_perimetral_camera(self, authed_api, mock_execute, installation):
         """YP perimetral exterior cameras should be included."""
