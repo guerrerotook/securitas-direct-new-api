@@ -1104,5 +1104,5 @@ class ApiManager(SecuritasHttpClient):
         best = max(binary_images, key=lambda img: len(img["image"]))
         try:
             return base64.b64decode(best["image"])
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             return None

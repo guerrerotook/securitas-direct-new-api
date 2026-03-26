@@ -404,7 +404,7 @@ class SecuritasHub:
                 thumbnail.signal_type,
                 priority=ApiQueue.BACKGROUND,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             _LOGGER.warning(
                 "[hub] Could not fetch full image for %s",
                 camera_device.name,
