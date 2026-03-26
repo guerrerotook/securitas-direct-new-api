@@ -209,6 +209,32 @@ class TestGetDeviceList:
         assert result[0].zone_id == "YR05"
         assert result[1].zone_id == "YR06"
 
+    async def test_yr_zone_id_two_digit_code(
+        self, authed_api, mock_execute, installation
+    ):
+        """YR devices with two-digit codes produce correct zoneId (no extra padding)."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "15",
+                            "code": "10",
+                            "zoneId": None,
+                            "name": "Salone",
+                            "type": "YR",
+                            "isActive": None,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 1
+        assert result[0].zone_id == "YR10"
+
     async def test_yp_perimetral_camera(self, authed_api, mock_execute, installation):
         """YP perimetral exterior cameras should be included."""
         mock_execute.return_value = {
