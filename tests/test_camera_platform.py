@@ -327,16 +327,22 @@ class TestSecuritasCameraFull:
         self, mock_hub_full, installation, camera_device
     ):
         """Both camera entities must share the same HA device (same identifiers)."""
-        from custom_components.securitas.camera import SecuritasCamera, SecuritasCameraFull
+        from custom_components.securitas.camera import (
+            SecuritasCamera,
+            SecuritasCameraFull,
+        )
         from custom_components.securitas import DOMAIN
 
         thumb_cam = SecuritasCamera(MagicMock(), installation, camera_device)
         full_cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
 
-        assert thumb_cam.device_info["identifiers"] == full_cam.device_info["identifiers"]
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in full_cam.device_info[
-            "identifiers"
-        ]
+        assert (
+            thumb_cam.device_info["identifiers"] == full_cam.device_info["identifiers"]
+        )
+        assert (
+            DOMAIN,
+            "v4_securitas_direct.2654190_camera_QR10",
+        ) in full_cam.device_info["identifiers"]
 
     @pytest.mark.asyncio
     async def test_async_added_to_hass_subscribes_to_signal(
@@ -349,6 +355,7 @@ class TestSecuritasCameraFull:
         cam.hass = MagicMock()
 
         connected_signal = {}
+
         def _capture_connect(hass, signal, callback):
             connected_signal[signal] = callback
             return MagicMock()
@@ -360,6 +367,7 @@ class TestSecuritasCameraFull:
             await cam.async_added_to_hass()
 
         from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
+
         assert SIGNAL_FULL_IMAGE_UPDATE in connected_signal
 
     @pytest.mark.asyncio
