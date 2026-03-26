@@ -97,6 +97,7 @@ class TestSecuritasCamera:
         image_bytes = b"\xff\xd8\xff\xe0fake_jpeg"
         mock_hub.get_camera_image.return_value = image_bytes
         cam = SecuritasCamera(mock_hub, installation, camera_device)
+        cam.hass = MagicMock()
         result = await cam.async_camera_image()
         assert result == image_bytes
         mock_hub.get_camera_image.assert_called_once_with("2654190", "QR10")
@@ -112,6 +113,7 @@ class TestSecuritasCamera:
 
         mock_hub.get_camera_image.return_value = None
         cam = SecuritasCamera(mock_hub, installation, camera_device)
+        cam.hass = MagicMock()
         result = await cam.async_camera_image()
         assert result == _PLACEHOLDER_IMAGE
 
@@ -123,13 +125,13 @@ class TestSecuritasCamera:
 
         mock_hub.get_camera_image.return_value = b"\xff\xd8"
         cam = SecuritasCamera(mock_hub, installation, camera_device)
+        cam.hass = MagicMock()
         assert cam._initial_fetch_done is False
 
         await cam.async_camera_image()
 
-        mock_hub.fetch_latest_thumbnail.assert_awaited_once_with(
-            installation, camera_device
-        )
+        # fetch_latest_thumbnail is now fired as a background task
+        cam.hass.async_create_task.assert_called_once()
         assert cam._initial_fetch_done is True
 
     @pytest.mark.asyncio
@@ -140,14 +142,15 @@ class TestSecuritasCamera:
 
         mock_hub.get_camera_image.return_value = b"\xff\xd8"
         cam = SecuritasCamera(mock_hub, installation, camera_device)
+        cam.hass = MagicMock()
 
-        # First call — triggers the lazy fetch
+        # First call — triggers the lazy fetch via background task
         await cam.async_camera_image()
-        assert mock_hub.fetch_latest_thumbnail.await_count == 1
+        assert cam.hass.async_create_task.call_count == 1
 
         # Second call — must NOT trigger fetch again
         await cam.async_camera_image()
-        assert mock_hub.fetch_latest_thumbnail.await_count == 1
+        assert cam.hass.async_create_task.call_count == 1
 
     def test_device_info_uses_camera_sub_device(
         self, mock_hub, installation, camera_device
@@ -305,6 +308,7 @@ class TestSecuritasCameraFull:
         image_bytes = b"\xff\xd8\xff\xe0full_jpeg"
         mock_hub_full.get_full_image.return_value = image_bytes
         cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        cam.hass = MagicMock()
         result = await cam.async_camera_image()
         assert result == image_bytes
         mock_hub_full.get_full_image.assert_called_once_with("2654190", "QR10")
@@ -320,6 +324,7 @@ class TestSecuritasCameraFull:
 
         mock_hub_full.get_full_image.return_value = None
         cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        cam.hass = MagicMock()
         result = await cam.async_camera_image()
         assert result == _PLACEHOLDER_IMAGE
 
