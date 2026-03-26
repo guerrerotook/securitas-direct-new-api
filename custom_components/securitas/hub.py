@@ -297,7 +297,7 @@ class SecuritasHub:
                 await asyncio.sleep(self.session.delay_check_operation)
 
             # Wait until the thumbnail idSignal changes (CDN propagation delay).
-            # Some cameras (e.g. PIRCAMs) always return idSignal=None, so fall
+            # Some cameras (e.g. PIRCAMs) may return idSignal=None, so fall
             # back to comparing the raw base64 image content.
             baseline_image = baseline.image
             while True:
@@ -406,7 +406,9 @@ class SecuritasHub:
             )
         except Exception:  # noqa: BLE001
             _LOGGER.warning(
-                "[hub] Could not fetch full image for %s", camera_device.name, exc_info=True
+                "[hub] Could not fetch full image for %s",
+                camera_device.name,
+                exc_info=True,
             )
             return
 
@@ -421,7 +423,10 @@ class SecuritasHub:
         if thumbnail.timestamp:
             self._full_timestamps[key] = thumbnail.timestamp
         async_dispatcher_send(
-            self.hass, SIGNAL_FULL_IMAGE_UPDATE, installation.number, camera_device.zone_id
+            self.hass,
+            SIGNAL_FULL_IMAGE_UPDATE,
+            installation.number,
+            camera_device.zone_id,
         )
 
     def _validate_and_store_image(

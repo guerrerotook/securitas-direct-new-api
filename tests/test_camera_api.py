@@ -211,6 +211,32 @@ class TestGetDeviceList:
         assert result[0].zone_id == "YR05"
         assert result[1].zone_id == "YR06"
 
+    async def test_yr_zone_id_two_digit_code(
+        self, authed_api, mock_execute, installation
+    ):
+        """YR devices with two-digit codes produce correct zoneId (no extra padding)."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "15",
+                            "code": "10",
+                            "zoneId": None,
+                            "name": "Salone",
+                            "type": "YR",
+                            "isActive": None,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 1
+        assert result[0].zone_id == "YR10"
+
     async def test_yr_non_numeric_code_falls_back_to_id(
         self, authed_api, mock_execute, installation
     ):
@@ -661,10 +687,18 @@ class TestCaptureImagePolling:
 
         baseline_thumb = ThumbnailResponse(id_signal="SIG-001", image=image)
         status_done = {"res": "OK", "msg": "alarm-manager.photo-request.success"}
-        new_thumb = ThumbnailResponse(id_signal="SIG-002", image=image, signal_type="16")
+        new_thumb = ThumbnailResponse(
+            id_signal="SIG-002", image=image, signal_type="16"
+        )
 
         hub._api_queue.submit = AsyncMock(
-            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb, b"\xff\xd8fullimg"]
+            side_effect=[
+                baseline_thumb,
+                "ref-id",
+                status_done,
+                new_thumb,
+                b"\xff\xd8fullimg",
+            ]
         )
 
         result = await hub.capture_image(installation, camera_device)
@@ -687,7 +721,11 @@ class TestGetPhotoImages:
                         "name": "SALA",
                         "quality": None,
                         "images": [
-                            {"id": "1", "image": "/9j/4AAQSkZJRgABhelloLONG==", "type": "BINARY"},
+                            {
+                                "id": "1",
+                                "image": "/9j/4AAQSkZJRgABhelloLONG==",
+                                "type": "BINARY",
+                            },
                             {"id": "0", "image": "/9j/4AAQShort==", "type": "BINARY"},
                             {"id": "2", "image": "/9j/4A==", "type": "BINARY"},
                         ],
@@ -716,9 +754,7 @@ class TestGetPhotoImages:
         self, authed_api, mock_execute, installation
     ):
         """When the devices list is empty, return None."""
-        mock_execute.return_value = {
-            "data": {"xSGetPhotoImages": {"devices": []}}
-        }
+        mock_execute.return_value = {"data": {"xSGetPhotoImages": {"devices": []}}}
         result = await authed_api.get_photo_images(
             installation, id_signal="123", signal_type="16"
         )
@@ -732,8 +768,14 @@ class TestGetPhotoImages:
             "data": {
                 "xSGetPhotoImages": {
                     "devices": [
-                        {"id": "0", "idSignal": "123", "code": "YR02",
-                         "name": "SALA", "quality": None, "images": []}
+                        {
+                            "id": "0",
+                            "idSignal": "123",
+                            "code": "YR02",
+                            "name": "SALA",
+                            "quality": None,
+                            "images": [],
+                        }
                     ]
                 }
             }
@@ -774,9 +816,7 @@ class TestGetPhotoImages:
         self, authed_api, mock_execute, installation
     ):
         """Verify the GraphQL variables are passed correctly."""
-        mock_execute.return_value = {
-            "data": {"xSGetPhotoImages": {"devices": []}}
-        }
+        mock_execute.return_value = {"data": {"xSGetPhotoImages": {"devices": []}}}
         await authed_api.get_photo_images(
             installation, id_signal="555", signal_type="16"
         )
