@@ -412,7 +412,7 @@ Three sensor types:
 - **SentinelHumidity** — Humidity as percentage
 - **SentinelAirQuality** — Air quality index with message (e.g. "Good")
 
-Sentinel sensors are discovered during platform setup by scanning services for ones matching the Sentinel name (language-dependent: "CONFORT" in Spanish, "COMFORTO" in Portuguese). No API calls are made during setup — entities start with unknown state. Data is populated by `async_update()` using HA's built-in polling at a 30-minute interval (see [Polling intervals](#polling-intervals)).
+Sentinel sensors are discovered during platform setup by scanning services for ones whose `request` field matches any name in `SENTINEL_SERVICE_NAMES` (currently "CONFORT", "COMFORTO", "COMFORT"). No API calls are made during setup — entities start with unknown state. Data is populated by `async_update()` using HA's built-in polling at a 30-minute interval (see [Polling intervals](#polling-intervals)).
 
 ### Binary sensors (`binary_sensor.py`)
 
@@ -599,7 +599,7 @@ tests/
 ├── test_camera_platform.py  Camera entity platform setup and image serving
 ├── test_config_flow.py      Config flow (setup + 2FA) and options flow
 ├── test_command_resolver.py  CommandResolver state transitions, fallback chains
-├── test_constants.py        SentinelName language mapping, SecuritasState enum, mapping tables
+├── test_constants.py        SENTINEL_SERVICE_NAMES, SecuritasState enum, mapping tables
 ├── test_domains.py          Country-to-URL routing
 ├── test_execute_request.py  HTTP request execution, headers, error handling, http_status
 ├── test_ha_platforms.py     Platform async_setup_entry for all entity types
@@ -715,7 +715,7 @@ Key design choices:
 | `sensor.py` | 91% | `async_setup_entry`, sensor discovery |
 | `command_resolver.py` | 92% | Rare fallback paths |
 | `log_filter.py` | 88% | Nested arg scanning |
-| `const.py` | 100% | Includes `SentinelName` (moved from `constants.py`) |
+| `const.py` | 100% | Includes `SENTINEL_SERVICE_NAMES` |
 | `dataTypes.py` | 100% | — |
 | `domains.py` | 100% | — |
 | `exceptions.py` | 100% | — |
@@ -743,7 +743,7 @@ Three parallel jobs run on every PR and push to main:
 | `camera.py` | 98 | Camera entity with lazy thumbnail fetching |
 | `button.py` | 150 | Refresh button with WAF notification, capture button |
 | `api_queue.py` | 104 | Priority-based rate-limited API queue (FOREGROUND/BACKGROUND) |
-| `const.py` | 66 | Integration constants, signal names, config keys, platform list, card URLs, SentinelName language mapping |
+| `const.py` | 66 | Integration constants, signal names, config keys, platform list, card URLs, `SENTINEL_SERVICE_NAMES` |
 | `log_filter.py` | 86 | `SensitiveDataFilter` — log sanitization for secrets |
 | `securitas_direct_new_api/http_client.py` | 513 | `SecuritasHttpClient` — HTTP transport, auth tokens, request execution, polling |
 | `securitas_direct_new_api/apimanager.py` | 1055 | `ApiManager` — business operations (inherits SecuritasHttpClient) |

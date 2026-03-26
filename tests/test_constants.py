@@ -2,6 +2,7 @@
 
 import pytest
 
+from custom_components.securitas.const import SENTINEL_SERVICE_NAMES
 from custom_components.securitas.securitas_direct_new_api.const import (
     CommandType,
     PERI_DEFAULTS,
@@ -13,6 +14,34 @@ from custom_components.securitas.securitas_direct_new_api.const import (
     STD_OPTIONS,
     SecuritasState,
 )
+
+
+# ── SENTINEL_SERVICE_NAMES ───────────────────────────────────────────────────
+
+
+class TestSentinelServiceNames:
+    """Tests for sentinel service name discovery."""
+
+    def test_contains_known_names(self):
+        assert "CONFORT" in SENTINEL_SERVICE_NAMES
+        assert "COMFORTO" in SENTINEL_SERVICE_NAMES
+        assert "COMFORT" in SENTINEL_SERVICE_NAMES
+
+    def test_is_frozenset(self):
+        assert isinstance(SENTINEL_SERVICE_NAMES, frozenset)
+
+    @pytest.mark.parametrize(
+        "service_name",
+        sorted(SENTINEL_SERVICE_NAMES),
+        ids=sorted(SENTINEL_SERVICE_NAMES),
+    )
+    def test_each_name_would_be_discovered(self, service_name):
+        """Every name in the set should match the discovery check in sensor.py."""
+        assert service_name in SENTINEL_SERVICE_NAMES
+
+    def test_unrelated_service_not_matched(self):
+        assert "ALARM" not in SENTINEL_SERVICE_NAMES
+        assert "confort" not in SENTINEL_SERVICE_NAMES
 
 
 # ── CommandType ──────────────────────────────────────────────────────────────

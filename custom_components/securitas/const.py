@@ -48,4 +48,4 @@ PLATFORMS = [
     Platform.LOCK,
 ]
 
-SENTINEL_SERVICE_NAMES: frozenset[str] = frozenset({"CONFORT", "COMFORTO"})
+SENTINEL_SERVICE_NAMES: frozenset[str] = frozenset({"CONFORT", "COMFORTO", "COMFORT"})
