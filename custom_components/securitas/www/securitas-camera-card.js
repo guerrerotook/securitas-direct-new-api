@@ -412,14 +412,13 @@ class SecuritasCameraCard extends HTMLElement {
   _findFullImageEntity(hass, thumbnailEntityId) {
     if (!hass?.entities || !thumbnailEntityId) return null;
     const thumbEntry = hass.entities[thumbnailEntityId];
-    if (!thumbEntry?.device_id) return null;
-    const deviceId = thumbEntry.device_id;
-    // The full-image entity is the other camera.* on the same device
+    if (!thumbEntry?.unique_id) return null;
+    // Thumbnail unique_id: v4_{num}_camera_{zone_id}
+    // Full image unique_id: v4_{num}_camera_full_{zone_id}
+    const fullUniqueId = thumbEntry.unique_id.replace("_camera_", "_camera_full_");
+    if (fullUniqueId === thumbEntry.unique_id) return null;
     for (const [eid, entry] of Object.entries(hass.entities)) {
-      if (!eid.startsWith("camera.")) continue;
-      if (eid === thumbnailEntityId) continue;
-      if (entry.device_id !== deviceId) continue;
-      return eid;
+      if (entry.unique_id === fullUniqueId) return eid;
     }
     return null;
   }
