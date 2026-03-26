@@ -152,11 +152,17 @@ class SecuritasCameraFull(Camera):
         )
         self._attr_name = "Full Image"
         self._attr_device_info = camera_device_info(installation, camera_device)
+        self._initial_fetch_done = False
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return the last full-resolution image, or a placeholder if none exists."""
+        if not self._initial_fetch_done:
+            self._initial_fetch_done = True
+            await self._client.fetch_latest_thumbnail(
+                self._installation, self._camera_device
+            )
         image = self._client.get_full_image(
             self._installation.number, self._camera_device.zone_id
         )

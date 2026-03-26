@@ -402,8 +402,8 @@ class SecuritasHub:
                 priority=ApiQueue.BACKGROUND,
             )
         except Exception:  # noqa: BLE001
-            _LOGGER.debug(
-                "[hub] Could not fetch full image for %s", camera_device.name
+            _LOGGER.warning(
+                "[hub] Could not fetch full image for %s", camera_device.name, exc_info=True
             )
             return
 
