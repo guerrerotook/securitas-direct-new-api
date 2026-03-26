@@ -294,7 +294,7 @@ class SecuritasHub:
                 await asyncio.sleep(self.session.delay_check_operation)
 
             # Wait until the thumbnail idSignal changes (CDN propagation delay).
-            # Some cameras (e.g. PIRCAMs) always return idSignal=None, so fall
+            # Some cameras (e.g. PIRCAMs) may return idSignal=None, so fall
             # back to comparing the raw base64 image content.
             baseline_image = baseline.image
             while True:
