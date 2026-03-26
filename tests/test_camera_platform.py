@@ -259,3 +259,137 @@ class TestSecuritasCaptureButton:
             "identifiers"
         ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
+
+
+@pytest.fixture
+def mock_hub_full():
+    hub = MagicMock()
+    hub.get_full_image = MagicMock(return_value=None)
+    hub.get_full_timestamp = MagicMock(return_value=None)
+    return hub
+
+
+class TestSecuritasCameraFull:
+    """Tests for the SecuritasCameraFull entity."""
+
+    def test_unique_id(self, mock_hub_full, installation, camera_device):
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        assert cam.unique_id == "v4_2654190_camera_full_QR10"
+
+    def test_has_entity_name(self, mock_hub_full, installation, camera_device):
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        assert cam._attr_has_entity_name is True
+
+    def test_name_is_full_image(self, mock_hub_full, installation, camera_device):
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        assert cam.name == "Full Image"
+
+    def test_should_not_poll(self, mock_hub_full, installation, camera_device):
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        assert cam.should_poll is False
+
+    @pytest.mark.asyncio
+    async def test_camera_image_returns_stored_bytes(
+        self, mock_hub_full, installation, camera_device
+    ):
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        image_bytes = b"\xff\xd8\xff\xe0full_jpeg"
+        mock_hub_full.get_full_image.return_value = image_bytes
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        result = await cam.async_camera_image()
+        assert result == image_bytes
+        mock_hub_full.get_full_image.assert_called_once_with("2654190", "QR10")
+
+    @pytest.mark.asyncio
+    async def test_camera_image_returns_placeholder_when_empty(
+        self, mock_hub_full, installation, camera_device
+    ):
+        from custom_components.securitas.camera import (
+            SecuritasCameraFull,
+            _PLACEHOLDER_IMAGE,
+        )
+
+        mock_hub_full.get_full_image.return_value = None
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        result = await cam.async_camera_image()
+        assert result == _PLACEHOLDER_IMAGE
+
+    def test_device_info_matches_thumbnail_entity(
+        self, mock_hub_full, installation, camera_device
+    ):
+        """Both camera entities must share the same HA device (same identifiers)."""
+        from custom_components.securitas.camera import SecuritasCamera, SecuritasCameraFull
+        from custom_components.securitas import DOMAIN
+
+        thumb_cam = SecuritasCamera(MagicMock(), installation, camera_device)
+        full_cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+
+        assert thumb_cam.device_info["identifiers"] == full_cam.device_info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in full_cam.device_info[
+            "identifiers"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_async_added_to_hass_subscribes_to_signal(
+        self, mock_hub_full, installation, camera_device
+    ):
+        from unittest.mock import patch, MagicMock
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        cam.hass = MagicMock()
+
+        connected_signal = {}
+        def _capture_connect(hass, signal, callback):
+            connected_signal[signal] = callback
+            return MagicMock()
+
+        with patch(
+            "custom_components.securitas.camera.async_dispatcher_connect",
+            side_effect=_capture_connect,
+        ):
+            await cam.async_added_to_hass()
+
+        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
+        assert SIGNAL_FULL_IMAGE_UPDATE in connected_signal
+
+    @pytest.mark.asyncio
+    async def test_token_rotates_on_signal(
+        self, mock_hub_full, installation, camera_device
+    ):
+        """When SIGNAL_FULL_IMAGE_UPDATE fires for this entity, the token rotates."""
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        cam.async_update_token = MagicMock()
+        cam.async_write_ha_state = MagicMock()
+
+        # Signal for this camera
+        cam._handle_full_update("2654190", "QR10")
+        cam.async_update_token.assert_called_once()
+        cam.async_write_ha_state.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_token_does_not_rotate_for_other_camera(
+        self, mock_hub_full, installation, camera_device
+    ):
+        """Signal for a different zone_id must not affect this entity."""
+        from custom_components.securitas.camera import SecuritasCameraFull
+
+        cam = SecuritasCameraFull(mock_hub_full, installation, camera_device)
+        cam.async_update_token = MagicMock()
+        cam.async_write_ha_state = MagicMock()
+
+        # Signal for a different camera
+        cam._handle_full_update("2654190", "QR11")
+        cam.async_update_token.assert_not_called()
+        cam.async_write_ha_state.assert_not_called()

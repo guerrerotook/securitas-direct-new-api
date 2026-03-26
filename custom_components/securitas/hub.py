@@ -29,6 +29,7 @@ from .const import (
     DOMAIN,
     SIGNAL_CAMERA_STATE,
     SIGNAL_CAMERA_UPDATE,
+    SIGNAL_FULL_IMAGE_UPDATE,
     SIGNAL_XSSTATUS_UPDATE,
 )
 from .log_filter import SensitiveDataFilter
@@ -161,6 +162,8 @@ class SecuritasHub:
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
+        self._full_images: dict[str, bytes] = {}
+        self._full_timestamps: dict[str, str] = {}
 
     async def login(self):
         """Login to Securitas."""
@@ -341,6 +344,13 @@ class SecuritasHub:
             async_dispatcher_send(
                 self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
             )
+
+        # Fetch and store the full-resolution image in the background using the
+        # idSignal obtained from the thumbnail.  PIR cameras return idSignal=None
+        # so we skip silently in that case.
+        if thumbnail is not None and thumbnail.id_signal and thumbnail.signal_type:
+            await self._fetch_and_store_full_image(installation, device, thumbnail)
+
         return image_bytes
 
     async def fetch_latest_thumbnail(
@@ -372,6 +382,44 @@ class SecuritasHub:
                 installation.number,
                 camera_device.zone_id,
             )
+
+        if thumbnail.id_signal and thumbnail.signal_type:
+            await self._fetch_and_store_full_image(installation, camera_device, thumbnail)
+
+    async def _fetch_and_store_full_image(
+        self,
+        installation: Installation,
+        camera_device: CameraDevice,
+        thumbnail,
+    ) -> None:
+        """Fetch the full-resolution photo and store it, then notify the frontend."""
+        try:
+            full_bytes = await self._api_queue.submit(
+                self.session.get_photo_images,
+                installation,
+                thumbnail.id_signal,
+                thumbnail.signal_type,
+                priority=ApiQueue.BACKGROUND,
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "[hub] Could not fetch full image for %s", camera_device.name
+            )
+            return
+
+        if not full_bytes or not full_bytes.startswith(b"\xff\xd8"):
+            _LOGGER.debug(
+                "[hub] Full image for %s is not valid JPEG", camera_device.name
+            )
+            return
+
+        key = f"{installation.number}_{camera_device.zone_id}"
+        self._full_images[key] = full_bytes
+        if thumbnail.timestamp:
+            self._full_timestamps[key] = thumbnail.timestamp
+        async_dispatcher_send(
+            self.hass, SIGNAL_FULL_IMAGE_UPDATE, installation.number, camera_device.zone_id
+        )
 
     def _validate_and_store_image(
         self,
@@ -409,6 +457,14 @@ class SecuritasHub:
     ) -> str | None:
         """Return the timestamp of the last captured image."""
         return self.camera_timestamps.get(f"{installation_number}_{zone_id}")
+
+    def get_full_image(self, installation_number: str, zone_id: str) -> bytes | None:
+        """Return the last full-resolution image for a camera."""
+        return self._full_images.get(f"{installation_number}_{zone_id}")
+
+    def get_full_timestamp(self, installation_number: str, zone_id: str) -> str | None:
+        """Return the timestamp of the last full-resolution image."""
+        return self._full_timestamps.get(f"{installation_number}_{zone_id}")
 
     def _max_poll_attempts(self, timeout_seconds: int = 30) -> int:
         """Calculate max polling attempts for a given timeout."""

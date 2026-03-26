@@ -235,3 +235,12 @@ GET_THUMBNAIL_QUERY = (
     " idSignal deviceId deviceCode deviceAlias timestamp"
     " signalType image type quality } }"
 )
+
+GET_PHOTO_IMAGES_QUERY = (
+    "query mkGetPhotoImages($numinst: String!, $idSignal: String!,"
+    " $signalType: String!, $panel: String!) {"
+    " xSGetPhotoImages(numinst: $numinst, idsignal: $idSignal,"
+    " signaltype: $signalType, panel: $panel) {"
+    " devices { id idSignal code name quality"
+    " images { id image type } } } }"
+)

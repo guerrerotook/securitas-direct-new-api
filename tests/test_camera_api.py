@@ -176,7 +176,9 @@ class TestGetDeviceList:
     async def test_yr_pir_camera_with_null_zone_id(
         self, authed_api, mock_execute, installation
     ):
-        """YR (PIR camera) devices have zoneId=null; zone_id should fall back to device id."""
+        """YR (PIR camera) devices have zoneId=null; zone_id should be constructed
+        from device type + zero-padded code (e.g. YR05).  Falls back to device id
+        only when code is non-numeric."""
         mock_execute.return_value = {
             "data": {
                 "xSDeviceList": {
@@ -206,8 +208,34 @@ class TestGetDeviceList:
         }
         result = await authed_api.get_device_list(installation)
         assert len(result) == 2
-        assert result[0].zone_id == "11"
-        assert result[1].zone_id == "12"
+        assert result[0].zone_id == "YR05"
+        assert result[1].zone_id == "YR06"
+
+    async def test_yr_non_numeric_code_falls_back_to_id(
+        self, authed_api, mock_execute, installation
+    ):
+        """If code is non-numeric, zone_id falls back to the device id."""
+        mock_execute.return_value = {
+            "data": {
+                "xSDeviceList": {
+                    "res": "OK",
+                    "devices": [
+                        {
+                            "id": "7",
+                            "code": "X1",
+                            "zoneId": None,
+                            "name": "Unknown Cam",
+                            "type": "YR",
+                            "isActive": None,
+                            "serialNumber": None,
+                        },
+                    ],
+                }
+            }
+        }
+        result = await authed_api.get_device_list(installation)
+        assert len(result) == 1
+        assert result[0].zone_id == "7"
 
     async def test_yp_perimetral_camera(self, authed_api, mock_execute, installation):
         """YP perimetral exterior cameras should be included."""
@@ -544,6 +572,8 @@ class TestCaptureImagePolling:
         hub.hass = hass
         hub.camera_images = {}
         hub.camera_timestamps = {}
+        hub._full_images = {}
+        hub._full_timestamps = {}
         hub._camera_capturing = set()
         hub.session = AsyncMock()
         hub.session.delay_check_operation = 0
@@ -631,13 +661,128 @@ class TestCaptureImagePolling:
 
         baseline_thumb = ThumbnailResponse(id_signal="SIG-001", image=image)
         status_done = {"res": "OK", "msg": "alarm-manager.photo-request.success"}
-        new_thumb = ThumbnailResponse(id_signal="SIG-002", image=image)
+        new_thumb = ThumbnailResponse(id_signal="SIG-002", image=image, signal_type="16")
 
         hub._api_queue.submit = AsyncMock(
-            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb]
+            side_effect=[baseline_thumb, "ref-id", status_done, new_thumb, b"\xff\xd8fullimg"]
         )
 
         result = await hub.capture_image(installation, camera_device)
 
         assert result is not None
-        assert hub._api_queue.submit.call_count == 4
+        assert hub._api_queue.submit.call_count == 5
+
+
+class TestGetPhotoImages:
+    """Tests for ApiManager.get_photo_images."""
+
+    PHOTO_IMAGES_RESPONSE = {
+        "data": {
+            "xSGetPhotoImages": {
+                "devices": [
+                    {
+                        "id": "0",
+                        "idSignal": "734492861",
+                        "code": "YR02",
+                        "name": "SALA",
+                        "quality": None,
+                        "images": [
+                            {"id": "1", "image": "/9j/4AAQSkZJRgABhelloLONG==", "type": "BINARY"},
+                            {"id": "0", "image": "/9j/4AAQShort==", "type": "BINARY"},
+                            {"id": "2", "image": "/9j/4A==", "type": "BINARY"},
+                        ],
+                    }
+                ]
+            }
+        }
+    }
+
+    async def test_returns_largest_binary_image(
+        self, authed_api, mock_execute, installation
+    ):
+        """Should pick the BINARY image with the largest base64 payload."""
+        import base64
+
+        mock_execute.return_value = self.PHOTO_IMAGES_RESPONSE
+        result = await authed_api.get_photo_images(
+            installation, id_signal="734492861", signal_type="16"
+        )
+        assert result is not None
+        # The largest base64 string is id=1 ("/9j/4AAQSkZJRgABhelloLONG==")
+        expected = base64.b64decode("/9j/4AAQSkZJRgABhelloLONG==")
+        assert result == expected
+
+    async def test_empty_devices_returns_none(
+        self, authed_api, mock_execute, installation
+    ):
+        """When the devices list is empty, return None."""
+        mock_execute.return_value = {
+            "data": {"xSGetPhotoImages": {"devices": []}}
+        }
+        result = await authed_api.get_photo_images(
+            installation, id_signal="123", signal_type="16"
+        )
+        assert result is None
+
+    async def test_empty_images_returns_none(
+        self, authed_api, mock_execute, installation
+    ):
+        """When the images list is empty, return None."""
+        mock_execute.return_value = {
+            "data": {
+                "xSGetPhotoImages": {
+                    "devices": [
+                        {"id": "0", "idSignal": "123", "code": "YR02",
+                         "name": "SALA", "quality": None, "images": []}
+                    ]
+                }
+            }
+        }
+        result = await authed_api.get_photo_images(
+            installation, id_signal="123", signal_type="16"
+        )
+        assert result is None
+
+    async def test_no_binary_images_returns_none(
+        self, authed_api, mock_execute, installation
+    ):
+        """When all images have a non-BINARY type, return None."""
+        mock_execute.return_value = {
+            "data": {
+                "xSGetPhotoImages": {
+                    "devices": [
+                        {
+                            "id": "0",
+                            "idSignal": "123",
+                            "code": "YR02",
+                            "name": "SALA",
+                            "quality": None,
+                            "images": [
+                                {"id": "1", "image": "data==", "type": "URL"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+        result = await authed_api.get_photo_images(
+            installation, id_signal="123", signal_type="16"
+        )
+        assert result is None
+
+    async def test_sends_correct_variables(
+        self, authed_api, mock_execute, installation
+    ):
+        """Verify the GraphQL variables are passed correctly."""
+        mock_execute.return_value = {
+            "data": {"xSGetPhotoImages": {"devices": []}}
+        }
+        await authed_api.get_photo_images(
+            installation, id_signal="555", signal_type="16"
+        )
+        call_args = mock_execute.call_args
+        variables = call_args[0][0]["variables"]
+        assert variables["numinst"] == installation.number
+        assert variables["idSignal"] == "555"
+        assert variables["signalType"] == "16"
+        assert variables["panel"] == installation.panel

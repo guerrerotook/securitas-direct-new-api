@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import datetime
 import logging
 import secrets
@@ -47,6 +48,7 @@ from .graphql_queries import (
     DISARM_STATUS_QUERY,
     GENERAL_STATUS_QUERY,
     GET_EXCEPTIONS_QUERY,
+    GET_PHOTO_IMAGES_QUERY,
     GET_THUMBNAIL_QUERY,
     INSTALLATION_LIST_QUERY,
     LOCK_CURRENT_MODE_QUERY,
@@ -977,7 +979,15 @@ class ApiManager(SecuritasHttpClient):
             CameraDevice(
                 id=d["id"],
                 code=int(d["code"]),
-                zone_id=d["zoneId"] or d["id"],
+                zone_id=(
+                    d["zoneId"]
+                    or (
+                        f"{d['type']}{int(d['code']):02d}"
+                        if str(d.get("code", "")).isdigit()
+                        else None
+                    )
+                    or d["id"]
+                ),
                 name=d["name"],
                 device_type=d["type"],
                 serial_number=d.get("serialNumber"),
@@ -1056,3 +1066,38 @@ class ApiManager(SecuritasHttpClient):
             signal_type=raw.get("signalType"),
             image=raw.get("image"),
         )
+
+    async def get_photo_images(
+        self, installation: Installation, id_signal: str, signal_type: str
+    ) -> bytes | None:
+        """Fetch the full-resolution images for a completed capture.
+
+        Uses the idSignal obtained from get_thumbnail to call xSGetPhotoImages.
+        Returns the decoded JPEG bytes of the highest-quality BINARY image, or
+        None if no usable image is found.
+        """
+        content = {
+            "operationName": "mkGetPhotoImages",
+            "variables": {
+                "numinst": installation.number,
+                "idSignal": id_signal,
+                "signalType": signal_type,
+                "panel": installation.panel,
+            },
+            "query": GET_PHOTO_IMAGES_QUERY,
+        }
+        raw = await self._execute_graphql(
+            content, "mkGetPhotoImages", "xSGetPhotoImages", installation, check_ok=False
+        )
+        devices = raw.get("devices") or []
+        if not devices:
+            return None
+        images = devices[0].get("images") or []
+        binary_images = [img for img in images if img.get("type") == "BINARY" and img.get("image")]
+        if not binary_images:
+            return None
+        best = max(binary_images, key=lambda img: len(img["image"]))
+        try:
+            return base64.b64decode(best["image"])
+        except Exception:  # noqa: BLE001
+            return None
