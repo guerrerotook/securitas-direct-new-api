@@ -798,7 +798,7 @@ class TestSecuritasLockActions:
     async def test_async_lock_stale_poll_trusts_api(self):
         """When API still returns pre-command state, we trust it."""
         # Lock starts open ("1"), we lock it, but the API still returns "1".
-        # After the 6s wait the API should normally have the new state, but
+        # After the min wait the API should normally have the new state, but
         # if it doesn't, we trust what the API says rather than guess.
         lock = make_lock(initial_status="1", poll_status="1")
         lock.client.change_lock_mode = AsyncMock(return_value=None)
@@ -848,6 +848,56 @@ class TestSecuritasLockActions:
 
         # Exception → UNKNOWN → optimistic "2" (locked)
         assert lock._state == "2"
+
+    async def test_operation_in_progress_set_during_lock(self):
+        """_operation_in_progress is True while change_lock_mode runs."""
+        lock = make_lock(poll_status="2")
+        observed = []
+
+        async def capture_flag(installation, lock_mode, device_id=None):
+            observed.append(lock._operation_in_progress)
+
+        lock.client.change_lock_mode = AsyncMock(side_effect=capture_flag)
+
+        await lock.async_lock()
+
+        assert observed == [True]
+        assert lock._operation_in_progress is False
+
+    async def test_operation_in_progress_cleared_on_error(self):
+        """_operation_in_progress is cleared even when the command fails."""
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(
+            side_effect=SecuritasDirectError("fail")
+        )
+
+        await lock.async_lock()
+
+        assert lock._operation_in_progress is False
+
+    async def test_operation_in_progress_cleared_on_poll_exception(self):
+        """_operation_in_progress is cleared when the post-command poll raises."""
+        lock = make_lock()
+        lock.client.change_lock_mode = AsyncMock(return_value=None)
+        lock.client.get_lock_modes = AsyncMock(side_effect=Exception("boom"))
+
+        await lock.async_lock()
+
+        assert lock._operation_in_progress is False
+
+    async def test_update_status_skipped_during_lock_operation(self):
+        """async_update_status is a no-op while a lock command is in flight."""
+        lock = make_lock()
+        lock._operation_in_progress = True
+        lock.client.get_lock_modes = AsyncMock(
+            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
+        )
+
+        await lock.async_update_status()
+
+        # Poll was skipped — state unchanged, API not called
+        assert lock._state == "2"
+        lock.client.get_lock_modes.assert_not_awaited()
 
 
 class TestSecuritasLockUpdateStatus:

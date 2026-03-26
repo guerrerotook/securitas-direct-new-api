@@ -116,6 +116,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._update_interval: timedelta = timedelta(seconds=scan_seconds)
         self._scan_seconds = scan_seconds
         self._update_unsub: Callable[[], None] | None = None
+        self._operation_in_progress: bool = False
 
     async def async_added_to_hass(self) -> None:
         """Register timer when entity is added to HA."""
@@ -142,6 +143,12 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
     async def async_update_status(self, _now=None) -> None:
         """Poll lock status from the API."""
         if self.hass is None:
+            return
+        if self._operation_in_progress:
+            _LOGGER.debug(
+                "[%s] Skipping status poll - lock operation in progress",
+                self.entity_id,
+            )
             return
 
         try:
@@ -220,36 +227,40 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         command (which waits for the lock to physically act), then fetches
         the actual lock status from the API.
         """
+        self._operation_in_progress = True
         self._force_state(transitional_state)
         try:
-            await self.client.change_lock_mode(
-                self.installation, lock_state, self._device_id
-            )
-        except SecuritasDirectError as err:
-            self._state = self._last_state
+            try:
+                await self.client.change_lock_mode(
+                    self.installation, lock_state, self._device_id
+                )
+            except SecuritasDirectError as err:
+                self._state = self._last_state
+                self.async_write_ha_state()
+                _LOGGER.error(
+                    "%s operation failed for %s device %s: %s",
+                    operation,
+                    self.installation.number,
+                    self._device_id,
+                    err.log_detail(),
+                )
+                return
+
+            # Fetch the real status from the API now that the lock has had
+            # time to act.  Catch broadly: aiohttp can raise TimeoutError,
+            # ClientError etc. in addition to SecuritasDirectError.
+            try:
+                real_state = await self.get_lock_state(priority=ApiQueue.FOREGROUND)
+            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                real_state = LOCK_STATUS_UNKNOWN
+
+            if real_state != LOCK_STATUS_UNKNOWN:
+                self._state = real_state
+            else:
+                self._state = optimistic_state
             self.async_write_ha_state()
-            _LOGGER.error(
-                "%s operation failed for %s device %s: %s",
-                operation,
-                self.installation.number,
-                self._device_id,
-                err.log_detail(),
-            )
-            return
-
-        # Fetch the real status from the API now that the lock has had
-        # time to act.  Catch broadly: aiohttp can raise TimeoutError,
-        # ClientError etc. in addition to SecuritasDirectError.
-        try:
-            real_state = await self.get_lock_state(priority=ApiQueue.FOREGROUND)
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-            real_state = LOCK_STATUS_UNKNOWN
-
-        if real_state != LOCK_STATUS_UNKNOWN:
-            self._state = real_state
-        else:
-            self._state = optimistic_state
-        self.async_write_ha_state()
+        finally:
+            self._operation_in_progress = False
 
     async def async_lock(self, **kwargs):
         await self._change_lock_mode(

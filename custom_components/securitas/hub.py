@@ -715,10 +715,11 @@ class SecuritasHub:
 
     # Minimum time (seconds) to wait after sending a lock command before
     # polling for the new lock status.  The backend typically returns
-    # error_status_not_found within ~3s, but the lock needs ~5s to
-    # physically act.  We wait at least this long (or until we get the
-    # acknowledgement, whichever is later) before reading the new state.
-    _LOCK_CMD_MIN_WAIT: float = 6.0
+    # error_status_not_found within ~3s, but the lock needs ~6s to
+    # start moving and ~4.5s to complete.  We wait at least this long
+    # (or until we get the acknowledgement, whichever is later) before
+    # reading the new state.
+    _LOCK_CMD_MIN_WAIT: float = 15.0
 
     async def change_lock_mode(
         self, installation: Installation, lock_state: bool, device_id: str
