@@ -1,4 +1,4 @@
-"""Tests for securitas_direct_new_api constants."""
+"""Tests for integration and securitas_direct_new_api constants."""
 
 import pytest
 
@@ -29,15 +29,6 @@ class TestSentinelServiceNames:
 
     def test_is_frozenset(self):
         assert isinstance(SENTINEL_SERVICE_NAMES, frozenset)
-
-    @pytest.mark.parametrize(
-        "service_name",
-        sorted(SENTINEL_SERVICE_NAMES),
-        ids=sorted(SENTINEL_SERVICE_NAMES),
-    )
-    def test_each_name_would_be_discovered(self, service_name):
-        """Every name in the set should match the discovery check in sensor.py."""
-        assert service_name in SENTINEL_SERVICE_NAMES
 
     def test_unrelated_service_not_matched(self):
         assert "ALARM" not in SENTINEL_SERVICE_NAMES
