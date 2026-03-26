@@ -960,7 +960,7 @@ class ApiManager(SecuritasHttpClient):
         return data["referenceId"]
 
     async def get_device_list(self, installation: Installation) -> list[CameraDevice]:
-        """Get list of camera devices (QR, YR, YP) for an installation."""
+        """Get list of camera devices (QR, YR, YP, QP) for an installation."""
         content = {
             "operationName": "xSDeviceList",
             "variables": {
@@ -973,18 +973,22 @@ class ApiManager(SecuritasHttpClient):
             content, "xSDeviceList", "xSDeviceList", installation, check_ok=False
         )
         devices = raw.get("devices", [])
-        return [
-            CameraDevice(
-                id=d["id"],
-                code=int(d["code"]),
-                zone_id=d["zoneId"] or f"{d['type']}{int(d['code']):02d}",
-                name=d["name"],
-                device_type=d["type"],
-                serial_number=d.get("serialNumber"),
+        result: list[CameraDevice] = []
+        for d in devices:
+            if d.get("type") not in CAMERA_DEVICE_TYPES or d.get("isActive") is False:
+                continue
+            code = int(d["code"])
+            result.append(
+                CameraDevice(
+                    id=d["id"],
+                    code=code,
+                    zone_id=d["zoneId"] or f"{d['type']}{code:02d}",
+                    name=d["name"],
+                    device_type=d["type"],
+                    serial_number=d.get("serialNumber"),
+                )
             )
-            for d in devices
-            if d.get("type") in CAMERA_DEVICE_TYPES and d.get("isActive") is not False
-        ]
+        return result
 
     async def request_images(
         self, installation: Installation, device_code: int, device_type: str = "QR"
