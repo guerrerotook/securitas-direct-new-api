@@ -40,6 +40,8 @@ class SecuritasCameraCardEditor extends HTMLElement {
     this._hass = hass;
     const entityForm = this.shadowRoot.getElementById("entity-form");
     if (entityForm) entityForm.hass = hass;
+    const fullForm = this.shadowRoot.getElementById("full-entity-form");
+    if (fullForm) fullForm.hass = hass;
   }
 
   setConfig(config) {
@@ -48,10 +50,12 @@ class SecuritasCameraCardEditor extends HTMLElement {
       // First call — build the DOM once
       this._render();
     } else {
-      // Subsequent calls (HA bouncing config back) — update entity picker in place,
+      // Subsequent calls (HA bouncing config back) — update pickers in place,
       // never touch the name textfield so focus is preserved while typing
       const entityForm = this.shadowRoot.getElementById("entity-form");
       if (entityForm) entityForm.data = { entity: this._config.entity || "" };
+      const fullForm = this.shadowRoot.getElementById("full-entity-form");
+      if (fullForm) fullForm.data = { full_entity: this._config.full_entity || "" };
     }
   }
 
@@ -63,6 +67,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
+        <ha-form id="full-entity-form"></ha-form>
         <div id="name-slot"></div>
       </div>`;
 
@@ -80,6 +85,25 @@ class SecuritasCameraCardEditor extends HTMLElement {
         this._config = { ...this._config, entity: newEntity };
         this._fireChanged();
       }
+    });
+
+    // Full-resolution entity picker (optional)
+    const fullForm = this.shadowRoot.getElementById("full-entity-form");
+    fullForm.hass = this._hass;
+    fullForm.data = { full_entity: this._config.full_entity || "" };
+    fullForm.schema = [
+      { name: "full_entity", selector: { entity: { domain: "camera" } } },
+    ];
+    fullForm.computeLabel = () => "Full Image Entity (optional)";
+    fullForm.addEventListener("value-changed", (e) => {
+      const val = e.detail.value?.full_entity;
+      if (val) {
+        this._config = { ...this._config, full_entity: val };
+      } else {
+        const { full_entity: _, ...rest } = this._config;
+        this._config = rest;
+      }
+      this._fireChanged();
     });
 
     // Name field — ha-textfield with input event (no value-changed → no re-render cycle)
