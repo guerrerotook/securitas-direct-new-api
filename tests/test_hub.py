@@ -749,7 +749,9 @@ class TestFullImageCapture:
         full_jpeg = b"\xff\xd8\xff\xe0full"
         baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
         new_thumb = make_thumbnail(
-            id_signal="sig2", image="base64data", timestamp="2026-03-11 10:01:00",
+            id_signal="sig2",
+            image="base64data",
+            timestamp="2026-03-11 10:01:00",
             signal_type="16",
         )
         hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
@@ -760,8 +762,13 @@ class TestFullImageCapture:
         hub.session.get_photo_images = AsyncMock(return_value=full_jpeg)
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
 
+        _tasks = []
+        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+
         with patch("custom_components.securitas.hub.async_dispatcher_send"):
             await hub.capture_image(installation, device)
+            for task in _tasks:
+                await task
 
         key = f"{installation.number}_{device.zone_id}"
         assert hub._full_images[key] == full_jpeg
@@ -777,7 +784,9 @@ class TestFullImageCapture:
         full_jpeg = b"\xff\xd8\xff\xe0full"
         baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
         new_thumb = make_thumbnail(
-            id_signal="sig2", image="base64data", timestamp="2026-03-11 10:01:00",
+            id_signal="sig2",
+            image="base64data",
+            timestamp="2026-03-11 10:01:00",
             signal_type="16",
         )
         hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
@@ -788,12 +797,17 @@ class TestFullImageCapture:
         hub.session.get_photo_images = AsyncMock(return_value=full_jpeg)
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
 
+        _tasks = []
+        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+
         calls = []
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
             side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
+            for task in _tasks:
+                await task
 
         signal_names = [c[1] for c in calls]
         assert SIGNAL_FULL_IMAGE_UPDATE in signal_names
@@ -808,7 +822,9 @@ class TestFullImageCapture:
 
         baseline = make_thumbnail(id_signal=None, timestamp="2026-03-11 10:00:00")
         new_thumb = make_thumbnail(
-            id_signal=None, image="newbase64", timestamp="2026-03-11 10:01:00",
+            id_signal=None,
+            image="newbase64",
+            timestamp="2026-03-11 10:01:00",
         )
         hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
         hub.session.request_images = AsyncMock(return_value="ref-001")
@@ -846,7 +862,9 @@ class TestFullImageCapture:
 
         key = f"{installation.number}_{device.zone_id}"
         hub._full_images[key] = b"\xff\xd8full"
-        assert hub.get_full_image(installation.number, device.zone_id) == b"\xff\xd8full"
+        assert (
+            hub.get_full_image(installation.number, device.zone_id) == b"\xff\xd8full"
+        )
 
     async def test_get_full_timestamp_returns_stored_value(self):
         """get_full_timestamp returns the timestamp stored alongside the full image."""
@@ -856,7 +874,10 @@ class TestFullImageCapture:
 
         key = f"{installation.number}_{device.zone_id}"
         hub._full_timestamps[key] = "2026-03-25 17:40:41"
-        assert hub.get_full_timestamp(installation.number, device.zone_id) == "2026-03-25 17:40:41"
+        assert (
+            hub.get_full_timestamp(installation.number, device.zone_id)
+            == "2026-03-25 17:40:41"
+        )
 
     async def test_fetch_latest_thumbnail_also_fetches_full_image(self):
         """fetch_latest_thumbnail fires SIGNAL_FULL_IMAGE_UPDATE when id_signal is set."""
@@ -868,12 +889,17 @@ class TestFullImageCapture:
 
         full_jpeg = b"\xff\xd8\xff\xe0full"
         thumb = make_thumbnail(
-            id_signal="sig1", image="base64data", timestamp="2026-03-11 10:00:00",
+            id_signal="sig1",
+            image="base64data",
+            timestamp="2026-03-11 10:00:00",
             signal_type="16",
         )
         hub.session.get_thumbnail = AsyncMock(return_value=thumb)
         hub.session.get_photo_images = AsyncMock(return_value=full_jpeg)
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        _tasks = []
+        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
         calls = []
         with patch(
@@ -881,8 +907,91 @@ class TestFullImageCapture:
             side_effect=lambda *a: calls.append(a),
         ):
             await hub.fetch_latest_thumbnail(installation, device)
+            for task in _tasks:
+                await task
 
         signal_names = [c[1] for c in calls]
         assert SIGNAL_FULL_IMAGE_UPDATE in signal_names
         key = f"{installation.number}_{device.zone_id}"
         assert hub._full_images[key] == full_jpeg
+
+    async def test_full_image_not_stored_when_not_jpeg(self):
+        """When get_photo_images returns non-JPEG bytes, the full image is not stored."""
+        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
+
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        non_jpeg = b"\x89PNG\r\n\x1a\nfakedata"
+        baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
+        new_thumb = make_thumbnail(
+            id_signal="sig2",
+            image="base64data",
+            timestamp="2026-03-11 10:01:00",
+            signal_type="16",
+        )
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        )
+        hub.session.get_photo_images = AsyncMock(return_value=non_jpeg)
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        _tasks = []
+        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+
+        calls = []
+        with patch(
+            "custom_components.securitas.hub.async_dispatcher_send",
+            side_effect=lambda *a: calls.append(a),
+        ):
+            await hub.capture_image(installation, device)
+            for task in _tasks:
+                await task
+
+        key = f"{installation.number}_{device.zone_id}"
+        assert key not in hub._full_images
+        signal_names = [c[1] for c in calls]
+        assert SIGNAL_FULL_IMAGE_UPDATE not in signal_names
+
+    async def test_full_image_not_stored_when_get_photo_images_returns_none(self):
+        """When get_photo_images returns None, the full image is not stored."""
+        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
+
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+
+        baseline = make_thumbnail(id_signal="sig1", timestamp="2026-03-11 10:00:00")
+        new_thumb = make_thumbnail(
+            id_signal="sig2",
+            image="base64data",
+            timestamp="2026-03-11 10:01:00",
+            signal_type="16",
+        )
+        hub.session.get_thumbnail = AsyncMock(side_effect=[baseline, new_thumb])
+        hub.session.request_images = AsyncMock(return_value="ref-001")
+        hub.session.check_request_images_status = AsyncMock(
+            return_value={"res": "OK", "msg": "alarm-manager.photo-request.success"}
+        )
+        hub.session.get_photo_images = AsyncMock(return_value=None)
+        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+
+        _tasks = []
+        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+
+        calls = []
+        with patch(
+            "custom_components.securitas.hub.async_dispatcher_send",
+            side_effect=lambda *a: calls.append(a),
+        ):
+            await hub.capture_image(installation, device)
+            for task in _tasks:
+                await task
+
+        key = f"{installation.number}_{device.zone_id}"
+        assert key not in hub._full_images
+        signal_names = [c[1] for c in calls]
+        assert SIGNAL_FULL_IMAGE_UPDATE not in signal_names

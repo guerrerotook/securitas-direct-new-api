@@ -1,5 +1,6 @@
 """Tests for CameraDevice, ThumbnailResponse dataclasses, and camera API methods."""
 
+import base64
 from unittest.mock import AsyncMock
 
 import pytest
@@ -710,6 +711,11 @@ class TestCaptureImagePolling:
 class TestGetPhotoImages:
     """Tests for ApiManager.get_photo_images."""
 
+    # Valid base64 strings with JPEG header bytes for testing size selection
+    _IMG_LARGE = base64.b64encode(b"\xff\xd8\xff\xe0" + b"x" * 100).decode()
+    _IMG_MEDIUM = base64.b64encode(b"\xff\xd8\xff\xe0" + b"y" * 50).decode()
+    _IMG_SMALL = base64.b64encode(b"\xff\xd8\xff\xe0" + b"z" * 10).decode()
+
     PHOTO_IMAGES_RESPONSE = {
         "data": {
             "xSGetPhotoImages": {
@@ -723,11 +729,11 @@ class TestGetPhotoImages:
                         "images": [
                             {
                                 "id": "1",
-                                "image": "/9j/4AAQSkZJRgABhelloLONG==",
+                                "image": _IMG_LARGE,
                                 "type": "BINARY",
                             },
-                            {"id": "0", "image": "/9j/4AAQShort==", "type": "BINARY"},
-                            {"id": "2", "image": "/9j/4A==", "type": "BINARY"},
+                            {"id": "0", "image": _IMG_MEDIUM, "type": "BINARY"},
+                            {"id": "2", "image": _IMG_SMALL, "type": "BINARY"},
                         ],
                     }
                 ]
@@ -739,15 +745,13 @@ class TestGetPhotoImages:
         self, authed_api, mock_execute, installation
     ):
         """Should pick the BINARY image with the largest base64 payload."""
-        import base64
-
         mock_execute.return_value = self.PHOTO_IMAGES_RESPONSE
         result = await authed_api.get_photo_images(
             installation, id_signal="734492861", signal_type="16"
         )
         assert result is not None
-        # The largest base64 string is id=1 ("/9j/4AAQSkZJRgABhelloLONG==")
-        expected = base64.b64decode("/9j/4AAQSkZJRgABhelloLONG==")
+        # The largest base64 string is id=1 (_IMG_LARGE)
+        expected = base64.b64decode(self._IMG_LARGE)
         assert result == expected
 
     async def test_empty_devices_returns_none(
