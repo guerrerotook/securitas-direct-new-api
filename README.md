@@ -281,11 +281,18 @@ Lock features (latch hold-back time, auto-lock settings) are fetched from the lo
 
 ## Cameras
 
-If your installation includes Securitas cameras, the integration creates a camera entity showing the last captured image. A **Capture** button entity is also created for each camera, allowing you to request a new image on demand.
+If your installation includes Securitas cameras, the integration creates two camera entities per physical camera:
+
+- **`camera.<name>`** — the thumbnail image, updated after each capture.
+- **`camera.<name>_full_image`** — the full-resolution image fetched from the API after each capture.
+
+A **Capture** button entity is also created for each camera, allowing you to request a new image on demand.
 
 QR-type cameras, YR-type PIR cameras, and YP/QP perimetral (outdoor) cameras are all supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
 
 When the capture button is pressed, the integration checks whether any images were taken since the last update (e.g. via the Securitas app or web portal) and displays them immediately, even before the newly requested capture arrives.
+
+> **Note:** Images are fetched from the API queue and may take up to 30 seconds to appear after a capture completes, depending on queue depth.
 
 ### Custom Camera Card
 
@@ -293,19 +300,24 @@ The integration also ships with a custom Lovelace card (`securitas-camera-card`)
 
 ![Camera Card](./docs/images/camera-card.png)
 
-It shows the latest image with:
+It shows the latest thumbnail image with:
 
 - **Capture button** — shown in the top-right corner, requests a new photograph
 - **Timestamp overlay** — displays when the image was taken, with a relative time and an absolute tooltip
-- **Click to open** — click the image to open a larger image
+- **Click to open** — clicking the image opens the HA more-info dialog. If a full-resolution image is available (auto-discovered from the same device), it opens the full-resolution entity; otherwise the thumbnail entity.
 
 The card is registered automatically when the integration loads. To add it to your dashboard, click **Add Card → Search for "Securitas Camera Card"** and pick your camera entity from the dropdown.
 
 ```yaml
 type: custom:securitas-camera-card
-entity: camera.securitas_front_door
-name: Front Door # optional — overrides the entity friendly name
+entity: camera.sala              # thumbnail entity (required)
+name: Sala                       # optional — overrides the entity friendly name
 ```
+
+| Option | Required | Description |
+|---|---|---|
+| `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
+| `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
 ## Troubleshooting
 

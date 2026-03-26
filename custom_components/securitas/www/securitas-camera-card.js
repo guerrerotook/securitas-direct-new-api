@@ -4,11 +4,13 @@
  * Displays the latest image from a Securitas Direct camera entity with:
  *  - Auto-discovered refresh (capture) button in the top-right corner
  *  - Image timestamp overlay (relative + absolute tooltip)
- *  - Click to open HA more-info dialog
+ *  - Click to open the HA more-info dialog: for the auto-discovered
+ *    full-resolution entity if available, otherwise the thumbnail entity
  *
  * Card config:
  *   type: custom:securitas-camera-card
- *   entity: camera.securitas_front_door
+ *   entity: camera.sala             # thumbnail entity (required)
+ *   name: Sala                       # optional display name
  *   name: Front Door   # optional — overrides the device name
  */
 
@@ -36,6 +38,8 @@ class SecuritasCameraCardEditor extends HTMLElement {
     this._hass = hass;
     const entityForm = this.shadowRoot.getElementById("entity-form");
     if (entityForm) entityForm.hass = hass;
+    const fullForm = this.shadowRoot.getElementById("full-entity-form");
+    if (fullForm) fullForm.hass = hass;
   }
 
   setConfig(config) {
@@ -44,7 +48,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
       // First call — build the DOM once
       this._render();
     } else {
-      // Subsequent calls (HA bouncing config back) — update entity picker in place,
+      // Subsequent calls (HA bouncing config back) — update pickers in place,
       // never touch the name textfield so focus is preserved while typing
       const entityForm = this.shadowRoot.getElementById("entity-form");
       if (entityForm) entityForm.data = { entity: this._config.entity || "" };
@@ -114,6 +118,7 @@ class SecuritasCameraCard extends HTMLElement {
     this._config = {};
     this._hass = null;
     this._captureEntityId = null;
+    this._fullEntityId = null;
     this._refreshing = false;
     this._fallbackTimer = null;
   }
@@ -128,6 +133,7 @@ class SecuritasCameraCard extends HTMLElement {
     const newToken = hass?.states[this._config.entity]?.attributes?.access_token;
     this._hass = hass;
     this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
+    this._fullEntityId = this._findFullEntity(hass, this._config.entity);
     // Clear spinner when the image token rotates (new image available) and
     // the capture is no longer in progress (capturing=false means final image).
     const capturing = hass?.states[this._config.entity]?.attributes?.capturing;
@@ -165,6 +171,10 @@ class SecuritasCameraCard extends HTMLElement {
     const timestamp = stateObj.attributes.image_timestamp;
     const { relative, absolute } = this._formatTimestamp(timestamp);
     const hasCapture = !!this._captureEntityId;
+    // Only use the full entity if it has a real image (non-null timestamp).
+    // PIR cameras may not support full-resolution images.
+    const fullState = this._fullEntityId ? this._hass?.states[this._fullEntityId] : null;
+    const hasFull = !!fullState?.attributes?.image_timestamp;
 
     this.shadowRoot.innerHTML = `
     <style>
@@ -244,10 +254,10 @@ class SecuritasCameraCard extends HTMLElement {
       </div>
     </ha-card>`;
 
-    // Click image → more-info dialog (but not if clicking the refresh button)
+    // Click image → more-info for full entity (if configured) or thumbnail entity
     this.shadowRoot.getElementById("img-wrapper").addEventListener("click", (e) => {
       if (e.target.closest("#refresh-btn")) return;
-      this._openMoreInfo();
+      this._openMoreInfo(hasFull ? this._fullEntityId : this._config.entity);
     });
 
     // Refresh button
@@ -275,9 +285,9 @@ class SecuritasCameraCard extends HTMLElement {
     return { relative: `${Math.round(diffHr / 24)}d ago`, absolute };
   }
 
-  _openMoreInfo() {
+  _openMoreInfo(entityId) {
     this.dispatchEvent(new CustomEvent("hass-more-info", {
-      detail: { entityId: this._config.entity },
+      detail: { entityId: entityId || this._config.entity },
       bubbles: true,
       composed: true,
     }));
@@ -317,6 +327,21 @@ class SecuritasCameraCard extends HTMLElement {
       if (entry.device_id !== deviceId) continue;
       const stateObj = hass.states[eid];
       if (stateObj?.attributes?.icon === "mdi:camera") return eid;
+    }
+    return null;
+  }
+
+  _findFullEntity(hass, cameraEntityId) {
+    if (!hass?.entities || !cameraEntityId) return null;
+    const cameraEntry = hass.entities[cameraEntityId];
+    if (!cameraEntry?.device_id) return null;
+    const deviceId = cameraEntry.device_id;
+    // The full-resolution entity shares the same device and has a "_full_image" suffix.
+    for (const [eid, entry] of Object.entries(hass.entities)) {
+      if (!eid.startsWith("camera.")) continue;
+      if (eid === cameraEntityId) continue;
+      if (entry.device_id !== deviceId) continue;
+      if (eid.endsWith("_full_image")) return eid;
     }
     return null;
   }

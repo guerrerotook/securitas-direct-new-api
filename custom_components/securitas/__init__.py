@@ -55,6 +55,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     PLATFORMS,
     SIGNAL_CAMERA_STATE,
     SIGNAL_CAMERA_UPDATE,
+    SIGNAL_FULL_IMAGE_UPDATE,
     SIGNAL_XSSTATUS_UPDATE,
 )
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
@@ -446,7 +447,7 @@ async def _discover_cameras(
 ) -> None:
     """Discover camera devices for an installation and add entities."""
     from .button import SecuritasCaptureButton
-    from .camera import SecuritasCamera
+    from .camera import SecuritasCamera, SecuritasCameraFull
 
     _LOGGER.debug(
         "[camera_discovery] Fetching camera devices for installation %s (%s)",
@@ -481,7 +482,8 @@ async def _discover_cameras(
         )
         if camera_add:
             camera_add(
-                [SecuritasCamera(hub, installation, cam) for cam in cameras],
+                [SecuritasCamera(hub, installation, cam) for cam in cameras]
+                + [SecuritasCameraFull(hub, installation, cam) for cam in cameras],
                 False,
             )
         if button_add:
