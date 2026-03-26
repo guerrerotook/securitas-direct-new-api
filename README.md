@@ -318,7 +318,7 @@ name: Sala                       # optional — overrides the entity friendly na
 | Option | Required | Description |
 |---|---|---|
 | `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
-| `full_entity` | No | The full-resolution camera entity (`camera.<name>_full_image`). When set, clicking the image opens the more-info dialog for the full-resolution photo. |
+| `full_entity` | No | The full-resolution camera entity (`camera.<name>_full_image`). Auto-discovered from the same device if not set. When present, clicking the image opens the more-info dialog for the full-resolution photo. |
 | `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
 ## Troubleshooting

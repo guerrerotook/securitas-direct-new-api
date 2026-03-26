@@ -157,7 +157,7 @@ class SecuritasCameraCard extends HTMLElement {
     const newToken = hass?.states[this._config.entity]?.attributes?.access_token;
     this._hass = hass;
     this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
-    this._fullEntityId = this._config.full_entity || null;
+    this._fullEntityId = this._config.full_entity || this._findFullEntity(hass, this._config.entity);
     // Clear spinner when the image token rotates (new image available) and
     // the capture is no longer in progress (capturing=false means final image).
     const capturing = hass?.states[this._config.entity]?.attributes?.capturing;
@@ -348,6 +348,21 @@ class SecuritasCameraCard extends HTMLElement {
       if (entry.device_id !== deviceId) continue;
       const stateObj = hass.states[eid];
       if (stateObj?.attributes?.icon === "mdi:camera") return eid;
+    }
+    return null;
+  }
+
+  _findFullEntity(hass, cameraEntityId) {
+    if (!hass?.entities || !cameraEntityId) return null;
+    const cameraEntry = hass.entities[cameraEntityId];
+    if (!cameraEntry?.device_id) return null;
+    const deviceId = cameraEntry.device_id;
+    // The full-resolution entity shares the same device and has a "_full_image" suffix.
+    for (const [eid, entry] of Object.entries(hass.entities)) {
+      if (!eid.startsWith("camera.")) continue;
+      if (eid === cameraEntityId) continue;
+      if (entry.device_id !== deviceId) continue;
+      if (eid.endsWith("_full_image")) return eid;
     }
     return null;
   }
