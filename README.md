@@ -304,21 +304,19 @@ It shows the latest thumbnail image with:
 
 - **Capture button** — shown in the top-right corner, requests a new photograph
 - **Timestamp overlay** — displays when the image was taken, with a relative time and an absolute tooltip
-- **Click to open** — if `full_entity` is configured, clicking the image opens the HA more-info dialog for the full-resolution entity; otherwise it opens the more-info dialog for the thumbnail entity
+- **Click to open** — clicking the image opens the HA more-info dialog. If a full-resolution image is available (auto-discovered from the same device), it opens the full-resolution entity; otherwise the thumbnail entity.
 
 The card is registered automatically when the integration loads. To add it to your dashboard, click **Add Card → Search for "Securitas Camera Card"** and pick your camera entity from the dropdown.
 
 ```yaml
 type: custom:securitas-camera-card
 entity: camera.sala              # thumbnail entity (required)
-full_entity: camera.sala_full_image  # full-resolution entity (optional)
 name: Sala                       # optional — overrides the entity friendly name
 ```
 
 | Option | Required | Description |
 |---|---|---|
 | `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
-| `full_entity` | No | The full-resolution camera entity (`camera.<name>_full_image`). Auto-discovered from the same device if not set. When present, clicking the image opens the more-info dialog for the full-resolution photo. |
 | `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
 ## Troubleshooting

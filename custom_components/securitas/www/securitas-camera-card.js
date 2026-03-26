@@ -4,14 +4,12 @@
  * Displays the latest image from a Securitas Direct camera entity with:
  *  - Auto-discovered refresh (capture) button in the top-right corner
  *  - Image timestamp overlay (relative + absolute tooltip)
- *  - Click to open the HA more-info dialog: for the full-resolution entity
- *    (camera.<name>_full_image) if `full_entity` is configured, otherwise
- *    for the thumbnail entity itself
+ *  - Click to open the HA more-info dialog: for the auto-discovered
+ *    full-resolution entity if available, otherwise the thumbnail entity
  *
  * Card config:
  *   type: custom:securitas-camera-card
  *   entity: camera.sala             # thumbnail entity (required)
- *   full_entity: camera.sala_full_image  # full-res entity (optional)
  *   name: Sala                       # optional display name
  *   name: Front Door   # optional — overrides the device name
  */
@@ -54,8 +52,6 @@ class SecuritasCameraCardEditor extends HTMLElement {
       // never touch the name textfield so focus is preserved while typing
       const entityForm = this.shadowRoot.getElementById("entity-form");
       if (entityForm) entityForm.data = { entity: this._config.entity || "" };
-      const fullForm = this.shadowRoot.getElementById("full-entity-form");
-      if (fullForm) fullForm.data = { full_entity: this._config.full_entity || "" };
     }
   }
 
@@ -67,7 +63,6 @@ class SecuritasCameraCardEditor extends HTMLElement {
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
-        <ha-form id="full-entity-form"></ha-form>
         <div id="name-slot"></div>
       </div>`;
 
@@ -85,25 +80,6 @@ class SecuritasCameraCardEditor extends HTMLElement {
         this._config = { ...this._config, entity: newEntity };
         this._fireChanged();
       }
-    });
-
-    // Full-resolution entity picker (optional)
-    const fullForm = this.shadowRoot.getElementById("full-entity-form");
-    fullForm.hass = this._hass;
-    fullForm.data = { full_entity: this._config.full_entity || "" };
-    fullForm.schema = [
-      { name: "full_entity", selector: { entity: { domain: "camera" } } },
-    ];
-    fullForm.computeLabel = () => "Full Image Entity (optional)";
-    fullForm.addEventListener("value-changed", (e) => {
-      const val = e.detail.value?.full_entity;
-      if (val) {
-        this._config = { ...this._config, full_entity: val };
-      } else {
-        const { full_entity: _, ...rest } = this._config;
-        this._config = rest;
-      }
-      this._fireChanged();
     });
 
     // Name field — ha-textfield with input event (no value-changed → no re-render cycle)
@@ -157,7 +133,7 @@ class SecuritasCameraCard extends HTMLElement {
     const newToken = hass?.states[this._config.entity]?.attributes?.access_token;
     this._hass = hass;
     this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
-    this._fullEntityId = this._config.full_entity || this._findFullEntity(hass, this._config.entity);
+    this._fullEntityId = this._findFullEntity(hass, this._config.entity);
     // Clear spinner when the image token rotates (new image available) and
     // the capture is no longer in progress (capturing=false means final image).
     const capturing = hass?.states[this._config.entity]?.attributes?.capturing;
@@ -195,7 +171,10 @@ class SecuritasCameraCard extends HTMLElement {
     const timestamp = stateObj.attributes.image_timestamp;
     const { relative, absolute } = this._formatTimestamp(timestamp);
     const hasCapture = !!this._captureEntityId;
-    const hasFull = !!this._fullEntityId;
+    // Only use the full entity if it has a real image (non-null timestamp).
+    // PIR cameras may not support full-resolution images.
+    const fullState = this._fullEntityId ? this._hass?.states[this._fullEntityId] : null;
+    const hasFull = !!fullState?.attributes?.image_timestamp;
 
     this.shadowRoot.innerHTML = `
     <style>
