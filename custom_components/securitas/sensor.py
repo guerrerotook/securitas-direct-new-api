@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN, SecuritasDirectDevice, SecuritasHub
-from .const import SentinelName
+from .const import SENTINEL_SERVICE_NAMES
 from .entity import SecuritasEntity, schedule_initial_updates
 from .securitas_direct_new_api import Installation, SecuritasDirectError
 from .securitas_direct_new_api.dataTypes import AirQuality, Service
@@ -35,8 +35,6 @@ async def async_setup_entry(
     sensors: list[SensorEntity] = []
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
 
-    sentinel_name: SentinelName = SentinelName()
-    sentinel_confort_name = sentinel_name.get_sentinel_name(client.lang)
     for device in securitas_devices:
         try:
             services: list[Service] = await client.get_services(device.installation)
@@ -49,7 +47,7 @@ async def async_setup_entry(
             continue
         first_sentinel_service: Service | None = None
         for service in services:
-            if service.request == sentinel_confort_name:
+            if service.request in SENTINEL_SERVICE_NAMES:
                 sensors.append(
                     SentinelTemperature(service, client, device.installation)
                 )
