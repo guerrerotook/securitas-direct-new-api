@@ -40,9 +40,9 @@ DOORLOCK_SERVICE = "DOORLOCK"
 
 # lockStatus codes returned by the Securitas smart-lock API
 LOCK_STATUS_UNKNOWN = "0"
-LOCK_STATUS_OPEN = "1"
+LOCK_STATUS_UNLOCKED = "1"
 LOCK_STATUS_LOCKED = "2"
-LOCK_STATUS_OPENING = "3"
+LOCK_STATUS_UNLOCKING = "3"
 LOCK_STATUS_LOCKING = "4"
 
 
@@ -184,7 +184,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
 
     @property
     def is_open(self) -> bool:  # type: ignore[override]
-        return self._state == LOCK_STATUS_OPEN
+        return False
 
     @property
     def is_locking(self) -> bool:  # type: ignore[override]
@@ -192,7 +192,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
 
     @property
     def is_unlocking(self) -> bool:  # type: ignore[override]
-        return self._state == LOCK_STATUS_OPENING
+        return self._state == LOCK_STATUS_UNLOCKING
 
     @property
     def is_opening(self) -> bool:  # type: ignore[override]
@@ -273,16 +273,16 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
     async def async_unlock(self, **kwargs):
         await self._change_lock_mode(
             lock_state=False,
-            transitional_state=LOCK_STATUS_OPENING,
-            optimistic_state=LOCK_STATUS_OPEN,
+            transitional_state=LOCK_STATUS_UNLOCKING,
+            optimistic_state=LOCK_STATUS_UNLOCKED,
             operation="Unlock",
         )
 
     async def async_open(self, **kwargs):
         await self._change_lock_mode(
             lock_state=False,
-            transitional_state=LOCK_STATUS_OPENING,
-            optimistic_state=LOCK_STATUS_OPEN,
+            transitional_state=LOCK_STATUS_UNLOCKING,
+            optimistic_state=LOCK_STATUS_UNLOCKED,
             operation="Open",
         )
 

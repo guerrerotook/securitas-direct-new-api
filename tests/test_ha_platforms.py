@@ -460,14 +460,10 @@ class TestSecuritasLockInit:
                 f"Expected is_locked=False for state={state}"
             )
 
-    def test_is_open_returns_true_when_state_is_1(self):
+    def test_is_open_always_returns_false(self):
+        """is_open is always False — the API has no distinct 'open' state."""
         lock = make_lock()
-        lock._state = "1"
-        assert lock.is_open is True
-
-    def test_is_open_returns_false_when_state_is_not_1(self):
-        lock = make_lock()
-        for state in ("2", "3", "4", "0"):
+        for state in ("1", "2", "3", "4", "0"):
             lock._state = state
             assert lock.is_open is False, f"Expected is_open=False for state={state}"
 
