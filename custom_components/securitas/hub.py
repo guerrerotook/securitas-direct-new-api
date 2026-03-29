@@ -408,7 +408,7 @@ class SecuritasHub:
                 thumbnail.signal_type,
                 priority=ApiQueue.BACKGROUND,
             )
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001  # pylint: disable=broad-exception-caught
             _LOGGER.warning(
                 "[hub] Could not fetch full image for %s",
                 camera_device.name,
@@ -837,48 +837,30 @@ class SecuritasHub:
 
         Tries xSGetSmartlockConfig first (fast, single call).  If that
         fails, falls back to the Danalock two-phase polling API.  Caches
-        which API type works so subsequent calls skip detection.
+        a "danalock" result so subsequent calls skip the Smartlock attempt.
         """
         cache_key = f"{installation.number}_{device_id}"
+        is_danalock = self._lock_config_type.get(cache_key) == "danalock"
 
-        # If we already know this is a Danalock, skip straight to it.
-        if self._lock_config_type.get(cache_key) == "danalock":
+        # Try Smartlock first unless we already know this is a Danalock.
+        if not is_danalock:
             try:
                 config = await self._api_queue.submit(
-                    self.session.get_danalock_config,
+                    self.session.get_smart_lock_config,
                     installation,
                     device_id,
                     priority=ApiQueue.FOREGROUND,
                 )
                 if config and config.res == "OK":
                     return config
-            except Exception:  # noqa: BLE001
+            except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
                 _LOGGER.debug(
-                    "Danalock config fetch failed for %s device %s",
+                    "Smartlock config fetch failed for %s device %s, trying Danalock",
                     installation.number,
                     device_id,
                 )
-            return None
 
-        # Try Smartlock first (most common, single API call).
-        try:
-            config = await self._api_queue.submit(
-                self.session.get_smart_lock_config,
-                installation,
-                device_id,
-                priority=ApiQueue.FOREGROUND,
-            )
-            if config and config.res == "OK":
-                self._lock_config_type[cache_key] = "smartlock"
-                return config
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug(
-                "Smartlock config fetch failed for %s device %s, trying Danalock",
-                installation.number,
-                device_id,
-            )
-
-        # Fall back to Danalock two-phase polling API.
+        # Fall back to (or go directly to) Danalock two-phase polling API.
         try:
             config = await self._api_queue.submit(
                 self.session.get_danalock_config,
@@ -889,7 +871,7 @@ class SecuritasHub:
             if config and config.res == "OK":
                 self._lock_config_type[cache_key] = "danalock"
                 return config
-        except Exception:  # noqa: BLE001
+        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             _LOGGER.debug(
                 "Danalock config fetch also failed for %s device %s",
                 installation.number,

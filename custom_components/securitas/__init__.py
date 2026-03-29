@@ -521,7 +521,7 @@ def _schedule_lock_config_retry(
     async def _retry(_now) -> None:
         try:
             config = await hub.get_lock_config(installation, lock_entity.device_id)
-        except Exception:  # noqa: BLE001
+        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             config = None
 
         if config is not None:
