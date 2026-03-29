@@ -41,6 +41,7 @@ from .securitas_direct_new_api import (
     OperationStatus,
     OtpPhone,
     SStatus,
+    SmartLock,
     SecuritasDirectError,
     Service,
 )
@@ -164,6 +165,9 @@ class SecuritasHub:
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
         self._full_images: dict[str, bytes] = {}
         self._full_timestamps: dict[str, str] = {}
+        self._lock_config_type: dict[
+            str, str
+        ] = {}  # "{numinst}_{device_id}" -> "smartlock"|"danalock"
 
     async def login(self):
         """Login to Securitas."""
@@ -825,6 +829,74 @@ class SecuritasHub:
             device_id,
             priority=ApiQueue.FOREGROUND,
         )
+
+    async def get_lock_config(
+        self, installation: Installation, device_id: str
+    ) -> SmartLock | None:
+        """Fetch lock config, auto-detecting Smartlock vs Danalock API.
+
+        Tries xSGetSmartlockConfig first (fast, single call).  If that
+        fails, falls back to the Danalock two-phase polling API.  Caches
+        which API type works so subsequent calls skip detection.
+        """
+        cache_key = f"{installation.number}_{device_id}"
+
+        # If we already know this is a Danalock, skip straight to it.
+        if self._lock_config_type.get(cache_key) == "danalock":
+            try:
+                config = await self._api_queue.submit(
+                    self.session.get_danalock_config,
+                    installation,
+                    device_id,
+                    priority=ApiQueue.FOREGROUND,
+                )
+                if config and config.res == "OK":
+                    return config
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Danalock config fetch failed for %s device %s",
+                    installation.number,
+                    device_id,
+                )
+            return None
+
+        # Try Smartlock first (most common, single API call).
+        try:
+            config = await self._api_queue.submit(
+                self.session.get_smart_lock_config,
+                installation,
+                device_id,
+                priority=ApiQueue.FOREGROUND,
+            )
+            if config and config.res == "OK":
+                self._lock_config_type[cache_key] = "smartlock"
+                return config
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "Smartlock config fetch failed for %s device %s, trying Danalock",
+                installation.number,
+                device_id,
+            )
+
+        # Fall back to Danalock two-phase polling API.
+        try:
+            config = await self._api_queue.submit(
+                self.session.get_danalock_config,
+                installation,
+                device_id,
+                priority=ApiQueue.FOREGROUND,
+            )
+            if config and config.res == "OK":
+                self._lock_config_type[cache_key] = "danalock"
+                return config
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "Danalock config fetch also failed for %s device %s",
+                installation.number,
+                device_id,
+            )
+
+        return None
 
     @property
     def api_queue(self) -> ApiQueue:

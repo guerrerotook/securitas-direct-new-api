@@ -277,7 +277,11 @@ If your installation includes Sentinel devices, the integration automatically cr
 
 If your installation includes smart door locks, the integration creates lock entities that you can lock and unlock from Home Assistant. Multiple locks per installation are supported — each lock gets its own entity.
 
+Both Smartlock and Danalock-type locks are supported. The integration auto-detects which configuration API your lock uses, so no manual configuration is needed.
+
 Lock features (latch hold-back time, auto-lock settings) are fetched from the lock configuration. When the lock supports latch hold-back, the entity exposes an "Open" action that unlatches the door without unlocking.
+
+If the lock configuration cannot be fetched during startup (e.g. due to a temporary API outage), the lock entity is still created and works for lock/unlock operations. The integration retries the configuration fetch in the background, and the "Open" button will appear once the configuration is successfully retrieved.
 
 ## Cameras
 

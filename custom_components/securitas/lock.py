@@ -118,6 +118,37 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._update_unsub: Callable[[], None] | None = None
         self._operation_in_progress: bool = False
 
+    @property
+    def lock_config(self) -> SmartLock | None:
+        """Return the current lock configuration."""
+        return self._lock_config
+
+    @property
+    def device_id(self) -> str:
+        """Return the device ID."""
+        return self._device_id
+
+    def update_lock_config(self, lock_config: SmartLock) -> None:
+        """Update lock configuration after deferred retry."""
+        self._lock_config = lock_config
+        if lock_config.location:
+            self._attr_name = lock_config.location
+        if lock_config.family or lock_config.serialNumber:
+            self._attr_device_info = DeviceInfo(
+                identifiers={
+                    (
+                        DOMAIN,
+                        f"v4_securitas_direct.{self.installation.number}_lock_{self._device_id}",
+                    )
+                },
+                via_device=(DOMAIN, f"v4_securitas_direct.{self.installation.number}"),
+                name=self._attr_name,
+                manufacturer="Securitas Direct",
+                model=lock_config.family or None,
+                serial_number=lock_config.serialNumber or None,
+            )
+        self.async_write_ha_state()
+
     async def async_added_to_hass(self) -> None:
         """Register timer when entity is added to HA."""
         if self._scan_seconds > 0:

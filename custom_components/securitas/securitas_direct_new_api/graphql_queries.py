@@ -244,3 +244,26 @@ GET_PHOTO_IMAGES_QUERY = (
     " devices { id idSignal code name quality"
     " images { id image type } } } }"
 )
+
+DANALOCK_CONFIG_QUERY = (
+    "query xSGetDanalockConfig($numinst: String!, $panel: String!,"
+    " $deviceId: String!, $deviceType: String) {\n"
+    "  xSGetDanalockConfig(\n    numinst: $numinst\n    panel: $panel\n"
+    "    deviceId: $deviceId\n    deviceType: $deviceType\n"
+    "  ) {\n    res\n    msg\n    referenceId\n  }\n}"
+)
+
+DANALOCK_CONFIG_STATUS_QUERY = (
+    "query xSGetDanalockConfigStatus($numinst: String!,"
+    " $referenceId: String!, $counter: Int!) {\n"
+    "  xSGetDanalockConfigStatus(\n    numinst: $numinst\n"
+    "    referenceId: $referenceId\n    counter: $counter\n"
+    "  ) {\n    res\n    msg\n    action\n    deviceNumber\n"
+    "    asyncCylinder\n    batteryLowPercenteage\n"
+    "    lockBeforePartialArm\n    lockBeforeFullArm\n"
+    "    unlockAfterDisarm\n    lockBeforePerimeterArm\n"
+    "    periodicBitExtension\n    autoLockTime\n"
+    "    features {\n      holdBackLatchTime\n      calibrationType\n"
+    "      autolock {\n        active\n        timeout\n      }\n"
+    "    }\n  }\n}"
+)

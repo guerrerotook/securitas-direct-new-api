@@ -1,5 +1,7 @@
 """Support for Securitas Direct alarms."""
 
+from __future__ import annotations
+
 import asyncio
 from collections import OrderedDict
 import logging
@@ -493,6 +495,57 @@ async def _discover_cameras(
             )
 
 
+_LOCK_CONFIG_RETRY_DELAYS = (60, 120, 300)  # seconds between retries
+
+
+def _schedule_lock_config_retry(
+    hass: HomeAssistant,
+    hub: SecuritasHub,
+    installation: Installation,
+    lock_entity,
+    attempt: int = 0,
+) -> None:
+    """Schedule a background retry to fetch lock config."""
+    from homeassistant.helpers.event import async_call_later
+
+    if attempt >= len(_LOCK_CONFIG_RETRY_DELAYS):
+        _LOGGER.info(
+            "Lock config retry exhausted for %s device %s",
+            installation.number,
+            lock_entity.device_id,
+        )
+        return
+
+    delay = _LOCK_CONFIG_RETRY_DELAYS[attempt]
+
+    async def _retry(_now) -> None:
+        try:
+            config = await hub.get_lock_config(installation, lock_entity.device_id)
+        except Exception:  # noqa: BLE001
+            config = None
+
+        if config is not None:
+            _LOGGER.info(
+                "Lock config retry succeeded for %s device %s (attempt %d)",
+                installation.number,
+                lock_entity.device_id,
+                attempt + 1,
+            )
+            lock_entity.update_lock_config(config)
+        else:
+            _LOGGER.debug(
+                "Lock config retry %d failed for %s device %s, scheduling next retry",
+                attempt + 1,
+                installation.number,
+                lock_entity.device_id,
+            )
+            _schedule_lock_config_retry(
+                hass, hub, installation, lock_entity, attempt + 1
+            )
+
+    async_call_later(hass, delay, _retry)
+
+
 async def _discover_locks(
     hass: HomeAssistant,
     hub: SecuritasHub,
@@ -541,10 +594,10 @@ async def _discover_locks(
             device_id = mode.deviceId or SMARTLOCK_DEVICE_ID
             lock_config: SmartLock | None = None
             try:
-                lock_config = await hub.get_smart_lock_config(installation, device_id)
+                lock_config = await hub.get_lock_config(installation, device_id)
             except Exception:  # pylint: disable=broad-exception-caught
                 _LOGGER.debug(
-                    "Could not fetch smart lock config for %s device %s",
+                    "Could not fetch lock config for %s device %s",
                     installation.number,
                     device_id,
                 )
@@ -560,6 +613,11 @@ async def _discover_locks(
             )
         lock_add(locks, False)
         schedule_initial_updates(hass, locks)
+
+        # Schedule deferred config retry for locks without config.
+        for lk in locks:
+            if lk.lock_config is None:
+                _schedule_lock_config_retry(hass, hub, installation, lk)
 
 
 async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
