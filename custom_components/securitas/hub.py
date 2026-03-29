@@ -408,7 +408,7 @@ class SecuritasHub:
                 thumbnail.signal_type,
                 priority=ApiQueue.BACKGROUND,
             )
-        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             _LOGGER.warning(
                 "[hub] Could not fetch full image for %s",
                 camera_device.name,
@@ -862,12 +862,7 @@ class SecuritasHub:
 
         # Fall back to (or go directly to) Danalock two-phase polling API.
         try:
-            config = await self._api_queue.submit(
-                self.session.get_danalock_config,
-                installation,
-                device_id,
-                priority=ApiQueue.FOREGROUND,
-            )
+            config = await self._get_danalock_config(installation, device_id)
             if config and config.res == "OK":
                 self._lock_config_type[cache_key] = "danalock"
                 return config
@@ -878,6 +873,47 @@ class SecuritasHub:
                 device_id,
             )
 
+        return None
+
+    async def _get_danalock_config(
+        self, installation: Installation, device_id: str
+    ) -> SmartLock | None:
+        """Fetch Danalock config via queue-submitted submit + poll calls."""
+        reference_id = await self._api_queue.submit(
+            self.session.submit_danalock_config_request,
+            installation,
+            device_id,
+            priority=ApiQueue.FOREGROUND,
+        )
+
+        max_attempts = 10
+        for counter in range(1, max_attempts + 1):
+            raw = await self._api_queue.submit(
+                self.session.check_danalock_config_status,
+                installation,
+                reference_id,
+                counter,
+                priority=ApiQueue.FOREGROUND,
+            )
+            if raw.get("res") == "WAIT":
+                continue
+
+            if raw.get("res") != "OK":
+                _LOGGER.debug(
+                    "Danalock config polling returned %s for %s device %s",
+                    raw.get("msg"),
+                    installation.number,
+                    device_id,
+                )
+                return None
+
+            return self.session.parse_danalock_config_response(raw, device_id)
+
+        _LOGGER.debug(
+            "Danalock config polling timed out for %s device %s",
+            installation.number,
+            device_id,
+        )
         return None
 
     @property

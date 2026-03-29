@@ -117,6 +117,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._scan_seconds = scan_seconds
         self._update_unsub: Callable[[], None] | None = None
         self._operation_in_progress: bool = False
+        self._config_retry_unsubs: list[Callable[[], None]] = []
 
     @property
     def lock_config(self) -> SmartLock | None:
@@ -133,21 +134,24 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._lock_config = lock_config
         if lock_config.location:
             self._attr_name = lock_config.location
-        if lock_config.family or lock_config.serialNumber:
-            self._attr_device_info = DeviceInfo(
-                identifiers={
-                    (
-                        DOMAIN,
-                        f"v4_securitas_direct.{self.installation.number}_lock_{self._device_id}",
-                    )
-                },
-                via_device=(DOMAIN, f"v4_securitas_direct.{self.installation.number}"),
-                name=self._attr_name,
-                manufacturer="Securitas Direct",
-                model=lock_config.family or None,
-                serial_number=lock_config.serialNumber or None,
-            )
+        self._attr_device_info = DeviceInfo(
+            identifiers={
+                (
+                    DOMAIN,
+                    f"v4_securitas_direct.{self.installation.number}_lock_{self._device_id}",
+                )
+            },
+            via_device=(DOMAIN, f"v4_securitas_direct.{self.installation.number}"),
+            name=self._attr_name,
+            manufacturer="Securitas Direct",
+            model=lock_config.family or None,
+            serial_number=lock_config.serialNumber or None,
+        )
         self.async_write_ha_state()
+
+    def add_config_retry_unsub(self, unsub: Callable[[], None]) -> None:
+        """Track a config retry cancel handle for cleanup on removal."""
+        self._config_retry_unsubs.append(unsub)
 
     async def async_added_to_hass(self) -> None:
         """Register timer when entity is added to HA."""
@@ -166,6 +170,9 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         if self._update_unsub:
             self._update_unsub()  # Unsubscribe from updates
             self._update_unsub = None
+        for unsub in self._config_retry_unsubs:
+            unsub()
+        self._config_retry_unsubs.clear()
 
     async def async_update(self) -> None:
         """Update lock state."""

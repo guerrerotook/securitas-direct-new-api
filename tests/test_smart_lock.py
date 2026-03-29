@@ -430,51 +430,24 @@ class TestCheckDanalockConfigStatus:
         assert call_args["variables"]["referenceId"] == "ref-1"
 
 
-# ── get_danalock_config() ─────────────────────────────────────────────────
+# ── parse_danalock_config_response() ──────────────────────────────────────
 
 
-class TestGetDanalockConfig:
-    async def test_success_after_wait(self, authed_api, mock_execute, installation):
-        """Polling returns WAIT, then OK with features."""
-        mock_execute.side_effect = [
-            # submit_danalock_config_request
-            {
-                "data": {
-                    "xSGetDanalockConfig": {
-                        "res": "OK",
-                        "msg": "alarm-manager.processed.request",
-                        "referenceId": "ref-1",
-                    }
-                }
+class TestParseDanalockConfigResponse:
+    def test_parses_features(self, authed_api):
+        """Features from Danalock config status are parsed into SmartLock."""
+        raw = {
+            "res": "OK",
+            "msg": "peripherals.lock-configuration-request.success",
+            "deviceNumber": "001",
+            "features": {
+                "holdBackLatchTime": 3,
+                "calibrationType": 0,
+                "autolock": {"active": None, "timeout": None},
             },
-            # check_danalock_config_status (counter=1) -> WAIT
-            {
-                "data": {
-                    "xSGetDanalockConfigStatus": {
-                        "res": "WAIT",
-                        "msg": "peripherals.processing.request",
-                        "features": None,
-                    }
-                }
-            },
-            # check_danalock_config_status (counter=2) -> OK
-            {
-                "data": {
-                    "xSGetDanalockConfigStatus": {
-                        "res": "OK",
-                        "msg": "peripherals.lock-configuration-request.success",
-                        "deviceNumber": "001",
-                        "features": {
-                            "holdBackLatchTime": 3,
-                            "calibrationType": 0,
-                            "autolock": {"active": None, "timeout": None},
-                        },
-                    }
-                }
-            },
-        ]
+        }
 
-        result = await authed_api.get_danalock_config(installation)
+        result = authed_api.parse_danalock_config_response(raw)
 
         assert isinstance(result, SmartLock)
         assert result.res == "OK"
@@ -482,101 +455,51 @@ class TestGetDanalockConfig:
         assert result.features.holdBackLatchTime == 3
         assert result.features.calibrationType == 0
 
-    async def test_success_immediate(self, authed_api, mock_execute, installation):
-        """Config returns OK on first poll (no WAIT)."""
-        mock_execute.side_effect = [
-            # submit
-            {
-                "data": {
-                    "xSGetDanalockConfig": {
-                        "res": "OK",
-                        "msg": "",
-                        "referenceId": "ref-2",
-                    }
-                }
+    def test_parses_autolock(self, authed_api):
+        """Autolock config is parsed correctly."""
+        raw = {
+            "res": "OK",
+            "deviceNumber": "001",
+            "features": {
+                "holdBackLatchTime": 5,
+                "calibrationType": 1,
+                "autolock": {"active": True, "timeout": "1800"},
             },
-            # check (counter=1) -> OK immediately
-            {
-                "data": {
-                    "xSGetDanalockConfigStatus": {
-                        "res": "OK",
-                        "msg": "success",
-                        "deviceNumber": "001",
-                        "features": {
-                            "holdBackLatchTime": 5,
-                            "calibrationType": 1,
-                            "autolock": {"active": True, "timeout": "1800"},
-                        },
-                    }
-                }
-            },
-        ]
+        }
 
-        result = await authed_api.get_danalock_config(installation)
+        result = authed_api.parse_danalock_config_response(raw)
 
         assert result.features.holdBackLatchTime == 5
         assert result.features.autolock is not None
         assert result.features.autolock.active is True
         assert result.features.autolock.timeout == "1800"
 
-    async def test_timeout_raises(self, authed_api, mock_execute, installation):
-        """Polling returns WAIT forever -> raises error."""
-        responses = [
-            # submit
-            {
-                "data": {
-                    "xSGetDanalockConfig": {
-                        "res": "OK",
-                        "msg": "",
-                        "referenceId": "ref-3",
-                    }
-                }
-            },
-        ]
-        # 10 WAIT responses (max_attempts = 10)
-        for _ in range(10):
-            responses.append(
-                {
-                    "data": {
-                        "xSGetDanalockConfigStatus": {
-                            "res": "WAIT",
-                            "msg": "peripherals.processing.request",
-                        }
-                    }
-                }
-            )
-        mock_execute.side_effect = responses
-
-        with pytest.raises(SecuritasDirectError, match="timed out"):
-            await authed_api.get_danalock_config(installation)
-
-    async def test_no_features_returns_none_features(
-        self, authed_api, mock_execute, installation
-    ):
+    def test_no_features_returns_none_features(self, authed_api):
         """Danalock config with no features field."""
-        mock_execute.side_effect = [
-            {
-                "data": {
-                    "xSGetDanalockConfig": {
-                        "res": "OK",
-                        "msg": "",
-                        "referenceId": "ref-4",
-                    }
-                }
-            },
-            {
-                "data": {
-                    "xSGetDanalockConfigStatus": {
-                        "res": "OK",
-                        "msg": "success",
-                        "deviceNumber": "001",
-                        "features": None,
-                    }
-                }
-            },
-        ]
+        raw = {
+            "res": "OK",
+            "msg": "success",
+            "deviceNumber": "001",
+            "features": None,
+        }
 
-        result = await authed_api.get_danalock_config(installation)
+        result = authed_api.parse_danalock_config_response(raw)
 
         assert result.res == "OK"
         assert result.features is None
+
+    def test_device_id_from_device_number(self, authed_api):
+        """deviceNumber from response is used as deviceId."""
+        raw = {"res": "OK", "deviceNumber": "002", "features": None}
+
+        result = authed_api.parse_danalock_config_response(raw)
+
+        assert result.deviceId == "002"
+
+    def test_device_id_fallback(self, authed_api):
+        """Falls back to provided device_id when deviceNumber is missing."""
+        raw = {"res": "OK", "features": None}
+
+        result = authed_api.parse_danalock_config_response(raw, "03")
+
+        assert result.deviceId == "03"

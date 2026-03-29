@@ -874,42 +874,16 @@ class ApiManager(SecuritasHttpClient):
         )
         return self._extract_response_data(response, "xSGetDanalockConfigStatus")
 
-    async def get_danalock_config(
-        self,
-        installation: Installation,
-        device_id: str = SMARTLOCK_DEVICE_ID,
+    @staticmethod
+    def parse_danalock_config_response(
+        raw: dict[str, Any], device_id: str = SMARTLOCK_DEVICE_ID
     ) -> SmartLock:
-        """Fetch Danalock config using two-phase polling.
-
-        Sends the config request, then polls for the result until the
-        backend responds with res != "WAIT".
-        """
-        reference_id = await self.submit_danalock_config_request(
-            installation, device_id
+        """Parse a successful Danalock config status response into SmartLock."""
+        return SmartLock(
+            res=raw.get("res"),
+            deviceId=raw.get("deviceNumber") or device_id,
+            features=_parse_lock_features(raw.get("features")),
         )
-
-        max_attempts = 10
-        for counter in range(1, max_attempts + 1):
-            raw = await self.check_danalock_config_status(
-                installation, reference_id, counter
-            )
-            if raw.get("res") == "WAIT":
-                await asyncio.sleep(self.delay_check_operation)
-                continue
-
-            if raw.get("res") != "OK":
-                raise SecuritasDirectError(
-                    raw.get("msg", "Danalock config polling failed"),
-                    {"data": {"xSGetDanalockConfigStatus": raw}},
-                )
-
-            return SmartLock(
-                res=raw.get("res"),
-                deviceId=raw.get("deviceNumber") or device_id,
-                features=_parse_lock_features(raw.get("features")),
-            )
-
-        raise SecuritasDirectError("Danalock config polling timed out")
 
     async def get_lock_current_mode(
         self, installation: Installation

@@ -519,6 +519,10 @@ def _schedule_lock_config_retry(
     delay = _LOCK_CONFIG_RETRY_DELAYS[attempt]
 
     async def _retry(_now) -> None:
+        # Guard: entity may have been removed while the timer was pending.
+        if lock_entity.hass is None:
+            return
+
         try:
             config = await hub.get_lock_config(installation, lock_entity.device_id)
         except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
@@ -543,7 +547,8 @@ def _schedule_lock_config_retry(
                 hass, hub, installation, lock_entity, attempt + 1
             )
 
-    async_call_later(hass, delay, _retry)
+    unsub = async_call_later(hass, delay, _retry)
+    lock_entity.add_config_retry_unsub(unsub)
 
 
 async def _discover_locks(
