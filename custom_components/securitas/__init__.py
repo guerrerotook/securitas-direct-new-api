@@ -524,7 +524,11 @@ def _schedule_lock_config_retry(
             return
 
         try:
-            config = await hub.get_lock_config(installation, lock_entity.device_id)
+            config = await hub.get_lock_config(
+                installation,
+                lock_entity.device_id,
+                priority=hub.api_queue.BACKGROUND,
+            )
         except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             config = None
 

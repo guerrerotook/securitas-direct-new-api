@@ -831,7 +831,11 @@ class SecuritasHub:
         )
 
     async def get_lock_config(
-        self, installation: Installation, device_id: str
+        self,
+        installation: Installation,
+        device_id: str,
+        *,
+        priority: int = ApiQueue.FOREGROUND,
     ) -> SmartLock | None:
         """Fetch lock config, auto-detecting Smartlock vs Danalock API.
 
@@ -849,7 +853,7 @@ class SecuritasHub:
                     self.session.get_smart_lock_config,
                     installation,
                     device_id,
-                    priority=ApiQueue.FOREGROUND,
+                    priority=priority,
                 )
                 if config and config.res == "OK":
                     return config
@@ -858,11 +862,14 @@ class SecuritasHub:
                     "Smartlock config fetch failed for %s device %s, trying Danalock",
                     installation.number,
                     device_id,
+                    exc_info=True,
                 )
 
         # Fall back to (or go directly to) Danalock two-phase polling API.
         try:
-            config = await self._get_danalock_config(installation, device_id)
+            config = await self._get_danalock_config(
+                installation, device_id, priority=priority
+            )
             if config and config.res == "OK":
                 self._lock_config_type[cache_key] = "danalock"
                 return config
@@ -871,29 +878,34 @@ class SecuritasHub:
                 "Danalock config fetch also failed for %s device %s",
                 installation.number,
                 device_id,
+                exc_info=True,
             )
 
         return None
 
     async def _get_danalock_config(
-        self, installation: Installation, device_id: str
+        self,
+        installation: Installation,
+        device_id: str,
+        *,
+        priority: int = ApiQueue.FOREGROUND,
     ) -> SmartLock | None:
         """Fetch Danalock config via queue-submitted submit + poll calls."""
         reference_id = await self._api_queue.submit(
             self.session.submit_danalock_config_request,
             installation,
             device_id,
-            priority=ApiQueue.FOREGROUND,
+            priority=priority,
         )
 
-        max_attempts = 10
+        max_attempts = self._max_poll_attempts(timeout_seconds=30)
         for counter in range(1, max_attempts + 1):
             raw = await self._api_queue.submit(
                 self.session.check_danalock_config_status,
                 installation,
                 reference_id,
                 counter,
-                priority=ApiQueue.FOREGROUND,
+                priority=priority,
             )
             if raw.get("res") == "WAIT":
                 continue
