@@ -43,6 +43,8 @@ from .graphql_queries import (
     CHANGE_LOCK_MODE_STATUS_QUERY,
     CHECK_ALARM_QUERY,
     CHECK_ALARM_STATUS_QUERY,
+    DANALOCK_CONFIG_QUERY,
+    DANALOCK_CONFIG_STATUS_QUERY,
     DEVICE_LIST_QUERY,
     DISARM_PANEL_MUTATION,
     DISARM_STATUS_QUERY,
@@ -76,6 +78,24 @@ SMARTLOCK_KEY_TYPE = "0"
 
 # Service ID used when polling CheckAlarmStatus
 ALARM_STATUS_SERVICE_ID = "11"
+
+
+def _parse_lock_features(raw_features: dict | None) -> LockFeatures | None:
+    """Parse lock features from a raw API response dict."""
+    if not raw_features:
+        return None
+    autolock = None
+    if raw_autolock := raw_features.get("autolock"):
+        autolock = LockAutolock(
+            active=raw_autolock.get("active"),
+            timeout=raw_autolock.get("timeout"),
+        )
+    return LockFeatures(
+        holdBackLatchTime=raw_features.get("holdBackLatchTime", 0),
+        calibrationType=raw_features.get("calibrationType", 0),
+        autolock=autolock,
+    )
+
 
 # Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
 
@@ -799,20 +819,6 @@ class ApiManager(SecuritasHttpClient):
         if raw_data is None:
             return SmartLock()
 
-        features = None
-        if raw_features := raw_data.get("features"):
-            autolock = None
-            if raw_autolock := raw_features.get("autolock"):
-                autolock = LockAutolock(
-                    active=raw_autolock.get("active"),
-                    timeout=raw_autolock.get("timeout"),
-                )
-            features = LockFeatures(
-                holdBackLatchTime=raw_features.get("holdBackLatchTime", 0),
-                calibrationType=raw_features.get("calibrationType", 0),
-                autolock=autolock,
-            )
-
         return SmartLock(
             res=raw_data.get("res"),
             location=raw_data.get("location"),
@@ -821,7 +827,62 @@ class ApiManager(SecuritasHttpClient):
             serialNumber=raw_data.get("serialNumber") or "",
             family=raw_data.get("family") or "",
             label=raw_data.get("label") or "",
-            features=features,
+            features=_parse_lock_features(raw_data.get("features")),
+        )
+
+    async def submit_danalock_config_request(
+        self,
+        installation: Installation,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+    ) -> str:
+        """Send Danalock config request and return referenceId."""
+        content = {
+            "operationName": "xSGetDanalockConfig",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "deviceType": SMARTLOCK_DEVICE_TYPE,
+                "deviceId": device_id,
+            },
+            "query": DANALOCK_CONFIG_QUERY,
+        }
+        data = await self._execute_graphql(
+            content, "xSGetDanalockConfig", "xSGetDanalockConfig", installation
+        )
+        if "referenceId" not in data:
+            raise SecuritasDirectError("No referenceId in Danalock config response")
+        return data["referenceId"]
+
+    async def check_danalock_config_status(
+        self,
+        installation: Installation,
+        reference_id: str,
+        counter: int,
+    ) -> dict[str, Any]:
+        """Check progress of Danalock config request."""
+        content = {
+            "operationName": "xSGetDanalockConfigStatus",
+            "variables": {
+                "numinst": installation.number,
+                "referenceId": reference_id,
+                "counter": counter,
+            },
+            "query": DANALOCK_CONFIG_STATUS_QUERY,
+        }
+        response = await self._execute_request(
+            content, "xSGetDanalockConfigStatus", installation
+        )
+        return self._extract_response_data(response, "xSGetDanalockConfigStatus")
+
+    @staticmethod
+    def parse_danalock_config_response(
+        raw: dict[str, Any], device_id: str = SMARTLOCK_DEVICE_ID
+    ) -> SmartLock:
+        """Parse a successful Danalock config status response into SmartLock."""
+        return SmartLock(
+            res=raw.get("res"),
+            deviceId=raw.get("deviceNumber") or device_id,
+            features=_parse_lock_features(raw.get("features")),
         )
 
     async def get_lock_current_mode(
