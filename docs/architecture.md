@@ -406,11 +406,12 @@ The `_get_exceptions()` API call uses the same polling pattern as arm/disarm —
 
 ### Sensors (`sensor.py`)
 
-Three sensor types:
+Four sensor types:
 
 - **SentinelTemperature** — Temperature in Celsius
 - **SentinelHumidity** — Humidity as percentage
-- **SentinelAirQuality** — Air quality index with message (e.g. "Good", "Fair", "Poor")
+- **SentinelAirQuality** — Numeric air quality index
+- **SentinelAirQualityStatus** — Categorical air quality label (Good, Fair, Poor)
 
 Sentinel sensors are discovered during platform setup by scanning services for ones whose `request` field matches any name in `SENTINEL_SERVICE_NAMES` (currently "CONFORT", "COMFORTO", "COMFORT"). No API calls are made during setup — entities start with unknown state. Data is populated by `async_update()` using HA's built-in polling at a 30-minute interval (see [Polling intervals](#polling-intervals)).
 
