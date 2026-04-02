@@ -144,7 +144,8 @@ class SentinelHumidity(SecuritasEntity, SensorEntity):
 
 AIR_QUALITY_LABELS: dict[str, str] = {
     "1": "Good",
-    "2": "Poor",
+    "2": "Fair",
+    "3": "Poor",
 }
 
 
