@@ -319,6 +319,33 @@ name: Sala                       # optional — overrides the entity friendly na
 | `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
 | `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
+## Automations & Scripts
+
+You can arm, disarm, and control the alarm from automations and scripts using the standard Home Assistant alarm actions:
+
+```yaml
+action: alarm_control_panel.alarm_arm_away
+target:
+  entity_id: alarm_control_panel.my_alarm
+data:
+  code: "12345" # only needed if you have a PIN configured
+```
+
+Replace `alarm_arm_away` with the action for the mode you want:
+
+| Action                                        | Mode     |
+| --------------------------------------------- | -------- |
+| `alarm_control_panel.alarm_arm_away`          | Away     |
+| `alarm_control_panel.alarm_arm_home`          | Home     |
+| `alarm_control_panel.alarm_arm_night`         | Night    |
+| `alarm_control_panel.alarm_arm_vacation`      | Vacation |
+| `alarm_control_panel.alarm_arm_custom_bypass` | Custom   |
+| `alarm_control_panel.alarm_disarm`            | Disarm   |
+
+> **Important:** Only actions for modes you have mapped in the [Alarm State Mappings](#alarm-state-mappings) will work. If you try to arm with an unmapped mode (e.g. calling `alarm_arm_home` when Home is set to "Not Used"), the action will fail with an error. Check your mappings in **Settings → Integrations → Securitas Direct → Configure → Submit** (second page).
+
+You can test which actions are available for your alarm in **Settings → Developer Tools → Actions** — type "arm alarm" to see the list.
+
 ## Troubleshooting
 
 - **HTTP 403 errors / rate limiting** — Securitas uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries once automatically, but if you see repeated 403 errors in the logs:
