@@ -1,7 +1,6 @@
 """Constants for the Securitas Direct integration."""
 
 import hashlib
-import json
 from pathlib import Path
 
 from homeassistant.const import Platform
@@ -15,7 +14,7 @@ SIGNAL_FULL_IMAGE_UPDATE = f"{DOMAIN}_full_image_update"
 
 def _file_hash(path: Path) -> str:
     """Return a short content hash for cache-busting."""
-    return hashlib.md5(path.read_bytes()).hexdigest()[:8]
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:8]
 
 
 _WWW = Path(__file__).parent / "www"
