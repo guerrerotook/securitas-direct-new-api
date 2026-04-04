@@ -382,11 +382,24 @@ class TestSentinelAirQualityStatus:
         await sensor.async_update()
         assert sensor._attr_native_value == "Good"
 
-    async def test_status_poor(self):
+    async def test_status_fair(self):
         client = make_client()
         client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
         client.get_air_quality = AsyncMock(
             return_value=AirQuality(value=200, status_current=2)
+        )
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        sensor.hass = MagicMock()
+
+        await sensor.async_update()
+        assert sensor._attr_native_value == "Fair"
+
+    async def test_status_poor(self):
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=300, status_current=3)
         )
         fetcher = _make_fetcher(client=client)
         sensor = SentinelAirQualityStatus(fetcher, make_installation())
