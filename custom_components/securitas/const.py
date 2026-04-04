@@ -21,7 +21,9 @@ _WWW = Path(__file__).parent / "www"
 CARD_BASE_URL = "/securitas_panel/securitas-alarm-card.js"
 CARD_URL = f"{CARD_BASE_URL}?v={_file_hash(_WWW / 'securitas-alarm-card.js')}"
 CAMERA_CARD_BASE_URL = "/securitas_panel/securitas-camera-card.js"
-CAMERA_CARD_URL = f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'securitas-camera-card.js')}"
+CAMERA_CARD_URL = (
+    f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'securitas-camera-card.js')}"
+)
 
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
