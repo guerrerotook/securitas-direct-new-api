@@ -30,6 +30,7 @@ from .dataTypes import (
     ThumbnailResponse,
 )
 from .exceptions import (
+    AccountBlockedError,
     ArmingExceptionError,
     Login2FAError,
     LoginError,
@@ -135,6 +136,16 @@ class ApiManager(SecuritasHttpClient):
             self.refresh_token_value = ""
             self.authentication_token_exp = datetime.min
             self.login_timestamp = 0
+
+    @staticmethod
+    def _is_account_blocked(result_json: dict) -> bool:
+        """Check if a login response indicates the account is blocked (error 60052)."""
+        errors = result_json.get("errors")
+        if isinstance(errors, list) and errors:
+            first = errors[0]
+            if isinstance(first, dict) and isinstance(first.get("data"), dict):
+                return first["data"].get("err") == "60052"
+        return False
 
     def _extract_otp_data(self, data) -> tuple[str | None, list[OtpPhone]]:
         if not data:
@@ -284,17 +295,21 @@ class ApiManager(SecuritasHttpClient):
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
             result_json: dict | None = err.args[1] if len(err.args) > 1 else None
+            message = str(err.args[0]) if err.args else "Login failed"
             if result_json is not None:
+                # Check for account-blocked error (60052)
+                if self._is_account_blocked(result_json):
+                    raise AccountBlockedError(message, result_json) from err
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken"):
                         if data["xSLoginToken"].get("needDeviceAuthorization"):
                             # needs a 2FA
-                            raise Login2FAError(err.args) from err
-                    raise LoginError(err.args) from err
+                            raise Login2FAError(message, result_json) from err
+                    raise LoginError(message, result_json) from err
                 # Has response dict = server responded with error
                 # → login failure.
-                raise LoginError(err.args) from err
+                raise LoginError(message, result_json) from err
             # No response dict = network/connection error
             # → let propagate.
             raise

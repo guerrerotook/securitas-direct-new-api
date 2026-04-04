@@ -1,6 +1,7 @@
 {
     "config": {
         "error": {
+            "account_blocked": "Your account has been blocked by Securitas. Use 'Forgot password' on the Securitas website to reset your password and unblock your account, then try again",
             "invalid_auth": "Invalid username or password",
             "cannot_connect": "Unable to connect to Securitas Direct",
             "invalid_otp": "Invalid verification code",

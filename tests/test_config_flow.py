@@ -22,6 +22,7 @@ from custom_components.securitas import (
     DOMAIN,
 )
 from custom_components.securitas.securitas_direct_new_api import (
+    AccountBlockedError,
     Attribute,
     Login2FAError,
     LoginError,
@@ -336,6 +337,21 @@ async def test_step_user_connection_error_shows_cannot_connect(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
     assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_step_user_account_blocked_shows_account_blocked(hass):
+    """Account blocked (error 60052) should re-show the form with account_blocked error."""
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = AccountBlockedError("account blocked")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "account_blocked"}
 
 
 async def test_step_user_generates_device_ids(hass):

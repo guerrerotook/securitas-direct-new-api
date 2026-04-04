@@ -32,6 +32,7 @@ from .dataTypes import (  # noqa: F401
 )
 from .domains import ApiDomains  # noqa: F401
 from .exceptions import (  # noqa: F401
+    AccountBlockedError,
     ArmingExceptionError,
     Login2FAError,
     LoginError,
