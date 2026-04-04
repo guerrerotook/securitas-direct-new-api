@@ -34,6 +34,16 @@ _LOGGER = logging.getLogger(__name__)
 API_CALLBY = "OWA_10"
 API_ID_PREFIX = "OWA_______________"
 
+# Operations that ARE the authentication — never retry auth on these
+_AUTH_OPERATIONS = frozenset(
+    {
+        "mkLoginToken",
+        "RefreshLogin",
+        "mkSendOTP",
+        "mkValidateDevice",
+    }
+)
+
 # Keys whose values should be replaced with a placeholder in debug logs
 _LOG_TRUNCATE_KEYS = {"hours", "image"}
 
@@ -332,12 +342,6 @@ class SecuritasHttpClient:
                     # Never retry auth for login/refresh operations — they ARE
                     # the authentication, so retrying would loop forever
                     # (e.g. error 60052 "account blocked" returns status 403).
-                    _AUTH_OPERATIONS = {
-                        "mkLoginToken",
-                        "RefreshLogin",
-                        "mkSendOTP",
-                        "mkValidateDevice",
-                    }
                     if (
                         error_status == 403
                         and not _retried
