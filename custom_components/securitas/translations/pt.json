@@ -1,6 +1,7 @@
 {
     "config": {
         "error": {
+            "account_blocked": "A sua conta foi bloqueada pela Securitas. Use 'Esqueci a palavra-passe' no site da Securitas para redefinir a sua palavra-passe e desbloquear a sua conta, depois tente novamente",
             "invalid_auth": "Nome de utilizador ou palavra-passe inválidos",
             "cannot_connect": "Não é possível ligar ao Securitas Direct",
             "invalid_otp": "Código de verificação inválido",

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
+    AccountBlockedError,
     Login2FAError,
     LoginError,
     SecuritasDirectError,
@@ -366,6 +367,26 @@ class TestLoginEdgeCases:
 
         assert api.authentication_token == ""
         assert api.login_timestamp > 0
+
+    async def test_account_blocked_raises_account_blocked_error(
+        self, api, mock_execute
+    ):
+        """Error 60052 (account blocked) raises AccountBlockedError, not LoginError."""
+        blocked_response = {
+            "errors": [
+                {
+                    "message": "Utilisateur bloqué.",
+                    "data": {"res": "ERROR", "err": "60052", "status": 403},
+                }
+            ],
+            "data": {"xSLoginToken": None},
+        }
+        mock_execute.side_effect = SecuritasDirectError(
+            "Utilisateur bloqué.", blocked_response
+        )
+
+        with pytest.raises(AccountBlockedError):
+            await api.login()
 
 
 # ── Additional validate_device edge cases ────────────────────────────────────

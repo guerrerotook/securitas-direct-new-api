@@ -30,6 +30,7 @@ from .dataTypes import (
     ThumbnailResponse,
 )
 from .exceptions import (
+    AccountBlockedError,
     ArmingExceptionError,
     Login2FAError,
     LoginError,
@@ -135,6 +136,16 @@ class ApiManager(SecuritasHttpClient):
             self.refresh_token_value = ""
             self.authentication_token_exp = datetime.min
             self.login_timestamp = 0
+
+    @staticmethod
+    def _is_account_blocked(result_json: dict) -> bool:
+        """Check if a login response indicates the account is blocked (error 60052)."""
+        errors = result_json.get("errors")
+        if isinstance(errors, list) and errors:
+            first = errors[0]
+            if isinstance(first, dict) and isinstance(first.get("data"), dict):
+                return first["data"].get("err") == "60052"
+        return False
 
     def _extract_otp_data(self, data) -> tuple[str | None, list[OtpPhone]]:
         if not data:
@@ -285,6 +296,9 @@ class ApiManager(SecuritasHttpClient):
         except SecuritasDirectError as err:
             result_json: dict | None = err.args[1] if len(err.args) > 1 else None
             if result_json is not None:
+                # Check for account-blocked error (60052)
+                if self._is_account_blocked(result_json):
+                    raise AccountBlockedError(err.args) from err
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken"):

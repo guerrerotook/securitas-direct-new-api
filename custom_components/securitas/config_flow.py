@@ -57,6 +57,7 @@ from .securitas_direct_new_api import (
     STATE_LABELS,
     STD_DEFAULTS,
     STD_OPTIONS,
+    AccountBlockedError,
     Attribute,
     Attributes,
     Installation,
@@ -319,6 +320,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         except Login2FAError:
             # 2FA required — proceed to device validation for phone list
             return await self._start_2fa_flow()
+        except AccountBlockedError:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=self._user_schema(user_input),
+                errors={"base": "account_blocked"},
+            )
         except LoginError:
             return self.async_show_form(
                 step_id="user",
@@ -383,6 +390,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.securitas.login()
         except Login2FAError:
             return await self._start_2fa_flow()
+        except AccountBlockedError:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=self._user_schema(self.config),
+                errors={"base": "account_blocked"},
+            )
         except LoginError:
             return self.async_show_form(
                 step_id="user",

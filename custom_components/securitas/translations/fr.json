@@ -1,6 +1,7 @@
 {
     "config": {
         "error": {
+            "account_blocked": "Votre compte a été bloqué par Securitas. Utilisez « Mot de passe oublié » sur le site Securitas pour réinitialiser votre mot de passe et débloquer votre compte, puis réessayez",
             "invalid_auth": "Nom d'utilisateur ou mot de passe incorrect",
             "cannot_connect": "Impossible de se connecter à Securitas Direct",
             "invalid_otp": "Code de vérification non valide",

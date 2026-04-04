@@ -60,6 +60,10 @@ class TokenRefreshError(LoginError):
     """Exception raised when the token needs refreshing."""
 
 
+class AccountBlockedError(LoginError):
+    """Exception raised when the user account is blocked by Securitas."""
+
+
 class Login2FAError(LoginError):
     """Exception raised when a 2FA authentication is needed."""
 
