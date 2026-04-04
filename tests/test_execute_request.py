@@ -598,6 +598,36 @@ class TestExecuteRequest:
         # Login was called once for the retry, then it raised on the second 403
         api.login.assert_awaited_once()
 
+    async def test_login_403_does_not_retry_auth(self, api):
+        """GraphQL 403 on mkLoginToken must NOT trigger re-auth (would loop forever)."""
+        blocked_response = json.dumps(
+            {
+                "errors": [
+                    {
+                        "message": "User blocked.",
+                        "data": {"res": "ERROR", "err": "60052", "status": 403},
+                    }
+                ],
+                "data": {"xSLoginToken": None},
+            }
+        )
+
+        resp = AsyncMock()
+        resp.text = AsyncMock(return_value=blocked_response)
+        resp.status = 200
+        resp.headers = {}
+        cm = AsyncMock()
+        cm.__aenter__ = AsyncMock(return_value=resp)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        api.http_client.post = MagicMock(return_value=cm)
+        api.login = AsyncMock()
+
+        with pytest.raises(SecuritasDirectError, match="User blocked"):
+            await api._execute_request({"query": "test"}, "mkLoginToken")
+
+        # login must NOT be called — re-auth on auth operations would loop
+        api.login.assert_not_awaited()
+
 
 # ── generate_uuid tests ─────────────────────────────────────────────────────
 

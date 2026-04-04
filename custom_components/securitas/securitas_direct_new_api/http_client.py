@@ -328,8 +328,21 @@ class SecuritasHttpClient:
                         ):
                             error_status = 400
 
-                    # Session expired server-side: re-authenticate and retry once
-                    if error_status == 403 and not _retried:
+                    # Session expired server-side: re-authenticate and retry once.
+                    # Never retry auth for login/refresh operations — they ARE
+                    # the authentication, so retrying would loop forever
+                    # (e.g. error 60052 "account blocked" returns status 403).
+                    _AUTH_OPERATIONS = {
+                        "mkLoginToken",
+                        "RefreshLogin",
+                        "mkSendOTP",
+                        "mkValidateDevice",
+                    }
+                    if (
+                        error_status == 403
+                        and not _retried
+                        and operation not in _AUTH_OPERATIONS
+                    ):
                         _LOGGER.debug(
                             "[auth] Session expired server-side, re-authenticating"
                         )
