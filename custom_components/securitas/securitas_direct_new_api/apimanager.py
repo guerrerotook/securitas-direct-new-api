@@ -298,7 +298,8 @@ class ApiManager(SecuritasHttpClient):
             if result_json is not None:
                 # Check for account-blocked error (60052)
                 if self._is_account_blocked(result_json):
-                    raise AccountBlockedError(err.args) from err
+                    message = str(err.args[0]) if err.args else "Account is blocked"
+                    raise AccountBlockedError(message, result_json) from err
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken"):
