@@ -406,6 +406,16 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
 1. **Home Assistant version** and **integration version** (from Settings → Integrations → Securitas Direct).
 2. **Country code** you are using.
 3. **Debug logs** — enable debug logging from the UI: go to **Settings → Integrations → Securitas Direct**, click the three-dot menu, and select **Enable debug logging**. Reproduce the issue, then click **Disable debug logging** to download the log file.
+
+   If you need debug logs **before the integration has been set up** (e.g. during initial installation), run this action from **Settings → Developer Tools → Actions**:
+
+   ```yaml
+   action: logger.set_level
+   data:
+     custom_components.securitas: debug
+   ```
+
+   Then retrieve the logs from **Settings → System → Logs → three dots in the top right corner → Show full logs**.
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
 5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Securitas Direct integration log messages (after enabling debug logging and reproducing the issue).
 
