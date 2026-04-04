@@ -528,15 +528,14 @@ class ApiManager(SecuritasHttpClient):
         if aq_data is None:
             return None
 
-        # Use hours[-1].value for the most recent hourly reading
-        hours = aq_data.get("hours", [])
-        if not hours:
-            return None
-
-        try:
-            value = int(hours[-1].get("value", 0))
-        except (ValueError, TypeError):
-            return None
+        # Use hours[-1].value for the most recent hourly reading (may be null)
+        value: int | None = None
+        hours = aq_data.get("hours") or []
+        if hours:
+            try:
+                value = int(hours[-1].get("value", 0))
+            except (ValueError, TypeError):
+                pass
 
         status = aq_data.get("status", {})
         return AirQuality(

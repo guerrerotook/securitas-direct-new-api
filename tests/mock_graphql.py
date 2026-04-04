@@ -508,8 +508,18 @@ def graphql_air_quality(
     hour_value: str = "114",
     hour_id: str = "18:00",
     status_current: int = 1,
+    hours: list | None = ...,
 ) -> dict:
-    """xSAirQuality response."""
+    """xSAirQuality response.
+
+    Pass ``hours=None`` to simulate installations that only provide status
+    data (e.g. issue #428 — Chipre).  The default builds a two-element list.
+    """
+    if hours is ...:
+        hours = [
+            {"id": "17:00", "value": "110"},
+            {"id": hour_id, "value": hour_value},
+        ]
     return {
         "data": {
             "xSAirQuality": {
@@ -518,10 +528,7 @@ def graphql_air_quality(
                     "status": {
                         "current": status_current,
                     },
-                    "hours": [
-                        {"id": "17:00", "value": "110"},
-                        {"id": hour_id, "value": hour_value},
-                    ],
+                    "hours": hours,
                 },
             }
         }
