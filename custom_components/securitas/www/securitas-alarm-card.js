@@ -1688,15 +1688,148 @@ class SecuritasAlarmBadge extends HTMLElement {
   }
 }
 
+// ── Mushroom-compatible chip ─────────────────────────────────────────────────
+
+class SecuritasAlarmChip extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._dialogOpen = false;
+    this._pinOverlay = null;
+    this._pinState   = null;
+    this._pin        = "";
+    this._gestureCleanup = null;
+  }
+
+  disconnectedCallback() {
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; this._pinState = null; this._pin = ""; }
+  }
+
+  setConfig(config) {
+    if (!config.entity) throw new Error("Please define an entity");
+    this._config = config;
+    this._lastKey = null;  // force re-render on config change
+    if (this._hass) this._tryRender();
+  }
+
+  set config(config) { this.setConfig(config); }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._tryRender();
+    if (this._dialogCard) this._dialogCard.hass = hass;
+  }
+
+  _tryRender() {
+    if (!this._hass || !this._config) return;
+    const stateObj = this._hass.states[this._config.entity];
+    const newKey = stateObj
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}`
+      : "missing";
+    if (newKey !== this._lastKey) {
+      this._lastKey = newKey;
+      this._render();
+    }
+  }
+
+  _render() {
+    if (!this._hass || !this._config) return;
+
+    const stateObj = this._hass.states[this._config.entity];
+    if (!stateObj) {
+      this.shadowRoot.innerHTML = `<ha-icon icon="mdi:shield-alert" style="color:var(--error-color)"></ha-icon>`;
+      return;
+    }
+
+    const state = stateObj.state;
+    const cfg = stateObj.attributes.force_arm_available
+      ? { icon: "mdi:alert", color: "var(--warning-color, #FF9800)" }
+      : STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: flex;
+          --chip-height: 36px;
+          --chip-padding: 0 10px;
+          --chip-border-radius: 19px;
+          --chip-icon-size: 18px;
+        }
+        .chip {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: var(--chip-height);
+          padding: var(--chip-padding);
+          border-radius: var(--chip-border-radius);
+          background: var(--ha-card-background, var(--card-background-color, #fff));
+          box-shadow: var(--chip-box-shadow, 0 2px 4px rgba(0,0,0,0.06));
+          cursor: pointer;
+          transition: transform 0.1s;
+          user-select: none;
+          -webkit-user-select: none;
+        }
+        .chip:active { transform: scale(0.95); }
+        .chip ha-icon {
+          --mdc-icon-size: var(--chip-icon-size);
+          color: ${cfg.color};
+        }
+      </style>
+      <div class="chip" id="chip">
+        <ha-icon icon="${cfg.icon}"></ha-icon>
+      </div>`;
+
+    if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+
+    const chipEl = this.shadowRoot.getElementById("chip");
+    const gestureConfig = {
+      tap_action:        this._config.tap_action        || { action: "more-info" },
+      hold_action:       this._config.hold_action       || { action: "none" },
+      double_tap_action: this._config.double_tap_action || { action: "none" },
+    };
+
+    this._gestureCleanup = attachGesture(
+      chipEl,
+      gestureConfig,
+      this._hass,
+      this._config.entity,
+      this,
+      {
+        onMoreInfo:    () => this._openDialog(),
+        startPinEntry: (svcAction) => SecuritasAlarmBadge.prototype._startBadgePinEntry.call(this, svcAction),
+      },
+    );
+  }
+
+  _openDialog() {
+    SecuritasAlarmBadge.prototype._openDialog.call(this);
+  }
+
+  _submitBadgePin(closeFn) {
+    SecuritasAlarmBadge.prototype._submitBadgePin.call(this, closeFn);
+  }
+
+  getCardSize() { return 1; }
+}
+
 if (!customElements.get("securitas-alarm-card"))   customElements.define("securitas-alarm-card", SecuritasAlarmCard);
 if (!customElements.get("securitas-alarm-card-editor")) customElements.define("securitas-alarm-card-editor", SecuritasAlarmCardEditor);
 if (!customElements.get("securitas-alarm-badge"))  customElements.define("securitas-alarm-badge", SecuritasAlarmBadge);
+if (!customElements.get("securitas-alarm-chip"))   customElements.define("securitas-alarm-chip", SecuritasAlarmChip);
+if (!customElements.get("mushroom-securitas-alarm-chip")) customElements.define("mushroom-securitas-alarm-chip", class extends SecuritasAlarmChip {});
 
 window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "securitas-alarm-card",
   name:        TRANSLATIONS.en.card_name,
   description: TRANSLATIONS.en.card_description,
+  preview:     false,
+});
+window.customCards.push({
+  type:        "securitas-alarm-chip",
+  name:        "Securitas Alarm Chip",
+  description: "Mushroom-compatible alarm chip — shows alarm state with force-arm support.",
   preview:     false,
 });
 window.customBadges = window.customBadges || [];
