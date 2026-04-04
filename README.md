@@ -282,6 +282,31 @@ Each action can be set to one of the following:
 
 Example: set **Hold** to **Disarm** on the badge to disarm with a long press, without opening the card popup.
 
+The card and badge have a visual editor for gesture actions. The chip only supports YAML configuration:
+
+```yaml
+type: custom:mushroom-chips-card
+chips:
+  - type: securitas-alarm
+    entity: alarm_control_panel.my_alarm
+    tap_action:
+      action: more-info           # default — opens alarm card popup
+    hold_action:
+      action: arm_or_disarm       # arms when disarmed, disarms when armed
+    double_tap_action:
+      action: navigate
+      navigation_path: /lovelace/security
+```
+
+Available actions:
+
+| Action           | YAML value                                                           |
+| ---------------- | -------------------------------------------------------------------- |
+| None             | `action: none`                                                       |
+| Open alarm card  | `action: more-info`                                                  |
+| Navigate         | `action: navigate` + `navigation_path: /path`                       |
+| Arm or Disarm    | `action: arm_or_disarm` (optionally + `arm_state: armed_away` etc.) |
+
 ## Sentinel Sensors
 
 If your installation includes Sentinel devices, the integration automatically creates temperature, humidity, and air quality sensors for each one.
