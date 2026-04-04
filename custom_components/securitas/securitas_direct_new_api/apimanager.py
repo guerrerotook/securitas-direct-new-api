@@ -295,21 +295,21 @@ class ApiManager(SecuritasHttpClient):
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
             result_json: dict | None = err.args[1] if len(err.args) > 1 else None
+            message = str(err.args[0]) if err.args else "Login failed"
             if result_json is not None:
                 # Check for account-blocked error (60052)
                 if self._is_account_blocked(result_json):
-                    message = str(err.args[0]) if err.args else "Account is blocked"
                     raise AccountBlockedError(message, result_json) from err
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken"):
                         if data["xSLoginToken"].get("needDeviceAuthorization"):
                             # needs a 2FA
-                            raise Login2FAError(err.args) from err
-                    raise LoginError(err.args) from err
+                            raise Login2FAError(message, result_json) from err
+                    raise LoginError(message, result_json) from err
                 # Has response dict = server responded with error
                 # → login failure.
-                raise LoginError(err.args) from err
+                raise LoginError(message, result_json) from err
             # No response dict = network/connection error
             # → let propagate.
             raise
