@@ -1709,6 +1709,7 @@ class SecuritasAlarmChip extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
+    this._lastKey = null;  // force re-render on config change
     if (this._hass) this._tryRender();
   }
 

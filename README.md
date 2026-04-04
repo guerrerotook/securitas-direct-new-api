@@ -248,7 +248,7 @@ To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and
 
 ### Mushroom Chip
 
-A **Securitas Alarm Chip** (`securitas-alarm-chip`) is available for use inside a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom). It shows the same state-specific icon and color as the badge, in a Mushroom-compatible pill shape.
+A **Securitas Alarm Chip** is available for use inside a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom). Use `type: securitas-alarm` in your Mushroom chips config. It shows the same state-specific icon and color as the badge, in a Mushroom-compatible pill shape.
 
 Tapping the chip opens the full alarm card in a popup overlay. Gesture actions (hold, double-tap) are supported via YAML — see [Gesture Actions](#gesture-actions) below.
 
@@ -261,15 +261,15 @@ chips:
 
 ### Gesture Actions
 
-The **alarm card**, **badge**, and **chip** all support configurable tap, hold, and double-tap actions. These are set in the card/badge editor under the **Tap action**, **Hold action**, and **Double-tap action** sections.
+The **alarm card**, **badge**, and **chip** all support configurable tap, hold, and double-tap actions. For the **card** and **badge**, these can be set in the visual editor under the **Tap action**, **Hold action**, and **Double-tap action** sections. For the **chip**, these actions are configured in YAML (see [below](#chip-gesture-actions)).
 
 ![Gesture Actions](./docs/images/card-gestures.png)
 
-| Action     | Badge default   | Chip default    | Card default |
-| ---------- | --------------- | --------------- | ------------ |
-| Tap        | Open alarm card | Open alarm card | _(none)_     |
-| Hold       | _(none)_        | _(none)_        | _(none)_     |
-| Double-tap | _(none)_        | _(none)_        | _(none)_     |
+| Action     | Badge default | Chip default    | Card default |
+| ---------- | ------------- | --------------- | ------------ |
+| Tap        | Open alarm card | Open alarm card | _(none)_   |
+| Hold       | Arm / Disarm  | _(none)_        | _(none)_     |
+| Double-tap | _(none)_      | _(none)_        | _(none)_     |
 
 Each action can be set to one of the following:
 
