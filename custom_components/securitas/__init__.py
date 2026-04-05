@@ -591,8 +591,8 @@ async def _discover_locks(
         lock_modes = [
             SmartLockMode(
                 res=None,
-                lockStatus=LOCK_STATUS_UNKNOWN,
-                deviceId=SMARTLOCK_DEVICE_ID,
+                lock_status=LOCK_STATUS_UNKNOWN,
+                device_id=SMARTLOCK_DEVICE_ID,
             )
         ]
 
@@ -600,7 +600,7 @@ async def _discover_locks(
     if lock_add:
         locks = []
         for mode in lock_modes:
-            device_id = mode.deviceId or SMARTLOCK_DEVICE_ID
+            device_id = mode.device_id or SMARTLOCK_DEVICE_ID
             lock_config: SmartLock | None = None
             try:
                 lock_config = await hub.get_lock_config(installation, device_id)
@@ -616,7 +616,7 @@ async def _discover_locks(
                     client=hub,
                     hass=hass,
                     device_id=device_id,
-                    initial_status=mode.lockStatus,
+                    initial_status=mode.lock_status,
                     lock_config=lock_config,
                 )
             )

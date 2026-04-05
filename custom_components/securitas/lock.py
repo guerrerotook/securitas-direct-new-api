@@ -105,8 +105,8 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             manufacturer="Securitas Direct",
             model=lock_config.family if lock_config and lock_config.family else None,
             serial_number=(
-                lock_config.serialNumber
-                if lock_config and lock_config.serialNumber
+                lock_config.serial_number
+                if lock_config and lock_config.serial_number
                 else None
             ),
         )
@@ -145,7 +145,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             name=self._attr_name,
             manufacturer="Securitas Direct",
             model=lock_config.family or None,
-            serial_number=lock_config.serialNumber or None,
+            serial_number=lock_config.serial_number or None,
         )
         self.async_write_ha_state()
 
@@ -212,8 +212,8 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             self.installation, priority=priority
         )
         for mode in lock_modes:
-            if mode.deviceId == self._device_id:
-                return mode.lockStatus
+            if mode.device_id == self._device_id:
+                return mode.lock_status
         return LOCK_STATUS_UNKNOWN
 
     @property
@@ -246,7 +246,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         attrs: dict[str, Any] = {}
         cfg = self._lock_config
         if cfg and cfg.features:
-            attrs["hold_back_latch_time"] = cfg.features.holdBackLatchTime
+            attrs["hold_back_latch_time"] = cfg.features.hold_back_latch_time
             if cfg.features.autolock:
                 attrs["autolock_active"] = cfg.features.autolock.active
                 attrs["autolock_timeout"] = cfg.features.autolock.timeout
@@ -331,8 +331,8 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         if (
             cfg
             and cfg.features
-            and cfg.features.holdBackLatchTime
-            and cfg.features.holdBackLatchTime > 0
+            and cfg.features.hold_back_latch_time
+            and cfg.features.hold_back_latch_time > 0
         ):
             return lock.LockEntityFeature.OPEN
         return lock.LockEntityFeature(0)

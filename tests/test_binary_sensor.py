@@ -7,7 +7,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
 
 from custom_components.securitas.binary_sensor import WifiConnectedSensor
-from custom_components.securitas.securitas_direct_new_api.dataTypes import SStatus
+from custom_components.securitas.securitas_direct_new_api.models import SStatus
 
 from tests.conftest import make_installation, make_securitas_hub_mock
 

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     Installation,
     SmartLock,
     SmartLockMode,
@@ -58,10 +58,10 @@ class TestGetSmartLockConfig:
         assert result.res == "OK"
         assert result.location == "Front Door"
         assert result.features is None
-        assert result.deviceId == ""  # not in response, uses default
-        assert result.referenceId == "ref1"
-        assert result.zoneId == "z1"
-        assert result.serialNumber == "SN001"
+        assert result.device_id == ""  # not in response, uses default
+        assert result.reference_id == "ref1"
+        assert result.zone_id == "z1"
+        assert result.serial_number == "SN001"
         assert result.family == "DR"
         assert result.label == "lock1"
 
@@ -98,8 +98,8 @@ class TestGetSmartLockConfig:
 
         assert result.res == "OK"
         assert result.location == "Hall"
-        assert result.referenceId == ""
-        assert result.serialNumber == ""
+        assert result.reference_id == ""
+        assert result.serial_number == ""
         assert result.family == ""
         assert result.label == ""
 
@@ -163,8 +163,8 @@ class TestGetSmartLockConfig:
         }
         result = await authed_api.get_smart_lock_config(installation, "02")
         assert result.features is not None
-        assert result.features.holdBackLatchTime == 3
-        assert result.features.calibrationType == 0
+        assert result.features.hold_back_latch_time == 3
+        assert result.features.calibration_type == 0
         assert result.features.autolock is not None
         assert result.features.autolock.active is True
         assert result.features.autolock.timeout == "1800"
@@ -212,7 +212,7 @@ class TestGetLockCurrentMode:
         assert len(result) == 1
         assert isinstance(result[0], SmartLockMode)
         assert result[0].res == "OK"
-        assert result[0].lockStatus == "2"
+        assert result[0].lock_status == "2"
 
     async def test_success_returns_open_status(
         self, authed_api, mock_execute, installation
@@ -230,7 +230,7 @@ class TestGetLockCurrentMode:
 
         assert len(result) == 1
         assert result[0].res == "OK"
-        assert result[0].lockStatus == "1"
+        assert result[0].lock_status == "1"
 
     async def test_error_in_response_returns_empty_list(
         self, authed_api, mock_execute, installation
@@ -264,7 +264,7 @@ class TestGetLockCurrentMode:
 
         result = await authed_api.get_lock_current_mode(installation)
 
-        assert result[0].deviceId == "02"
+        assert result[0].device_id == "02"
 
     async def test_no_smartlock_info_returns_empty_list(
         self, authed_api, mock_execute, installation
@@ -308,12 +308,12 @@ class TestGetLockCurrentMode:
         result = await authed_api.get_lock_current_mode(installation)
 
         assert len(result) == 2
-        assert result[0].deviceId == "01"
-        assert result[0].lockStatus == "2"
-        assert result[0].statusTimestamp == "111"
-        assert result[1].deviceId == "02"
-        assert result[1].lockStatus == "1"
-        assert result[1].statusTimestamp == "222"
+        assert result[0].device_id == "01"
+        assert result[0].lock_status == "2"
+        assert result[0].status_timestamp == "111"
+        assert result[1].device_id == "02"
+        assert result[1].lock_status == "1"
+        assert result[1].status_timestamp == "222"
 
     async def test_status_timestamp_extracted(
         self, authed_api, mock_execute, installation
@@ -335,7 +335,7 @@ class TestGetLockCurrentMode:
 
         result = await authed_api.get_lock_current_mode(installation)
 
-        assert result[0].statusTimestamp == "1772728828235"
+        assert result[0].status_timestamp == "1772728828235"
 
 
 # ── submit_danalock_config_request() ──────────────────────────────────────
@@ -452,8 +452,8 @@ class TestParseDanalockConfigResponse:
         assert isinstance(result, SmartLock)
         assert result.res == "OK"
         assert result.features is not None
-        assert result.features.holdBackLatchTime == 3
-        assert result.features.calibrationType == 0
+        assert result.features.hold_back_latch_time == 3
+        assert result.features.calibration_type == 0
 
     def test_parses_autolock(self, authed_api):
         """Autolock config is parsed correctly."""
@@ -469,7 +469,7 @@ class TestParseDanalockConfigResponse:
 
         result = authed_api.parse_danalock_config_response(raw)
 
-        assert result.features.holdBackLatchTime == 5
+        assert result.features.hold_back_latch_time == 5
         assert result.features.autolock is not None
         assert result.features.autolock.active is True
         assert result.features.autolock.timeout == "1800"
@@ -494,7 +494,7 @@ class TestParseDanalockConfigResponse:
 
         result = authed_api.parse_danalock_config_response(raw)
 
-        assert result.deviceId == "002"
+        assert result.device_id == "002"
 
     def test_device_id_fallback(self, authed_api):
         """Falls back to provided device_id when deviceNumber is missing."""
@@ -502,4 +502,4 @@ class TestParseDanalockConfigResponse:
 
         result = authed_api.parse_danalock_config_response(raw, "03")
 
-        assert result.deviceId == "03"
+        assert result.device_id == "03"

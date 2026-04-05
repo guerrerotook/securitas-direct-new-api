@@ -16,7 +16,7 @@ from . import DOMAIN, SIGNAL_CAMERA_STATE, SIGNAL_CAMERA_UPDATE, SecuritasHub
 from .const import SIGNAL_FULL_IMAGE_UPDATE
 from .entity import camera_device_info
 from .securitas_direct_new_api import Installation
-from .securitas_direct_new_api.dataTypes import CameraDevice
+from .securitas_direct_new_api.models import CameraDevice
 
 _LOGGER = logging.getLogger(__name__)
 

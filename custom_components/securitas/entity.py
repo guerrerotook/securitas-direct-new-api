@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
 
 from . import DOMAIN
-from .securitas_direct_new_api.dataTypes import CameraDevice, Installation
+from .securitas_direct_new_api.models import CameraDevice, Installation
 
 if TYPE_CHECKING:
     from .hub import SecuritasHub

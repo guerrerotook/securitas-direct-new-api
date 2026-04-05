@@ -12,7 +12,7 @@ from homeassistant.components.alarm_control_panel.const import (
 )
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     Installation,
     OperationStatus,
 )
@@ -90,8 +90,8 @@ def make_alarm(
             message="",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
 
     # Patch async_track_time_interval to avoid HA event loop dependency,
@@ -132,8 +132,8 @@ class TestUpdateStatusAlarm:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.DISARMED
@@ -146,8 +146,8 @@ class TestUpdateStatusAlarm:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="T",
-            protomResponseData="",
+            protom_response="T",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
@@ -160,8 +160,8 @@ class TestUpdateStatusAlarm:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="P",
-            protomResponseData="",
+            protom_response="P",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_HOME
@@ -174,8 +174,8 @@ class TestUpdateStatusAlarm:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="Q",
-            protomResponseData="",
+            protom_response="Q",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
@@ -189,8 +189,8 @@ class TestUpdateStatusAlarm:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="Z",
-            protomResponseData="",
+            protom_response="Z",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
@@ -205,8 +205,8 @@ class TestUpdateStatusAlarm:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="",
-            protomResponseData="",
+            protom_response="",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.DISARMED
@@ -226,8 +226,8 @@ class TestUpdateStatusAlarm:
             message="Panel ok",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="some-data",
+            protom_response="D",
+            protom_response_data="some-data",
         )
         alarm.update_status_alarm(status)
         assert alarm._attr_extra_state_attributes["message"] == "Panel ok"
@@ -250,8 +250,8 @@ class TestUpdateStatusAlarmPeri:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="A",
-            protomResponseData="",
+            protom_response="A",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
@@ -264,8 +264,8 @@ class TestUpdateStatusAlarmPeri:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="E",
-            protomResponseData="",
+            protom_response="E",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
@@ -284,8 +284,8 @@ class TestUpdateStatusAlarmPeri:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="C",
-            protomResponseData="",
+            protom_response="C",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
@@ -301,8 +301,8 @@ class TestUpdateStatusAlarmPeri:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="Q",
-            protomResponseData="",
+            protom_response="Q",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
@@ -429,8 +429,8 @@ class TestAsyncAlarmDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -482,8 +482,8 @@ class TestAsyncAlarmDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -509,8 +509,8 @@ class TestAsyncAlarmDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -539,8 +539,8 @@ class TestSetArmState:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
         alarm.client.disarm_alarm = AsyncMock()
@@ -559,7 +559,7 @@ class TestSetArmState:
         alarm._last_proto_code = "P"  # partial_day = currently armed home
 
         alarm.client.disarm_alarm = AsyncMock(
-            return_value=OperationStatus(protomResponse="D", operation_status="OK")
+            return_value=OperationStatus(protom_response="D", operation_status="OK")
         )
         alarm.client.arm_alarm = AsyncMock(
             return_value=OperationStatus(
@@ -567,8 +567,8 @@ class TestSetArmState:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -607,8 +607,8 @@ class TestSetArmState:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -800,8 +800,8 @@ class TestForceState:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -831,8 +831,8 @@ class TestForceState:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -861,8 +861,8 @@ class TestForceState:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -892,8 +892,8 @@ class TestForceState:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -988,8 +988,8 @@ class TestForceState:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -1009,8 +1009,8 @@ class TestForceState:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -1082,8 +1082,8 @@ class TestAsyncUpdateStatus:
             message="Armed total",
             status="",
             installation_number="123456",
-            protomResponse="T",
-            protomResponseData="",
+            protom_response="T",
+            protom_response_data="",
         )
         alarm.client.update_overview = AsyncMock(return_value=status)
 
@@ -1101,8 +1101,8 @@ class TestAsyncUpdateStatus:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
         alarm.client.update_overview = AsyncMock(return_value=status)
 
@@ -1147,8 +1147,8 @@ class TestAsyncUpdateStatus:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
         alarm.client.update_overview = AsyncMock(return_value=status)
 
@@ -1176,8 +1176,8 @@ class TestAsyncUpdateStatus:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
         alarm.client.update_overview = AsyncMock(return_value=status)
         alarm._operation_in_progress = False
@@ -1293,8 +1293,8 @@ class TestArmMethods:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="P",
-                protomResponseData="",
+                protom_response="P",
+                protom_response_data="",
             )
         )
 
@@ -1317,8 +1317,8 @@ class TestArmMethods:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="Q",
-                protomResponseData="",
+                protom_response="Q",
+                protom_response_data="",
             )
         )
 
@@ -1340,8 +1340,8 @@ class TestArmMethods:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="E",
-                protomResponseData="",
+                protom_response="E",
+                protom_response_data="",
             )
         )
 
@@ -1375,8 +1375,8 @@ class TestArmMethods:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -1402,8 +1402,8 @@ class TestArmMethods:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="P",
-                protomResponseData="",
+                protom_response="P",
+                protom_response_data="",
             )
         )
 
@@ -1478,8 +1478,8 @@ class TestForceArmContext:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="P",
-                protomResponseData="",
+                protom_response="P",
+                protom_response_data="",
             )
         )
 
@@ -1513,8 +1513,8 @@ class TestForceArmContext:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -1543,8 +1543,8 @@ class TestForceArmContext:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -1566,8 +1566,8 @@ class TestForceArmContext:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -1639,8 +1639,8 @@ class TestForceArmContext:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="T",
-                protomResponseData="",
+                protom_response="T",
+                protom_response_data="",
             )
         )
 
@@ -1822,8 +1822,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse=proto,
-                protomResponseData="",
+                protom_response=proto,
+                protom_response_data="",
             )
 
         alarm.client.arm_alarm = track_arm
@@ -1846,8 +1846,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="C",
-                protomResponseData="",
+                protom_response="C",
+                protom_response_data="",
             )
         )
 
@@ -1875,8 +1875,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse=proto,
-                protomResponseData="",
+                protom_response=proto,
+                protom_response_data="",
             )
 
         alarm.client.arm_alarm = track_arm
@@ -1907,8 +1907,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="C",
-                protomResponseData="",
+                protom_response="C",
+                protom_response_data="",
             )
 
         alarm.client.arm_alarm = track_arm
@@ -1946,8 +1946,8 @@ class TestCompoundArmCommands:
                     message="",
                     status="",
                     installation_number="123456",
-                    protomResponse="Q",
-                    protomResponseData="",
+                    protom_response="Q",
+                    protom_response_data="",
                 )
             raise SecuritasDirectError("PERI1 failed")
 
@@ -1992,8 +1992,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="Q",
-                protomResponseData="",
+                protom_response="Q",
+                protom_response_data="",
             )
         )
 
@@ -2043,8 +2043,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse=proto,
-                protomResponseData="",
+                protom_response=proto,
+                protom_response_data="",
             )
 
         alarm.client.arm_alarm = arm_side_effect
@@ -2076,8 +2076,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse=proto,
-                protomResponseData="",
+                protom_response=proto,
+                protom_response_data="",
             )
 
         alarm.client.arm_alarm = track_arm
@@ -2114,8 +2114,8 @@ class TestCompoundArmCommands:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse=proto,
-                protomResponseData="",
+                protom_response=proto,
+                protom_response_data="",
             )
 
         alarm.client.arm_alarm = track_arm
@@ -2148,8 +2148,8 @@ class TestDynamicDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -2177,8 +2177,8 @@ class TestDynamicDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
 
         alarm.client.disarm_alarm = disarm_side_effect
@@ -2204,8 +2204,8 @@ class TestDynamicDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -2241,8 +2241,8 @@ class TestDynamicDisarm:
                 message="",
                 status="",
                 numinst="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
 
@@ -2326,7 +2326,7 @@ class TestDynamicDisarm:
             disarm_calls.append(command)
             if command == "DARM1DARMPERI":
                 raise SecuritasDirectError("404 not found", http_status=400)
-            return OperationStatus(protomResponse="D", operation_status="OK")
+            return OperationStatus(protom_response="D", operation_status="OK")
 
         alarm.client.disarm_alarm = track_disarm
         alarm.client.arm_alarm = AsyncMock(
@@ -2335,8 +2335,8 @@ class TestDynamicDisarm:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="A",
-                protomResponseData="",
+                protom_response="A",
+                protom_response_data="",
             )
         )
 
@@ -2364,9 +2364,9 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=False)
         alarm._last_proto_code = "T"
         alarm.client.disarm_alarm = AsyncMock(
-            return_value=OperationStatus(protomResponse="D", operation_status="OK")
+            return_value=OperationStatus(protom_response="D", operation_status="OK")
         )
-        await alarm._execute_transition(AlarmState(InteriorMode.OFF, PerimeterMode.OFF))
+        await alarm._execute_transition(AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF))
         alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
 
     async def test_disarm_compound_fallback_to_darm1(self):
@@ -2376,10 +2376,10 @@ class TestExecuteTransition:
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=[
                 SecuritasDirectError("unsupported", http_status=400),
-                OperationStatus(protomResponse="D", operation_status="OK"),
+                OperationStatus(protom_response="D", operation_status="OK"),
             ]
         )
-        await alarm._execute_transition(AlarmState(InteriorMode.OFF, PerimeterMode.OFF))
+        await alarm._execute_transition(AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF))
         calls = alarm.client.disarm_alarm.call_args_list
         assert calls[0].args == (alarm.installation, "DARM1DARMPERI")
         assert calls[1].args == (alarm.installation, "DARM1")
@@ -2391,10 +2391,10 @@ class TestExecuteTransition:
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=[
                 SecuritasDirectError("unsupported", http_status=400),
-                OperationStatus(protomResponse="D", operation_status="OK"),
+                OperationStatus(protom_response="D", operation_status="OK"),
             ]
         )
-        await alarm._execute_transition(AlarmState(InteriorMode.OFF, PerimeterMode.OFF))
+        await alarm._execute_transition(AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF))
         assert "DARM1DARMPERI" in alarm._resolver.unsupported
 
     async def test_409_not_treated_as_unsupported(self):
@@ -2406,7 +2406,7 @@ class TestExecuteTransition:
         )
         with pytest.raises(SecuritasDirectError, match="busy"):
             await alarm._execute_transition(
-                AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
 
@@ -2421,7 +2421,7 @@ class TestExecuteTransition:
         )
         with pytest.raises(SecuritasDirectError, match="403"):
             await alarm._execute_transition(
-                AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
         # Only tried first command, didn't fall back
         alarm.client.disarm_alarm.assert_called_once_with(
@@ -2438,7 +2438,7 @@ class TestExecuteTransition:
         )
         with pytest.raises(SecuritasDirectError, match="TECHNICAL_ERROR"):
             await alarm._execute_transition(
-                AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
         # Only tried first command, didn't fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
@@ -2456,7 +2456,7 @@ class TestExecuteTransition:
         )
         with pytest.raises(SecuritasDirectError):
             await alarm._execute_transition(
-                AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
 
     async def test_mode_change_disarms_then_arms(self):
@@ -2464,13 +2464,13 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=False)
         alarm._last_proto_code = "P"
         alarm.client.disarm_alarm = AsyncMock(
-            return_value=OperationStatus(protomResponse="D", operation_status="OK")
+            return_value=OperationStatus(protom_response="D", operation_status="OK")
         )
         alarm.client.arm_alarm = AsyncMock(
-            return_value=OperationStatus(protomResponse="Q", operation_status="OK")
+            return_value=OperationStatus(protom_response="Q", operation_status="OK")
         )
         await alarm._execute_transition(
-            AlarmState(InteriorMode.NIGHT, PerimeterMode.OFF)
+            AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF)
         )
         alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
         alarm.client.arm_alarm.assert_called_once_with(alarm.installation, "ARMNIGHT1")
@@ -2483,12 +2483,12 @@ class TestExecuteTransition:
         alarm._resolver.mark_unsupported("ARM1PERI1")
         alarm.client.arm_alarm = AsyncMock(
             side_effect=[
-                OperationStatus(protomResponse="T", operation_status="OK"),
-                OperationStatus(protomResponse="A", operation_status="OK"),
+                OperationStatus(protom_response="T", operation_status="OK"),
+                OperationStatus(protom_response="A", operation_status="OK"),
             ]
         )
         await alarm._execute_transition(
-            AlarmState(InteriorMode.TOTAL, PerimeterMode.ON)
+            AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON)
         )
         calls = alarm.client.arm_alarm.call_args_list
         assert calls[0].args == (alarm.installation, "ARM1")
@@ -2508,14 +2508,14 @@ class TestExecuteTransition:
         # Second call: PERI1 (from "T") → result is "A" (target reached)
         alarm.client.arm_alarm = AsyncMock(
             side_effect=[
-                OperationStatus(protomResponse="T", operation_status="OK"),
-                OperationStatus(protomResponse="A", operation_status="OK"),
+                OperationStatus(protom_response="T", operation_status="OK"),
+                OperationStatus(protom_response="A", operation_status="OK"),
             ]
         )
         result = await alarm._execute_transition(
-            AlarmState(InteriorMode.TOTAL, PerimeterMode.ON)
+            AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON)
         )
-        assert result.protomResponse == "A"
+        assert result.protom_response == "A"
         assert alarm._last_proto_code == "T"  # updated before retry
         calls = alarm.client.arm_alarm.call_args_list
         # First attempt resolved D→A: tries compound first
@@ -2529,13 +2529,13 @@ class TestExecuteTransition:
         alarm._last_proto_code = "D"
         # Both attempts return wrong state — should not loop forever
         alarm.client.arm_alarm = AsyncMock(
-            return_value=OperationStatus(protomResponse="T", operation_status="OK")
+            return_value=OperationStatus(protom_response="T", operation_status="OK")
         )
         result = await alarm._execute_transition(
-            AlarmState(InteriorMode.TOTAL, PerimeterMode.ON)
+            AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON)
         )
         # Accepted the second attempt's result even though it's wrong
-        assert result.protomResponse == "T"
+        assert result.protom_response == "T"
         # Called twice (attempt 0 + attempt 1), not more
         assert alarm.client.arm_alarm.call_count == 2
 
@@ -2544,12 +2544,12 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=False)
         alarm._last_proto_code = "D"
         alarm.client.arm_alarm = AsyncMock(
-            return_value=OperationStatus(protomResponse="T", operation_status="OK")
+            return_value=OperationStatus(protom_response="T", operation_status="OK")
         )
         result = await alarm._execute_transition(
-            AlarmState(InteriorMode.TOTAL, PerimeterMode.OFF)
+            AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)
         )
-        assert result.protomResponse == "T"
+        assert result.protom_response == "T"
         alarm.client.arm_alarm.assert_called_once()
 
 
@@ -2569,8 +2569,8 @@ class TestLastProtoCode:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="C",
-            protomResponseData="",
+            protom_response="C",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._last_proto_code == "C"
@@ -2584,8 +2584,8 @@ class TestLastProtoCode:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._last_proto_code == "D"
@@ -2599,8 +2599,8 @@ class TestLastProtoCode:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="",
-            protomResponseData="",
+            protom_response="",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._last_proto_code == "T"
@@ -2619,8 +2619,8 @@ class TestLastProtoCode:
             message="",
             status="ARMED_TOTAL",
             installation_number="123456",
-            protomResponse="ARMED_TOTAL",
-            protomResponseData="",
+            protom_response="ARMED_TOTAL",
+            protom_response_data="",
         )
         alarm.update_status_alarm(status)
         assert alarm._last_proto_code == "A"
@@ -2908,8 +2908,8 @@ class TestForceArmWorkflow:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="P",
-            protomResponseData="",
+            protom_response="P",
+            protom_response_data="",
         )
         # First call raises ArmingExceptionError, second succeeds
         alarm.client.arm_alarm = AsyncMock(side_effect=[exc, success_result])
@@ -3031,8 +3031,8 @@ class TestForceArmWorkflow:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="P",
-            protomResponseData="",
+            protom_response="P",
+            protom_response_data="",
         )
 
         # Step 1: initial arm fails
@@ -3050,8 +3050,8 @@ class TestForceArmWorkflow:
                 message="",
                 status="",
                 installation_number="123456",
-                protomResponse="D",
-                protomResponseData="",
+                protom_response="D",
+                protom_response_data="",
             )
         )
         await alarm.async_update_status()

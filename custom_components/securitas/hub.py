@@ -101,7 +101,7 @@ class SecuritasDirectDevice:
     @property
     def postal_code(self) -> str:
         """Return the postalCode of the instalation."""
-        return self.installation.postalCode
+        return self.installation.postal_code
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -674,7 +674,7 @@ class SecuritasHub:
                 reference_id,
                 priority=ApiQueue.FOREGROUND,
             )
-            if hasattr(status, "protomResponse") and status.protomResponse:
+            if hasattr(status, "protom_response") and status.protom_response:
                 return status
             # check_alarm_status returns OperationStatus with empty
             # protomResponse when still waiting
@@ -713,8 +713,8 @@ class SecuritasHub:
             message="",
             status=status.status or "",
             installation_number=installation.number,
-            protomResponse=status.status or "",
-            protomResponseData=status.timestampUpdate or "",
+            protom_response=status.status or "",
+            protom_response_data=status.timestamp_update or "",
         )
 
     # Minimum time (seconds) to wait after sending a lock command before

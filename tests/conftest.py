@@ -32,7 +32,7 @@ from custom_components.securitas.securitas_direct_new_api.const import (
     PERI_DEFAULTS,
     STD_DEFAULTS,
 )
-from custom_components.securitas.securitas_direct_new_api.dataTypes import Installation
+from custom_components.securitas.securitas_direct_new_api.models import Installation
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -177,10 +177,10 @@ def make_installation(**overrides) -> Installation:
         "panel": "SDVFAST",
         "type": "PLUS",
         "name": "John",
-        "lastName": "Doe",
+        "last_name": "Doe",
         "address": "123 St",
         "city": "Madrid",
-        "postalCode": "28001",
+        "postal_code": "28001",
         "province": "Madrid",
         "email": "test@example.com",
         "phone": "555-1234",

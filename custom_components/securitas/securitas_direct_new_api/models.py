@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .exceptions import UnexpectedStateError
 
@@ -157,6 +157,14 @@ class OperationStatus(BaseModel):
     request_id: str = Field("", alias="requestId")
     error: dict | None = None
 
+    @field_validator("error", mode="before")
+    @classmethod
+    def _coerce_error(cls, v: Any) -> dict | None:
+        """Coerce non-dict error values (e.g. empty string) to None."""
+        if isinstance(v, dict):
+            return v
+        return None
+
 
 class SStatus(BaseModel):
     """Current status of the alarm system."""
@@ -206,6 +214,18 @@ class SmartLock(BaseModel):
     family: str = ""
     label: str = ""
     features: LockFeatures | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_none_strings(cls, data: Any) -> Any:
+        """Coerce None values to empty strings for required str fields."""
+        if isinstance(data, dict):
+            for key in ("deviceId", "device_id", "referenceId", "reference_id",
+                        "zoneId", "zone_id", "serialNumber", "serial_number",
+                        "family", "label"):
+                if key in data and data[key] is None:
+                    data[key] = ""
+        return data
 
 
 class SmartLockMode(BaseModel):

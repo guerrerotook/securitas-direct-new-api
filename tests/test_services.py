@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     Attribute,
     Installation,
     OperationStatus,
@@ -102,10 +102,10 @@ class TestListInstallations:
         assert inst.panel == "SDVFAST"
         assert inst.type == "PLUS"
         assert inst.name == "John"
-        assert inst.lastName == "Doe"
+        assert inst.last_name == "Doe"
         assert inst.address == "123 St"
         assert inst.city == "Madrid"
-        assert inst.postalCode == "28001"
+        assert inst.postal_code == "28001"
         assert inst.province == "Madrid"
         assert inst.email == "j@e.com"
         assert inst.phone == "555"
@@ -378,7 +378,7 @@ class TestGetSentinelData:
 
         result = await authed_api.get_sentinel_data(installation, mock_service)
 
-        assert result == Sentinel("", "", 0, 0)
+        assert result == Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
     async def test_none_xscomfort_returns_empty_sentinel(
         self, authed_api, mock_execute, installation, mock_service
@@ -387,7 +387,7 @@ class TestGetSentinelData:
 
         result = await authed_api.get_sentinel_data(installation, mock_service)
 
-        assert result == Sentinel("", "", 0, 0)
+        assert result == Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
     async def test_missing_air_quality_code_returns_empty_string(
         self, authed_api, mock_execute, installation, mock_service
@@ -440,7 +440,7 @@ class TestGetSentinelData:
 
         result = await authed_api.get_sentinel_data(installation, mock_service)
 
-        assert result == Sentinel("", "", 0, 0)
+        assert result == Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
 
 # ── send_otp() ────────────────────────────────────────────────────────────────
@@ -527,7 +527,7 @@ class TestGetSentinelDataEdgeCases:
 
         result = await authed_api.get_sentinel_data(installation, service_no_attrs)
 
-        assert result == Sentinel("", "", 0, 0)
+        assert result == Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
 
 class TestGetAirQualityData:
@@ -632,7 +632,7 @@ class TestCheckAlarmStatus:
         self, authed_api, mock_execute, installation
     ):
         """check_alarm_status returns OperationStatus dataclass."""
-        from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+        from custom_components.securitas.securitas_direct_new_api.models import (
             OperationStatus,
         )
 
@@ -656,7 +656,7 @@ class TestCheckAlarmStatus:
         assert result.operation_status == "OK"
         assert result.status == "ARM1"
         assert result.installation_number == "123456"
-        assert result.protomResponse == "PROT_RESP"
+        assert result.protom_response == "PROT_RESP"
 
 
 # ── Dataclass field tests ────────────────────────────────────────────────────
@@ -665,11 +665,11 @@ class TestCheckAlarmStatus:
 class TestDataclassFields:
     def test_smart_lock_mode_has_device_id(self):
         mode = SmartLockMode(res="OK", lockStatus="2", deviceId="02")
-        assert mode.deviceId == "02"
+        assert mode.device_id == "02"
 
     def test_smart_lock_mode_device_id_defaults_empty(self):
         mode = SmartLockMode(res="OK", lockStatus="2")
-        assert mode.deviceId == ""
+        assert mode.device_id == ""
 
 
 # ── Submit request + single-poll methods for ApiQueue ─────────────────────────
@@ -804,7 +804,7 @@ class TestResultProcessing:
         }
         result = await authed_api.process_arm_result(raw, installation)
         assert isinstance(result, OperationStatus)
-        assert result.protomResponse == "P"
+        assert result.protom_response == "P"
         assert authed_api.protom_response == "P"
 
     async def test_process_arm_result_error_raises(self, authed_api, installation):
@@ -861,7 +861,7 @@ class TestResultProcessing:
         }
         result = authed_api.process_disarm_result(raw)
         assert isinstance(result, OperationStatus)
-        assert result.protomResponse == "D"
+        assert result.protom_response == "D"
         assert authed_api.protom_response == "D"
 
     async def test_process_disarm_result_error_raises(self, authed_api, installation):
@@ -887,5 +887,5 @@ class TestResultProcessing:
         }
         result = authed_api.process_lock_mode_result(raw)
         assert isinstance(result, SmartLockModeStatus)
-        assert result.protomResponse == "L"
+        assert result.protom_response == "L"
         assert authed_api.protom_response == "L"

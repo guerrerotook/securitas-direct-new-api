@@ -11,7 +11,7 @@ from custom_components.securitas.securitas_direct_new_api.apimanager import (
     generate_device_id,
     generate_uuid,
 )
-from custom_components.securitas.securitas_direct_new_api.dataTypes import Installation
+from custom_components.securitas.securitas_direct_new_api.models import Installation
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
 )

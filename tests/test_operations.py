@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     Installation,
     OperationStatus,
     SStatus,
@@ -114,7 +114,7 @@ class TestCheckAlarmStatus:
         assert result.operation_status == "OK"
         assert result.status == "ARMED"
         assert result.installation_number == "123456"
-        assert result.protomResponse == "PROT_OK"
+        assert result.protom_response == "PROT_OK"
 
     async def test_polls_on_wait_then_returns_ok(
         self, authed_api, mock_execute, installation
@@ -203,8 +203,8 @@ class TestArmAlarm:
             operation_status="OK",
             status="ARMED_TOTAL",
             installation_number="123456",
-            protomResponse="PROT_ARMED",
-            requestId="req-001",
+            protom_response="PROT_ARMED",
+            request_id="req-001",
         )
         hub.session.process_arm_result = AsyncMock(return_value=expected_result)
 
@@ -214,7 +214,7 @@ class TestArmAlarm:
         assert result.operation_status == "OK"
         assert result.status == "ARMED_TOTAL"
         assert result.installation_number == "123456"
-        assert result.requestId == "req-001"
+        assert result.request_id == "req-001"
         hub.session.submit_arm_request.assert_awaited_once_with(installation, "ARM1")
         hub.session.process_arm_result.assert_awaited_once()
 
@@ -329,7 +329,7 @@ class TestArmAlarm:
             "error": None,
         }
         hub.session.check_arm_status = AsyncMock(return_value=ok_raw)
-        expected_result = OperationStatus(operation_status="OK", protomResponse="P")
+        expected_result = OperationStatus(operation_status="OK", protom_response="P")
         hub.session.process_arm_result = AsyncMock(return_value=expected_result)
 
         result = await hub.arm_alarm(
@@ -340,7 +340,7 @@ class TestArmAlarm:
         )
 
         assert result.operation_status == "OK"
-        assert result.protomResponse == "P"
+        assert result.protom_response == "P"
 
         # Check submit_arm_request received force params
         hub.session.submit_arm_request.assert_awaited_once_with(
@@ -485,8 +485,8 @@ class TestDisarmAlarm:
         expected_result = OperationStatus(
             operation_status="OK",
             status="DISARMED",
-            numinst="123456",
-            requestId="req-003",
+            installation_number="123456",
+            request_id="req-003",
         )
         hub.session.process_disarm_result = MagicMock(return_value=expected_result)
 
@@ -495,8 +495,8 @@ class TestDisarmAlarm:
         assert isinstance(result, OperationStatus)
         assert result.operation_status == "OK"
         assert result.status == "DISARMED"
-        assert result.numinst == "123456"
-        assert result.requestId == "req-003"
+        assert result.installation_number == "123456"
+        assert result.request_id == "req-003"
         hub.session.submit_disarm_request.assert_awaited_once_with(
             installation, "DARM1"
         )
@@ -648,7 +648,7 @@ class TestCheckGeneralStatus:
 
         assert isinstance(result, SStatus)
         assert result.status == "ARMED_TOTAL"
-        assert result.timestampUpdate == "2026-01-15T10:30:00Z"
+        assert result.timestamp_update == "2026-01-15T10:30:00Z"
 
     async def test_errors_in_response_returns_none_sstatus(
         self, authed_api, mock_execute, installation
@@ -659,7 +659,7 @@ class TestCheckGeneralStatus:
 
         assert isinstance(result, SStatus)
         assert result.status is None
-        assert result.timestampUpdate is None
+        assert result.timestamp_update is None
 
     async def test_none_xsstatus_returns_none_sstatus(
         self, authed_api, mock_execute, installation
@@ -670,4 +670,4 @@ class TestCheckGeneralStatus:
 
         assert isinstance(result, SStatus)
         assert result.status is None
-        assert result.timestampUpdate is None
+        assert result.timestamp_update is None

@@ -12,12 +12,11 @@ from uuid import uuid4
 
 import jwt
 
-from .dataTypes import (
+from .models import (
     AirQuality,
     Attribute,
     CameraDevice,
     Installation,
-    LockAutolock,
     LockFeatures,
     OperationStatus,
     OtpPhone,
@@ -81,23 +80,6 @@ SMARTLOCK_KEY_TYPE = "0"
 ALARM_STATUS_SERVICE_ID = "11"
 
 
-def _parse_lock_features(raw_features: dict | None) -> LockFeatures | None:
-    """Parse lock features from a raw API response dict."""
-    if not raw_features:
-        return None
-    autolock = None
-    if raw_autolock := raw_features.get("autolock"):
-        autolock = LockAutolock(
-            active=raw_autolock.get("active"),
-            timeout=raw_autolock.get("timeout"),
-        )
-    return LockFeatures(
-        holdBackLatchTime=raw_features.get("holdBackLatchTime", 0),
-        calibrationType=raw_features.get("calibrationType", 0),
-        autolock=autolock,
-    )
-
-
 # Extra settle delay after a lock-mode change completes (multiples of delay_check_operation)
 
 # Device types for camera devices in xSDeviceList
@@ -153,7 +135,7 @@ class ApiManager(SecuritasHttpClient):
         otp_hash = data.get("auth-otp-hash")
         phones: list[OtpPhone] = []
         for item in data.get("auth-phones", []):
-            phones.append(OtpPhone(item["id"], item["phone"]))
+            phones.append(OtpPhone(id=item["id"], phone=item["phone"]))
         return (otp_hash, phones)
 
     async def validate_device(
@@ -358,28 +340,9 @@ class ApiManager(SecuritasHttpClient):
         }
         response = await self._execute_request(content, "mkInstallationList")
 
-        result: list[Installation] = []
         installations_data = self._extract_response_data(response, "xSInstallations")
         raw_installations = installations_data["installations"]
-        for item in raw_installations:
-            installation_item: Installation = Installation(
-                item["numinst"],
-                item["alias"],
-                item["panel"],
-                item["type"],
-                item["name"],
-                item["surname"],
-                item["address"],
-                item["city"],
-                item["postcode"],
-                item["province"],
-                item["email"],
-                item["phone"],
-                "",
-                datetime.min,
-            )
-            result.append(installation_item)
-        return result
+        return [Installation.model_validate(item) for item in raw_installations]
 
     async def check_alarm(self, installation: Installation) -> str:
         """Check status of the alarm."""
@@ -451,32 +414,32 @@ class ApiManager(SecuritasHttpClient):
                 for attribute_item in attributes["attributes"]:
                     attribute_list.append(
                         Attribute(
-                            attribute_item["name"],
-                            attribute_item["value"],
-                            bool(attribute_item["active"]),
+                            name=attribute_item["name"],
+                            value=attribute_item["value"],
+                            active=bool(attribute_item["active"]),
                         )
                     )
 
             result.append(
                 Service(
-                    int(item["idService"]),
-                    int(item["idService"]),
-                    bool(item["active"]),
-                    bool(item["visible"]),
-                    bool(item["bde"]),
-                    bool(item["isPremium"]),
-                    bool(item["codOper"]),
-                    int(item.get("totalDevice", 0)),
-                    item["request"],
-                    False,
-                    0,
-                    False,
-                    item["minWrapperVersion"],
-                    item.get("description", ""),
-                    attribute_list,
-                    [],
-                    [],
-                    installation,
+                    id=int(item["idService"]),
+                    id_service=int(item["idService"]),
+                    active=bool(item["active"]),
+                    visible=bool(item["visible"]),
+                    bde=bool(item["bde"]),
+                    is_premium=bool(item["isPremium"]),
+                    cod_oper=bool(item["codOper"]),
+                    total_device=int(item.get("totalDevice", 0)),
+                    request=item["request"],
+                    multiple_req=False,
+                    num_devices_mr=0,
+                    secret_word=False,
+                    min_wrapper_version=item["minWrapperVersion"],
+                    description=item.get("description", ""),
+                    attributes=attribute_list,
+                    listdiy=[],
+                    listprompt=[],
+                    installation=installation,
                 )
             )
         return result
@@ -497,16 +460,16 @@ class ApiManager(SecuritasHttpClient):
         response = await self._execute_request(content, "Sentinel", installation)
 
         if "errors" in response:
-            return Sentinel("", "", 0, 0)
+            return Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
         if not service.attributes or not isinstance(service.attributes, list):
             _LOGGER.warning("No attributes found for sentinel service %s", service.id)
-            return Sentinel("", "", 0, 0)
+            return Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
         zone = service.attributes[0].value
         comfort_data = response["data"]["xSComfort"]
         if comfort_data is None:
-            return Sentinel("", "", 0, 0)
+            return Sentinel(alias="", air_quality="", humidity=0, temperature=0)
         devices = comfort_data["devices"]
         target_device = None
 
@@ -516,14 +479,14 @@ class ApiManager(SecuritasHttpClient):
                 break
 
         if target_device is None:
-            return Sentinel("", "", 0, 0)
+            return Sentinel(alias="", air_quality="", humidity=0, temperature=0)
 
         air_quality_code = target_device["status"].get("airQualityCode")
         return Sentinel(
-            target_device["alias"],
-            str(air_quality_code) if air_quality_code is not None else "",
-            int(target_device["status"]["humidity"]),
-            int(target_device["status"]["temperature"]),
+            alias=target_device["alias"],
+            air_quality=str(air_quality_code) if air_quality_code is not None else "",
+            humidity=int(target_device["status"]["humidity"]),
+            temperature=int(target_device["status"]["temperature"]),
             zone=target_device.get("zone", ""),
         )
 
@@ -582,19 +545,15 @@ class ApiManager(SecuritasHttpClient):
 
         if "errors" in response:
             _LOGGER.error(response)
-            return SStatus(None, None)
+            return SStatus()
 
         if "data" in response:
             raw_data = response["data"]["xSStatus"]
             if raw_data is None:
-                return SStatus(None, None)
-            return SStatus(
-                raw_data["status"],
-                raw_data["timestampUpdate"],
-                raw_data.get("wifiConnected"),
-            )
+                return SStatus()
+            return SStatus.model_validate(raw_data)
 
-        return SStatus(None, None)
+        return SStatus()
 
     async def check_alarm_status(
         self,
@@ -609,14 +568,7 @@ class ApiManager(SecuritasHttpClient):
         raw_data = await self._poll_operation(_check)
 
         self.protom_response = raw_data["protomResponse"]
-        return OperationStatus(
-            operation_status=raw_data["res"],
-            message=raw_data["msg"],
-            status=raw_data["status"],
-            installation_number=raw_data["numinst"],
-            protomResponse=raw_data["protomResponse"],
-            protomResponseData=raw_data["protomResponseDate"],
-        )
+        return OperationStatus.model_validate(raw_data)
 
     async def _check_alarm_status(
         self, installation: Installation, reference_id: str
@@ -669,16 +621,7 @@ class ApiManager(SecuritasHttpClient):
                 )
 
         self.protom_response = raw_data["protomResponse"]
-        return OperationStatus(
-            operation_status=raw_data["res"],
-            message=raw_data["msg"],
-            status=raw_data["status"],
-            installation_number=raw_data["numinst"],
-            protomResponse=raw_data["protomResponse"],
-            protomResponseData=raw_data["protomResponseDate"],
-            requestId=raw_data["requestId"],
-            error=raw_data["error"],
-        )
+        return OperationStatus.model_validate(raw_data)
 
     def process_disarm_result(
         self,
@@ -697,16 +640,7 @@ class ApiManager(SecuritasHttpClient):
 
         if raw_data.get("protomResponse"):
             self.protom_response = raw_data["protomResponse"]
-        return OperationStatus(
-            operation_status=raw_data.get("res", ""),
-            message=raw_data.get("msg", ""),
-            status=raw_data.get("status", ""),
-            numinst=raw_data.get("numinst", ""),
-            protomResponse=raw_data.get("protomResponse", ""),
-            protomResponseData=raw_data.get("protomResponseDate", ""),
-            requestId=raw_data.get("requestId", ""),
-            error=raw_data.get("error"),
-        )
+        return OperationStatus.model_validate(raw_data)
 
     def process_lock_mode_result(
         self,
@@ -714,12 +648,7 @@ class ApiManager(SecuritasHttpClient):
     ) -> SmartLockModeStatus:
         """Process raw lock mode poll result into SmartLockModeStatus."""
         self.protom_response = raw_data["protomResponse"]
-        return SmartLockModeStatus(
-            raw_data["res"],
-            raw_data["msg"],
-            raw_data["protomResponse"],
-            raw_data["status"],
-        )
+        return SmartLockModeStatus.model_validate(raw_data)
 
     async def check_arm_status(
         self,
@@ -845,16 +774,7 @@ class ApiManager(SecuritasHttpClient):
         if raw_data is None:
             return SmartLock()
 
-        return SmartLock(
-            res=raw_data.get("res"),
-            location=raw_data.get("location"),
-            referenceId=raw_data.get("referenceId") or "",
-            zoneId=raw_data.get("zoneId") or "",
-            serialNumber=raw_data.get("serialNumber") or "",
-            family=raw_data.get("family") or "",
-            label=raw_data.get("label") or "",
-            features=_parse_lock_features(raw_data.get("features")),
-        )
+        return SmartLock.model_validate(raw_data)
 
     async def submit_danalock_config_request(
         self,
@@ -907,8 +827,8 @@ class ApiManager(SecuritasHttpClient):
         """Parse a successful Danalock config status response into SmartLock."""
         return SmartLock(
             res=raw.get("res"),
-            deviceId=raw.get("deviceNumber") or device_id,
-            features=_parse_lock_features(raw.get("features")),
+            device_id=raw.get("deviceNumber") or device_id,
+            features=LockFeatures.model_validate(raw["features"]) if raw.get("features") else None,
         )
 
     async def get_lock_current_mode(
@@ -932,14 +852,8 @@ class ApiManager(SecuritasHttpClient):
             return []
         modes: list[SmartLockMode] = []
         for info in raw_data.get("smartlockInfo") or []:
-            modes.append(
-                SmartLockMode(
-                    res=raw_data["res"],
-                    lockStatus=info.get("lockStatus", "0"),
-                    deviceId=info.get("deviceId", ""),
-                    statusTimestamp=info.get("statusTimestamp", ""),
-                )
-            )
+            info["res"] = raw_data["res"]
+            modes.append(SmartLockMode.model_validate(info))
         return modes
 
     async def check_change_lock_mode(
@@ -1144,14 +1058,7 @@ class ApiManager(SecuritasHttpClient):
         raw = await self._execute_graphql(
             content, "mkGetThumbnail", "xSGetThumbnail", installation, check_ok=False
         )
-        return ThumbnailResponse(
-            id_signal=raw.get("idSignal"),
-            device_code=raw.get("deviceCode"),
-            device_alias=raw.get("deviceAlias"),
-            timestamp=raw.get("timestamp"),
-            signal_type=raw.get("signalType"),
-            image=raw.get("image"),
-        )
+        return ThumbnailResponse.model_validate(raw)
 
     async def get_photo_images(
         self, installation: Installation, id_signal: str, signal_type: str

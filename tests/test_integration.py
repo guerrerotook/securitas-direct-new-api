@@ -152,7 +152,7 @@ async def test_setup_general_status_via_update_overview(
     status = await hub.update_overview(devices[0].installation)
     assert mock_server.call_count("Status") >= 1
     assert mock_server.call_count("CheckAlarm") == 0
-    assert status.protomResponse == "D"
+    assert status.protom_response == "D"
 
 
 async def test_login_sets_auth_token(
@@ -398,7 +398,7 @@ async def test_initial_state_disarmed(
     assert len(devices) == 1
 
     status = await hub.update_overview(devices[0].installation)
-    assert status.protomResponse == "D"
+    assert status.protom_response == "D"
 
 
 async def test_initial_state_armed_away(
@@ -417,7 +417,7 @@ async def test_initial_state_armed_away(
     devices = entry_data["devices"]
 
     status = await hub.update_overview(devices[0].installation)
-    assert status.protomResponse == "T"
+    assert status.protom_response == "T"
 
 
 async def test_general_status_used_by_update_overview(
@@ -441,7 +441,7 @@ async def test_general_status_used_by_update_overview(
     status = await hub.update_overview(devices[0].installation)
     assert mock_server.call_count("Status") >= 1
     assert mock_server.call_count("CheckAlarm") == 0
-    assert status.protomResponse == "T"
+    assert status.protom_response == "T"
 
 
 # ── Services create correct entities ─────────────────────────────────────────
@@ -514,7 +514,7 @@ async def test_arm_away_api_call(hass: HomeAssistant, mock_server: MockGraphQLSe
     mock_server.add_response("ArmStatus", graphql_arm_status(proto="T"))
 
     status = await hub.arm_alarm(installation, "ARM1")
-    assert status.protomResponse == "T"
+    assert status.protom_response == "T"
     assert mock_server.call_count("xSArmPanel") == 1
     assert mock_server.call_count("ArmStatus") >= 1
 
@@ -534,7 +534,7 @@ async def test_disarm_api_call(hass: HomeAssistant, mock_server: MockGraphQLServ
     mock_server.add_response("DisarmStatus", graphql_disarm_status(proto="D"))
 
     status = await hub.disarm_alarm(installation, "DARM1")
-    assert status.protomResponse == "D"
+    assert status.protom_response == "D"
     assert mock_server.call_count("xSDisarmPanel") == 1
 
 
@@ -557,7 +557,7 @@ async def test_arm_poll_waits_for_ok(
     mock_server.add_response("ArmStatus", graphql_arm_status(res="OK", proto="T"))
 
     status = await hub.arm_alarm(installation, "ARM1")
-    assert status.protomResponse == "T"
+    assert status.protom_response == "T"
     assert mock_server.call_count("ArmStatus") == 3
 
 

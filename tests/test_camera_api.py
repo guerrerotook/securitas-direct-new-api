@@ -8,7 +8,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.securitas.hub import SecuritasHub
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     CameraDevice,
     Installation,
     ThumbnailResponse,

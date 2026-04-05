@@ -261,10 +261,10 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             self._message = status.message
             self._attr_extra_state_attributes["message"] = status.message
             self._attr_extra_state_attributes["response_data"] = (
-                status.protomResponseData
+                status.protom_response_data
             )
 
-            if not status.protomResponse:
+            if not status.protom_response:
                 _LOGGER.debug(
                     "[%s] Received empty protomResponse"
                     " (operation_status: %s, message: %s, status: %s,"
@@ -273,7 +273,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
                     status.operation_status,
                     status.message,
                     status.status,
-                    status.protomResponseData,
+                    status.protom_response_data,
                 )
                 return
             # Only update _last_proto_code when protomResponse is a known proto
@@ -282,20 +282,20 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             # the last proto code or the resolver's state-based command
             # selection will break.
             if (
-                status.protomResponse == PROTO_DISARMED
-                or status.protomResponse in PROTO_TO_STATE
+                status.protom_response == PROTO_DISARMED
+                or status.protom_response in PROTO_TO_STATE
             ):
-                self._last_proto_code = status.protomResponse
-            if status.protomResponse == PROTO_DISARMED:
+                self._last_proto_code = status.protom_response
+            if status.protom_response == PROTO_DISARMED:
                 self._state = AlarmControlPanelState.DISARMED
-            elif status.protomResponse in self._status_map:
-                self._state = self._status_map[status.protomResponse]
+            elif status.protom_response in self._status_map:
+                self._state = self._status_map[status.protom_response]
             else:
                 self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
                 _LOGGER.info(
                     "Unmapped alarm status code '%s' from Securitas. "
                     "Check your Alarm State Mappings in the integration options",
-                    status.protomResponse,
+                    status.protom_response,
                 )
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
@@ -322,7 +322,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         return OperationStatus(
             operation_status=getattr(result, "operation_status", ""),
             message=getattr(result, "message", ""),
-            protomResponse=result.protomResponse,
+            protom_response=result.protom_response,
         )
 
     def _handle_arm_disarm_error(self, err: SecuritasDirectError, context: str) -> None:
@@ -357,13 +357,13 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         for attempt in range(2):
             current = PROTO_TO_ALARM_STATE.get(
                 self._last_proto_code or "D",
-                AlarmState(InteriorMode.OFF, PerimeterMode.OFF),
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF),
             )
             steps = self._resolver.resolve(current, target)
 
             if not steps:
                 # Resolver says we're already in the target state.
-                return OperationStatus(protomResponse=self._last_proto_code or "D")
+                return OperationStatus(protom_response=self._last_proto_code or "D")
 
             for step in steps:
                 result = await self._execute_step(step, **force_params)
@@ -371,7 +371,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             assert result is not None
 
             # Check whether we actually reached the target state.
-            actual_proto = result.protomResponse
+            actual_proto = result.protom_response
             if actual_proto and actual_proto in PROTO_TO_ALARM_STATE:
                 actual_state = PROTO_TO_ALARM_STATE[actual_proto]
                 if actual_state == target:
@@ -518,7 +518,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._operation_in_progress = True
         self._operation_epoch += 1
         try:
-            target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+            target = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             result = await self._execute_transition(target)
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
@@ -562,7 +562,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             self._state = self._last_state
             self._notify_arm_exceptions(exc)
         except SecuritasDirectError as err:
-            if self._last_arm_result.protomResponse:
+            if self._last_arm_result.protom_response:
                 self.update_status_alarm(
                     self._build_operation_status(self._last_arm_result)
                 )

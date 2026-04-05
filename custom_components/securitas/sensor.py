@@ -14,7 +14,7 @@ from . import DOMAIN, SecuritasDirectDevice, SecuritasHub
 from .const import SENTINEL_SERVICE_NAMES
 from .entity import SecuritasEntity, schedule_initial_updates
 from .securitas_direct_new_api import Installation, SecuritasDirectError
-from .securitas_direct_new_api.dataTypes import AirQuality, Service
+from .securitas_direct_new_api.models import AirQuality, Service
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 from aiohttp import ClientConnectorDNSError, ClientConnectorError, ClientSession
 import jwt
 
-from .dataTypes import Installation
+from .models import Installation
 from .domains import ApiDomains
 from .exceptions import SecuritasDirectError
 

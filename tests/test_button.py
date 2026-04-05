@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.button import SecuritasRefreshButton, async_setup_entry
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     OperationStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
@@ -90,8 +90,8 @@ class TestSecuritasRefreshButtonAsyncPress:
             message="All good",
             status="",
             installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
+            protom_response="D",
+            protom_response_data="",
         )
         button.client.refresh_alarm_status = AsyncMock(return_value=alarm_status)
 
@@ -109,8 +109,8 @@ class TestSecuritasRefreshButtonAsyncPress:
             message="",
             status="",
             installation_number="123456",
-            protomResponse="T",
-            protomResponseData="",
+            protom_response="T",
+            protom_response_data="",
         )
         button.client.refresh_alarm_status = AsyncMock(return_value=alarm_status)
 

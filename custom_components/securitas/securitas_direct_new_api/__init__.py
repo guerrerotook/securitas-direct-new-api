@@ -15,20 +15,28 @@ from .const import (  # noqa: F401
     STATE_TO_COMMAND,
     SecuritasState,
 )
-from .dataTypes import (  # noqa: F401
+from .models import (  # noqa: F401
+    AirQuality,
+    AlarmState,
+    ArmCommand,
     Attribute,
-    Attributes,
     CameraDevice,
     Installation,
+    InteriorMode,
+    LockAutolock,
     LockFeatures,
     OperationStatus,
     OtpPhone,
+    PerimeterMode,
+    ProtoCode,
+    Sentinel,
     Service,
     SStatus,
     SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
     ThumbnailResponse,
+    parse_proto_code,
 )
 from .domains import ApiDomains  # noqa: F401
 from .exceptions import (  # noqa: F401

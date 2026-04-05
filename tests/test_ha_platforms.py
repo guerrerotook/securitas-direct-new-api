@@ -3,10 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     AirQuality,
     Attribute,
-    Attributes,
     Installation,
     LockAutolock,
     LockFeatures,
@@ -61,10 +60,7 @@ def make_service():
         secret_word=False,
         min_wrapper_version=None,
         description="Sentinel",
-        attributes=Attributes(
-            name="attrs",
-            attributes=[Attribute(name="zone", value="1", active=True)],
-        ),
+        attributes=[Attribute(name="zone", value="1", active=True)],
         listdiy=[],
         listprompt=[],
         installation=make_installation(),
@@ -108,7 +104,7 @@ def make_lock(
     client.change_lock_mode = AsyncMock()
     if poll_status is not None:
         client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lockStatus=poll_status, deviceId=device_id)]
+            return_value=[SmartLockMode(lock_status=poll_status, device_id=device_id)]
         )
     else:
         client.get_lock_modes = AsyncMock(return_value=[])
@@ -544,7 +540,7 @@ class TestSecuritasLockConfig:
             res="OK",
             location="Front Door",
             family="DR",
-            serialNumber="SN001",
+            serial_number="SN001",
         )
         lock = make_lock(device_id="01", lock_config=config)
         info = lock._attr_device_info
@@ -609,8 +605,8 @@ class TestSecuritasLockConfig:
             res="OK",
             location="Front Door",
             features=LockFeatures(
-                holdBackLatchTime=3,
-                calibrationType=0,
+                hold_back_latch_time=3,
+                calibration_type=0,
                 autolock=LockAutolock(active=True, timeout=30),
             ),
         )
@@ -638,7 +634,7 @@ class TestSecuritasLockConfig:
 
         lock_config = SmartLock(
             res="OK",
-            features=LockFeatures(holdBackLatchTime=3, calibrationType=0),
+            features=LockFeatures(hold_back_latch_time=3, calibration_type=0),
         )
         lock = make_lock(lock_config=lock_config)
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
@@ -648,7 +644,7 @@ class TestSecuritasLockConfig:
 
         lock_config = SmartLock(
             res="OK",
-            features=LockFeatures(holdBackLatchTime=0, calibrationType=0),
+            features=LockFeatures(hold_back_latch_time=0, calibration_type=0),
         )
         lock = make_lock(lock_config=lock_config)
         assert lock.supported_features == lock_mod.LockEntityFeature(0)
@@ -899,7 +895,7 @@ class TestSecuritasLockActions:
         lock = make_lock()
         lock._operation_in_progress = True
         lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
+            return_value=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
         )
 
         await lock.async_update_status()
@@ -915,7 +911,7 @@ class TestSecuritasLockUpdateStatus:
     async def test_async_update_status_updates_state_from_api(self):
         lock = make_lock()
         lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
+            return_value=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
         )
 
         await lock.async_update_status()
@@ -928,7 +924,7 @@ class TestSecuritasLockUpdateStatus:
         assert lock._state == "2"
 
         lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lockStatus="0", deviceId="01")]
+            return_value=[SmartLockMode(res="OK", lock_status="0", device_id="01")]
         )
 
         await lock.async_update_status()
@@ -939,7 +935,7 @@ class TestSecuritasLockUpdateStatus:
     async def test_async_update_status_updates_on_non_zero(self):
         lock = make_lock()
         lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lockStatus="3", deviceId="01")]
+            return_value=[SmartLockMode(res="OK", lock_status="3", device_id="01")]
         )
 
         await lock.async_update_status()
@@ -951,7 +947,7 @@ class TestSecuritasLockUpdateStatus:
         lock = make_lock(device_id="01")
         lock.client.get_lock_modes = AsyncMock(
             return_value=[
-                SmartLockMode(res="OK", lockStatus="1", deviceId="02"),
+                SmartLockMode(res="OK", lock_status="1", device_id="02"),
             ]
         )
 
@@ -966,11 +962,11 @@ class TestSecuritasLockUpdateStatus:
 
         lock_config = SmartLock(
             res="OK",
-            features=LockFeatures(holdBackLatchTime=3, calibrationType=0),
+            features=LockFeatures(hold_back_latch_time=3, calibration_type=0),
         )
         lock = make_lock(lock_config=lock_config)
         lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lockStatus="2", deviceId="01")]
+            return_value=[SmartLockMode(lock_status="2", device_id="01")]
         )
 
         await lock.async_update_status()
@@ -981,7 +977,7 @@ class TestSecuritasLockUpdateStatus:
         """async_update just calls async_update_status."""
         lock = make_lock()
         lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lockStatus="1", deviceId="01")]
+            return_value=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
         )
 
         await lock.async_update()

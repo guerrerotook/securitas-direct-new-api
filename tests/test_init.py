@@ -46,7 +46,7 @@ from custom_components.securitas import (
 from custom_components.securitas.securitas_direct_new_api.const import (
     STD_DEFAULTS,
 )
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     SStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
@@ -237,7 +237,7 @@ class TestSecuritasDirectDevice:
 
     def test_postal_code_returns_installation_postal_code(self):
         """postal_code should return the installation postalCode."""
-        device = self._make_device(postalCode="08001")
+        device = self._make_device(postal_code="08001")
         assert device.postal_code == "08001"
 
     def test_device_info_structure(self):
@@ -378,7 +378,7 @@ class TestSecuritasHub:
         result = await hub.update_overview(inst)
 
         hub.session.check_general_status.assert_awaited_once_with(inst)
-        assert result.protomResponse == "T"
+        assert result.protom_response == "T"
         assert result.installation_number == inst.number
 
     async def test_update_overview_reraises_403(self):
@@ -420,7 +420,7 @@ class TestSecuritasHub:
 
         result = await hub.update_overview(inst)
         # Should return empty CheckAlarmStatus, not raise
-        assert not result.protomResponse
+        assert not result.protom_response
 
     async def test_update_overview_cooldown_between_calls(self):
         """update_overview updates _api_queue._last_api_time after API calls."""

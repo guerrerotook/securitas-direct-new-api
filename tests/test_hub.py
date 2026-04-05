@@ -16,7 +16,7 @@ from custom_components.securitas.securitas_direct_new_api import (
     OperationStatus,
     SecuritasDirectError,
 )
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
@@ -299,21 +299,21 @@ class TestRefreshAlarmStatus:
         """Returns immediately when protomResponse is present."""
         hub = make_hub()
         installation = make_installation()
-        status = OperationStatus(protomResponse="ARM1")
+        status = OperationStatus(protom_response="ARM1")
         hub.session.check_alarm = AsyncMock(return_value="ref-456")
         hub.session.check_alarm_status = AsyncMock(return_value=status)
 
         result = await hub.refresh_alarm_status(installation)
 
         assert result is status
-        assert result.protomResponse == "ARM1"
+        assert result.protom_response == "ARM1"
         hub.session.check_alarm_status.assert_awaited_once()
 
     async def test_returns_on_non_wait_status(self):
         """Returns when operation_status is not WAIT (even without protomResponse)."""
         hub = make_hub()
         installation = make_installation()
-        status = OperationStatus(operation_status="ERROR", protomResponse="")
+        status = OperationStatus(operation_status="ERROR", protom_response="")
         hub.session.check_alarm = AsyncMock(return_value="ref-456")
         hub.session.check_alarm_status = AsyncMock(return_value=status)
 
@@ -325,8 +325,8 @@ class TestRefreshAlarmStatus:
         """Polls through WAIT responses until protomResponse arrives."""
         hub = make_hub()
         installation = make_installation()
-        wait_status = OperationStatus(operation_status="WAIT", protomResponse="")
-        ok_status = OperationStatus(protomResponse="DARM1")
+        wait_status = OperationStatus(operation_status="WAIT", protom_response="")
+        ok_status = OperationStatus(protom_response="DARM1")
         hub.session.check_alarm = AsyncMock(return_value="ref-456")
         hub.session.check_alarm_status = AsyncMock(
             side_effect=[wait_status, wait_status, ok_status]
@@ -341,7 +341,7 @@ class TestRefreshAlarmStatus:
         """TimeoutError raised when all attempts return WAIT."""
         hub = make_hub()
         installation = make_installation()
-        wait_status = OperationStatus(operation_status="WAIT", protomResponse="")
+        wait_status = OperationStatus(operation_status="WAIT", protom_response="")
         hub.session.check_alarm = AsyncMock(return_value="ref-456")
         hub.session.check_alarm_status = AsyncMock(return_value=wait_status)
 

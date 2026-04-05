@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
+from custom_components.securitas.securitas_direct_new_api.models import (
     CameraDevice,
 )
 from custom_components.securitas.securitas_direct_new_api import Installation

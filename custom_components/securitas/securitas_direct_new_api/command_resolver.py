@@ -8,62 +8,34 @@ discovery.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 from .const import SecuritasState
+from .models import (
+    AlarmState,
+    InteriorMode,
+    PerimeterMode,
+    ProtoCode,
+    PROTO_TO_STATE,
+)
 
-
-class InteriorMode(StrEnum):
-    """Interior alarm mode."""
-
-    OFF = "off"
-    DAY = "day"
-    NIGHT = "night"
-    TOTAL = "total"
-
-
-class PerimeterMode(StrEnum):
-    """Perimeter alarm mode."""
-
-    OFF = "off"
-    ON = "on"
-
-
-@dataclass(frozen=True)
-class AlarmState:
-    """Two-axis alarm state: interior mode + perimeter on/off."""
-
-    interior: InteriorMode
-    perimeter: PerimeterMode
-
-
-# Proto response code -> AlarmState
+# Re-export for backward compatibility
 PROTO_TO_ALARM_STATE: dict[str, AlarmState] = {
-    "D": AlarmState(InteriorMode.OFF, PerimeterMode.OFF),
-    "P": AlarmState(InteriorMode.DAY, PerimeterMode.OFF),
-    "Q": AlarmState(InteriorMode.NIGHT, PerimeterMode.OFF),
-    "T": AlarmState(InteriorMode.TOTAL, PerimeterMode.OFF),
-    "E": AlarmState(InteriorMode.OFF, PerimeterMode.ON),
-    "B": AlarmState(InteriorMode.DAY, PerimeterMode.ON),
-    "C": AlarmState(InteriorMode.NIGHT, PerimeterMode.ON),
-    "A": AlarmState(InteriorMode.TOTAL, PerimeterMode.ON),
+    code.value: state for code, state in PROTO_TO_STATE.items()
 }
-
-# AlarmState -> proto response code
 ALARM_STATE_TO_PROTO: dict[AlarmState, str] = {
-    v: k for k, v in PROTO_TO_ALARM_STATE.items()
+    state: code.value for code, state in PROTO_TO_STATE.items()
 }
 
 # SecuritasState (config/UI) -> AlarmState (resolver)
 SECURITAS_STATE_TO_ALARM_STATE: dict[SecuritasState, AlarmState] = {
-    SecuritasState.DISARMED: AlarmState(InteriorMode.OFF, PerimeterMode.OFF),
-    SecuritasState.PARTIAL_DAY: AlarmState(InteriorMode.DAY, PerimeterMode.OFF),
-    SecuritasState.PARTIAL_NIGHT: AlarmState(InteriorMode.NIGHT, PerimeterMode.OFF),
-    SecuritasState.TOTAL: AlarmState(InteriorMode.TOTAL, PerimeterMode.OFF),
-    SecuritasState.PERI_ONLY: AlarmState(InteriorMode.OFF, PerimeterMode.ON),
-    SecuritasState.PARTIAL_DAY_PERI: AlarmState(InteriorMode.DAY, PerimeterMode.ON),
-    SecuritasState.PARTIAL_NIGHT_PERI: AlarmState(InteriorMode.NIGHT, PerimeterMode.ON),
-    SecuritasState.TOTAL_PERI: AlarmState(InteriorMode.TOTAL, PerimeterMode.ON),
+    SecuritasState.DISARMED: PROTO_TO_STATE[ProtoCode.DISARMED],
+    SecuritasState.PARTIAL_DAY: PROTO_TO_STATE[ProtoCode.PARTIAL_DAY],
+    SecuritasState.PARTIAL_NIGHT: PROTO_TO_STATE[ProtoCode.PARTIAL_NIGHT],
+    SecuritasState.TOTAL: PROTO_TO_STATE[ProtoCode.TOTAL],
+    SecuritasState.PERI_ONLY: PROTO_TO_STATE[ProtoCode.PERIMETER_ONLY],
+    SecuritasState.PARTIAL_DAY_PERI: PROTO_TO_STATE[ProtoCode.PARTIAL_DAY_PERIMETER],
+    SecuritasState.PARTIAL_NIGHT_PERI: PROTO_TO_STATE[ProtoCode.PARTIAL_NIGHT_PERIMETER],
+    SecuritasState.TOTAL_PERI: PROTO_TO_STATE[ProtoCode.TOTAL_PERIMETER],
 }
 
 
@@ -139,7 +111,7 @@ class CommandResolver:
             steps.extend(self._resolve_disarm(current))
             steps.extend(
                 self._resolve_arm(
-                    AlarmState(InteriorMode.OFF, PerimeterMode.OFF), target
+                    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF), target
                 )
             )
             return steps

@@ -59,7 +59,6 @@ from .securitas_direct_new_api import (
     STD_OPTIONS,
     AccountBlockedError,
     Attribute,
-    Attributes,
     Installation,
     Login2FAError,
     LoginError,
@@ -486,8 +485,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Check service attributes (e.g. SCH with PERI attribute — Spanish panels)
         for svc in services:
             attrs = svc.attributes
-            if isinstance(attrs, Attributes):
-                attrs = attrs.attributes
             if isinstance(attrs, list):
                 for attr in attrs:
                     if isinstance(attr, Attribute) and attr.name == "PERI":
