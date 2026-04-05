@@ -24,7 +24,7 @@ from custom_components.securitas.sensor import (
     SentinelHumidity,
     SentinelTemperature,
 )
-from custom_components.securitas.coordinators import SentinelData
+from custom_components.securitas.coordinators import LockData, SentinelData
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.lock import SecuritasLock
 
@@ -83,6 +83,14 @@ def make_client():
     return client
 
 
+def _make_lock_coordinator(data: LockData | None = None):
+    """Create a mock LockCoordinator for lock tests."""
+    coordinator = MagicMock()
+    coordinator.data = data
+    coordinator.async_request_refresh = AsyncMock()
+    return coordinator
+
+
 def make_lock(
     device_id: str = "01",
     initial_status: str = "2",
@@ -94,7 +102,7 @@ def make_lock(
     Args:
         poll_status: If set, ``get_lock_modes`` returns a mode with this
             lockStatus for the device.  If *None*, ``get_lock_modes``
-            returns an empty list (so ``get_lock_state`` returns UNKNOWN
+            returns an empty list (so ``_get_lock_state`` returns UNKNOWN
             and the optimistic fallback is used).
     """
     installation = make_installation()
@@ -112,14 +120,17 @@ def make_lock(
     hass.async_create_task = MagicMock()
     hass.services = MagicMock()
 
+    coordinator = _make_lock_coordinator()
+
     lock_entity = SecuritasLock(
+        coordinator=coordinator,
         installation=installation,
         client=client,
-        hass=hass,
         device_id=device_id,
         initial_status=initial_status,
         lock_config=lock_config,
     )
+    lock_entity.hass = hass
     lock_entity.entity_id = f"lock.securitas_{installation.number}_{device_id}"
     # Mock HA state-writing methods (no platform registered in unit tests)
     lock_entity.async_write_ha_state = MagicMock()
@@ -582,7 +593,7 @@ class TestSecuritasLockActions:
 
     async def test_async_lock_sets_state_to_locking_then_locked_on_success(self):
         lock = make_lock(poll_status="2")
-        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_lock()
 
@@ -593,13 +604,15 @@ class TestSecuritasLockActions:
         # async_write_ha_state is called after successful state change
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
         # get_lock_modes was called with FOREGROUND priority to fetch real status
-        lock.client.get_lock_modes.assert_awaited_once_with(  # type: ignore[attr-defined]
+        lock._client.get_lock_modes.assert_awaited_once_with(  # type: ignore[attr-defined]
             lock.installation, priority=ApiQueue.FOREGROUND
         )
+        # Coordinator refresh was requested after the operation
+        lock.coordinator.async_request_refresh.assert_awaited_once()
 
     async def test_async_lock_uses_optimistic_state_when_poll_returns_unknown(self):
         lock = make_lock()  # no poll_status → get_lock_modes returns []
-        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_lock()
 
@@ -608,7 +621,7 @@ class TestSecuritasLockActions:
 
     async def test_async_unlock_sets_state_to_opening_then_open_on_success(self):
         lock = make_lock(poll_status="1")
-        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_unlock()
 
@@ -619,7 +632,7 @@ class TestSecuritasLockActions:
 
     async def test_async_lock_error_restores_previous_state(self):
         lock = make_lock()
-        lock.client.change_lock_mode = AsyncMock(
+        lock._client.change_lock_mode = AsyncMock(
             side_effect=SecuritasDirectError("API error")
         )
 
@@ -630,7 +643,7 @@ class TestSecuritasLockActions:
 
     async def test_async_unlock_error_restores_previous_state(self):
         lock = make_lock()
-        lock.client.change_lock_mode = AsyncMock(
+        lock._client.change_lock_mode = AsyncMock(
             side_effect=SecuritasDirectError("API error")
         )
 
@@ -649,7 +662,7 @@ class TestSecuritasLockActions:
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
-        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
+        lock._client.change_lock_mode = AsyncMock(side_effect=capture_state)
 
         await lock.async_lock()
 
@@ -667,7 +680,7 @@ class TestSecuritasLockActions:
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
-        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
+        lock._client.change_lock_mode = AsyncMock(side_effect=capture_state)
 
         await lock.async_unlock()
 
@@ -676,7 +689,7 @@ class TestSecuritasLockActions:
 
     async def test_async_open_sets_state_to_opening_then_open_on_success(self):
         lock = make_lock(poll_status="1")
-        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_open()
 
@@ -686,7 +699,7 @@ class TestSecuritasLockActions:
 
     async def test_async_open_error_restores_previous_state(self):
         lock = make_lock()
-        lock.client.change_lock_mode = AsyncMock(
+        lock._client.change_lock_mode = AsyncMock(
             side_effect=SecuritasDirectError("API error")
         )
 
@@ -696,11 +709,11 @@ class TestSecuritasLockActions:
 
     async def test_async_open_calls_change_lock_mode_with_false(self):
         lock = make_lock(poll_status="1")
-        lock.client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
         await lock.async_open()
 
-        lock.client.change_lock_mode.assert_awaited_once_with(
+        lock._client.change_lock_mode.assert_awaited_once_with(
             lock.installation, False, "01"
         )
 
@@ -713,7 +726,7 @@ class TestSecuritasLockActions:
             observed_states.append(lock._state)
             return SmartLockModeStatus()
 
-        lock.client.change_lock_mode = AsyncMock(side_effect=capture_state)
+        lock._client.change_lock_mode = AsyncMock(side_effect=capture_state)
 
         await lock.async_open()
 
@@ -726,7 +739,7 @@ class TestSecuritasLockActions:
         # After the min wait the API should normally have the new state, but
         # if it doesn't, we trust what the API says rather than guess.
         lock = make_lock(initial_status="1", poll_status="1")
-        lock.client.change_lock_mode = AsyncMock(return_value=None)
+        lock._client.change_lock_mode = AsyncMock(return_value=None)
 
         await lock.async_lock()
 
@@ -735,7 +748,7 @@ class TestSecuritasLockActions:
     async def test_async_unlock_stale_poll_trusts_api(self):
         """When API still returns pre-command state, we trust it."""
         lock = make_lock(initial_status="2", poll_status="2")
-        lock.client.change_lock_mode = AsyncMock(return_value=None)
+        lock._client.change_lock_mode = AsyncMock(return_value=None)
 
         await lock.async_unlock()
 
@@ -745,7 +758,7 @@ class TestSecuritasLockActions:
         """When API returns the expected new state, it is used directly."""
         # Lock starts open ("1"), we lock it, API confirms "2"
         lock = make_lock(initial_status="1", poll_status="2")
-        lock.client.change_lock_mode = AsyncMock(return_value=None)
+        lock._client.change_lock_mode = AsyncMock(return_value=None)
 
         await lock.async_lock()
 
@@ -756,7 +769,7 @@ class TestSecuritasLockActions:
         """When API returns the expected new state, it is used directly."""
         # Lock starts locked ("2"), we unlock it, API confirms "1"
         lock = make_lock(initial_status="2", poll_status="1")
-        lock.client.change_lock_mode = AsyncMock(return_value=None)
+        lock._client.change_lock_mode = AsyncMock(return_value=None)
 
         await lock.async_unlock()
 
@@ -764,10 +777,10 @@ class TestSecuritasLockActions:
         assert lock._state == "1"
 
     async def test_async_lock_poll_exception_uses_optimistic_state(self):
-        """When get_lock_state raises, optimistic state is used."""
+        """When _get_lock_state raises, optimistic state is used."""
         lock = make_lock()
-        lock.client.change_lock_mode = AsyncMock(return_value=None)
-        lock.client.get_lock_modes = AsyncMock(side_effect=Exception("network error"))
+        lock._client.change_lock_mode = AsyncMock(return_value=None)
+        lock._client.get_lock_modes = AsyncMock(side_effect=Exception("network error"))
 
         await lock.async_lock()
 
@@ -782,7 +795,7 @@ class TestSecuritasLockActions:
         async def capture_flag(installation, lock_mode, device_id=None):
             observed.append(lock._operation_in_progress)
 
-        lock.client.change_lock_mode = AsyncMock(side_effect=capture_flag)
+        lock._client.change_lock_mode = AsyncMock(side_effect=capture_flag)
 
         await lock.async_lock()
 
@@ -792,7 +805,7 @@ class TestSecuritasLockActions:
     async def test_operation_in_progress_cleared_on_error(self):
         """_operation_in_progress is cleared even when the command fails."""
         lock = make_lock()
-        lock.client.change_lock_mode = AsyncMock(
+        lock._client.change_lock_mode = AsyncMock(
             side_effect=SecuritasDirectError("fail")
         )
 
@@ -803,80 +816,91 @@ class TestSecuritasLockActions:
     async def test_operation_in_progress_cleared_on_poll_exception(self):
         """_operation_in_progress is cleared when the post-command poll raises."""
         lock = make_lock()
-        lock.client.change_lock_mode = AsyncMock(return_value=None)
-        lock.client.get_lock_modes = AsyncMock(side_effect=Exception("boom"))
+        lock._client.change_lock_mode = AsyncMock(return_value=None)
+        lock._client.get_lock_modes = AsyncMock(side_effect=Exception("boom"))
 
         await lock.async_lock()
 
         assert lock._operation_in_progress is False
 
-    async def test_update_status_skipped_during_lock_operation(self):
-        """async_update_status is a no-op while a lock command is in flight."""
+    async def test_coordinator_update_skipped_during_lock_operation(self):
+        """_handle_coordinator_update is a no-op while a lock command is in flight."""
         lock = make_lock()
         lock._operation_in_progress = True
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
+        lock.coordinator.data = LockData(
+            modes=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
         )
 
-        await lock.async_update_status()
+        lock._handle_coordinator_update()
 
-        # Poll was skipped — state unchanged, API not called
+        # Update was skipped — state unchanged
         assert lock._state == "2"
-        lock.client.get_lock_modes.assert_not_awaited()
+        lock.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
 
 
-class TestSecuritasLockUpdateStatus:
-    """Tests for SecuritasLock async_update_status."""
+class TestSecuritasLockCoordinatorUpdate:
+    """Tests for SecuritasLock coordinator-driven state updates."""
 
-    async def test_async_update_status_updates_state_from_api(self):
+    def test_coordinator_update_syncs_state_from_data(self):
         lock = make_lock()
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
+        lock.coordinator.data = LockData(
+            modes=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
         )
 
-        await lock.async_update_status()
+        lock._handle_coordinator_update()
 
         assert lock._state == "1"
+        lock.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
 
-    async def test_async_update_status_ignores_zero_status(self):
+    def test_coordinator_update_ignores_zero_status(self):
         lock = make_lock()
         # Initial state is "2" (locked)
         assert lock._state == "2"
 
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lock_status="0", device_id="01")]
+        lock.coordinator.data = LockData(
+            modes=[SmartLockMode(res="OK", lock_status="0", device_id="01")]
         )
 
-        await lock.async_update_status()
+        lock._handle_coordinator_update()
 
         # State should remain "2" because "0" is ignored
         assert lock._state == "2"
+        # async_write_ha_state is still called (to refresh entity)
+        lock.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
 
-    async def test_async_update_status_updates_on_non_zero(self):
+    def test_coordinator_update_syncs_on_non_zero(self):
         lock = make_lock()
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lock_status="3", device_id="01")]
+        lock.coordinator.data = LockData(
+            modes=[SmartLockMode(res="OK", lock_status="3", device_id="01")]
         )
 
-        await lock.async_update_status()
+        lock._handle_coordinator_update()
 
         assert lock._state == "3"
 
-    async def test_async_update_status_ignores_other_device_ids(self):
+    def test_coordinator_update_ignores_other_device_ids(self):
         """Only status for the lock's own device_id is used."""
         lock = make_lock(device_id="01")
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[
-                SmartLockMode(res="OK", lock_status="1", device_id="02"),
-            ]
+        lock.coordinator.data = LockData(
+            modes=[SmartLockMode(res="OK", lock_status="1", device_id="02")]
         )
 
-        await lock.async_update_status()
+        lock._handle_coordinator_update()
 
-        # No matching device_id → get_lock_state returns "0" (unknown) → ignored
+        # No matching device_id → _current_mode returns None → state unchanged
         assert lock._state == "2"
 
-    async def test_lock_config_with_holdback_gives_open_feature(self):
+    def test_coordinator_update_with_none_data(self):
+        """When coordinator data is None, state is unchanged."""
+        lock = make_lock()
+        lock.coordinator.data = None
+
+        lock._handle_coordinator_update()
+
+        assert lock._state == "2"
+        lock.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
+
+    def test_lock_config_with_holdback_gives_open_feature(self):
         """Lock created with holdBackLatchTime exposes OPEN feature."""
         import homeassistant.components.lock as lock_mod
 
@@ -885,42 +909,25 @@ class TestSecuritasLockUpdateStatus:
             features=LockFeatures(hold_back_latch_time=3, calibration_type=0),
         )
         lock = make_lock(lock_config=lock_config)
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(lock_status="2", device_id="01")]
-        )
-
-        await lock.async_update_status()
 
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
-
-    async def test_async_update_delegates_to_update_status(self):
-        """async_update just calls async_update_status."""
-        lock = make_lock()
-        lock.client.get_lock_modes = AsyncMock(
-            return_value=[SmartLockMode(res="OK", lock_status="1", device_id="01")]
-        )
-
-        await lock.async_update()
-
-        lock.client.get_lock_modes.assert_awaited_once()
-        assert lock._state == "1"
 
 
 class TestSecuritasLockRemoval:
     """Tests for SecuritasLock async_will_remove_from_hass."""
 
-    async def test_async_will_remove_from_hass_unsubscribes(self):
+    async def test_async_will_remove_from_hass_cleans_up_config_retries(self):
         lock = make_lock()
         unsub_mock = MagicMock()
-        lock._update_unsub = unsub_mock
+        lock.add_config_retry_unsub(unsub_mock)
 
         await lock.async_will_remove_from_hass()
 
         unsub_mock.assert_called_once()
+        assert lock._config_retry_unsubs == []
 
-    async def test_async_will_remove_from_hass_handles_none_unsub(self):
+    async def test_async_will_remove_from_hass_no_config_retries(self):
         lock = make_lock()
-        lock._update_unsub = None
 
         # Should not raise
         await lock.async_will_remove_from_hass()
@@ -933,15 +940,6 @@ class TestSecuritasLockRemoval:
 
 class TestHassNoneGuards:
     """Verify entities bail out when hass is None (after removal)."""
-
-    async def test_lock_update_status_skips_when_hass_is_none(self):
-        lock = make_lock()
-        lock.hass = None  # type: ignore[attr-defined]
-        lock.client.get_lock_modes = AsyncMock()
-
-        await lock.async_update_status()
-
-        lock.client.get_lock_modes.assert_not_awaited()
 
     def test_lock_force_state_skips_schedule_when_hass_is_none(self):
         lock = make_lock()

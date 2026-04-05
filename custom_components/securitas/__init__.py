@@ -647,7 +647,6 @@ async def _discover_locks(
     entry_data: dict,
 ) -> None:
     """Discover lock devices for an installation and add entities."""
-    from .entity import schedule_initial_updates
     from .lock import (
         DOORLOCK_SERVICE,
         LOCK_STATUS_UNKNOWN,
@@ -681,8 +680,9 @@ async def _discover_locks(
             )
         ]
 
+    lock_coordinator = entry_data.get("lock_coordinator")
     lock_add = entry_data.get("lock_add_entities")
-    if lock_add:
+    if lock_add and lock_coordinator is not None:
         locks = []
         for mode in lock_modes:
             device_id = mode.device_id or SMARTLOCK_DEVICE_ID
@@ -697,16 +697,15 @@ async def _discover_locks(
                 )
             locks.append(
                 SecuritasLock(
-                    installation,
+                    coordinator=lock_coordinator,
+                    installation=installation,
                     client=hub,
-                    hass=hass,
                     device_id=device_id,
                     initial_status=mode.lock_status,
                     lock_config=lock_config,
                 )
             )
         lock_add(locks, False)
-        schedule_initial_updates(hass, locks)
 
         # Schedule deferred config retry for locks without config.
         for lk in locks:
