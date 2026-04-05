@@ -309,7 +309,7 @@ class SecuritasClient:
 
     # ── JWT decoding ─────────────────────────────────────────────────────
 
-    def _decode_auth_token(self, token_str: str | None) -> dict | None:
+    def _decode_auth_token(self, token_str: str | None) -> dict[str, Any] | None:
         """Decode a JWT auth token and update the token expiry.
 
         Returns the decoded claims dict, or None on failure.
@@ -331,7 +331,9 @@ class SecuritasClient:
 
     # ── Response extraction ──────────────────────────────────────────────
 
-    def _extract_response_data(self, response: dict, field_name: str) -> dict:
+    def _extract_response_data(
+        self, response: dict[str, Any], field_name: str
+    ) -> dict[str, Any]:
         """Extract and validate response['data'][field_name].
 
         Raises SecuritasDirectError if the data is missing or None.
@@ -351,7 +353,7 @@ class SecuritasClient:
     # ── Error checking helpers ───────────────────────────────────────────
 
     @staticmethod
-    def _is_account_blocked(result_json: dict) -> bool:
+    def _is_account_blocked(result_json: dict[str, Any]) -> bool:
         """Check if a login response indicates the account is blocked (error 60052)."""
         errors = result_json.get("errors")
         if isinstance(errors, list) and errors:
@@ -572,7 +574,7 @@ class SecuritasClient:
         try:
             response = await self._execute_raw(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            result_json: dict | None = err.response_body
+            result_json: dict[str, Any] | None = err.response_body
             if result_json is not None:
                 # Check for account-blocked error (60052)
                 if self._is_account_blocked(result_json):

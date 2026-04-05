@@ -187,11 +187,11 @@ class OperationStatus(BaseModel):
     protom_response: str = Field(default="", validation_alias="protomResponse")
     protom_response_data: str = Field(default="", validation_alias="protomResponseDate")
     request_id: str = Field(default="", validation_alias="requestId")
-    error: dict | None = None
+    error: dict[str, Any] | None = None
 
     @field_validator("error", mode="before")
     @classmethod
-    def _coerce_error(cls, v: Any) -> dict | None:
+    def _coerce_error(cls, v: Any) -> dict[str, Any] | None:
         """Coerce non-dict error values (e.g. empty string) to None."""
         if isinstance(v, dict):
             return v
