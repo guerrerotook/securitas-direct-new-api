@@ -1,0 +1,306 @@
+"""Pydantic domain models for the Securitas Direct API."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from .exceptions import UnexpectedStateError
+
+
+# ── Enums ─────────────────────────────────────────────────────────────────────
+
+
+class InteriorMode(StrEnum):
+    """Interior alarm mode."""
+
+    OFF = "off"
+    DAY = "day"
+    NIGHT = "night"
+    TOTAL = "total"
+
+
+class PerimeterMode(StrEnum):
+    """Perimeter alarm mode."""
+
+    OFF = "off"
+    ON = "on"
+
+
+class ProtoCode(StrEnum):
+    """Protocol response codes from the Securitas Direct API."""
+
+    DISARMED = "D"
+    PERIMETER_ONLY = "E"
+    PARTIAL_DAY = "P"
+    PARTIAL_NIGHT = "Q"
+    PARTIAL_DAY_PERIMETER = "B"
+    PARTIAL_NIGHT_PERIMETER = "C"
+    TOTAL = "T"
+    TOTAL_PERIMETER = "A"
+
+
+class ArmCommand(StrEnum):
+    """Arm/disarm command strings sent to the API."""
+
+    DISARM = "DARM1"
+    DISARM_ALL = "DARM1DARMPERI"
+    ARM_DAY = "ARMDAY1"
+    ARM_NIGHT = "ARMNIGHT1"
+    ARM_TOTAL = "ARM1"
+    ARM_PERIMETER = "PERI1"
+    ARM_DAY_PERIMETER = "ARMDAY1PERI1"
+    ARM_NIGHT_PERIMETER = "ARMNIGHT1PERI1"
+    ARM_TOTAL_PERIMETER = "ARM1PERI1"
+
+
+# ── AlarmState ────────────────────────────────────────────────────────────────
+
+
+class AlarmState(BaseModel):
+    """Two-axis alarm state: interior mode + perimeter on/off."""
+
+    model_config = ConfigDict(frozen=True)
+
+    interior: InteriorMode
+    perimeter: PerimeterMode
+
+    def __hash__(self) -> int:
+        return hash((self.interior, self.perimeter))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AlarmState):
+            return NotImplemented
+        return self.interior == other.interior and self.perimeter == other.perimeter
+
+
+# ── parse_proto_code ──────────────────────────────────────────────────────────
+
+
+def parse_proto_code(code: str) -> ProtoCode:
+    """Parse a raw protocol code string into a ProtoCode enum.
+
+    Raises UnexpectedStateError for unknown codes.
+    """
+    try:
+        return ProtoCode(code)
+    except ValueError:
+        raise UnexpectedStateError(code)
+
+
+# ── Mapping tables ────────────────────────────────────────────────────────────
+
+PROTO_TO_STATE: dict[ProtoCode, AlarmState] = {
+    ProtoCode.DISARMED: AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF),
+    ProtoCode.PERIMETER_ONLY: AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.ON),
+    ProtoCode.PARTIAL_DAY: AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF),
+    ProtoCode.PARTIAL_NIGHT: AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF),
+    ProtoCode.PARTIAL_DAY_PERIMETER: AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.ON),
+    ProtoCode.PARTIAL_NIGHT_PERIMETER: AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON),
+    ProtoCode.TOTAL: AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF),
+    ProtoCode.TOTAL_PERIMETER: AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON),
+}
+
+STATE_TO_PROTO: dict[AlarmState, ProtoCode] = {v: k for k, v in PROTO_TO_STATE.items()}
+
+STATE_TO_COMMAND: dict[AlarmState, ArmCommand] = {
+    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF): ArmCommand.DISARM,
+    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.ON): ArmCommand.ARM_PERIMETER,
+    AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF): ArmCommand.ARM_DAY,
+    AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF): ArmCommand.ARM_NIGHT,
+    AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.ON): ArmCommand.ARM_DAY_PERIMETER,
+    AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON): ArmCommand.ARM_NIGHT_PERIMETER,
+    AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF): ArmCommand.ARM_TOTAL,
+    AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON): ArmCommand.ARM_TOTAL_PERIMETER,
+}
+
+
+# ── Domain models ─────────────────────────────────────────────────────────────
+
+
+class Installation(BaseModel):
+    """A Securitas Direct installation (customer site)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    number: str = Field("", alias="numinst")
+    alias: str = ""
+    panel: str = ""
+    type: str = ""
+    name: str = ""
+    last_name: str = Field("", alias="surname")
+    address: str = ""
+    city: str = ""
+    postal_code: str = Field("", alias="postcode")
+    province: str = ""
+    email: str = ""
+    phone: str = ""
+    capabilities: str = ""
+    capabilities_exp: datetime = Field(default=datetime.min)
+    alarm_partitions: list[dict] = Field(default_factory=list)
+
+
+class OperationStatus(BaseModel):
+    """Result of an alarm or lock operation (arm, disarm, check)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    operation_status: str = Field("", alias="res")
+    message: str = Field("", alias="msg")
+    status: str = ""
+    installation_number: str = Field("", alias="numinst")
+    protom_response: str = Field("", alias="protomResponse")
+    protom_response_data: str = Field("", alias="protomResponseDate")
+    request_id: str = Field("", alias="requestId")
+    error: dict | None = None
+
+
+class SStatus(BaseModel):
+    """Current status of the alarm system."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: str | None = None
+    timestamp_update: str | None = Field(None, alias="timestampUpdate")
+    wifi_connected: bool | None = Field(None, alias="wifiConnected")
+
+
+class OtpPhone(BaseModel):
+    """OTP phone item for two-factor authentication."""
+
+    id: int
+    phone: str
+
+
+class LockAutolock(BaseModel):
+    """Lock auto-lock configuration."""
+
+    active: bool | None = None
+    timeout: str | int | None = None
+
+
+class LockFeatures(BaseModel):
+    """Lock feature configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    hold_back_latch_time: int = Field(0, alias="holdBackLatchTime")
+    calibration_type: int = Field(0, alias="calibrationType")
+    autolock: LockAutolock | None = None
+
+
+class SmartLock(BaseModel):
+    """Smart lock discovery response."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    res: str | None = None
+    location: str | None = None
+    device_id: str = Field("", alias="deviceId")
+    reference_id: str = Field("", alias="referenceId")
+    zone_id: str = Field("", alias="zoneId")
+    serial_number: str = Field("", alias="serialNumber")
+    family: str = ""
+    label: str = ""
+    features: LockFeatures | None = None
+
+
+class SmartLockMode(BaseModel):
+    """Smart lock mode and status."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    res: str | None = None
+    lock_status: str = Field("", alias="lockStatus")
+    device_id: str = Field("", alias="deviceId")
+    status_timestamp: str = Field("", alias="statusTimestamp")
+
+
+class SmartLockModeStatus(BaseModel):
+    """Smart lock mode change operation status."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    request_id: str = Field("", alias="requestId")
+    message: str = Field("", alias="msg")
+    protom_response: str = Field("", alias="protomResponse")
+    status: str = ""
+
+
+class CameraDevice(BaseModel):
+    """A camera device from xSDeviceList (QR, YR, YP, or QP cameras)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = ""
+    code: int = 0
+    zone_id: str = Field("", alias="zoneId")
+    name: str = ""
+    device_type: str = Field("", alias="type")
+    serial_number: str | None = Field(None, alias="serialNumber")
+
+
+class ThumbnailResponse(BaseModel):
+    """Response from xSGetThumbnail."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id_signal: str | None = Field(None, alias="idSignal")
+    device_code: str | None = Field(None, alias="deviceCode")
+    device_alias: str | None = Field(None, alias="deviceAlias")
+    timestamp: str | None = None
+    signal_type: str | None = Field(None, alias="signalType")
+    image: str | None = None
+
+
+class Sentinel(BaseModel):
+    """Sentinel environmental sensor status."""
+
+    alias: str
+    air_quality: str
+    humidity: int
+    temperature: int
+    zone: str = ""
+
+
+class AirQuality(BaseModel):
+    """Air quality reading from xSAirQuality API."""
+
+    value: int | None
+    status_current: int = 0
+
+
+class Attribute(BaseModel):
+    """A single service attribute key/value pair."""
+
+    name: str = ""
+    value: str = ""
+    active: bool = False
+
+
+class Service(BaseModel):
+    """A Securitas Direct service offering."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int = 0
+    id_service: int = Field(0, alias="idService")
+    active: bool = False
+    visible: bool = False
+    bde: bool = False
+    is_premium: bool = Field(False, alias="isPremium")
+    cod_oper: bool = Field(False, alias="codOper")
+    total_device: int = Field(0, alias="totalDevice")
+    request: str = ""
+    multiple_req: bool = False
+    num_devices_mr: int = 0
+    secret_word: bool = False
+    min_wrapper_version: Any = Field(None, alias="minWrapperVersion")
+    description: str = ""
+    attributes: list[Attribute] = Field(default_factory=list)
+    listdiy: list[Any] = Field(default_factory=list)
+    listprompt: list[Any] = Field(default_factory=list)
+    installation: Installation | None = None
