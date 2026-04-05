@@ -375,7 +375,7 @@ class SecuritasClient:
     def _check_graphql_errors(
         self,
         response_dict: dict[str, Any],
-        operation: str,
+        operation: str,  # pylint: disable=unused-argument
     ) -> None:
         """Check for GraphQL-level errors in the response and raise if needed."""
         if "errors" not in response_dict:
@@ -1163,7 +1163,7 @@ class SecuritasClient:
             config = envelope.data.xSGetSmartlockConfig
             if config.res == "OK":
                 return config
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             _LOGGER.debug(
                 "Smartlock config fetch failed for %s device %s, trying Danalock",
                 installation.number,
@@ -1174,7 +1174,7 @@ class SecuritasClient:
         # ── Danalock fallback (two-phase polling) ──
         try:
             return await self._get_danalock_config(installation, device_id)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             _LOGGER.debug(
                 "Danalock config fetch also failed for %s device %s",
                 installation.number,
@@ -1544,7 +1544,7 @@ class SecuritasClient:
         best = max(binary_images, key=lambda img: len(img["image"]))
         try:
             decoded = base64.b64decode(best["image"])
-        except Exception:  # noqa: BLE001
+        except (ValueError, TypeError):  # base64 decode errors
             return None
         # Validate JPEG magic bytes
         if not decoded[:2] == b"\xff\xd8":
