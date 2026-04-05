@@ -61,7 +61,7 @@ class SecuritasRefreshButton(SecuritasEntity, ButtonEntity):
         try:
             alarm_status = await self.client.refresh_alarm_status(self.installation)
 
-            self.client.session.protom_response = alarm_status.protom_response
+            self.client.client.protom_response = alarm_status.protom_response
 
             _LOGGER.info(
                 "Status of the Alarm via API: %s installation id: %s",

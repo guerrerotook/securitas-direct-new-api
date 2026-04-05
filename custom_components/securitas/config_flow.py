@@ -418,7 +418,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             sessions[username] = {"hub": self.securitas, "ref_count": 0}
 
         try:
-            installations = await self.securitas.session.list_installations()
+            installations = await self.securitas.client.list_installations()
         except SecuritasDirectError:
             return self.async_show_form(
                 step_id="user",

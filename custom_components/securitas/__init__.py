@@ -321,7 +321,7 @@ async def _fetch_and_cache_installations(
         all_installations: list[Installation] = install_cache["data"]
     else:
         all_installations = await hub.api_queue.submit(
-            hub.session.list_installations,
+            hub.client.list_installations,
             priority=ApiQueue.FOREGROUND,
         )
         hass.data[DOMAIN][install_cache_key] = {
@@ -357,9 +357,9 @@ async def _fetch_and_cache_installations(
         elif installation.number not in hub.services_cache:
             # HA restart: fetch directly (bypass queue — we just logged
             # in, no WAF risk yet) so platforms don't block on queue.
-            hub.services_cache[
-                installation.number
-            ] = await hub.session.get_all_services(installation)
+            hub.services_cache[installation.number] = await hub.client.get_services(
+                installation
+            )
         devices.append(SecuritasDirectDevice(installation))
     return devices
 

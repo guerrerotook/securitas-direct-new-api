@@ -1,8 +1,6 @@
 """SecuritasHub and SecuritasDirectDevice classes."""
 
-import asyncio
 import base64
-import functools
 import logging
 import time
 from typing import Any
@@ -35,7 +33,6 @@ from .const import (
 from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
     ApiDomains,
-    ApiManager,
     CameraDevice,
     Installation,
     OperationStatus,
@@ -45,12 +42,10 @@ from .securitas_direct_new_api import (
     SecuritasDirectError,
     Service,
 )
+from .securitas_direct_new_api.client import SecuritasClient
+from .securitas_direct_new_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
-
-# API error messages that indicate the lock hasn't responded yet (transient)
-_ERR_NO_RESPONSE = "alarm-manager.error_no_response_to_request"
-_ERR_STATUS_NOT_FOUND = "alarm-manager.error_status_not_found"
 
 
 def _notify_error(
@@ -132,21 +127,27 @@ class SecuritasHub:
         self.config_entry: ConfigEntry | None = config_entry
         self.sentinel_services: list[Service] = []
         self.country: str = domain_config[CONF_COUNTRY].upper()
-        self.lang: str = ApiDomains().get_language(self.country)
+        api_domains = ApiDomains()
+        self.lang: str = api_domains.get_language(self.country)
         self.hass: HomeAssistant = hass
         self._services_cache: dict[str, list[Service]] = {}
         self.log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get(
             "log_filter"
         )
-        self.session: ApiManager = ApiManager(
-            domain_config[CONF_USERNAME],
-            domain_config[CONF_PASSWORD],
-            self.country,
-            http_client,
-            domain_config[CONF_DEVICE_ID],
-            domain_config[CONF_UNIQUE_ID],
-            domain_config[CONF_DEVICE_INDIGITALL],
-            domain_config[CONF_DELAY_CHECK_OPERATION],
+        transport = HttpTransport(
+            session=http_client,
+            base_url=api_domains.get_url(self.country),
+        )
+        self.client: SecuritasClient = SecuritasClient(
+            transport=transport,
+            country=self.country,
+            language=self.lang,
+            username=domain_config[CONF_USERNAME],
+            password=domain_config[CONF_PASSWORD],
+            device_id=domain_config[CONF_DEVICE_ID],
+            uuid=domain_config[CONF_UNIQUE_ID],
+            id_device_indigitall=domain_config[CONF_DEVICE_INDIGITALL],
+            poll_delay=domain_config[CONF_DELAY_CHECK_OPERATION],
             log_filter=self.log_filter,
         )
         self.installations: list[Installation] = []
@@ -165,31 +166,28 @@ class SecuritasHub:
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
         self._full_images: dict[str, bytes] = {}
         self._full_timestamps: dict[str, str] = {}
-        self._lock_config_type: dict[
-            str, str
-        ] = {}  # "{numinst}_{device_id}" -> "smartlock"|"danalock"
 
     async def login(self):
         """Login to Securitas."""
-        await self.session.login()
+        await self.client.login()
 
     async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
         """Validate the current device."""
-        return await self.session.validate_device(False, "", "")
+        return await self.client.validate_device(False, "", "")
 
     async def send_sms_code(
         self, auth_otp_hash: str, sms_code: str
     ) -> tuple[str | None, list[OtpPhone] | None]:
         """Send the SMS."""
-        return await self.session.validate_device(True, auth_otp_hash, sms_code)
+        return await self.client.validate_device(True, auth_otp_hash, sms_code)
 
     async def refresh_token(self) -> bool:
         """Refresh the token."""
-        return await self.session.refresh_token()
+        return await self.client.refresh_token()
 
     async def send_opt(self, challange: str, phone_index: int):
         """Call for the SMS challange."""
-        return await self.session.send_otp(phone_index, challange)
+        return await self.client.send_otp(phone_index, challange)
 
     async def get_services(
         self, instalation: Installation, priority=None
@@ -201,7 +199,7 @@ class SecuritasHub:
         if key in self._services_cache:
             return self._services_cache[key]
         services = await self._api_queue.submit(
-            self.session.get_all_services,
+            self.client.get_services,
             instalation,
             priority=priority,
         )
@@ -216,7 +214,7 @@ class SecuritasHub:
         if key in self._camera_devices_cache:
             return self._camera_devices_cache[key]
         devices = await self._api_queue.submit(
-            self.session.get_device_list,
+            self.client.get_camera_devices,
             installation,
             priority=ApiQueue.BACKGROUND,
         )
@@ -230,7 +228,12 @@ class SecuritasHub:
     async def capture_image(
         self, installation: Installation, camera_device: CameraDevice
     ) -> bytes | None:
-        """Request a new image capture and fetch the result."""
+        """Request a new image capture and fetch the result.
+
+        The client handles all capture polling internally.  The hub keeps
+        HA-specific dispatcher signals, image validation/storage, and the
+        background full-image fetch.
+        """
         device = camera_device
         capture_key = f"{installation.number}_{device.zone_id}"
         self._camera_capturing.add(capture_key)
@@ -238,101 +241,15 @@ class SecuritasHub:
             self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
         )
 
-        # Get the baseline thumbnail idSignal so we can detect when it changes
-        baseline = await self._api_queue.submit(
-            self.session.get_thumbnail,
+        # Delegate capture + polling entirely to the client
+        thumbnail = await self._api_queue.submit(
+            self.client.capture_image,
             installation,
+            device.code,
             device.device_type,
             device.zone_id,
             priority=ApiQueue.FOREGROUND,
         )
-        baseline_id = baseline.id_signal
-
-        # If the baseline image differs from what we have stored, we missed a previous
-        # update — show it now while waiting for the new capture to arrive.
-        # The baseline is fetched before the new capture is requested, so it can never
-        # be the photo we're about to take.
-        key = f"{installation.number}_{device.zone_id}"
-        stored_timestamp = self.camera_timestamps.get(key)
-        if baseline.image and baseline.timestamp != stored_timestamp:
-            _LOGGER.debug(
-                "[hub] Storing missed image for %s (server: %s, stored: %s)",
-                device.name,
-                baseline.timestamp,
-                stored_timestamp,
-            )
-            self._validate_and_store_image(
-                baseline, installation, device, log_warnings=False
-            )
-            async_dispatcher_send(
-                self.hass, SIGNAL_CAMERA_UPDATE, installation.number, device.zone_id
-            )
-
-        reference_id = await self._api_queue.submit(
-            self.session.request_images,
-            installation,
-            device.code,
-            device.device_type,
-            priority=ApiQueue.FOREGROUND,
-        )
-
-        # Poll for capture completion then wait for the thumbnail to update.
-        # Both loops together are bounded by a hard 30-second wall-clock timeout.
-        thumbnail = None
-
-        async def _poll_capture_result() -> None:
-            nonlocal thumbnail
-            attempt = 0
-
-            # Wait until the image request stops being "processing"
-            while True:
-                attempt += 1
-                raw = await self._api_queue.submit(
-                    self.session.check_request_images_status,
-                    installation,
-                    device.code,
-                    reference_id,
-                    attempt,
-                    priority=ApiQueue.FOREGROUND,
-                )
-                msg = raw.get("msg", "")
-                if "processing" not in msg and raw.get("res") != "WAIT":
-                    break
-                await asyncio.sleep(self.session.delay_check_operation)
-
-            # Wait until the thumbnail idSignal changes (CDN propagation delay).
-            # Some cameras (e.g. PIRCAMs) may return idSignal=None, so fall
-            # back to comparing the raw base64 image content.
-            baseline_image = baseline.image
-            while True:
-                thumbnail = await self._api_queue.submit(
-                    self.session.get_thumbnail,
-                    installation,
-                    device.device_type,
-                    device.zone_id,
-                    priority=ApiQueue.FOREGROUND,
-                )
-                if thumbnail.id_signal != baseline_id:
-                    return
-                if baseline_id is None and thumbnail.image != baseline_image:
-                    return
-                await asyncio.sleep(max(5, self.session.delay_check_operation))
-
-        try:
-            await asyncio.wait_for(_poll_capture_result(), timeout=30)
-        except TimeoutError:
-            _LOGGER.warning(
-                "Image capture timed out for %s after 30 seconds",
-                device.name,
-            )
-            if thumbnail is None:
-                thumbnail = await self._api_queue.submit(
-                    self.session.get_thumbnail,
-                    installation,
-                    device.device_type,
-                    device.zone_id,
-                    priority=ApiQueue.FOREGROUND,
-                )
 
         image_bytes = self._validate_and_store_image(
             thumbnail, installation, device, log_warnings=True
@@ -364,7 +281,7 @@ class SecuritasHub:
         """Fetch the current thumbnail from the API and store it."""
         try:
             thumbnail = await self._api_queue.submit(
-                self.session.get_thumbnail,
+                self.client.get_thumbnail,
                 installation,
                 camera_device.device_type,
                 camera_device.zone_id,
@@ -402,7 +319,7 @@ class SecuritasHub:
         """Fetch the full-resolution photo and store it, then notify the frontend."""
         try:
             full_bytes = await self._api_queue.submit(
-                self.session.get_photo_images,
+                self.client.get_full_image,
                 installation,
                 thumbnail.id_signal,
                 thumbnail.signal_type,
@@ -478,25 +395,20 @@ class SecuritasHub:
         """Return the timestamp of the last full-resolution image."""
         return self._full_timestamps.get(f"{installation_number}_{zone_id}")
 
-    def _max_poll_attempts(self, timeout_seconds: int = 30) -> int:
-        """Calculate max polling attempts for a given timeout."""
-        return max(
-            10, round(timeout_seconds / max(1, self.session.delay_check_operation))
-        )
-
     def get_authentication_token(self) -> str | None:
         """Get the authentication token."""
-        return self.session.authentication_token
+        return self.client.authentication_token
 
     def set_authentication_token(self, value: str):
         """Set the authentication token."""
-        self.session.authentication_token = value
+        self.client.authentication_token = value
 
     async def logout(self):
         """Logout from Securitas."""
-        ret = await self.session.logout()
-        if not ret:
-            _LOGGER.error("Could not log out from Securitas: %s", ret)
+        try:
+            await self.client.logout()
+        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
+            _LOGGER.error("Could not log out from Securitas", exc_info=True)
             return False
         return True
 
@@ -517,7 +429,7 @@ class SecuritasHub:
 
         try:
             modes: list[SmartLockMode] = await self._api_queue.submit(
-                self.session.get_lock_current_mode,
+                self.client.get_lock_modes,
                 installation,
                 priority=priority,
             )
@@ -586,7 +498,7 @@ class SecuritasHub:
         cache_key = f"sentinel_{installation.number}_{service.id}"
         return await self._cached_api_call(
             cache_key,
-            self.session.get_sentinel_data,
+            self.client.get_sentinel_data,
             installation,
             service,
         )
@@ -596,7 +508,7 @@ class SecuritasHub:
         cache_key = f"air_quality_{installation.number}_{zone}"
         return await self._cached_api_call(
             cache_key,
-            self.session.get_air_quality_data,
+            self.client.get_air_quality_data,
             installation,
             zone,
         )
@@ -604,85 +516,40 @@ class SecuritasHub:
     async def arm_alarm(
         self, installation: Installation, command: str, **force_params: str
     ) -> Any:
-        """Arm the alarm via queue-submitted API calls."""
-        reference_id = await self._api_queue.submit(
-            functools.partial(
-                self.session.submit_arm_request, installation, command, **force_params
-            ),
+        """Arm the alarm via the client (polling handled internally)."""
+        force_id = force_params.get("force_arming_remote_id")
+        suid = force_params.get("suid")
+
+        async def _arm() -> OperationStatus:
+            return await self.client.arm(
+                installation, command, force_id=force_id, suid=suid
+            )
+
+        return await self._api_queue.submit(
+            _arm,
             priority=ApiQueue.FOREGROUND,
         )
 
-        max_attempts = self._max_poll_attempts(timeout_seconds=30)
-        for attempt in range(1, max_attempts + 1):
-            raw = await self._api_queue.submit(
-                self.session.check_arm_status,
-                installation,
-                reference_id,
-                command,
-                attempt,
-                priority=ApiQueue.FOREGROUND,
-            )
-            if raw.get("res") != "WAIT":
-                return await self.session.process_arm_result(raw, installation)
-
-        raise TimeoutError("Arm status poll timed out")
-
     async def disarm_alarm(self, installation: Installation, command: str) -> Any:
-        """Disarm the alarm via queue-submitted API calls."""
-        # Capture protom_response at request time so status polls use the
-        # correct currentStatus even if protom_response changes concurrently.
-        current_status = self.session.protom_response
-        reference_id = await self._api_queue.submit(
-            self.session.submit_disarm_request,
+        """Disarm the alarm via the client (polling handled internally)."""
+        return await self._api_queue.submit(
+            self.client.disarm,
             installation,
             command,
             priority=ApiQueue.FOREGROUND,
         )
 
-        max_attempts = self._max_poll_attempts(timeout_seconds=30)
-        for attempt in range(1, max_attempts + 1):
-            raw = await self._api_queue.submit(
-                self.session.check_disarm_status,
-                installation,
-                reference_id,
-                command,
-                attempt,
-                current_status,
-                priority=ApiQueue.FOREGROUND,
-            )
-            if raw.get("res") != "WAIT":
-                return self.session.process_disarm_result(raw)
-
-        raise TimeoutError("Disarm status poll timed out")
-
     async def refresh_alarm_status(self, installation: Installation) -> OperationStatus:
         """Full alarm status refresh via CheckAlarm + poll (through queue).
 
         Used by the refresh button for an authoritative protom round-trip.
+        The client handles all polling internally.
         """
-        reference_id = await self._api_queue.submit(
-            self.session.check_alarm,
+        return await self._api_queue.submit(
+            self.client.check_alarm,
             installation,
             priority=ApiQueue.FOREGROUND,
         )
-
-        max_attempts = self._max_poll_attempts(timeout_seconds=30)
-        for _attempt in range(1, max_attempts + 1):
-            status = await self._api_queue.submit(
-                self.session.check_alarm_status,
-                installation,
-                reference_id,
-                priority=ApiQueue.FOREGROUND,
-            )
-            if hasattr(status, "protom_response") and status.protom_response:
-                return status
-            # check_alarm_status returns OperationStatus with empty
-            # protomResponse when still waiting
-            raw = getattr(status, "operation_status", "")
-            if raw != "WAIT":
-                return status
-
-        raise TimeoutError("Alarm status refresh timed out")
 
     async def update_overview(self, installation: Installation) -> OperationStatus:
         """Poll alarm status via check_general_status (single API call).
@@ -693,7 +560,7 @@ class SecuritasHub:
         """
         try:
             status = await self._api_queue.submit(
-                self.session.check_general_status,
+                self.client.get_general_status,
                 installation,
                 priority=ApiQueue.BACKGROUND,
             )
@@ -717,118 +584,23 @@ class SecuritasHub:
             protom_response_data=status.timestamp_update or "",
         )
 
-    # Minimum time (seconds) to wait after sending a lock command before
-    # polling for the new lock status.  The backend typically returns
-    # error_status_not_found within ~3s, but the lock needs ~6s to
-    # start moving and ~4.5s to complete.  We wait at least this long
-    # (or until we get the acknowledgement, whichever is later) before
-    # reading the new state.
-    _LOCK_CMD_MIN_WAIT: float = 15.0
-
     async def change_lock_mode(
         self, installation: Installation, lock_state: bool, device_id: str
     ) -> None:
-        """Send lock/unlock command and wait for acknowledgement.
+        """Send lock/unlock command and wait for completion.
 
-        Sends the command and then polls for the backend response.  Normally,
-        polling continues until the backend acknowledges the command with
-        error_status_not_found and at least _LOCK_CMD_MIN_WAIT seconds have
-        elapsed, whichever comes *last*.  If the backend returns a non-WAIT
-        result (a final lock status), the method invalidates the cache and
-        returns immediately without waiting.  In all cases where the command
-        is accepted, the cache is invalidated so the caller can immediately
-        poll for the real state.
+        The client handles all polling internally.  After the client returns,
+        the lock modes cache is invalidated so the caller fetches fresh state.
         """
-        reference_id = await self._api_queue.submit(
-            self.session.submit_change_lock_mode_request,
+        await self._api_queue.submit(
+            self.client.change_lock_mode,
             installation,
             lock_state,
             device_id,
             priority=ApiQueue.FOREGROUND,
         )
-
-        # Measure from after the command is dispatched, not before, so that
-        # any queue throttle time doesn't eat into the post-command wait.
-        start = time.monotonic()
-
-        max_attempts = self._max_poll_attempts(timeout_seconds=30)
-        acknowledged = False
-        last_err: SecuritasDirectError | None = None
-        for attempt in range(1, max_attempts + 1):
-            try:
-                raw = await self._api_queue.submit(
-                    self.session.check_change_lock_mode,
-                    installation,
-                    reference_id,
-                    attempt,
-                    device_id,
-                    priority=ApiQueue.FOREGROUND,
-                )
-            except SecuritasDirectError as err:
-                if err.message != _ERR_NO_RESPONSE:
-                    raise
-                _LOGGER.warning(
-                    "Lock mode change for %s device %s: panel has not received "
-                    "lock response yet (attempt %d/%d): %s",
-                    installation.number,
-                    device_id,
-                    attempt,
-                    max_attempts,
-                    err.log_detail(),
-                )
-                last_err = err
-                continue
-
-            msg = raw.get("msg", "")
-            if msg == _ERR_STATUS_NOT_FOUND:
-                # The backend accepted the command and forwarded it to the
-                # lock, but there is no status update to report.  The lock
-                # is physically acting now.
-                _LOGGER.debug(
-                    "Lock mode change for %s device %s: command acknowledged "
-                    "(attempt %d)",
-                    installation.number,
-                    device_id,
-                    attempt,
-                )
-                acknowledged = True
-                break
-
-            if raw.get("res") != "WAIT":
-                # Got a real status response (rare but possible on some
-                # panels).  Invalidate cache and return.
-                self._lock_modes_time.pop(installation.number, None)
-                return
-
-        # Wait for the lock to physically act.  If we got the
-        # acknowledgement quickly (e.g. 3s), sleep the remaining time.
-        elapsed = time.monotonic() - start
-        remaining = self._LOCK_CMD_MIN_WAIT - elapsed
-        if remaining > 0:
-            _LOGGER.debug(
-                "Lock mode change for %s device %s: waiting %.1fs for lock to act",
-                installation.number,
-                device_id,
-                remaining,
-            )
-            await asyncio.sleep(remaining)
-
         # Invalidate the cache so the caller fetches fresh state.
         self._lock_modes_time.pop(installation.number, None)
-
-        if not acknowledged and last_err is not None:
-            raise last_err
-
-    async def get_smart_lock_config(
-        self, installation: Installation, device_id: str
-    ) -> Any:
-        """Fetch smart lock config via queue-submitted API calls."""
-        return await self._api_queue.submit(
-            self.session.get_smart_lock_config,
-            installation,
-            device_id,
-            priority=ApiQueue.FOREGROUND,
-        )
 
     async def get_lock_config(
         self,
@@ -839,94 +611,16 @@ class SecuritasHub:
     ) -> SmartLock | None:
         """Fetch lock config, auto-detecting Smartlock vs Danalock API.
 
-        Tries xSGetSmartlockConfig first (fast, single call).  If that
-        fails, falls back to the Danalock two-phase polling API.  Caches
-        a "danalock" result so subsequent calls skip the Smartlock attempt.
+        The client handles auto-detection and Danalock polling internally.
+        Returns SmartLock or None if both paths fail.
         """
-        cache_key = f"{installation.number}_{device_id}"
-        is_danalock = self._lock_config_type.get(cache_key) == "danalock"
-
-        # Try Smartlock first unless we already know this is a Danalock.
-        if not is_danalock:
-            try:
-                config = await self._api_queue.submit(
-                    self.session.get_smart_lock_config,
-                    installation,
-                    device_id,
-                    priority=priority,
-                )
-                if config and config.res == "OK":
-                    return config
-            except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-                _LOGGER.debug(
-                    "Smartlock config fetch failed for %s device %s, trying Danalock",
-                    installation.number,
-                    device_id,
-                    exc_info=True,
-                )
-
-        # Fall back to (or go directly to) Danalock two-phase polling API.
-        try:
-            config = await self._get_danalock_config(
-                installation, device_id, priority=priority
-            )
-            if config and config.res == "OK":
-                self._lock_config_type[cache_key] = "danalock"
-                return config
-        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-            _LOGGER.debug(
-                "Danalock config fetch also failed for %s device %s",
-                installation.number,
-                device_id,
-                exc_info=True,
-            )
-
-        return None
-
-    async def _get_danalock_config(
-        self,
-        installation: Installation,
-        device_id: str,
-        *,
-        priority: int = ApiQueue.FOREGROUND,
-    ) -> SmartLock | None:
-        """Fetch Danalock config via queue-submitted submit + poll calls."""
-        reference_id = await self._api_queue.submit(
-            self.session.submit_danalock_config_request,
+        result = await self._api_queue.submit(
+            self.client.get_lock_config,
             installation,
             device_id,
             priority=priority,
         )
-
-        max_attempts = self._max_poll_attempts(timeout_seconds=30)
-        for counter in range(1, max_attempts + 1):
-            raw = await self._api_queue.submit(
-                self.session.check_danalock_config_status,
-                installation,
-                reference_id,
-                counter,
-                priority=priority,
-            )
-            if raw.get("res") == "WAIT":
-                continue
-
-            if raw.get("res") != "OK":
-                _LOGGER.debug(
-                    "Danalock config polling returned %s for %s device %s",
-                    raw.get("msg"),
-                    installation.number,
-                    device_id,
-                )
-                return None
-
-            return self.session.parse_danalock_config_response(raw, device_id)
-
-        _LOGGER.debug(
-            "Danalock config polling timed out for %s device %s",
-            installation.number,
-            device_id,
-        )
-        return None
+        return result if result and result.res == "OK" else None
 
     @property
     def api_queue(self) -> ApiQueue:
