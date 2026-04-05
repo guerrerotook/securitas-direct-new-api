@@ -1,7 +1,8 @@
 """SecuritasClient — unified API client with auth lifecycle and typed execute.
 
 Composes an HttpTransport for the raw HTTP layer.  Business methods (arm,
-disarm, lock, camera, etc.) will be added in later tasks.
+disarm, check_alarm, get_general_status) are included; lock, camera, etc.
+will be added in later tasks.
 """
 
 from __future__ import annotations
@@ -18,19 +19,34 @@ import jwt
 
 from .exceptions import (
     AccountBlockedError,
+    ArmingExceptionError,
     AuthenticationError,
     OperationTimeoutError,
     SecuritasDirectError,
     TwoFactorRequiredError,
 )
 from .graphql_queries import (
+    ARM_PANEL_MUTATION,
+    ARM_STATUS_QUERY,
+    CHECK_ALARM_QUERY,
+    CHECK_ALARM_STATUS_QUERY,
+    DISARM_PANEL_MUTATION,
+    DISARM_STATUS_QUERY,
+    GENERAL_STATUS_QUERY,
+    GET_EXCEPTIONS_QUERY,
     LOGIN_TOKEN_MUTATION,
     REFRESH_LOGIN_MUTATION,
     SEND_OTP_MUTATION,
     VALIDATE_DEVICE_MUTATION,
 )
 from .http_transport import HttpTransport
-from .models import Installation, OtpPhone
+from .models import Installation, OperationStatus, OtpPhone, SStatus
+from .responses import (
+    ArmPanelEnvelope,
+    CheckAlarmEnvelope,
+    DisarmPanelEnvelope,
+    GeneralStatusEnvelope,
+)
 
 if TYPE_CHECKING:
     from custom_components.securitas.log_filter import SensitiveDataFilter
@@ -42,6 +58,7 @@ T = TypeVar("T", bound=BaseModel)
 # API protocol constants
 API_CALLBY = "OWA_10"
 API_ID_PREFIX = "OWA_______________"
+ALARM_STATUS_SERVICE_ID = "11"
 
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
@@ -723,6 +740,284 @@ class SecuritasClient:
             break
 
         return result
+
+    # ── Alarm operations ──────────────────────────────────────────────────
+
+    async def arm(
+        self,
+        installation: Installation,
+        command: str,
+        *,
+        force_id: str | None = None,
+        suid: str | None = None,
+    ) -> OperationStatus:
+        """Arm the alarm panel.
+
+        Submits the ARM mutation, then polls ARM status until complete.
+
+        Args:
+            installation: The installation to arm.
+            command: Arm command string (e.g. "ARM1", "ARMDAY1").
+            force_id: Optional forceArmingRemoteId to override exceptions.
+            suid: Optional SUID for exception handling.
+
+        Returns:
+            OperationStatus with the final arm result.
+
+        Raises:
+            ArmingExceptionError: If arming blocked by non-blocking exceptions.
+            SecuritasDirectError: If arming fails with a blocking error.
+            OperationTimeoutError: If polling times out.
+        """
+        # ── Submit arm request ──
+        variables: dict[str, Any] = {
+            "request": command,
+            "numinst": installation.number,
+            "panel": installation.panel,
+            "currentStatus": self.protom_response,
+            "armAndLock": False,
+        }
+        if force_id is not None:
+            variables["forceArmingRemoteId"] = force_id
+        if suid is not None:
+            variables["suid"] = suid
+
+        content = {
+            "operationName": "xSArmPanel",
+            "variables": variables,
+            "query": ARM_PANEL_MUTATION,
+        }
+        envelope = await self._execute_graphql(
+            content, "xSArmPanel", ArmPanelEnvelope, installation=installation
+        )
+        reference_id = envelope.data.xSArmPanel.reference_id
+
+        # ── Poll arm status ──
+        counter = 0
+
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            poll_vars: dict[str, Any] = {
+                "request": command,
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": reference_id,
+                "counter": counter,
+                "armAndLock": False,
+            }
+            if force_id is not None:
+                poll_vars["forceArmingRemoteId"] = force_id
+
+            poll_content = {
+                "operationName": "ArmStatus",
+                "variables": poll_vars,
+                "query": ARM_STATUS_QUERY,
+            }
+            response = await self._execute_raw(
+                poll_content, "ArmStatus", installation=installation
+            )
+            return self._extract_response_data(response, "xSArmStatus")
+
+        raw = await self._poll_operation(_check)
+
+        # ── Process result ──
+        error = raw.get("error")
+        if raw.get("res") == "ERROR":
+            if (
+                error
+                and error.get("type") == "NON_BLOCKING"
+                and error.get("allowForcing")
+            ):
+                error_ref = error.get("referenceId", "")
+                error_suid = error.get("suid", "")
+                exceptions = await self._get_exceptions(
+                    installation, error_ref, error_suid
+                )
+                raise ArmingExceptionError(error_ref, error_suid, exceptions)
+            error_info = error or {}
+            if error_info.get("type") != "NON_BLOCKING":
+                raise SecuritasDirectError(
+                    f"Arm command failed: {raw.get('msg', 'unknown error')}"
+                )
+
+        self.protom_response = raw["protomResponse"]
+        return OperationStatus.model_validate(raw)
+
+    async def disarm(
+        self,
+        installation: Installation,
+        command: str,
+    ) -> OperationStatus:
+        """Disarm the alarm panel.
+
+        Submits the DISARM mutation, then polls DISARM status until complete.
+
+        Args:
+            installation: The installation to disarm.
+            command: Disarm command string (e.g. "DARM1", "DARM1DARMPERI").
+
+        Returns:
+            OperationStatus with the final disarm result.
+
+        Raises:
+            SecuritasDirectError: If disarming fails with a blocking error.
+            OperationTimeoutError: If polling times out.
+        """
+        # Capture current status at request time for consistent polling
+        current_status = self.protom_response
+
+        # ── Submit disarm request ──
+        content = {
+            "operationName": "xSDisarmPanel",
+            "variables": {
+                "request": command,
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "currentStatus": current_status,
+            },
+            "query": DISARM_PANEL_MUTATION,
+        }
+        envelope = await self._execute_graphql(
+            content, "xSDisarmPanel", DisarmPanelEnvelope, installation=installation
+        )
+        reference_id = envelope.data.xSDisarmPanel.reference_id
+
+        # ── Poll disarm status ──
+        counter = 0
+
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            poll_content = {
+                "operationName": "DisarmStatus",
+                "variables": {
+                    "request": command,
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "currentStatus": current_status,
+                    "referenceId": reference_id,
+                    "counter": counter,
+                },
+                "query": DISARM_STATUS_QUERY,
+            }
+            response = await self._execute_raw(
+                poll_content, "DisarmStatus", installation=installation
+            )
+            return self._extract_response_data(response, "xSDisarmStatus")
+
+        raw = await self._poll_operation(_check)
+
+        # ── Process result ──
+        if raw.get("res") == "ERROR":
+            error_info = raw.get("error") or {}
+            if error_info.get("type") != "NON_BLOCKING":
+                raise SecuritasDirectError(
+                    f"Disarm command failed: {raw.get('msg', 'unknown error')}"
+                )
+
+        if raw.get("protomResponse"):
+            self.protom_response = raw["protomResponse"]
+        return OperationStatus.model_validate(raw)
+
+    async def check_alarm(self, installation: Installation) -> OperationStatus:
+        """Check the current alarm status by querying the panel.
+
+        Submits a CHECK_ALARM query, then polls until the panel responds.
+
+        Returns:
+            OperationStatus with the current alarm state.
+
+        Raises:
+            OperationTimeoutError: If polling times out.
+        """
+        # ── Submit check alarm request ──
+        content = {
+            "operationName": "CheckAlarm",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+            },
+            "query": CHECK_ALARM_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content, "CheckAlarm", CheckAlarmEnvelope, installation=installation
+        )
+        reference_id = envelope.data.xSCheckAlarm.reference_id
+
+        # ── Poll check alarm status ──
+        async def _check() -> dict[str, Any]:
+            poll_content = {
+                "operationName": "CheckAlarmStatus",
+                "variables": {
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "referenceId": reference_id,
+                    "idService": ALARM_STATUS_SERVICE_ID,
+                },
+                "query": CHECK_ALARM_STATUS_QUERY,
+            }
+            response = await self._execute_raw(
+                poll_content, "CheckAlarmStatus", installation=installation
+            )
+            return self._extract_response_data(response, "xSCheckAlarmStatus")
+
+        raw = await self._poll_operation(_check)
+
+        self.protom_response = raw["protomResponse"]
+        return OperationStatus.model_validate(raw)
+
+    async def get_general_status(self, installation: Installation) -> SStatus:
+        """Get the general alarm status (single call, no polling).
+
+        Returns:
+            SStatus with current status, timestamp, and wifi connectivity.
+        """
+        content = {
+            "operationName": "Status",
+            "variables": {"numinst": installation.number},
+            "query": GENERAL_STATUS_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content, "Status", GeneralStatusEnvelope, installation=installation
+        )
+        raw_data = envelope.data.xSStatus
+        return SStatus.model_validate(raw_data.model_dump(by_alias=True))
+
+    async def _get_exceptions(
+        self,
+        installation: Installation,
+        reference_id: str,
+        suid: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch arming exception details (e.g. open windows/doors).
+
+        Polls until the exceptions list is non-empty or the result is not WAIT.
+        """
+        counter = 0
+
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            content = {
+                "operationName": "xSGetExceptions",
+                "variables": {
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "referenceId": reference_id,
+                    "counter": counter,
+                    "suid": suid,
+                },
+                "query": GET_EXCEPTIONS_QUERY,
+            }
+            response = await self._execute_raw(
+                content, "xSGetExceptions", installation=installation
+            )
+            data = self._extract_response_data(response, "xSGetExceptions")
+            return data
+
+        raw = await self._poll_operation(_check)
+        return raw.get("exceptions") or []
 
     # ── Stub: get_services (full implementation in Task 5) ───────────────
 
