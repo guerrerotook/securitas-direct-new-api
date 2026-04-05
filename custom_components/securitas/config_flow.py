@@ -222,7 +222,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
         )
 
-    async def async_step_otp_challenge(self, user_input: dict[str, Any] | None = None):
+    async def async_step_otp_challenge(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Last step of the OTP challenge."""
         assert self.securitas is not None
         assert self.otp_challenge is not None
@@ -456,7 +458,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Re-show phone list form with an error."""
         return await self._start_2fa_flow(errors={"base": error_key})
 
-    async def finish_setup(self):
+    async def finish_setup(self) -> config_entries.ConfigFlowResult:
         """Login, discover installations, detect peri, advance to options."""
         assert self.securitas is not None
         try:
@@ -521,7 +523,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._available_installations = available
         return await self.async_step_select_installation()
 
-    async def _select_installation(self, installation: Installation):
+    async def _select_installation(
+        self, installation: Installation
+    ) -> config_entries.ConfigFlowResult:
         """Set installation, call get_services, detect peri, advance to options."""
         self.config[CONF_INSTALLATION] = installation.number
         self._selected_installation = installation
@@ -698,7 +702,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._general_data: dict[str, Any] = {}
 
-    def _get(self, key, default=None):
+    def _get(self, key: str, default: Any = None) -> Any:
         """Read current value from options, falling back to entry data."""
         return self.config_entry.options.get(
             key, self.config_entry.data.get(key, default)

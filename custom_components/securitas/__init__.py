@@ -8,6 +8,7 @@ from datetime import timedelta
 import logging
 from pathlib import Path
 import time
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import voluptuous as vol
@@ -80,6 +81,9 @@ from .securitas_direct_new_api import (
     generate_device_id,
     generate_uuid,
 )
+
+if TYPE_CHECKING:
+    from .lock import SecuritasLock
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -159,14 +163,14 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
-def _build_config_dict(entry: ConfigEntry) -> tuple[dict, bool]:
+def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     """Build config dict from entry.data + entry.options.
 
     Returns the config dict and a flag indicating whether sign-in is needed
     (True if any device ID fields are missing from entry.data).
     """
 
-    def _opt(key, default=None):
+    def _opt(key: str, default: Any = None) -> Any:
         """Read from options first, then data, then default."""
         return entry.options.get(key, entry.data.get(key, default))
 
@@ -212,7 +216,7 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict, bool]:
 
 
 async def _get_or_create_session(
-    hass: HomeAssistant, config: dict, entry: ConfigEntry
+    hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> SecuritasHub:
     """Get or create a shared SecuritasHub session with reference counting.
 
@@ -268,7 +272,7 @@ async def _get_or_create_session(
 def _get_or_create_api_queue(
     hass: HomeAssistant,
     session: SecuritasHub,
-    config: dict,
+    config: dict[str, Any],
     entry: ConfigEntry,
 ) -> None:
     """Create or reuse an ApiQueue for the session's API domain.
@@ -511,7 +515,7 @@ async def _discover_cameras(
     hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
-    entry_data: dict,
+    entry_data: dict[str, Any],
     entry: ConfigEntry,
 ) -> None:
     """Discover camera devices for an installation and add entities."""
@@ -590,7 +594,7 @@ def _schedule_lock_config_retry(
     hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
-    lock_entity,
+    lock_entity: SecuritasLock,
     attempt: int = 0,
 ) -> None:
     """Schedule a background retry to fetch lock config."""
@@ -606,7 +610,7 @@ def _schedule_lock_config_retry(
 
     delay = _LOCK_CONFIG_RETRY_DELAYS[attempt]
 
-    async def _retry(_now) -> None:
+    async def _retry(_now: Any) -> None:
         # Guard: entity may have been removed while the timer was pending.
         if lock_entity.hass is None:
             return
@@ -647,7 +651,7 @@ async def _discover_locks(
     hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
-    entry_data: dict,
+    entry_data: dict[str, Any],
 ) -> None:
     """Discover lock devices for an installation and add entities."""
     from .lock import (

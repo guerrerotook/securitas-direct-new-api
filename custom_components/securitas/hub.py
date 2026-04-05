@@ -35,8 +35,10 @@ from .securitas_direct_new_api import (
     OperationStatus,
     OtpPhone,
     SmartLock,
+    SmartLockMode,
     SecuritasDirectError,
     Service,
+    ThumbnailResponse,
 )
 from .securitas_direct_new_api.client import SecuritasClient
 from .securitas_direct_new_api.http_transport import HttpTransport
@@ -45,7 +47,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _notify_error(
-    hass: HomeAssistant, notification_id, title: str, message: str
+    hass: HomeAssistant, notification_id: str, title: str, message: str
 ) -> None:
     """Notify user with persistent notification."""
     hass.async_create_task(
@@ -148,7 +150,7 @@ class SecuritasHub:
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
         )
         self._lock_modes: dict[
-            str, list
+            str, list[SmartLockMode]
         ] = {}  # installation.number -> SmartLockMode list
         self._lock_modes_time: dict[str, float] = {}  # last fetch time per installation
         self.camera_images: dict[str, bytes] = {}
@@ -158,7 +160,7 @@ class SecuritasHub:
         self._full_images: dict[str, bytes] = {}
         self._full_timestamps: dict[str, str] = {}
 
-    async def login(self):
+    async def login(self) -> None:
         """Login to Securitas."""
         await self.client.login()
 
@@ -176,12 +178,12 @@ class SecuritasHub:
         """Refresh the token."""
         return await self.client.refresh_token()
 
-    async def send_opt(self, challange: str, phone_index: int):
+    async def send_opt(self, challange: str, phone_index: int) -> None:
         """Call for the SMS challange."""
         return await self.client.send_otp(phone_index, challange)
 
     async def get_services(
-        self, instalation: Installation, priority=None
+        self, instalation: Installation, priority: int | None = None
     ) -> list[Service]:
         """Get the list of services from the installation (cached)."""
         if priority is None:
@@ -306,7 +308,7 @@ class SecuritasHub:
         self,
         installation: Installation,
         camera_device: CameraDevice,
-        thumbnail,
+        thumbnail: ThumbnailResponse,
     ) -> None:
         """Fetch the full-resolution photo and store it, then notify the frontend."""
         try:
@@ -343,9 +345,9 @@ class SecuritasHub:
 
     def _validate_and_store_image(
         self,
-        thumbnail,
+        thumbnail: ThumbnailResponse | None,
         installation: Installation,
-        camera_device,
+        camera_device: CameraDevice,
         *,
         log_warnings: bool = True,
     ) -> bytes | None:
@@ -371,7 +373,7 @@ class SecuritasHub:
     def _get_camera_coordinator(
         self,
         installation: Installation,  # pylint: disable=unused-argument
-    ):
+    ) -> Any | None:
         """Return the CameraCoordinator for an installation, if available."""
         entry_id = self.config_entry.entry_id if self.config_entry else None
         if entry_id is None:
@@ -382,7 +384,7 @@ class SecuritasHub:
         return entry_data.get("camera_coordinator")
 
     def _update_camera_coordinator_thumbnail(
-        self, installation: Installation, zone_id: str, thumbnail
+        self, installation: Installation, zone_id: str, thumbnail: ThumbnailResponse
     ) -> None:
         """Push a new thumbnail into the CameraCoordinator's data."""
         if thumbnail is None:
@@ -437,11 +439,11 @@ class SecuritasHub:
         """Get the authentication token."""
         return self.client.authentication_token
 
-    def set_authentication_token(self, value: str):
+    def set_authentication_token(self, value: str) -> None:
         """Set the authentication token."""
         self.client.authentication_token = value
 
-    async def logout(self):
+    async def logout(self) -> bool:
         """Logout from Securitas."""
         try:
             await self.client.logout()
@@ -452,10 +454,8 @@ class SecuritasHub:
 
     async def get_lock_modes(
         self, installation: Installation, *, priority: int | None = None
-    ) -> list:
+    ) -> list[SmartLockMode]:
         """Get lock modes with caching, submitted via queue."""
-        from .securitas_direct_new_api import SmartLockMode
-
         if priority is None:
             priority = ApiQueue.BACKGROUND
 

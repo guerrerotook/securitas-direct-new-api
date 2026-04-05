@@ -195,7 +195,7 @@ class SecuritasAlarm(  # type: ignore[override]
         """Return the client hub."""
         return self._client
 
-    def _force_state(self, state) -> None:
+    def _force_state(self, state: AlarmControlPanelState) -> None:
         """Force entity state and schedule HA update."""
         self._last_state = self._state
         self._state = state
@@ -768,23 +768,23 @@ class SecuritasAlarm(  # type: ignore[override]
         self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
-    async def async_alarm_arm_home(self, code: str | None = None):
+    async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Send arm home command."""
         await self._async_arm(AlarmControlPanelState.ARMED_HOME, code)
 
-    async def async_alarm_arm_away(self, code: str | None = None):
+    async def async_alarm_arm_away(self, code: str | None = None) -> None:
         """Send arm away command."""
         await self._async_arm(AlarmControlPanelState.ARMED_AWAY, code)
 
-    async def async_alarm_arm_night(self, code: str | None = None):
+    async def async_alarm_arm_night(self, code: str | None = None) -> None:
         """Send arm night command."""
         await self._async_arm(AlarmControlPanelState.ARMED_NIGHT, code)
 
-    async def async_alarm_arm_custom_bypass(self, code: str | None = None):
+    async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Send arm perimeter command."""
         await self._async_arm(AlarmControlPanelState.ARMED_CUSTOM_BYPASS, code)
 
-    async def async_alarm_arm_vacation(self, code: str | None = None):
+    async def async_alarm_arm_vacation(self, code: str | None = None) -> None:
         """Send arm vacation command."""
         await self._async_arm(AlarmControlPanelState.ARMED_VACATION, code)
 

@@ -71,7 +71,7 @@ class SecuritasEntity(Entity):
         """Return the client hub."""
         return self._client
 
-    def _force_state(self, state) -> None:
+    def _force_state(self, state: str | None) -> None:
         """Force entity state and schedule HA update."""
         self._last_state = self._state
         self._state = state
