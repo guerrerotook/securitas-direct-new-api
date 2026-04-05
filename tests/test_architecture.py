@@ -16,10 +16,69 @@ from pathlib import Path
 
 CLIENT_PACKAGE = Path("custom_components/securitas/securitas_direct_new_api")
 
+# Pydantic validators legitimately use bare dict/Any in signatures
+_VALIDATOR_DECORATORS = frozenset({"field_validator", "model_validator", "validator"})
+
 
 def _python_files() -> list[Path]:
     """Return all .py files in the client package (excluding examples)."""
     return [p for p in CLIENT_PACKAGE.glob("*.py") if p.name != "__init__.py"]
+
+
+def _decorator_name(node: ast.expr) -> str:
+    """Extract the decorator name from an AST node.
+
+    Handles both simple decorators (``@foo``) and call decorators
+    (``@foo(...)`` / ``@module.foo(...)``).
+    """
+    if isinstance(node, ast.Call):
+        return _decorator_name(node.func)
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return ""
+
+
+def _is_validator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return True if the function is decorated with a Pydantic validator."""
+    return bool(
+        _VALIDATOR_DECORATORS & {_decorator_name(d) for d in node.decorator_list}
+    )
+
+
+def _has_bare_dict(node: ast.expr) -> bool:
+    """Return True if the AST node contains a bare ``dict`` anywhere.
+
+    Checks the node itself and recurses into container types like
+    ``list[dict]``, ``dict[str, dict]``, ``tuple[dict, ...]``, and
+    union types (``dict | None``).
+    """
+    # Bare dict
+    if isinstance(node, ast.Name) and node.id == "dict":
+        return True
+    # dict | None (BinOp with | operator)
+    if isinstance(node, ast.BinOp):
+        return _has_bare_dict(node.left) or _has_bare_dict(node.right)
+    # Container types: list[dict], dict[str, dict], tuple[dict, ...], etc.
+    if isinstance(node, ast.Subscript):
+        # Check the slice (type parameters)
+        slc = node.slice
+        if isinstance(slc, ast.Tuple):
+            return any(_has_bare_dict(elt) for elt in slc.elts)
+        return _has_bare_dict(slc)
+    return False
+
+
+def _is_standalone_any(node: ast.expr) -> bool:
+    """Return True if the node is standalone ``Any`` (not inside a container)."""
+    # Bare Any
+    if isinstance(node, ast.Name) and node.id == "Any":
+        return True
+    # Any | None (BinOp)
+    if isinstance(node, ast.BinOp):
+        return _is_standalone_any(node.left) or _is_standalone_any(node.right)
+    return False
 
 
 class TestNoBareDict:
@@ -27,11 +86,6 @@ class TestNoBareDict:
 
     Use ``dict[str, Any]`` or a more specific type instead.
     """
-
-    # Pydantic validators legitimately use bare dict in signatures
-    _VALIDATOR_DECORATORS = frozenset(
-        {"field_validator", "model_validator", "validator"}
-    )
 
     def test_no_bare_dict_in_annotations(self):
         """Every ``dict`` annotation must have type parameters."""
@@ -42,15 +96,10 @@ class TestNoBareDict:
             for node in ast.walk(tree):
                 # Skip Pydantic validator methods
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    decorators = [
-                        getattr(d, "attr", getattr(d, "id", ""))
-                        for d in node.decorator_list
-                    ]
-                    if self._VALIDATOR_DECORATORS & set(decorators):
+                    if _is_validator(node):
                         continue
 
-                # Check function annotations (params + return)
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    # Check function annotations (params + return)
                     annotations = [
                         (arg.annotation, arg.arg)
                         for arg in node.args.args
@@ -60,7 +109,7 @@ class TestNoBareDict:
                         annotations.append((node.returns, "<return>"))
 
                     for ann, name in annotations:
-                        if self._is_bare_dict(ann):
+                        if _has_bare_dict(ann):
                             violations.append(
                                 f"{path.name}:{node.lineno} "
                                 f"({node.name}, param {name!r})"
@@ -68,7 +117,7 @@ class TestNoBareDict:
 
                 # Check variable annotations
                 if isinstance(node, ast.AnnAssign) and node.annotation:
-                    if self._is_bare_dict(node.annotation):
+                    if _has_bare_dict(node.annotation):
                         target = ast.dump(node.target) if node.target else "?"
                         violations.append(
                             f"{path.name}:{node.lineno} (variable {target})"
@@ -78,19 +127,6 @@ class TestNoBareDict:
             "Bare `dict` without type parameters found in annotations:\n"
             + "\n".join(f"  - {v}" for v in violations)
         )
-
-    @staticmethod
-    def _is_bare_dict(node: ast.expr) -> bool:
-        """Return True if the AST node is a bare ``dict`` (no subscript)."""
-        # dict
-        if isinstance(node, ast.Name) and node.id == "dict":
-            return True
-        # dict | None  (BinOp with | operator)
-        if isinstance(node, ast.BinOp):
-            return TestNoBareDict._is_bare_dict(
-                node.left
-            ) or TestNoBareDict._is_bare_dict(node.right)
-        return False
 
 
 class TestNoBlanketTypeIgnore:
@@ -130,12 +166,7 @@ class TestAnyUsageBaseline:
 
     # Current baseline — update this number only when deliberately
     # adding or removing standalone Any annotations.
-    _BASELINE = 15
-
-    # Pydantic validators legitimately use Any
-    _VALIDATOR_DECORATORS = frozenset(
-        {"field_validator", "model_validator", "validator"}
-    )
+    _BASELINE = 9
 
     def test_standalone_any_does_not_increase(self):
         """Count of standalone ``Any`` annotations must not exceed baseline."""
@@ -144,41 +175,26 @@ class TestAnyUsageBaseline:
         for path in _python_files():
             tree = ast.parse(path.read_text())
             for node in ast.walk(tree):
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if _is_validator(node):
+                        continue
 
-                # Skip Pydantic validators
-                decorators = [
-                    getattr(d, "attr", getattr(d, "id", ""))
-                    for d in node.decorator_list
-                ]
-                if self._VALIDATOR_DECORATORS & set(decorators):
-                    continue
+                    # Check params
+                    for arg in node.args.args:
+                        if arg.annotation and _is_standalone_any(arg.annotation):
+                            count += 1
 
-                # Check params
-                for arg in node.args.args:
-                    if arg.annotation and self._is_standalone_any(arg.annotation):
+                    # Check return
+                    if node.returns and _is_standalone_any(node.returns):
                         count += 1
 
-                # Check return
-                if node.returns and self._is_standalone_any(node.returns):
-                    count += 1
+                # Check variable and class attribute annotations
+                elif isinstance(node, ast.AnnAssign):
+                    if node.annotation and _is_standalone_any(node.annotation):
+                        count += 1
 
         assert count <= self._BASELINE, (
             f"Standalone `Any` count ({count}) exceeds baseline "
             f"({self._BASELINE}). If you intentionally added `Any`, "
             f"update _BASELINE. Otherwise, use a more specific type."
         )
-
-    @staticmethod
-    def _is_standalone_any(node: ast.expr) -> bool:
-        """Return True if the node is standalone ``Any`` (not inside a container)."""
-        # Bare Any
-        if isinstance(node, ast.Name) and node.id == "Any":
-            return True
-        # Any | None (BinOp)
-        if isinstance(node, ast.BinOp):
-            return TestAnyUsageBaseline._is_standalone_any(
-                node.left
-            ) or TestAnyUsageBaseline._is_standalone_any(node.right)
-        return False

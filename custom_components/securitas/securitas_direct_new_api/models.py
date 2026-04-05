@@ -172,7 +172,7 @@ class Installation(BaseModel):
     phone: str = ""
     capabilities: str = ""
     capabilities_exp: datetime = Field(default=datetime.min)
-    alarm_partitions: list[dict] = Field(default_factory=list)
+    alarm_partitions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class OperationStatus(BaseModel):
