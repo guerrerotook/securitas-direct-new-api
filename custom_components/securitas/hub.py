@@ -95,12 +95,12 @@ class SecuritasDirectDevice:
 
     @property
     def city(self) -> str:
-        """Return the city of the instalation."""
+        """Return the city of the installation."""
         return self.installation.city
 
     @property
     def postal_code(self) -> str:
-        """Return the postalCode of the instalation."""
+        """Return the postal code of the installation."""
         return self.installation.postal_code
 
     @property

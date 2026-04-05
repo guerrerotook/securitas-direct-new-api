@@ -280,7 +280,7 @@ class ApiManager(SecuritasHttpClient):
             if result_json is not None:
                 # Check for account-blocked error (60052)
                 if self._is_account_blocked(result_json):
-                    _new = AccountBlockedError(err.message)
+                    _new = AccountBlockedError(err.message, http_status=err.http_status)
                     _new.response_body = result_json
                     raise _new from err
                 if result_json.get("data"):
@@ -288,15 +288,17 @@ class ApiManager(SecuritasHttpClient):
                     if data.get("xSLoginToken"):
                         if data["xSLoginToken"].get("needDeviceAuthorization"):
                             # needs a 2FA
-                            _new = TwoFactorRequiredError(err.message)
+                            _new = TwoFactorRequiredError(
+                                err.message, http_status=err.http_status
+                            )
                             _new.response_body = result_json
                             raise _new from err
-                    _new = AuthenticationError(err.message)
+                    _new = AuthenticationError(err.message, http_status=err.http_status)
                     _new.response_body = result_json
                     raise _new from err
                 # Has response dict = server responded with error
                 # → login failure.
-                _new = AuthenticationError(err.message)
+                _new = AuthenticationError(err.message, http_status=err.http_status)
                 _new.response_body = result_json
                 raise _new from err
             # No response dict = network/connection error
