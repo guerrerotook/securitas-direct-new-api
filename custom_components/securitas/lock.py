@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, SecuritasHub
-from .coordinators import LockCoordinator, LockData
+from .coordinators import LockCoordinator
 from .securitas_direct_new_api import (
     Installation,
     SecuritasDirectError,
@@ -51,7 +51,7 @@ async def async_setup_entry(
     entry_data["lock_add_entities"] = async_add_entities
 
 
-class SecuritasLock(CoordinatorEntity[LockData], lock.LockEntity):
+class SecuritasLock(CoordinatorEntity[LockCoordinator], lock.LockEntity):
     """Representation of a Securitas Direct smart lock."""
 
     _attr_has_entity_name = False

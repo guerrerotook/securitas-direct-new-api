@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN
-from .coordinators import SentinelCoordinator, SentinelData
+from .coordinators import SentinelCoordinator
 from .entity import securitas_device_info
 from .securitas_direct_new_api import Installation
 
@@ -44,7 +44,7 @@ async def async_setup_entry(
     async_add_entities(sensors, False)
 
 
-class SentinelTemperature(CoordinatorEntity[SentinelData], SensorEntity):
+class SentinelTemperature(CoordinatorEntity[SentinelCoordinator], SensorEntity):
     """Sentinel temperature sensor."""
 
     _attr_has_entity_name = False
@@ -72,7 +72,7 @@ class SentinelTemperature(CoordinatorEntity[SentinelData], SensorEntity):
         return self.coordinator.data.sentinel.temperature
 
 
-class SentinelHumidity(CoordinatorEntity[SentinelData], SensorEntity):
+class SentinelHumidity(CoordinatorEntity[SentinelCoordinator], SensorEntity):
     """Sentinel Humidity sensor."""
 
     _attr_has_entity_name = False
@@ -107,7 +107,7 @@ AIR_QUALITY_LABELS: dict[str, str] = {
 }
 
 
-class SentinelAirQuality(CoordinatorEntity[SentinelData], SensorEntity):
+class SentinelAirQuality(CoordinatorEntity[SentinelCoordinator], SensorEntity):
     """Air Quality sensor — numeric value from the most recent hourly reading."""
 
     _attr_has_entity_name = False
@@ -133,7 +133,7 @@ class SentinelAirQuality(CoordinatorEntity[SentinelData], SensorEntity):
         return self.coordinator.data.air_quality.value
 
 
-class SentinelAirQualityStatus(CoordinatorEntity[SentinelData], SensorEntity):
+class SentinelAirQualityStatus(CoordinatorEntity[SentinelCoordinator], SensorEntity):
     """Air Quality Status sensor — categorical status (Good/Fair/Poor/Bad)."""
 
     _attr_has_entity_name = False

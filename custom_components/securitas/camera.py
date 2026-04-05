@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, SIGNAL_CAMERA_STATE, SecuritasHub
-from .coordinators import CameraCoordinator, CameraData
+from .coordinators import CameraCoordinator
 from .entity import camera_device_info
 from .securitas_direct_new_api import Installation
 from .securitas_direct_new_api.models import CameraDevice
@@ -35,7 +35,7 @@ async def async_setup_entry(
     entry_data["camera_add_entities"] = async_add_entities
 
 
-class SecuritasCamera(CoordinatorEntity[CameraData], Camera):
+class SecuritasCamera(CoordinatorEntity[CameraCoordinator], Camera):
     """A Securitas Direct camera entity showing the last captured image."""
 
     _attr_should_poll = False
@@ -114,7 +114,7 @@ class SecuritasCamera(CoordinatorEntity[CameraData], Camera):
         self.async_write_ha_state()
 
 
-class SecuritasCameraFull(CoordinatorEntity[CameraData], Camera):
+class SecuritasCameraFull(CoordinatorEntity[CameraCoordinator], Camera):
     """A Securitas Direct camera entity showing the last full-resolution image."""
 
     _attr_should_poll = False

@@ -103,7 +103,9 @@ async def async_setup_entry(
     )
 
 
-class SecuritasAlarm(CoordinatorEntity[AlarmStatusData], alarm.AlarmControlPanelEntity):
+class SecuritasAlarm(
+    CoordinatorEntity[AlarmCoordinator], alarm.AlarmControlPanelEntity
+):
     """Representation of a Securitas alarm status."""
 
     _attr_has_entity_name = False

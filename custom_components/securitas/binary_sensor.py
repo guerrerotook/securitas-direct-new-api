@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, SecuritasDirectDevice
-from .coordinators import AlarmCoordinator, AlarmStatusData
+from .coordinators import AlarmCoordinator
 from .entity import securitas_device_info
 from .securitas_direct_new_api import Installation
 
@@ -35,7 +35,7 @@ async def async_setup_entry(
     async_add_entities(entities, False)
 
 
-class WifiConnectedSensor(CoordinatorEntity[AlarmStatusData], BinarySensorEntity):
+class WifiConnectedSensor(CoordinatorEntity[AlarmCoordinator], BinarySensorEntity):
     """WiFi connection status from coordinator — no independent polling."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
