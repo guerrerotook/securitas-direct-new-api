@@ -45,14 +45,15 @@ async def main():
         uuid = generate_uuid()
         device_id = generate_device_id(country)
         id_device_indigitall = str(uuid4())
+        api_domains = ApiDomains()
         transport = HttpTransport(
             session=aiohttp_session,
-            base_url=ApiDomains().get_url(country),
+            base_url=api_domains.get_url(country),
         )
         client = SecuritasClient(
             transport=transport,
             country=country,
-            language=ApiDomains.language(country),
+            language=api_domains.get_language(country),
             username=user,
             password=password,
             device_id=device_id,

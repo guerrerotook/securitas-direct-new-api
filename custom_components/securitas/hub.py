@@ -272,15 +272,9 @@ class SecuritasHub:
                 )
 
             # Fetch full-resolution image in background
-            if (
-                thumbnail is not None
-                and thumbnail.id_signal
-                and thumbnail.signal_type
-            ):
+            if thumbnail is not None and thumbnail.id_signal and thumbnail.signal_type:
                 self.hass.async_create_task(
-                    self._fetch_and_store_full_image(
-                        installation, device, thumbnail
-                    )
+                    self._fetch_and_store_full_image(installation, device, thumbnail)
                 )
 
             return image_bytes
