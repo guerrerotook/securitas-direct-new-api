@@ -15,7 +15,7 @@ import voluptuous as vol
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -411,10 +411,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not need_sign_in:
         try:
             client = await _get_or_create_session(hass, config, entry)
-        except TwoFactorRequiredError:
-            return False
-        except AuthenticationError:
-            return False
+        except TwoFactorRequiredError as err:
+            raise ConfigEntryAuthFailed("2FA required — please reauthenticate") from err
+        except AuthenticationError as err:
+            raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
 
         _get_or_create_api_queue(hass, client, config, entry)
 

@@ -10,9 +10,18 @@
             "service_error": "Erro do serviço Securitas Direct: {error}"
         },
         "abort": {
-            "already_configured": "O serviço já está configurado"
+            "already_configured": "O serviço já está configurado",
+            "reauth_successful": "Reautenticação realizada com sucesso"
         },
         "step": {
+            "reauth_confirm": {
+                "title": "Reautenticar Securitas Direct",
+                "description": "Sua sessão expirou. Digite novamente sua senha para reconectar.",
+                "data": {
+                    "username": "Nome de usuário",
+                    "password": "Senha"
+                }
+            },
             "user": {
                 "data": {
                     "country": "Código do país",

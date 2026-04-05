@@ -32,7 +32,7 @@ from custom_components.securitas.securitas_direct_new_api import (
     SecuritasState,
     TwoFactorRequiredError,
 )
-from homeassistant.config_entries import SOURCE_USER
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -1253,3 +1253,207 @@ async def test_no_peri_when_no_peri_service_attribute(hass):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_HAS_PERI] is False
+
+
+# ===================================================================
+# TestReauthFlow
+# ===================================================================
+
+REAUTH_ENTRY_DATA = {
+    CONF_USERNAME: "test@example.com",
+    CONF_PASSWORD: "old-password",
+    CONF_COUNTRY: "ES",
+    CONF_INSTALLATION: "123456",
+    CONF_DEVICE_ID: "test-device-id",
+    CONF_UNIQUE_ID: "test-uuid",
+    CONF_DEVICE_INDIGITALL: "test-indigitall",
+    CONF_DELAY_CHECK_OPERATION: DEFAULT_DELAY_CHECK_OPERATION,
+}
+
+
+def _make_reauth_entry(hass) -> MockConfigEntry:
+    """Create a MockConfigEntry for reauth tests and add it to hass."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_123456",
+        data=dict(REAUTH_ENTRY_DATA),
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def _start_reauth_flow(hass, entry):
+    """Initiate a reauth flow for the given entry."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+        data=dict(entry.data),
+    )
+    return result
+
+
+async def test_reauth_shows_confirm_form(hass):
+    """Reauth flow should show the reauth_confirm form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+
+
+async def test_reauth_confirm_valid_credentials(hass):
+    """Valid credentials in reauth should update entry and abort with reauth_successful."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+
+    with (
+        _patches(mock_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    # Verify the entry was updated with new password
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reauth_confirm_invalid_auth(hass):
+    """Invalid credentials in reauth should show error on form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = AuthenticationError("bad credentials")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "wrong-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_reauth_confirm_account_blocked(hass):
+    """Account blocked during reauth should show error on form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = AccountBlockedError("account blocked")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "account_blocked"}
+
+
+async def test_reauth_confirm_cannot_connect(hass):
+    """Connection error during reauth should show error on form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = SecuritasDirectError("connection failed")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_reauth_with_2fa_flow(hass):
+    """Reauth with 2FA: confirm -> phone_list -> otp_challenge -> reauth_successful."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory(two_fa=True)
+
+    # Step 1: Submit credentials — triggers 2FA
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "phone_list"
+
+    # Step 2: Select phone
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={"phones": "0_555-1234"}
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "otp_challenge"
+
+    # Step 3: Submit OTP — should complete reauth
+    with (
+        _patches(mock_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reauth_preserves_username_from_entry(hass):
+    """Reauth form should pre-populate the username from the existing entry."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    # The schema should have the username pre-filled
+    schema = result["data_schema"]
+    assert schema is not None

@@ -14,7 +14,7 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -404,7 +404,7 @@ class TestAsyncSetupEntry:
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
 
     async def test_setup_login_2fa_error(self, hass, mock_hub):
-        """TwoFactorRequiredError should return False and create a notification."""
+        """TwoFactorRequiredError should raise ConfigEntryAuthFailed."""
         mock_hub.login = AsyncMock(side_effect=TwoFactorRequiredError("2FA required"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
@@ -412,19 +412,13 @@ class TestAsyncSetupEntry:
         with (
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify_error") as mock_notify,
-            patch.object(
-                hass.config_entries.flow, "async_init", new_callable=AsyncMock
-            ),
+            patch("custom_components.securitas._notify_error"),
+            pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
         ):
-            result = await async_setup_entry(hass, entry)
-
-        assert result is False
-        mock_notify.assert_called_once()
-        assert mock_notify.call_args[0][1] == "2fa_error"
+            await async_setup_entry(hass, entry)
 
     async def test_setup_login_error(self, hass, mock_hub):
-        """AuthenticationError should return False and create a notification."""
+        """AuthenticationError should raise ConfigEntryAuthFailed."""
         mock_hub.login = AsyncMock(side_effect=AuthenticationError("bad credentials"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
@@ -432,16 +426,10 @@ class TestAsyncSetupEntry:
         with (
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify_error") as mock_notify,
-            patch.object(
-                hass.config_entries.flow, "async_init", new_callable=AsyncMock
-            ),
+            patch("custom_components.securitas._notify_error"),
+            pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
         ):
-            result = await async_setup_entry(hass, entry)
-
-        assert result is False
-        mock_notify.assert_called_once()
-        assert mock_notify.call_args[0][1] == "login_error"
+            await async_setup_entry(hass, entry)
 
     async def test_setup_securitas_error_during_login(self, hass, mock_hub):
         """SecuritasDirectError during login should raise ConfigEntryNotReady."""

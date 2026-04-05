@@ -158,6 +158,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._selected_installation: Installation | None = None
         self._options_data: dict[str, Any] = {}
         self._has_peri: bool = False
+        self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def _create_entry_for_installation(
         self, installation: Installation
@@ -259,6 +260,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
         # MFA may succeed without returning a token (hash: null).
         # finish_setup() will call login() to obtain it.
+        if self._reauth_entry is not None:
+            return await self._finish_reauth()
         return await self.finish_setup()
 
     def _user_schema(self, defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -340,6 +343,78 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Login succeeded without 2FA — proceed directly
         return await self.finish_setup()
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Handle reauth when ConfigEntryAuthFailed is raised."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        assert self._reauth_entry is not None
+        self.config = dict(entry_data)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Show reauth form and handle credential re-entry."""
+        assert self._reauth_entry is not None
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+            self.config[CONF_USERNAME] = user_input.get(
+                CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
+            )
+
+            # Generate new device IDs for the reauth session
+            uuid = generate_uuid()
+            self.config[CONF_DEVICE_ID] = uuid
+            self.config[CONF_UNIQUE_ID] = uuid
+            self.config.setdefault(CONF_DEVICE_INDIGITALL, "")
+            self.config.setdefault(
+                CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+            )
+            self.config.setdefault(CONF_ENTRY_ID, "")
+
+            self.securitas = self._create_client()
+
+            try:
+                await self.securitas.login()
+            except TwoFactorRequiredError:
+                return await self._start_2fa_flow()
+            except AccountBlockedError:
+                errors["base"] = "account_blocked"
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except SecuritasDirectError:
+                errors["base"] = "cannot_connect"
+            else:
+                return await self._finish_reauth()
+
+        username = self._reauth_entry.data.get(CONF_USERNAME, "")
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_USERNAME, default=username): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
+        """Complete reauth by updating entry credentials and reloading."""
+        assert self._reauth_entry is not None
+        await self.async_set_unique_id(self._reauth_entry.unique_id)
+        new_data = {**self._reauth_entry.data}
+        new_data[CONF_USERNAME] = self.config[CONF_USERNAME]
+        new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+        self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
+        await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+        return self.async_abort(reason="reauth_successful")
 
     async def _start_2fa_flow(
         self, errors: dict[str, str] | None = None

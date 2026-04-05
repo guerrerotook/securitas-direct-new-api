@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
@@ -291,30 +291,29 @@ async def test_check_alarm_sends_operation_name(
 # ── Error handling during setup ───────────────────────────────────────────────
 
 
-async def test_setup_login_error_returns_false(
+async def test_setup_login_error_raises_auth_failed(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """AuthenticationError during setup causes async_setup_entry to return False."""
+    """AuthenticationError during setup raises ConfigEntryAuthFailed."""
     mock_server.add_response("mkLoginToken", graphql_login_error("Invalid credentials"))
 
     entry = _make_entry(hass)
     mock_http = mock_server.make_http_client()
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=mock_http,
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch.object(hass, "async_create_task"),
+        pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
     ):
-        # Suppress background flow.async_init that fails because 'securitas'
-        # is not registered in the test HA loader
-        with patch.object(hass, "async_create_task"):
-            result = await async_setup_entry(hass, entry)
-
-    assert result is False
+        await async_setup_entry(hass, entry)
 
 
-async def test_setup_2fa_error_returns_false(
+async def test_setup_2fa_error_raises_auth_failed(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """TwoFactorRequiredError during setup causes async_setup_entry to return False."""
+    """TwoFactorRequiredError during setup raises ConfigEntryAuthFailed."""
     # Response that sets needDeviceAuthorization=True triggers TwoFactorRequiredError
     mock_server.add_response(
         "mkLoginToken",
@@ -336,14 +335,15 @@ async def test_setup_2fa_error_returns_false(
     )
     entry = _make_entry(hass)
     mock_http = mock_server.make_http_client()
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=mock_http,
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch.object(hass, "async_create_task"),
+        pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
     ):
-        # Suppress background flow.async_init that fails in test loader
-        with patch.object(hass, "async_create_task"):
-            result = await async_setup_entry(hass, entry)
-    assert result is False
+        await async_setup_entry(hass, entry)
 
 
 async def test_setup_connection_error_raises_not_ready(
