@@ -15,6 +15,7 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.securitas.securitas_direct_new_api.models import (
     Installation,
     OperationStatus,
+    SStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.const import (
     PERI_DEFAULTS,
@@ -28,6 +29,10 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
 )
 from custom_components.securitas.alarm_control_panel import (
     SecuritasAlarm,
+)
+from custom_components.securitas.coordinators import (
+    AlarmCoordinator,
+    AlarmStatusData,
 )
 from custom_components.securitas.securitas_direct_new_api.command_resolver import (
     AlarmState,
@@ -84,6 +89,10 @@ def make_alarm(
     hass.async_create_task = MagicMock()
     hass.services = MagicMock()
 
+    coordinator = MagicMock(spec=AlarmCoordinator)
+    coordinator.data = None
+    coordinator.async_request_refresh = AsyncMock()
+
     if initial_status is None:
         initial_status = OperationStatus(
             operation_status="OK",
@@ -94,22 +103,19 @@ def make_alarm(
             protom_response_data="",
         )
 
-    # Patch async_track_time_interval to avoid HA event loop dependency,
-    # and patch Entity state-writing methods that require a running HA instance.
+    # Patch Entity state-writing methods that require a running HA instance.
     with (
-        patch(
-            "custom_components.securitas.alarm_control_panel.async_track_time_interval"
-        ) as mock_track,
         patch.object(SecuritasAlarm, "async_schedule_update_ha_state", MagicMock()),
         patch.object(SecuritasAlarm, "async_write_ha_state", MagicMock()),
     ):
-        mock_track.return_value = MagicMock()  # unsub callable
         alarm = SecuritasAlarm(
             installation=installation,
-            state=initial_status,
             client=client,
             hass=hass,
+            coordinator=coordinator,
         )
+    # Apply the initial status to set default state (e.g. DISARMED)
+    alarm.update_status_alarm(initial_status)
     # Keep the patches alive on the instance for later calls in tests
     alarm.async_schedule_update_ha_state = MagicMock()
     alarm.async_write_ha_state = MagicMock()
@@ -1028,24 +1034,6 @@ class TestForceState:
 class TestAsyncWillRemoveFromHass:
     """Tests for async_will_remove_from_hass()."""
 
-    async def test_calls_unsub_when_exists(self):
-        """Calls the unsub callable when it exists."""
-        alarm = make_alarm()
-        unsub_mock = MagicMock()
-        alarm._update_unsub = unsub_mock
-
-        await alarm.async_will_remove_from_hass()
-
-        unsub_mock.assert_called_once()
-
-    async def test_handles_none_unsub_gracefully(self):
-        """Handles None _update_unsub gracefully (no crash)."""
-        alarm = make_alarm()
-        alarm._update_unsub = None
-
-        # Should not raise
-        await alarm.async_will_remove_from_hass()
-
     async def test_unsubscribes_mobile_action_listener(self):
         """Calls _mobile_action_unsub() when it is set."""
         alarm = make_alarm()
@@ -1066,142 +1054,107 @@ class TestAsyncWillRemoveFromHass:
 
 
 # ===========================================================================
-# async_update_status
+# _handle_coordinator_update / _update_from_coordinator
 # ===========================================================================
 
 
-@pytest.mark.asyncio
-class TestAsyncUpdateStatus:
-    """Tests for async_update_status()."""
+class TestHandleCoordinatorUpdate:
+    """Tests for coordinator-driven updates."""
 
-    async def test_success_calls_update_overview_and_writes_state(self):
-        """Success: calls update_overview, update_status_alarm, writes HA state."""
+    def test_coordinator_update_with_total_status(self):
+        """Coordinator data with status 'T' sets ARMED_AWAY."""
         alarm = make_alarm()
-        status = OperationStatus(
-            operation_status="OK",
-            message="Armed total",
-            status="",
-            installation_number="123456",
-            protom_response="T",
-            protom_response_data="",
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="T"), protom_response="T"
         )
-        alarm.client.update_overview = AsyncMock(return_value=status)
 
-        await alarm.async_update_status()
+        alarm._handle_coordinator_update()
 
-        alarm.client.update_overview.assert_called_once_with(alarm.installation)
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
         alarm.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
 
-    async def test_success_with_now_parameter(self):
-        """async_update_status accepts an optional now parameter (used by timer)."""
+    def test_coordinator_update_with_disarmed_status(self):
+        """Coordinator data with status 'D' sets DISARMED."""
         alarm = make_alarm()
-        status = OperationStatus(
-            operation_status="OK",
-            message="",
-            status="",
-            installation_number="123456",
-            protom_response="D",
-            protom_response_data="",
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="D"), protom_response="D"
         )
-        alarm.client.update_overview = AsyncMock(return_value=status)
 
-        await alarm.async_update_status(_now="2024-01-01T00:00:00")
+        alarm._handle_coordinator_update()
 
-        alarm.client.update_overview.assert_called_once_with(alarm.installation)
         assert alarm._state == AlarmControlPanelState.DISARMED
         alarm.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
 
-    async def test_error_logged_state_unchanged(self):
-        """Error: SecuritasDirectError logged, state unchanged, HA state written."""
+    def test_coordinator_update_skipped_during_operation(self):
+        """Coordinator update is skipped when _operation_in_progress is True."""
         alarm = make_alarm()
-        alarm.client.update_overview = AsyncMock(
-            side_effect=SecuritasDirectError("Network error")
-        )
-
-        await alarm.async_update_status()
-
-        alarm.client.update_overview.assert_called_once()
-        assert alarm._state == AlarmControlPanelState.DISARMED
-        alarm.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
-        assert "waf_blocked" not in alarm._attr_extra_state_attributes
-
-    async def test_403_error_sets_waf_blocked_attribute(self):
-        """403 WAF error sets waf_blocked attribute for the card."""
-        alarm = make_alarm()
-        alarm.client.update_overview = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
-        )
-
-        await alarm.async_update_status()
-
-        assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
-        alarm.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
-
-    async def test_successful_update_clears_waf_blocked(self):
-        """Successful status check clears waf_blocked and dismisses notification."""
-        alarm = make_alarm()
-        alarm._attr_extra_state_attributes["waf_blocked"] = True
-        status = OperationStatus(
-            operation_status="OK",
-            message="",
-            status="",
-            installation_number="123456",
-            protom_response="D",
-            protom_response_data="",
-        )
-        alarm.client.update_overview = AsyncMock(return_value=status)
-
-        await alarm.async_update_status()
-
-        assert "waf_blocked" not in alarm._attr_extra_state_attributes
-        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
-
-    async def test_skips_poll_when_operation_in_progress(self):
-        """Status poll is skipped when _operation_in_progress is True."""
-        alarm = make_alarm()
-        alarm.client.update_overview = AsyncMock()
         alarm._operation_in_progress = True
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="T"), protom_response="T"
+        )
 
-        await alarm.async_update_status()
+        alarm._handle_coordinator_update()
 
-        alarm.client.update_overview.assert_not_called()
+        # State should remain at initial DISARMED — update was skipped
+        assert alarm._state == AlarmControlPanelState.DISARMED
         alarm.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
 
-    async def test_polls_when_operation_not_in_progress(self):
-        """Status poll proceeds normally when _operation_in_progress is False."""
+    def test_coordinator_update_with_none_data(self):
+        """Coordinator data=None still writes HA state (no crash)."""
         alarm = make_alarm()
-        status = OperationStatus(
-            operation_status="OK",
-            message="",
-            status="",
-            installation_number="123456",
-            protom_response="D",
-            protom_response_data="",
+        alarm.coordinator.data = None
+
+        alarm._handle_coordinator_update()
+
+        alarm.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
+
+    def test_coordinator_update_with_empty_status(self):
+        """Coordinator data with empty status string leaves state unchanged."""
+        alarm = make_alarm()
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status=""), protom_response=""
         )
-        alarm.client.update_overview = AsyncMock(return_value=status)
-        alarm._operation_in_progress = False
 
-        await alarm.async_update_status()
+        alarm._handle_coordinator_update()
 
-        alarm.client.update_overview.assert_called_once()
+        assert alarm._state == AlarmControlPanelState.DISARMED
+        alarm.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
 
-    async def test_scan_interval_zero_no_timer_registered(self):
-        """scan_interval=0 does not register async_track_time_interval."""
-        alarm = make_alarm(
-            config={
-                "scan_interval": 0,
-                "PERI_alarm": False,
-                "map_home": "not_used",
-                "map_away": "total",
-                "map_night": "not_used",
-                "map_custom": "not_used",
-                "map_vacation": "not_used",
-            }
+    def test_coordinator_update_with_none_status(self):
+        """Coordinator data with None status string leaves state unchanged."""
+        alarm = make_alarm()
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status=None), protom_response=""
         )
-        assert alarm._update_unsub is None
 
-    async def test_scan_interval_zero_keeps_force_context_retention(self):
+        alarm._handle_coordinator_update()
+
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+    def test_coordinator_update_unknown_code_sets_custom_bypass(self):
+        """Unknown proto code from coordinator sets ARMED_CUSTOM_BYPASS."""
+        alarm = make_alarm()
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="Z"), protom_response="Z"
+        )
+
+        alarm._handle_coordinator_update()
+
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+
+    def test_coordinator_update_updates_last_proto_code(self):
+        """Known proto code from coordinator updates _last_proto_code."""
+        alarm = make_alarm()
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="T"), protom_response="T"
+        )
+
+        alarm._handle_coordinator_update()
+
+        assert alarm._last_proto_code == "T"
+
+    def test_scan_interval_zero_keeps_force_context_retention(self):
         """scan_interval=0 still uses DEFAULT_SCAN_INTERVAL for force_context retention."""
         from custom_components.securitas import DEFAULT_SCAN_INTERVAL
 
@@ -1490,10 +1443,10 @@ class TestForceArmContext:
         assert "force_arming_remote_id" not in call_kwargs
         assert "suid" not in call_kwargs
 
-    async def test_force_context_survives_immediate_status_refresh(self):
-        """async_update_status does NOT clear recently-set force context.
+    async def test_force_context_survives_immediate_coordinator_update(self):
+        """Coordinator update does NOT clear recently-set force context.
 
-        HA triggers an immediate status refresh after every service call.
+        HA triggers an immediate coordinator refresh after every service call.
         The force context must survive until the user has a chance to re-arm.
         """
         alarm = make_alarm()
@@ -1507,25 +1460,18 @@ class TestForceArmContext:
         alarm._attr_extra_state_attributes["force_arm_available"] = True
         alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
 
-        alarm.client.update_overview = AsyncMock(
-            return_value=OperationStatus(
-                operation_status="OK",
-                message="",
-                status="",
-                installation_number="123456",
-                protom_response="D",
-                protom_response_data="",
-            )
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="D"), protom_response="D"
         )
 
-        await alarm.async_update_status()
+        alarm._handle_coordinator_update()
 
         # Force context should STILL be present (age < scan interval)
         assert alarm._force_context is not None
         assert alarm._attr_extra_state_attributes.get("force_arm_available") is True
 
-    async def test_force_context_cleared_on_expired_status_refresh(self):
-        """async_update_status clears force context after scan interval expires."""
+    async def test_force_context_cleared_on_expired_coordinator_update(self):
+        """Coordinator update clears force context after scan interval expires."""
         alarm = make_alarm()
         alarm._force_context = {
             "reference_id": "ref-123",
@@ -1537,18 +1483,11 @@ class TestForceArmContext:
         alarm._attr_extra_state_attributes["force_arm_available"] = True
         alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
 
-        alarm.client.update_overview = AsyncMock(
-            return_value=OperationStatus(
-                operation_status="OK",
-                message="",
-                status="",
-                installation_number="123456",
-                protom_response="D",
-                protom_response_data="",
-            )
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="D"), protom_response="D"
         )
 
-        await alarm.async_update_status()
+        alarm._handle_coordinator_update()
 
         assert alarm._force_context is None
         assert "force_arm_available" not in alarm._attr_extra_state_attributes
@@ -3049,18 +2988,11 @@ class TestForceArmWorkflow:
         assert alarm._force_context is not None
         created_at = alarm._force_context["created_at"]
 
-        # Step 2: status refresh returns disarmed (HA auto-refreshes after service calls)
-        alarm.client.update_overview = AsyncMock(
-            return_value=OperationStatus(
-                operation_status="OK",
-                message="",
-                status="",
-                installation_number="123456",
-                protom_response="D",
-                protom_response_data="",
-            )
+        # Step 2: coordinator refresh returns disarmed (HA auto-refreshes after service calls)
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="D"), protom_response="D"
         )
-        await alarm.async_update_status()
+        alarm._handle_coordinator_update()
 
         # Context should survive (age < scan interval of 120s)
         assert alarm._force_context is not None
@@ -3088,15 +3020,6 @@ class TestForceArmWorkflow:
 
 class TestHassNoneGuardsAlarm:
     """Verify alarm entity bails out when hass is None (after removal)."""
-
-    async def test_update_status_skips_when_hass_is_none(self):
-        alarm = make_alarm()
-        alarm.hass = None  # type: ignore[attr-defined]
-        alarm.client.update_overview = AsyncMock()
-
-        await alarm.async_update_status()
-
-        alarm.client.update_overview.assert_not_awaited()
 
     def test_force_state_skips_schedule_when_hass_is_none(self):
         alarm = make_alarm()

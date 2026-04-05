@@ -7,9 +7,10 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
 
 from custom_components.securitas.binary_sensor import WifiConnectedSensor
+from custom_components.securitas.coordinators import AlarmCoordinator, AlarmStatusData
 from custom_components.securitas.securitas_direct_new_api.models import SStatus
 
-from tests.conftest import make_installation, make_securitas_hub_mock
+from tests.conftest import make_installation
 
 pytestmark = pytest.mark.asyncio
 
@@ -24,9 +25,9 @@ def make_sensor(
 ) -> WifiConnectedSensor:
     """Create a WifiConnectedSensor with mocked dependencies."""
     installation = make_installation(**(installation_overrides or {}))
-    client = make_securitas_hub_mock()
-    client.xsstatus = {}
-    sensor = WifiConnectedSensor(client, installation)
+    coordinator = MagicMock(spec=AlarmCoordinator)
+    coordinator.data = None
+    sensor = WifiConnectedSensor(coordinator, installation)
     sensor.async_write_ha_state = MagicMock()  # type: ignore[method-assign]
     return sensor
 
@@ -65,54 +66,43 @@ class TestWifiConnectedSensorInit:
 
 
 # ===========================================================================
-# _handle_update
+# is_on property (coordinator-driven)
 # ===========================================================================
 
 
-class TestHandleUpdate:
-    """Tests for WifiConnectedSensor._handle_update."""
+class TestIsOnProperty:
+    """Tests for WifiConnectedSensor.is_on property."""
 
-    def test_ignores_update_for_different_installation(self):
-        """Update for a different installation number is ignored."""
+    def test_returns_none_when_coordinator_data_is_none(self):
+        """is_on returns None when coordinator has no data yet."""
         sensor = make_sensor()
-        sensor._handle_update("999999")
+        sensor.coordinator.data = None
 
-        sensor.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
+        assert sensor.is_on is None
 
-    def test_updates_is_on_when_wifi_connected_true(self):
-        """Sets _attr_is_on to True when wifi_connected is True."""
+    def test_returns_true_when_wifi_connected(self):
+        """is_on returns True when wifi_connected is True."""
         sensor = make_sensor()
-        sensor._client.xsstatus["123456"] = SStatus(wifi_connected=True)
+        sensor.coordinator.data = AlarmStatusData(
+            status=SStatus(wifi_connected=True),
+        )
 
-        sensor._handle_update("123456")
+        assert sensor.is_on is True
 
-        assert sensor._attr_is_on is True
-        sensor.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
-
-    def test_updates_is_on_when_wifi_connected_false(self):
-        """Sets _attr_is_on to False when wifi_connected is False."""
+    def test_returns_false_when_wifi_disconnected(self):
+        """is_on returns False when wifi_connected is False."""
         sensor = make_sensor()
-        sensor._client.xsstatus["123456"] = SStatus(wifi_connected=False)
+        sensor.coordinator.data = AlarmStatusData(
+            status=SStatus(wifi_connected=False),
+        )
 
-        sensor._handle_update("123456")
+        assert sensor.is_on is False
 
-        assert sensor._attr_is_on is False
-        sensor.async_write_ha_state.assert_called_once()  # type: ignore[attr-defined]
-
-    def test_no_update_when_wifi_connected_is_none(self):
-        """Does NOT update state when wifi_connected is None."""
+    def test_returns_none_when_wifi_connected_is_none(self):
+        """is_on returns None when wifi_connected field is None."""
         sensor = make_sensor()
-        sensor._client.xsstatus["123456"] = SStatus(wifi_connected=None)
+        sensor.coordinator.data = AlarmStatusData(
+            status=SStatus(wifi_connected=None),
+        )
 
-        sensor._handle_update("123456")
-
-        sensor.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
-
-    def test_no_update_when_status_missing_from_xsstatus(self):
-        """Does NOT update state when installation number not in xsstatus dict."""
-        sensor = make_sensor()
-        # xsstatus is empty — no entry for "123456"
-
-        sensor._handle_update("123456")
-
-        sensor.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
+        assert sensor.is_on is None
