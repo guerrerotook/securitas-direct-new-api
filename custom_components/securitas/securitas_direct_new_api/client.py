@@ -28,24 +28,43 @@ from .exceptions import (
 from .graphql_queries import (
     ARM_PANEL_MUTATION,
     ARM_STATUS_QUERY,
+    CHANGE_LOCK_MODE_MUTATION,
+    CHANGE_LOCK_MODE_STATUS_QUERY,
     CHECK_ALARM_QUERY,
     CHECK_ALARM_STATUS_QUERY,
+    DANALOCK_CONFIG_QUERY,
+    DANALOCK_CONFIG_STATUS_QUERY,
     DISARM_PANEL_MUTATION,
     DISARM_STATUS_QUERY,
     GENERAL_STATUS_QUERY,
     GET_EXCEPTIONS_QUERY,
+    LOCK_CURRENT_MODE_QUERY,
     LOGIN_TOKEN_MUTATION,
     REFRESH_LOGIN_MUTATION,
     SEND_OTP_MUTATION,
+    SMARTLOCK_CONFIG_QUERY,
     VALIDATE_DEVICE_MUTATION,
 )
 from .http_transport import HttpTransport
-from .models import Installation, OperationStatus, OtpPhone, SStatus
+from .models import (
+    Installation,
+    LockFeatures,
+    OperationStatus,
+    OtpPhone,
+    SmartLock,
+    SmartLockMode,
+    SmartLockModeStatus,
+    SStatus,
+)
 from .responses import (
     ArmPanelEnvelope,
+    ChangeLockModeEnvelope,
     CheckAlarmEnvelope,
+    DanalockConfigEnvelope,
     DisarmPanelEnvelope,
     GeneralStatusEnvelope,
+    LockModeEnvelope,
+    SmartlockConfigEnvelope,
 )
 
 if TYPE_CHECKING:
@@ -59,6 +78,11 @@ T = TypeVar("T", bound=BaseModel)
 API_CALLBY = "OWA_10"
 API_ID_PREFIX = "OWA_______________"
 ALARM_STATUS_SERVICE_ID = "11"
+
+# Lock device constants
+SMARTLOCK_DEVICE_ID = "1"
+SMARTLOCK_DEVICE_TYPE = "DR"
+SMARTLOCK_KEY_TYPE = "MASTER"
 
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
@@ -1018,6 +1042,226 @@ class SecuritasClient:
 
         raw = await self._poll_operation(_check)
         return raw.get("exceptions") or []
+
+    # ── Lock operations ────────────────────────────────────────────────────
+
+    async def get_lock_modes(self, installation: Installation) -> list[SmartLockMode]:
+        """Get the current mode of all smart locks.
+
+        Returns:
+            A list of SmartLockMode instances, one per lock device.
+        """
+        content = {
+            "operationName": "xSGetLockCurrentMode",
+            "variables": {
+                "numinst": installation.number,
+            },
+            "query": LOCK_CURRENT_MODE_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "xSGetLockCurrentMode",
+            LockModeEnvelope,
+            installation=installation,
+        )
+        smartlock_info = envelope.data.xSGetLockCurrentMode.smartlock_info
+        if not smartlock_info:
+            return []
+        return [SmartLockMode.model_validate(item) for item in smartlock_info]
+
+    async def get_lock_config(
+        self,
+        installation: Installation,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+    ) -> SmartLock:
+        """Fetch lock configuration, auto-detecting Smartlock vs Danalock API.
+
+        Tries the fast xSGetSmartlockConfig query first.  If that returns a
+        non-OK result or raises, falls back to the Danalock two-phase polling
+        API.  Returns an empty SmartLock() if both paths fail.
+
+        Args:
+            installation: The installation to query.
+            device_id: Lock device ID (defaults to SMARTLOCK_DEVICE_ID).
+
+        Returns:
+            SmartLock with lock configuration details, or empty SmartLock().
+        """
+        # ── Smartlock fast path ──
+        try:
+            smartlock_content = {
+                "operationName": "xSGetSmartlockConfig",
+                "variables": {
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "deviceType": SMARTLOCK_DEVICE_TYPE,
+                    "deviceId": device_id,
+                    "keytype": SMARTLOCK_KEY_TYPE,
+                },
+                "query": SMARTLOCK_CONFIG_QUERY,
+            }
+            envelope = await self._execute_graphql(
+                smartlock_content,
+                "xSGetSmartlockConfig",
+                SmartlockConfigEnvelope,
+                installation=installation,
+            )
+            config = envelope.data.xSGetSmartlockConfig
+            if config.res == "OK":
+                return config
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "Smartlock config fetch failed for %s device %s, trying Danalock",
+                installation.number,
+                device_id,
+                exc_info=True,
+            )
+
+        # ── Danalock fallback (two-phase polling) ──
+        try:
+            return await self._get_danalock_config(installation, device_id)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug(
+                "Danalock config fetch also failed for %s device %s",
+                installation.number,
+                device_id,
+                exc_info=True,
+            )
+
+        return SmartLock()
+
+    async def _get_danalock_config(
+        self,
+        installation: Installation,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+    ) -> SmartLock:
+        """Fetch Danalock config via submit + poll.
+
+        Returns:
+            SmartLock with lock configuration, or SmartLock() on failure.
+        """
+        # Submit danalock config request
+        submit_content = {
+            "operationName": "xSGetDanalockConfig",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "deviceType": SMARTLOCK_DEVICE_TYPE,
+                "deviceId": device_id,
+            },
+            "query": DANALOCK_CONFIG_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            submit_content,
+            "xSGetDanalockConfig",
+            DanalockConfigEnvelope,
+            installation=installation,
+        )
+        reference_id = envelope.data.xSGetDanalockConfig.reference_id
+
+        # Poll for status
+        counter = 0
+
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            poll_content = {
+                "operationName": "xSGetDanalockConfigStatus",
+                "variables": {
+                    "numinst": installation.number,
+                    "referenceId": reference_id,
+                    "counter": counter,
+                },
+                "query": DANALOCK_CONFIG_STATUS_QUERY,
+            }
+            response = await self._execute_raw(
+                poll_content,
+                "xSGetDanalockConfigStatus",
+                installation=installation,
+            )
+            return self._extract_response_data(response, "xSGetDanalockConfigStatus")
+
+        raw = await self._poll_operation(_check)
+
+        if raw.get("res") != "OK":
+            return SmartLock()
+
+        return SmartLock(
+            res=raw.get("res"),
+            device_id=raw.get("deviceNumber") or device_id,
+            features=LockFeatures.model_validate(raw["features"])
+            if raw.get("features")
+            else None,
+        )
+
+    async def change_lock_mode(
+        self,
+        installation: Installation,
+        lock: bool,
+        device_id: str = SMARTLOCK_DEVICE_ID,
+    ) -> SmartLockModeStatus:
+        """Send lock/unlock command and poll until the backend responds.
+
+        Args:
+            installation: The installation containing the lock.
+            lock: True to lock, False to unlock.
+            device_id: Lock device ID (defaults to SMARTLOCK_DEVICE_ID).
+
+        Returns:
+            SmartLockModeStatus with the final operation result.
+
+        Raises:
+            OperationTimeoutError: If polling times out.
+        """
+        # ── Submit change lock mode request ──
+        submit_content = {
+            "operationName": "xSChangeSmartlockMode",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "deviceType": SMARTLOCK_DEVICE_TYPE,
+                "deviceId": device_id,
+                "lock": lock,
+            },
+            "query": CHANGE_LOCK_MODE_MUTATION,
+        }
+        envelope = await self._execute_graphql(
+            submit_content,
+            "xSChangeSmartlockMode",
+            ChangeLockModeEnvelope,
+            installation=installation,
+        )
+        reference_id = envelope.data.xSChangeSmartlockMode.reference_id
+
+        # ── Poll change lock mode status ──
+        counter = 0
+
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            poll_content = {
+                "operationName": "xSChangeSmartlockModeStatus",
+                "variables": {
+                    "counter": counter,
+                    "deviceId": device_id,
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "referenceId": reference_id,
+                },
+                "query": CHANGE_LOCK_MODE_STATUS_QUERY,
+            }
+            response = await self._execute_raw(
+                poll_content,
+                "xSChangeSmartlockModeStatus",
+                installation=installation,
+            )
+            return self._extract_response_data(response, "xSChangeSmartlockModeStatus")
+
+        raw = await self._poll_operation(_check)
+
+        # ── Process result ──
+        self.protom_response = raw["protomResponse"]
+        return SmartLockModeStatus.model_validate(raw)
 
     # ── Stub: get_services (full implementation in Task 5) ───────────────
 
