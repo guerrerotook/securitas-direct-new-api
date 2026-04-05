@@ -349,7 +349,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Handle reauth when ConfigEntryAuthFailed is raised."""
         self._reauth_entry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]
+            self.context["entry_id"]  # type: ignore[typeddict-item]
         )
         assert self._reauth_entry is not None
         self.config = dict(entry_data)
