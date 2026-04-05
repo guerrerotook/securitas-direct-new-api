@@ -85,7 +85,7 @@ class TestLogin:
         await api.login()
 
         assert api.login_timestamp > 0
-        assert api.authentication_token == ""  # unchanged from init
+        assert api.authentication_token is None  # unchanged from init
 
     async def test_invalid_jwt_raises_error(self, api, mock_execute):
         mock_execute.return_value = login_response(hash_token="not-a-jwt")
@@ -366,12 +366,12 @@ class TestLoginEdgeCases:
             await api.login()
 
     async def test_login_stores_empty_token_for_null_hash(self, api, mock_execute):
-        """When hash is None (2FA flow), auth token stays empty but timestamp is set."""
+        """When hash is None (2FA flow), auth token stays None but timestamp is set."""
         mock_execute.return_value = login_response(hash_token=None)  # type: ignore[arg-type]
 
         await api.login()
 
-        assert api.authentication_token == ""
+        assert api.authentication_token is None
         assert api.login_timestamp > 0
 
     async def test_account_blocked_raises_account_blocked_error(

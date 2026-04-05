@@ -163,7 +163,7 @@ async def test_login_sets_auth_token(
     entry, _ = await _setup(hass, mock_server)
 
     hub = hass.data[DOMAIN][entry.entry_id]["hub"]
-    assert hub.session.authentication_token == FAKE_JWT
+    assert hub.client.authentication_token == FAKE_JWT
 
 
 async def test_login_token_stored(hass: HomeAssistant, mock_server: MockGraphQLServer):
@@ -277,7 +277,7 @@ async def test_installation_scoped_requests_carry_numinst(
     devices = entry_data["devices"]
 
     # Trigger a scoped call by calling check_alarm directly
-    await hub.session.check_alarm(devices[0].installation)
+    await hub.client.check_alarm(devices[0].installation)
 
     calls = mock_server.get_calls("CheckAlarm")
     assert calls, "CheckAlarm was never called"
@@ -586,7 +586,7 @@ async def test_sentinel_data_returned(
         "Sentinel", graphql_sentinel(temperature=23, humidity=60, zone="1")
     )
 
-    sentinel = await hub.session.get_sentinel_data(installation, svc)
+    sentinel = await hub.client.get_sentinel_data(installation, svc)
     assert sentinel.temperature == 23
     assert sentinel.humidity == 60
 
@@ -653,7 +653,7 @@ async def test_graphql_error_response_raises(
     mock_server.add_response("CheckAlarm", graphql_error("Some API error"))
 
     with pytest.raises(SecuritasDirectError):
-        await hub.session.check_alarm(installation)
+        await hub.client.check_alarm(installation)
 
 
 async def test_malformed_json_raises(
@@ -670,9 +670,9 @@ async def test_malformed_json_raises(
     devices = entry_data["devices"]
     installation = devices[0].installation
 
-    # Patch http_client.post to return invalid JSON
+    # Patch transport session.post to return invalid JSON
     bad_response = MockContextManager(MockResponse("not-valid-json"))
-    hub.session.http_client.post = lambda *a, **kw: bad_response
+    hub.client._transport._session.post = lambda *a, **kw: bad_response
 
     with pytest.raises(SecuritasDirectError):
-        await hub.session.check_alarm(installation)
+        await hub.client.check_alarm(installation)

@@ -2,7 +2,8 @@
 
 import logging
 
-from .apimanager import ApiManager, generate_device_id, generate_uuid  # noqa: F401
+from .client import SecuritasClient, generate_device_id, generate_uuid  # noqa: F401
+from .http_transport import HttpTransport  # noqa: F401
 from .const import (  # noqa: F401
     CommandType,
     PERI_DEFAULTS,

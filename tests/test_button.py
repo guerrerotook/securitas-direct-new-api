@@ -69,7 +69,7 @@ class TestSecuritasRefreshButtonInit:
         """Button stores the client (SecuritasHub) reference."""
         button = make_button()
         assert button.client is not None
-        assert hasattr(button.client, "session")
+        assert hasattr(button.client, "client")
 
 
 # ===========================================================================
@@ -98,7 +98,7 @@ class TestSecuritasRefreshButtonAsyncPress:
         await button.async_press()
 
         button.client.refresh_alarm_status.assert_called_once_with(button.installation)
-        assert button.client.session.protom_response == "D"
+        assert button.client.client.protom_response == "D"
 
     async def test_success_triggers_alarm_entity_update(self):
         """Success: triggers state update on the alarm entity for this installation."""

@@ -212,7 +212,7 @@ async def _get_or_create_session(
     """Get or create a shared SecuritasHub session with reference counting.
 
     Multiple config entries for the same username share a single
-    SecuritasHub / ApiManager session to avoid duplicate logins
+    SecuritasHub / SecuritasClient session to avoid duplicate logins
     and WAF rate-limit blocks.  A per-username lock prevents concurrent
     async_setup_entry calls from creating duplicate hubs.
     """
@@ -569,7 +569,7 @@ async def _discover_locks(
         SecuritasLock,
     )
     from .securitas_direct_new_api import SmartLock, SmartLockMode
-    from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
+    from .securitas_direct_new_api.client import SMARTLOCK_DEVICE_ID
 
     try:
         services = await hub.get_services(installation)

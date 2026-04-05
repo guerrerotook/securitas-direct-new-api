@@ -2,9 +2,8 @@
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
-from aiohttp import ClientConnectorError
 import jwt
 import pytest
 
@@ -92,7 +91,7 @@ class TestPollOperation:
     async def test_returns_result_on_first_non_wait(self, api):
         """Should return immediately when check_fn returns non-WAIT result."""
         check_fn = AsyncMock(return_value={"res": "OK", "msg": "done"})
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         result = await api._poll_operation(check_fn)
         assert result == {"res": "OK", "msg": "done"}
@@ -107,24 +106,21 @@ class TestPollOperation:
                 {"res": "OK", "msg": "done"},
             ]
         )
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         result = await api._poll_operation(check_fn)
         assert result["res"] == "OK"
         assert check_fn.call_count == 3
 
-    async def test_retries_on_transient_error(self, api):
-        """Should catch transient errors and continue polling."""
-        conn_err = ClientConnectorError(
-            connection_key=MagicMock(), os_error=OSError("connection reset")
-        )
+    async def test_retries_on_transient_timeout_error(self, api):
+        """Should catch asyncio.TimeoutError and continue polling."""
         check_fn = AsyncMock(
             side_effect=[
-                conn_err,
+                asyncio.TimeoutError("connection timeout"),
                 {"res": "OK", "msg": "done"},
             ]
         )
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         result = await api._poll_operation(check_fn)
         assert result["res"] == "OK"
@@ -133,7 +129,7 @@ class TestPollOperation:
     async def test_raises_on_non_transient_error(self, api):
         """Should immediately raise non-transient errors (no http_status)."""
         check_fn = AsyncMock(side_effect=SecuritasDirectError("bad request"))
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         with pytest.raises(SecuritasDirectError, match="bad request"):
             await api._poll_operation(check_fn)
@@ -149,7 +145,7 @@ class TestPollOperation:
                 {"res": "OK", "msg": "done"},
             ]
         )
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         result = await api._poll_operation(check_fn)
         assert result["res"] == "OK"
@@ -159,17 +155,21 @@ class TestPollOperation:
         """Should immediately raise SecuritasDirectError with non-409 http_status."""
         err_500 = SecuritasDirectError("server error", http_status=500)
         check_fn = AsyncMock(side_effect=err_500)
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         with pytest.raises(SecuritasDirectError, match="server error"):
             await api._poll_operation(check_fn)
 
     async def test_timeout_raises(self, api):
-        """Should raise TimeoutError when wall-clock timeout is exceeded."""
-        check_fn = AsyncMock(return_value={"res": "WAIT", "msg": ""})
-        api.delay_check_operation = 0
+        """Should raise OperationTimeoutError when wall-clock timeout is exceeded."""
+        from custom_components.securitas.securitas_direct_new_api.exceptions import (
+            OperationTimeoutError,
+        )
 
-        with pytest.raises(TimeoutError, match="timed out"):
+        check_fn = AsyncMock(return_value={"res": "WAIT", "msg": ""})
+        api.poll_delay = 0
+
+        with pytest.raises(OperationTimeoutError, match="timed out"):
             await api._poll_operation(check_fn, timeout=0.05)
 
     async def test_also_polls_on_specific_message(self, api):
@@ -180,7 +180,7 @@ class TestPollOperation:
                 {"res": "OK", "msg": "done"},
             ]
         )
-        api.delay_check_operation = 0
+        api.poll_delay = 0
 
         result = await api._poll_operation(
             check_fn,
@@ -216,14 +216,11 @@ class TestCheckAuthenticationTokenErrorHandling:
         await api._check_authentication_token()
         api.login.assert_called_once()
 
-    async def test_falls_back_to_login_on_connection_error(self, api):
-        """Should fall back to login() when refresh raises ClientConnectorError."""
+    async def test_falls_back_to_login_on_timeout_error(self, api):
+        """Should fall back to login() when refresh raises asyncio.TimeoutError."""
         api.authentication_token = None
         api.refresh_token_value = "some-refresh-token"
-        conn_err = ClientConnectorError(
-            connection_key=MagicMock(), os_error=OSError("fail")
-        )
-        api.refresh_token = AsyncMock(side_effect=conn_err)
+        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError("timeout"))
         api.login = AsyncMock()
 
         await api._check_authentication_token()

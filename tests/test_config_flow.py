@@ -123,7 +123,7 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
     """
     hub = make_securitas_hub_mock(**overrides)
     hub.validate_device = AsyncMock(return_value=("otp-hash-abc", MOCK_PHONES))
-    hub.session.list_installations = AsyncMock(return_value=[make_installation()])
+    hub.client.list_installations = AsyncMock(return_value=[make_installation()])
 
     # Start without a token; login() and send_sms_code() set it.
     _token_holder: dict[str, str | None] = {"token": None}
@@ -579,7 +579,7 @@ async def test_finish_setup_lists_installations(hass):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
-    mock_hub.session.list_installations.assert_awaited_once()
+    mock_hub.client.list_installations.assert_awaited_once()
     mock_hub.get_services.assert_awaited_once()
 
 
@@ -921,7 +921,7 @@ async def test_options_get_falls_back_to_data(hass):
 async def test_single_installation_auto_selects(hass):
     """When there is exactly one unconfigured installation, auto-select it."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[make_installation(number="111", alias="My Home")]
     )
 
@@ -938,7 +938,7 @@ async def test_single_installation_auto_selects(hass):
 async def test_multiple_installations_show_picker(hass):
     """When multiple unconfigured installations exist, show a selection form."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -957,7 +957,7 @@ async def test_multiple_installations_show_picker(hass):
 async def test_select_installation_advances_to_options(hass):
     """Picking an installation from the list advances to options."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -984,7 +984,7 @@ async def test_select_installation_advances_to_options(hass):
 async def test_unique_id_includes_installation(hass):
     """The config entry unique_id should be username_installationNumber."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[make_installation(number="42", alias="Cabin")]
     )
 
@@ -1011,7 +1011,7 @@ async def test_already_configured_filtered_out(hass):
     existing.add_to_hass(hass)
 
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -1039,7 +1039,7 @@ async def test_all_configured_aborts(hass):
     existing.add_to_hass(hass)
 
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[make_installation(number="111", alias="Home")]
     )
 
@@ -1101,7 +1101,7 @@ async def test_full_flow_2fa_creates_entry(hass):
 async def test_full_flow_select_installation_creates_entry(hass):
     """Complete flow with installation picker creates entry."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),

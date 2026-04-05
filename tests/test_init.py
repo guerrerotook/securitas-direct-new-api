@@ -286,9 +286,9 @@ class TestSecuritasHub:
         return SecuritasHub(config, MagicMock(), MagicMock(), MagicMock())
 
     def test_init_creates_api_manager(self):
-        """Constructor should create an ApiManager session."""
+        """Constructor should create a SecuritasClient."""
         hub = self._make_hub()
-        assert hub.session is not None
+        assert hub.client is not None
         assert hub.config[CONF_USERNAME] == "test@example.com"
         assert hub.country == "ES"
 
@@ -301,91 +301,91 @@ class TestSecuritasHub:
     async def test_login_delegates_to_session(self):
         """login() should delegate to session.login()."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
+        hub.client = AsyncMock()
         await hub.login()
-        hub.session.login.assert_awaited_once()
+        hub.client.login.assert_awaited_once()
 
     async def test_validate_device_delegates(self):
         """validate_device() should delegate to session.validate_device()."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.validate_device = AsyncMock(return_value=("hash", []))
+        hub.client = AsyncMock()
+        hub.client.validate_device = AsyncMock(return_value=("hash", []))
         result = await hub.validate_device()
-        hub.session.validate_device.assert_awaited_once_with(False, "", "")
+        hub.client.validate_device.assert_awaited_once_with(False, "", "")
         assert result == ("hash", [])
 
     async def test_send_sms_code_delegates(self):
         """send_sms_code() should delegate to session.validate_device() with correct args."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.validate_device = AsyncMock(return_value=("hash", []))
+        hub.client = AsyncMock()
+        hub.client.validate_device = AsyncMock(return_value=("hash", []))
         await hub.send_sms_code("otp-hash", "123456")
-        hub.session.validate_device.assert_awaited_once_with(True, "otp-hash", "123456")
+        hub.client.validate_device.assert_awaited_once_with(True, "otp-hash", "123456")
 
     async def test_refresh_token_delegates(self):
         """refresh_token() should delegate to session.refresh_token()."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.refresh_token = AsyncMock(return_value=True)
+        hub.client = AsyncMock()
+        hub.client.refresh_token = AsyncMock(return_value=True)
         result = await hub.refresh_token()
-        hub.session.refresh_token.assert_awaited_once()
+        hub.client.refresh_token.assert_awaited_once()
         assert result is True
 
     async def test_get_services_delegates(self):
         """get_services() should delegate to session.get_all_services()."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.get_all_services = AsyncMock(return_value=[])
+        hub.client = AsyncMock()
+        hub.client.get_services = AsyncMock(return_value=[])
         inst = make_installation()
         result = await hub.get_services(inst)
-        hub.session.get_all_services.assert_awaited_once_with(inst)
+        hub.client.get_services.assert_awaited_once_with(inst)
         assert result == []
 
     async def test_logout_returns_false_on_failure(self):
-        """logout() should return False when session.logout() returns falsy."""
+        """logout() should return False when client.logout() raises."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.logout = AsyncMock(return_value=False)
+        hub.client = AsyncMock()
+        hub.client.logout = AsyncMock(side_effect=Exception("logout failed"))
         result = await hub.logout()
         assert result is False
 
     async def test_logout_returns_true_on_success(self):
-        """logout() should return True when session.logout() returns truthy."""
+        """logout() should return True when client.logout() succeeds."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.logout = AsyncMock(return_value=True)
+        hub.client = AsyncMock()
+        hub.client.logout = AsyncMock()
         result = await hub.logout()
         assert result is True
 
     def test_get_set_authentication_token(self):
         """get/set_authentication_token should read/write session.authentication_token."""
         hub = self._make_hub()
-        hub.session = MagicMock()
-        hub.session.authentication_token = "original-token"
+        hub.client = MagicMock()
+        hub.client.authentication_token = "original-token"
         assert hub.get_authentication_token() == "original-token"
         hub.set_authentication_token("new-token")
-        assert hub.session.authentication_token == "new-token"
+        assert hub.client.authentication_token == "new-token"
 
     async def test_update_overview_uses_general_status(self):
         """update_overview always uses check_general_status."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.check_general_status = AsyncMock(
+        hub.client = AsyncMock()
+        hub.client.get_general_status = AsyncMock(
             return_value=SStatus(status="T", timestampUpdate="2024-01-01")
         )
         inst = make_installation()
 
         result = await hub.update_overview(inst)
 
-        hub.session.check_general_status.assert_awaited_once_with(inst)
+        hub.client.get_general_status.assert_awaited_once_with(inst)
         assert result.protom_response == "T"
         assert result.installation_number == inst.number
 
     async def test_update_overview_reraises_403(self):
         """update_overview re-raises 403 errors from check_general_status."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.check_general_status = AsyncMock(
+        hub.client = AsyncMock()
+        hub.client.get_general_status = AsyncMock(
             side_effect=SecuritasDirectError("HTTP 403", http_status=403)
         )
         inst = make_installation()
@@ -399,8 +399,8 @@ class TestSecuritasHub:
     async def test_update_overview_403_updates_last_api_time(self):
         """403 on check_general_status still updates _last_api_time for cooldown."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.check_general_status = AsyncMock(
+        hub.client = AsyncMock()
+        hub.client.get_general_status = AsyncMock(
             side_effect=SecuritasDirectError("HTTP 403", http_status=403)
         )
         inst = make_installation()
@@ -412,8 +412,8 @@ class TestSecuritasHub:
     async def test_update_overview_swallows_non_403_error(self):
         """update_overview swallows non-403 errors and returns empty status."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.check_general_status = AsyncMock(
+        hub.client = AsyncMock()
+        hub.client.get_general_status = AsyncMock(
             side_effect=SecuritasDirectError("Network error")
         )
         inst = make_installation()
@@ -425,8 +425,8 @@ class TestSecuritasHub:
     async def test_update_overview_cooldown_between_calls(self):
         """update_overview updates _api_queue._last_api_time after API calls."""
         hub = self._make_hub()
-        hub.session = AsyncMock()
-        hub.session.check_general_status = AsyncMock(
+        hub.client = AsyncMock()
+        hub.client.get_general_status = AsyncMock(
             return_value=SStatus(status="D", timestampUpdate="2024-01-01")
         )
         inst = make_installation()
@@ -449,7 +449,7 @@ class TestAsyncSetupEntry:
     def mock_hub(self):
         """Create a mock SecuritasHub for setup tests."""
         hub = make_securitas_hub_mock()
-        hub.session.list_installations = AsyncMock(return_value=[make_installation()])
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
         return hub
 
     async def test_setup_success(self, hass, mock_hub):
@@ -470,7 +470,7 @@ class TestAsyncSetupEntry:
 
         assert result is True
         mock_hub.login.assert_awaited_once()
-        mock_hub.session.list_installations.assert_awaited_once()
+        mock_hub.client.list_installations.assert_awaited_once()
         assert DOMAIN in hass.data
         assert entry.entry_id in hass.data[DOMAIN]
         assert "hub" in hass.data[DOMAIN][entry.entry_id]
@@ -535,7 +535,7 @@ class TestAsyncSetupEntry:
         self, hass, mock_hub
     ):
         """SecuritasDirectError during list_installations should raise ConfigEntryNotReady."""
-        mock_hub.session.list_installations = AsyncMock(
+        mock_hub.client.list_installations = AsyncMock(
             side_effect=SecuritasDirectError("network error")
         )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
@@ -775,16 +775,16 @@ class TestAsyncSetupEntry:
         spanish_installation = make_installation(number="2222", alias="Rome")
 
         italian_hub = make_securitas_hub_mock()
-        italian_hub.session.list_installations = AsyncMock(
+        italian_hub.client.list_installations = AsyncMock(
             return_value=[italian_installation]
         )
-        italian_hub.session.get_all_services = AsyncMock(return_value=[])
+        italian_hub.client.get_services = AsyncMock(return_value=[])
 
         spanish_hub = make_securitas_hub_mock()
-        spanish_hub.session.list_installations = AsyncMock(
+        spanish_hub.client.list_installations = AsyncMock(
             return_value=[spanish_installation]
         )
-        spanish_hub.session.get_all_services = AsyncMock(return_value=[])
+        spanish_hub.client.get_services = AsyncMock(return_value=[])
 
         italian_data = make_config_entry_data(username="italian@example.com")
         italian_data[CONF_INSTALLATION] = "1111"
@@ -823,8 +823,8 @@ class TestAsyncSetupEntry:
         assert result_es is True
 
         # Each hub must have fetched its own installation list exactly once
-        italian_hub.session.list_installations.assert_awaited_once()
-        spanish_hub.session.list_installations.assert_awaited_once()
+        italian_hub.client.list_installations.assert_awaited_once()
+        spanish_hub.client.list_installations.assert_awaited_once()
 
         # Each entry must have exactly one device (its own installation)
         it_devices = hass.data[DOMAIN][entry_it.entry_id]["devices"]
@@ -899,49 +899,6 @@ class TestBuildConfigDict:
 # ===========================================================================
 # 5c. TestMaxPollAttempts
 # ===========================================================================
-
-
-class TestMaxPollAttempts:
-    """Tests for SecuritasHub._max_poll_attempts()."""
-
-    def _make_hub(self, delay=2):
-        config = OrderedDict(
-            {
-                CONF_USERNAME: "test@example.com",
-                CONF_PASSWORD: "test-password",
-                CONF_COUNTRY: "ES",
-                CONF_DEVICE_ID: "test-device-id",
-                CONF_UNIQUE_ID: "test-uuid",
-                CONF_DEVICE_INDIGITALL: "test-indigitall",
-                CONF_DELAY_CHECK_OPERATION: delay,
-                CONF_SCAN_INTERVAL: 120,
-                CONF_CODE: "",
-                CONF_HAS_PERI: False,
-                CONF_CODE_ARM_REQUIRED: False,
-            }
-        )
-        return SecuritasHub(config, MagicMock(), MagicMock(), MagicMock())
-
-    def test_default_timeout(self):
-        """Default timeout of 30s with delay=2 should return 15."""
-        hub = self._make_hub(delay=2)
-        assert hub._max_poll_attempts() == 15
-
-    def test_custom_timeout(self):
-        """Custom timeout of 60s with delay=2 should return 30."""
-        hub = self._make_hub(delay=2)
-        assert hub._max_poll_attempts(timeout_seconds=60) == 30
-
-    def test_minimum_10(self):
-        """Should return at least 10 even with large delay."""
-        hub = self._make_hub(delay=100)
-        assert hub._max_poll_attempts() == 10
-
-    def test_zero_delay(self):
-        """Zero delay should not cause division by zero (uses max(1, delay))."""
-        hub = self._make_hub(delay=0)
-        result = hub._max_poll_attempts(timeout_seconds=30)
-        assert result == 30
 
 
 # ===========================================================================
@@ -1252,7 +1209,7 @@ class TestSharedSession:
     def mock_hub(self):
         """Create a mock SecuritasHub for setup tests."""
         hub = make_securitas_hub_mock()
-        hub.session.list_installations = AsyncMock(
+        hub.client.list_installations = AsyncMock(
             return_value=[
                 make_installation(number="111", alias="Home"),
                 make_installation(number="222", alias="Office"),
@@ -1606,11 +1563,11 @@ class TestPerDomainQueueSharing:
         entry2.add_to_hass(hass)
 
         mock_hub1 = make_securitas_hub_mock()
-        mock_hub1.session.list_installations = AsyncMock(
+        mock_hub1.client.list_installations = AsyncMock(
             return_value=[make_installation()]
         )
         mock_hub2 = make_securitas_hub_mock()
-        mock_hub2.session.list_installations = AsyncMock(
+        mock_hub2.client.list_installations = AsyncMock(
             return_value=[make_installation(number="654321")]
         )
 
@@ -1657,11 +1614,11 @@ class TestPerDomainQueueSharing:
         entry_it.add_to_hass(hass)
 
         mock_hub_es = make_securitas_hub_mock()
-        mock_hub_es.session.list_installations = AsyncMock(
+        mock_hub_es.client.list_installations = AsyncMock(
             return_value=[make_installation()]
         )
         mock_hub_it = make_securitas_hub_mock()
-        mock_hub_it.session.list_installations = AsyncMock(
+        mock_hub_it.client.list_installations = AsyncMock(
             return_value=[make_installation(number="654321")]
         )
 

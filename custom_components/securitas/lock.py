@@ -28,7 +28,7 @@ from .securitas_direct_new_api import (
     SmartLock,
 )
 from .api_queue import ApiQueue
-from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
+from .securitas_direct_new_api.client import SMARTLOCK_DEVICE_ID
 
 if TYPE_CHECKING:
     from .securitas_direct_new_api import SmartLockMode

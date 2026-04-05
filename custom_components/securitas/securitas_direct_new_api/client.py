@@ -14,6 +14,7 @@ import json
 import logging
 import secrets
 from typing import TYPE_CHECKING, Any, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 import jwt
@@ -114,6 +115,17 @@ IMAGE_RESOLUTION = 0
 IMAGE_MEDIA_TYPE = 1
 IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
 
+
+def generate_uuid() -> str:
+    """Create a device id."""
+    return str(uuid4()).replace("-", "")[0:16]
+
+
+def generate_device_id(_lang: str) -> str:
+    """Create a device identifier for the API."""
+    return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
+
+
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
     {
@@ -185,6 +197,18 @@ class SecuritasClient:
         # Internal state
         self._apollo_operation_id: str = secrets.token_hex(64)
         self._log_filter: SensitiveDataFilter | None = log_filter
+
+    # ── Public property for token expiry ────────────────────────────────
+
+    @property
+    def authentication_token_exp(self) -> datetime:
+        """Return the authentication token expiry timestamp."""
+        return self._authentication_token_exp
+
+    @authentication_token_exp.setter
+    def authentication_token_exp(self, value: datetime) -> None:
+        """Set the authentication token expiry timestamp."""
+        self._authentication_token_exp = value
 
     # ── Secret / installation registration ───────────────────────────────
 

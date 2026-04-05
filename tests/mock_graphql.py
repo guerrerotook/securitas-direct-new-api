@@ -39,6 +39,7 @@ class MockResponse:
     def __init__(self, text: str, status: int = 200) -> None:
         self._text = text
         self.status = status
+        self.headers: dict[str, str] = {}
 
     async def text(self) -> str:
         return self._text

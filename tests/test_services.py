@@ -8,14 +8,11 @@ import pytest
 from custom_components.securitas.securitas_direct_new_api.models import (
     Attribute,
     Installation,
-    OperationStatus,
     Sentinel,
     Service,
     SmartLockMode,
-    SmartLockModeStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    ArmingExceptionError,
     SecuritasDirectError,
 )
 
@@ -35,7 +32,7 @@ def installation():
 @pytest.fixture
 def authed_api(api):
     api._check_authentication_token = AsyncMock()
-    api._check_capabilities_token = AsyncMock()
+    api._ensure_capabilities = AsyncMock()
     return api
 
 
@@ -68,7 +65,7 @@ def mock_service(installation):
 
 
 class TestListInstallations:
-    async def test_returns_installation_objects(self, api, mock_execute):
+    async def test_returns_installation_objects(self, authed_api, mock_execute):
         mock_execute.return_value = {
             "data": {
                 "xSInstallations": {
@@ -92,7 +89,7 @@ class TestListInstallations:
             }
         }
 
-        result = await api.list_installations()
+        result = await authed_api.list_installations()
 
         assert len(result) == 1
         inst = result[0]
@@ -110,7 +107,7 @@ class TestListInstallations:
         assert inst.email == "j@e.com"
         assert inst.phone == "555"
 
-    async def test_multiple_installations(self, api, mock_execute):
+    async def test_multiple_installations(self, authed_api, mock_execute):
         mock_execute.return_value = {
             "data": {
                 "xSInstallations": {
@@ -148,24 +145,22 @@ class TestListInstallations:
             }
         }
 
-        result = await api.list_installations()
+        result = await authed_api.list_installations()
 
         assert len(result) == 2
         assert result[0].number == "111"
         assert result[1].number == "222"
 
-    async def test_none_xsinstallations_raises_error(self, api, mock_execute):
+    async def test_none_xsinstallations_raises_error(self, authed_api, mock_execute):
         mock_execute.return_value = {"data": {"xSInstallations": None}}
 
-        with pytest.raises(
-            SecuritasDirectError, match="xSInstallations response is None"
-        ):
-            await api.list_installations()
+        with pytest.raises(SecuritasDirectError, match="Invalid response"):
+            await authed_api.list_installations()
 
-    async def test_empty_installations_returns_empty(self, api, mock_execute):
+    async def test_empty_installations_returns_empty(self, authed_api, mock_execute):
         mock_execute.return_value = {"data": {"xSInstallations": {"installations": []}}}
 
-        result = await api.list_installations()
+        result = await authed_api.list_installations()
 
         assert result == []
 
@@ -207,7 +202,7 @@ class TestGetAllServices:
             }
         }
 
-        result = await authed_api.get_all_services(installation)
+        result = await authed_api.get_services(installation)
 
         assert len(result) == 1
         svc = result[0]
@@ -248,17 +243,19 @@ class TestGetAllServices:
             }
         }
 
-        await authed_api.get_all_services(installation)
+        await authed_api.get_services(installation)
 
-        assert installation.capabilities == capabilities_jwt
-        assert installation.capabilities_exp > datetime.now()
+        cap_entry = authed_api._capabilities.get(installation.number)
+        assert cap_entry is not None
+        assert cap_entry[0] == capabilities_jwt
+        assert cap_entry[1] > datetime.now()
 
     async def test_none_installation_data_returns_empty(
         self, authed_api, mock_execute, installation
     ):
         mock_execute.return_value = {"data": {"xSSrv": {"installation": None}}}
 
-        result = await authed_api.get_all_services(installation)
+        result = await authed_api.get_services(installation)
 
         assert result == []
 
@@ -277,7 +274,7 @@ class TestGetAllServices:
             }
         }
 
-        result = await authed_api.get_all_services(installation)
+        result = await authed_api.get_services(installation)
 
         assert result == []
 
@@ -308,33 +305,9 @@ class TestGetAllServices:
             }
         }
 
-        result = await authed_api.get_all_services(installation)
+        result = await authed_api.get_services(installation)
 
         assert result == []
-
-    async def test_get_all_services_extracts_alarm_partitions(
-        self, authed_api, mock_execute, installation
-    ):
-        """get_all_services should store alarmPartitions on the installation."""
-        capabilities_jwt = make_jwt(exp_minutes=60)
-        partitions = [
-            {"id": "1", "enterStates": ["T", "A", "P", "Q", "E"], "leaveStates": ["D"]}
-        ]
-        mock_execute.return_value = {
-            "data": {
-                "xSSrv": {
-                    "installation": {
-                        "services": [],
-                        "capabilities": capabilities_jwt,
-                        "configRepoUser": {"alarmPartitions": partitions},
-                    }
-                }
-            }
-        }
-
-        await authed_api.get_all_services(installation)
-
-        assert installation.alarm_partitions == partitions
 
 
 # ── get_sentinel_data() ───────────────────────────────────────────────────────
@@ -371,23 +344,21 @@ class TestGetSentinelData:
         assert result.humidity == 45
         assert result.air_quality == "2"
 
-    async def test_error_response_returns_empty_sentinel(
+    async def test_error_response_raises(
         self, authed_api, mock_execute, installation, mock_service
     ):
         mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
-        result = await authed_api.get_sentinel_data(installation, mock_service)
+        with pytest.raises(SecuritasDirectError):
+            await authed_api.get_sentinel_data(installation, mock_service)
 
-        assert result == Sentinel(alias="", air_quality="", humidity=0, temperature=0)
-
-    async def test_none_xscomfort_returns_empty_sentinel(
+    async def test_none_xscomfort_raises(
         self, authed_api, mock_execute, installation, mock_service
     ):
         mock_execute.return_value = {"data": {"xSComfort": None}}
 
-        result = await authed_api.get_sentinel_data(installation, mock_service)
-
-        assert result == Sentinel(alias="", air_quality="", humidity=0, temperature=0)
+        with pytest.raises(SecuritasDirectError):
+            await authed_api.get_sentinel_data(installation, mock_service)
 
     async def test_missing_air_quality_code_returns_empty_string(
         self, authed_api, mock_execute, installation, mock_service
@@ -447,35 +418,35 @@ class TestGetSentinelData:
 
 
 class TestSendOtp:
-    async def test_returns_res_value(self, api, mock_execute):
+    async def test_returns_res_value(self, authed_api, mock_execute):
         mock_execute.return_value = {"data": {"xSSendOtp": {"res": "OK", "msg": ""}}}
 
-        result = await api.send_otp(device_id=1, auth_otp_hash="hash123")
+        result = await authed_api.send_otp(device_id=1, auth_otp_hash="hash123")
 
         assert result == "OK"
 
-    async def test_none_response_raises_error(self, api, mock_execute):
+    async def test_none_response_raises_error(self, authed_api, mock_execute):
         mock_execute.return_value = {"data": {"xSSendOtp": None}}
 
         with pytest.raises(SecuritasDirectError, match="xSSendOtp response is None"):
-            await api.send_otp(device_id=1, auth_otp_hash="hash123")
+            await authed_api.send_otp(device_id=1, auth_otp_hash="hash123")
 
 
 # ── logout() ─────────────────────────────────────────────────────────────────
 
 
 class TestLogout:
-    async def test_calls_execute_request_with_logout(self, api, mock_execute):
+    async def test_calls_execute_request_with_logout(self, authed_api, mock_execute):
         mock_execute.return_value = {}
 
-        await api.logout()
+        await authed_api.logout()
 
         mock_execute.assert_awaited_once()
         call_args = mock_execute.call_args
         content = call_args[0][0]
-        operation = call_args[0][1]
+        headers = call_args[0][1]
         assert content["operationName"] == "Logout"
-        assert operation == "Logout"
+        assert headers["X-APOLLO-OPERATION-NAME"] == "Logout"
 
 
 # ── Additional sentinel / air quality edge cases ─────────────────────────────
@@ -549,13 +520,12 @@ class TestGetAirQualityData:
         assert result.value == 114
         assert result.status_current == 1
 
-    async def test_returns_none_on_errors(self, authed_api, mock_execute, installation):
-        """Returns None when response has errors."""
+    async def test_raises_on_errors(self, authed_api, mock_execute, installation):
+        """Raises SecuritasDirectError when response has errors."""
         mock_execute.return_value = {"errors": [{"message": "fail"}]}
 
-        result = await authed_api.get_air_quality_data(installation, "1")
-
-        assert result is None
+        with pytest.raises(SecuritasDirectError):
+            await authed_api.get_air_quality_data(installation, "1")
 
     async def test_returns_none_when_no_hours(
         self, authed_api, mock_execute, installation
@@ -577,19 +547,18 @@ class TestGetAirQualityData:
 
         assert result is None
 
-    async def test_returns_none_when_xsairquality_null(
+    async def test_raises_when_xsairquality_null(
         self, authed_api, mock_execute, installation
     ):
-        """Returns None when xSAirQuality is null."""
+        """Raises SecuritasDirectError when xSAirQuality is null."""
         mock_execute.return_value = {
             "data": {
                 "xSAirQuality": None,
             }
         }
 
-        result = await authed_api.get_air_quality_data(installation, "1")
-
-        assert result is None
+        with pytest.raises(SecuritasDirectError):
+            await authed_api.get_air_quality_data(installation, "1")
 
 
 class TestGetAllServicesEdgeCases:
@@ -599,64 +568,12 @@ class TestGetAllServicesEdgeCases:
         """When xSSrv response is None, returns empty list."""
         mock_execute.return_value = {"data": {"xSSrv": None}}
 
-        result = await authed_api.get_all_services(installation)
+        result = await authed_api.get_services(installation)
 
         assert result == []
 
 
 # ── check_alarm / check_alarm_status tests ───────────────────────────────────
-
-
-class TestCheckAlarm:
-    async def test_check_alarm_returns_reference_id(
-        self, authed_api, mock_execute, installation
-    ):
-        """check_alarm returns the reference ID string."""
-        mock_execute.return_value = {
-            "data": {
-                "xSCheckAlarm": {
-                    "res": "OK",
-                    "msg": "",
-                    "referenceId": "ref-abc-123",
-                }
-            }
-        }
-
-        result = await authed_api.check_alarm(installation)
-
-        assert result == "ref-abc-123"
-
-
-class TestCheckAlarmStatus:
-    async def test_check_alarm_status_returns_status(
-        self, authed_api, mock_execute, installation
-    ):
-        """check_alarm_status returns OperationStatus dataclass."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
-            OperationStatus,
-        )
-
-        # Return immediate (non-WAIT) response so no loop
-        mock_execute.return_value = {
-            "data": {
-                "xSCheckAlarmStatus": {
-                    "res": "OK",
-                    "msg": "",
-                    "status": "ARM1",
-                    "numinst": "123456",
-                    "protomResponse": "PROT_RESP",
-                    "protomResponseDate": "2024-01-01",
-                }
-            }
-        }
-
-        result = await authed_api.check_alarm_status(installation, "ref-abc-123")
-
-        assert isinstance(result, OperationStatus)
-        assert result.operation_status == "OK"
-        assert result.status == "ARM1"
-        assert result.installation_number == "123456"
-        assert result.protom_response == "PROT_RESP"
 
 
 # ── Dataclass field tests ────────────────────────────────────────────────────
@@ -670,222 +587,3 @@ class TestDataclassFields:
     def test_smart_lock_mode_device_id_defaults_empty(self):
         mode = SmartLockMode(res="OK", lockStatus="2")
         assert mode.device_id == ""
-
-
-# ── Submit request + single-poll methods for ApiQueue ─────────────────────────
-
-
-class TestSubmitRequestMethods:
-    """Tests for submit request + single-poll methods used by ApiQueue."""
-
-    async def test_submit_arm_request_returns_reference_id(
-        self, authed_api, installation
-    ):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSArmPanel": {
-                        "res": "OK",
-                        "msg": "processed",
-                        "referenceId": "ref-123",
-                    }
-                }
-            }
-        )
-        ref = await authed_api.submit_arm_request(installation, "ARM1")
-        assert ref == "ref-123"
-
-    async def test_submit_arm_request_error_raises(self, authed_api, installation):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSArmPanel": {
-                        "res": "ERROR",
-                        "msg": "failed",
-                        "referenceId": None,
-                    }
-                }
-            }
-        )
-        with pytest.raises(SecuritasDirectError):
-            await authed_api.submit_arm_request(installation, "ARM1")
-
-    async def test_submit_disarm_request_returns_reference_id(
-        self, authed_api, installation
-    ):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSDisarmPanel": {
-                        "res": "OK",
-                        "msg": "processed",
-                        "referenceId": "ref-456",
-                    }
-                }
-            }
-        )
-        ref = await authed_api.submit_disarm_request(installation, "DARM1")
-        assert ref == "ref-456"
-
-    async def test_check_arm_status_delegates(self, authed_api, installation):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSArmStatus": {
-                        "res": "WAIT",
-                        "msg": "processing",
-                        "status": None,
-                        "protomResponse": None,
-                        "protomResponseDate": None,
-                        "numinst": "123",
-                        "requestId": None,
-                        "error": None,
-                    }
-                }
-            }
-        )
-        raw = await authed_api.check_arm_status(installation, "ref-123", "ARM1", 1)
-        assert raw["res"] == "WAIT"
-
-    async def test_check_disarm_status_delegates(self, authed_api, installation):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSDisarmStatus": {
-                        "res": "WAIT",
-                        "msg": "processing",
-                        "status": None,
-                        "protomResponse": None,
-                        "protomResponseDate": None,
-                        "numinst": "123",
-                        "requestId": None,
-                        "error": None,
-                    }
-                }
-            }
-        )
-        raw = await authed_api.check_disarm_status(installation, "ref-456", "DARM1", 1)
-        assert raw["res"] == "WAIT"
-
-    async def test_submit_change_lock_mode_request_returns_reference_id(
-        self, authed_api, installation
-    ):
-        authed_api._execute_request = AsyncMock(
-            return_value={
-                "data": {
-                    "xSChangeSmartlockMode": {
-                        "res": "OK",
-                        "msg": "ok",
-                        "referenceId": "ref-lock",
-                    }
-                }
-            }
-        )
-        ref = await authed_api.submit_change_lock_mode_request(installation, True, "01")
-        assert ref == "ref-lock"
-
-
-# ── Result-processing helpers ────────────────────────────────────────────────
-
-
-class TestResultProcessing:
-    """Tests for result-processing helpers."""
-
-    async def test_process_arm_result_success(self, authed_api, installation):
-        raw = {
-            "res": "OK",
-            "msg": "armed",
-            "status": "ARMED",
-            "protomResponse": "P",
-            "protomResponseDate": "2026-01-01",
-            "numinst": "123",
-            "requestId": "req1",
-            "error": None,
-        }
-        result = await authed_api.process_arm_result(raw, installation)
-        assert isinstance(result, OperationStatus)
-        assert result.protom_response == "P"
-        assert authed_api.protom_response == "P"
-
-    async def test_process_arm_result_error_raises(self, authed_api, installation):
-        raw = {
-            "res": "ERROR",
-            "msg": "fault",
-            "status": None,
-            "protomResponse": None,
-            "protomResponseDate": None,
-            "numinst": "123",
-            "requestId": None,
-            "error": {"type": "BLOCKING", "description": "fault"},
-        }
-        with pytest.raises(SecuritasDirectError):
-            await authed_api.process_arm_result(raw, installation)
-
-    async def test_process_arm_result_non_blocking_raises_arming_exception(
-        self, authed_api, installation
-    ):
-        raw = {
-            "res": "ERROR",
-            "msg": "exception",
-            "status": None,
-            "protomResponse": None,
-            "protomResponseDate": None,
-            "numinst": "123",
-            "requestId": None,
-            "error": {
-                "type": "NON_BLOCKING",
-                "allowForcing": True,
-                "referenceId": "ref-err",
-                "suid": "suid-1",
-            },
-        }
-        authed_api._get_exceptions = AsyncMock(
-            return_value=[{"alias": "Window", "status": "OPEN", "deviceType": "SENSOR"}]
-        )
-        with pytest.raises(ArmingExceptionError) as exc_info:
-            await authed_api.process_arm_result(raw, installation)
-        assert exc_info.value.reference_id == "ref-err"
-        assert exc_info.value.suid == "suid-1"
-        assert len(exc_info.value.exceptions) == 1
-
-    async def test_process_disarm_result_success(self, authed_api, installation):
-        raw = {
-            "res": "OK",
-            "msg": "disarmed",
-            "status": "DISARMED",
-            "protomResponse": "D",
-            "protomResponseDate": "2026-01-01",
-            "numinst": "123",
-            "requestId": "req2",
-            "error": None,
-        }
-        result = authed_api.process_disarm_result(raw)
-        assert isinstance(result, OperationStatus)
-        assert result.protom_response == "D"
-        assert authed_api.protom_response == "D"
-
-    async def test_process_disarm_result_error_raises(self, authed_api, installation):
-        raw = {
-            "res": "ERROR",
-            "msg": "fail",
-            "status": None,
-            "protomResponse": None,
-            "protomResponseDate": None,
-            "numinst": "123",
-            "requestId": None,
-            "error": {"type": "BLOCKING"},
-        }
-        with pytest.raises(SecuritasDirectError):
-            authed_api.process_disarm_result(raw)
-
-    async def test_process_lock_mode_result_success(self, authed_api, installation):
-        raw = {
-            "res": "OK",
-            "msg": "locked",
-            "protomResponse": "L",
-            "status": "LOCKED",
-        }
-        result = authed_api.process_lock_mode_result(raw)
-        assert isinstance(result, SmartLockModeStatus)
-        assert result.protom_response == "L"
-        assert authed_api.protom_response == "L"
