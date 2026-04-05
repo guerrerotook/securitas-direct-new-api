@@ -26,7 +26,7 @@ _LOG_TRUNCATE_KEYS = {"hours", "image"}
 # Standard headers added to every request
 _DEFAULT_HEADERS: dict[str, str] = {
     "User-Agent": (
-        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         " AppleWebKit/537.36 (KHTML, like Gecko)"
         " Chrome/102.0.5005.124 Safari/537.36"
         " Edg/102.0.1245.41"
@@ -147,5 +147,8 @@ class HttpTransport:
         try:
             return json.loads(response_text)
         except json.JSONDecodeError as err:
-            _LOGGER.error("Failed to parse JSON response: %s", response_text)
+            _LOGGER.error(
+                "Failed to parse JSON response: %s",
+                _sanitize_response_for_log(response_text),
+            )
             raise SecuritasDirectError(err.msg) from err
