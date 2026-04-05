@@ -146,28 +146,6 @@ async def test_setup_makes_only_expected_api_calls(
     )
 
 
-async def test_setup_general_status_via_update_overview(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """update_overview() uses check_general_status (Status), not CheckAlarm."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server)
-    mock_server.set_default_response("Status", graphql_general_status(status="D"))
-    entry, _ = await _setup(hass, mock_server)
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-
-    # Reset call log to only count calls from update_overview
-    mock_server.reset()
-    status = await hub.update_overview(devices[0].installation)
-    assert mock_server.call_count("Status") >= 1
-    assert mock_server.call_count("CheckAlarm") == 0
-    assert status.protom_response == "D"
-
-
 async def test_login_sets_auth_token(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
@@ -390,71 +368,6 @@ async def test_setup_connection_error_raises_not_ready(
     ):
         with pytest.raises(ConfigEntryNotReady):
             await async_setup_entry(hass, entry)
-
-
-# ── Alarm state from API response ─────────────────────────────────────────────
-
-
-async def test_initial_state_disarmed(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """Status 'D' from check_general_status → alarm state is disarmed."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server, proto="D")
-    mock_server.set_default_response("Status", graphql_general_status(status="D"))
-    entry, _ = await _setup(hass, mock_server)
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-    assert len(devices) == 1
-
-    status = await hub.update_overview(devices[0].installation)
-    assert status.protom_response == "D"
-
-
-async def test_initial_state_armed_away(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """Status 'T' from check_general_status → total armed."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server, proto="T")
-    mock_server.set_default_response("Status", graphql_general_status(status="T"))
-    entry, result = await _setup(hass, mock_server)
-    assert result is True
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-
-    status = await hub.update_overview(devices[0].installation)
-    assert status.protom_response == "T"
-
-
-async def test_general_status_used_by_update_overview(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """update_overview() always uses Status (check_general_status), not CheckAlarm."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server)
-    mock_server.set_default_response("Status", graphql_general_status(status="T"))
-
-    entry, result = await _setup(hass, mock_server)
-    assert result is True
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-
-    # Reset call log to only count calls from update_overview
-    mock_server.reset()
-    status = await hub.update_overview(devices[0].installation)
-    assert mock_server.call_count("Status") >= 1
-    assert mock_server.call_count("CheckAlarm") == 0
-    assert status.protom_response == "T"
 
 
 # ── Services create correct entities ─────────────────────────────────────────

@@ -26,7 +26,6 @@ from .const import (
     CONF_DEVICE_INDIGITALL,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
-    SIGNAL_XSSTATUS_UPDATE,
 )
 from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
@@ -35,7 +34,6 @@ from .securitas_direct_new_api import (
     Installation,
     OperationStatus,
     OtpPhone,
-    SStatus,
     SmartLock,
     SecuritasDirectError,
     Service,
@@ -119,11 +117,8 @@ class SecuritasHub:
         hass: HomeAssistant,
     ) -> None:
         """Initialize the Securitas hub."""
-        self.overview: OperationStatus | dict = {}
-        self.xsstatus: dict[str, SStatus] = {}
         self.config = domain_config
         self.config_entry: ConfigEntry | None = config_entry
-        self.sentinel_services: list[Service] = []
         self.country: str = domain_config[CONF_COUNTRY].upper()
         api_domains = ApiDomains()
         self.lang: str = api_domains.get_language(self.country)
@@ -156,8 +151,6 @@ class SecuritasHub:
             str, list
         ] = {}  # installation.number -> SmartLockMode list
         self._lock_modes_time: dict[str, float] = {}  # last fetch time per installation
-        self._api_cache: dict[str, Any] = {}  # generic cache: key -> result
-        self._api_cache_time: dict[str, float] = {}  # generic cache: key -> timestamp
         self.camera_images: dict[str, bytes] = {}
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
@@ -487,74 +480,6 @@ class SecuritasHub:
         self._lock_modes_time[installation.number] = time.monotonic()
         return modes
 
-    async def _cached_api_call(self, cache_key: str, coro_fn, *args, priority=None):
-        """Execute an API call with caching, submitted via queue.
-
-        The cache is checked twice: once before queuing (fast path) and once
-        inside the queue-submitted wrapper (after serialization).  This
-        prevents duplicate API calls when multiple entities concurrently
-        request the same cached data — they all miss the cache, queue up,
-        but only the first actually calls the API; the rest see the freshly
-        populated cache.
-        """
-        if priority is None:
-            priority = ApiQueue.BACKGROUND
-        _CACHE_TTL = API_CACHE_TTL
-        now = time.monotonic()
-        if (
-            now - self._api_cache_time.get(cache_key, 0) < _CACHE_TTL
-            and cache_key in self._api_cache
-        ):
-            return self._api_cache[cache_key]
-
-        _sentinel = object()
-
-        async def _call_with_cache_recheck(*call_args):
-            # Re-check cache after queue serialization — another caller
-            # may have populated it while we were waiting.
-            now_inner = time.monotonic()
-            if (
-                now_inner - self._api_cache_time.get(cache_key, 0) < _CACHE_TTL
-                and cache_key in self._api_cache
-            ):
-                return _sentinel  # signal: used cache, no API call made
-            return await coro_fn(*call_args)
-
-        result = await self._api_queue.submit(
-            _call_with_cache_recheck,
-            *args,
-            priority=priority,
-            label=f"{getattr(coro_fn, '__name__', coro_fn)}[{cache_key}]",
-        )
-
-        if result is _sentinel:
-            return self._api_cache[cache_key]
-
-        if result is not None:
-            self._api_cache[cache_key] = result
-            self._api_cache_time[cache_key] = time.monotonic()
-        return result
-
-    async def get_sentinel(self, installation: Installation, service: Service) -> Any:
-        """Get sentinel data with rate-limit serialization and caching."""
-        cache_key = f"sentinel_{installation.number}_{service.id}"
-        return await self._cached_api_call(
-            cache_key,
-            self.client.get_sentinel_data,
-            installation,
-            service,
-        )
-
-    async def get_air_quality(self, installation: Installation, zone: str) -> Any:
-        """Get air quality data with rate-limit serialization and caching."""
-        cache_key = f"air_quality_{installation.number}_{zone}"
-        return await self._cached_api_call(
-            cache_key,
-            self.client.get_air_quality_data,
-            installation,
-            zone,
-        )
-
     async def arm_alarm(
         self, installation: Installation, command: str, **force_params: str
     ) -> Any:
@@ -579,51 +504,6 @@ class SecuritasHub:
             installation,
             command,
             priority=ApiQueue.FOREGROUND,
-        )
-
-    async def refresh_alarm_status(self, installation: Installation) -> OperationStatus:
-        """Full alarm status refresh via CheckAlarm + poll (through queue).
-
-        Used by the refresh button for an authoritative protom round-trip.
-        The client handles all polling internally.
-        """
-        return await self._api_queue.submit(
-            self.client.check_alarm,
-            installation,
-            priority=ApiQueue.FOREGROUND,
-        )
-
-    async def update_overview(self, installation: Installation) -> OperationStatus:
-        """Poll alarm status via check_general_status (single API call).
-
-        Periodic polling always uses xSStatus for efficiency.  The more
-        expensive CheckAlarm path (protom round-trip) is used only for
-        arm/disarm operations and the manual refresh button.
-        """
-        try:
-            status = await self._api_queue.submit(
-                self.client.get_general_status,
-                installation,
-                priority=ApiQueue.BACKGROUND,
-            )
-        except SecuritasDirectError as err:
-            _LOGGER.warning(
-                "Error checking general status for %s: %s",
-                installation.number,
-                err.log_detail(),
-            )
-            if getattr(err, "http_status", None) == 403:
-                raise
-            return OperationStatus()
-        self.xsstatus[installation.number] = status
-        async_dispatcher_send(self.hass, SIGNAL_XSSTATUS_UPDATE, installation.number)
-        return OperationStatus(
-            operation_status=status.status or "",
-            message="",
-            status=status.status or "",
-            installation_number=installation.number,
-            protom_response=status.status or "",
-            protom_response_data=status.timestamp_update or "",
         )
 
     async def change_lock_mode(

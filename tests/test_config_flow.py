@@ -62,15 +62,6 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
-@pytest.fixture(autouse=True)
-def mock_call_later():
-    """Prevent lingering timers from schedule_initial_updates in entity.py."""
-    with patch(
-        "custom_components.securitas.entity.async_call_later",
-    ):
-        yield
-
-
 # ---------------------------------------------------------------------------
 # Shared constants and helpers
 # ---------------------------------------------------------------------------

@@ -10,11 +10,9 @@ from custom_components.securitas.const import (
     API_CACHE_TTL,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
-    SIGNAL_CAMERA_UPDATE,
 )
 from custom_components.securitas.hub import SecuritasHub
 from custom_components.securitas.securitas_direct_new_api import (
-    OperationStatus,
     SecuritasDirectError,
 )
 from custom_components.securitas.securitas_direct_new_api.models import (
@@ -45,75 +43,6 @@ def make_hub() -> SecuritasHub:
     hub.client = MagicMock()
     hub.client.poll_delay = 0.01
     return hub
-
-
-# ── _cached_api_call tests ──────────────────────────────────────────────────
-
-
-class TestCachedApiCall:
-    """Tests for _cached_api_call."""
-
-    async def test_cache_miss_calls_api(self):
-        """First call should invoke the API and cache the result."""
-        hub = make_hub()
-        api_fn = AsyncMock(return_value="result_a")
-
-        result = await hub._cached_api_call("key1", api_fn, "arg1")
-
-        assert result == "result_a"
-        api_fn.assert_awaited_once_with("arg1")
-        assert hub._api_cache["key1"] == "result_a"
-
-    async def test_cache_hit_skips_api(self):
-        """Second call within TTL should return cached value without calling API."""
-        hub = make_hub()
-        api_fn = AsyncMock(return_value="result_a")
-
-        await hub._cached_api_call("key1", api_fn, "arg1")
-        api_fn.reset_mock()
-
-        result = await hub._cached_api_call("key1", api_fn, "arg1")
-
-        assert result == "result_a"
-        api_fn.assert_not_awaited()
-
-    async def test_cache_expired_calls_api_again(self):
-        """After TTL expires, API should be called again."""
-        hub = make_hub()
-        api_fn = AsyncMock(return_value="result_a")
-
-        await hub._cached_api_call("key1", api_fn, "arg1")
-        api_fn.reset_mock()
-        api_fn.return_value = "result_b"
-
-        # Expire the cache
-        hub._api_cache_time["key1"] = time.monotonic() - API_CACHE_TTL - 1
-
-        result = await hub._cached_api_call("key1", api_fn, "arg1")
-
-        assert result == "result_b"
-        api_fn.assert_awaited_once()
-
-    async def test_none_result_not_cached(self):
-        """None results should not be cached."""
-        hub = make_hub()
-        api_fn = AsyncMock(return_value=None)
-
-        result = await hub._cached_api_call("key1", api_fn)
-
-        assert result is None
-        assert "key1" not in hub._api_cache
-
-    async def test_custom_priority(self):
-        """Priority parameter should be forwarded to the queue."""
-        hub = make_hub()
-        api_fn = AsyncMock(return_value="val")
-
-        # Just verify it completes without error with a custom priority
-        result = await hub._cached_api_call(
-            "key1", api_fn, priority=ApiQueue.FOREGROUND
-        )
-        assert result == "val"
 
 
 # ── change_lock_mode tests ──────────────────────────────────────────────────
@@ -161,39 +90,6 @@ class TestChangeLockMode:
 
         with pytest.raises(SecuritasDirectError, match="lock error"):
             await hub.change_lock_mode(installation, False, "device-1")
-
-
-# ── refresh_alarm_status tests ──────────────────────────────────────────────
-
-
-class TestRefreshAlarmStatus:
-    """Tests for refresh_alarm_status.
-
-    The hub delegates to client.check_alarm which handles all polling
-    internally and returns OperationStatus.
-    """
-
-    async def test_returns_operation_status(self):
-        """Returns the OperationStatus from client.check_alarm."""
-        hub = make_hub()
-        installation = make_installation()
-        status = OperationStatus(protom_response="ARM1")
-        hub.client.check_alarm = AsyncMock(return_value=status)
-
-        result = await hub.refresh_alarm_status(installation)
-
-        assert result is status
-        assert result.protom_response == "ARM1"
-        hub.client.check_alarm.assert_awaited_once_with(installation)
-
-    async def test_error_propagates(self):
-        """SecuritasDirectError from client propagates."""
-        hub = make_hub()
-        installation = make_installation()
-        hub.client.check_alarm = AsyncMock(side_effect=SecuritasDirectError("timeout"))
-
-        with pytest.raises(SecuritasDirectError, match="timeout"):
-            await hub.refresh_alarm_status(installation)
 
 
 # ── get_lock_modes tests ────────────────────────────────────────────────────
@@ -382,7 +278,7 @@ class TestCaptureImage:
         assert device.zone_id in new_data.thumbnails
 
     async def test_camera_state_signal_dispatched_when_no_image(self):
-        """SIGNAL_CAMERA_STATE (not UPDATE) is dispatched when no image arrives."""
+        """SIGNAL_CAMERA_STATE is dispatched when no image arrives."""
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -397,8 +293,9 @@ class TestCaptureImage:
         ):
             await hub.capture_image(installation, device)
 
+        # All dispatched signals should be SIGNAL_CAMERA_STATE
         signal_names = [c[1] for c in calls]
-        assert SIGNAL_CAMERA_UPDATE not in signal_names
+        assert all(s == SIGNAL_CAMERA_STATE for s in signal_names)
         # Last signal should be SIGNAL_CAMERA_STATE to clear the spinner
         assert calls[-1][1] == SIGNAL_CAMERA_STATE
 

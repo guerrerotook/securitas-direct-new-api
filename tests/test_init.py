@@ -46,9 +46,6 @@ from custom_components.securitas import (
 from custom_components.securitas.securitas_direct_new_api.const import (
     STD_DEFAULTS,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
-    SStatus,
-)
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     AuthenticationError,
     SecuritasDirectError,
@@ -365,76 +362,6 @@ class TestSecuritasHub:
         assert hub.get_authentication_token() == "original-token"
         hub.set_authentication_token("new-token")
         assert hub.client.authentication_token == "new-token"
-
-    async def test_update_overview_uses_general_status(self):
-        """update_overview always uses check_general_status."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.get_general_status = AsyncMock(
-            return_value=SStatus(status="T", timestampUpdate="2024-01-01")
-        )
-        inst = make_installation()
-
-        result = await hub.update_overview(inst)
-
-        hub.client.get_general_status.assert_awaited_once_with(inst)
-        assert result.protom_response == "T"
-        assert result.installation_number == inst.number
-
-    async def test_update_overview_reraises_403(self):
-        """update_overview re-raises 403 errors from check_general_status."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.get_general_status = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
-        )
-        inst = make_installation()
-
-        with pytest.raises(SecuritasDirectError) as exc_info:
-            await hub.update_overview(inst)
-        assert exc_info.value.http_status == 403
-        # _last_api_time should still be updated even on 403 (for cooldown)
-        assert hub._api_queue._last_api_time > 0
-
-    async def test_update_overview_403_updates_last_api_time(self):
-        """403 on check_general_status still updates _last_api_time for cooldown."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.get_general_status = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
-        )
-        inst = make_installation()
-
-        with pytest.raises(SecuritasDirectError):
-            await hub.update_overview(inst)
-        assert hub._api_queue._last_api_time > 0
-
-    async def test_update_overview_swallows_non_403_error(self):
-        """update_overview swallows non-403 errors and returns empty status."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.get_general_status = AsyncMock(
-            side_effect=SecuritasDirectError("Network error")
-        )
-        inst = make_installation()
-
-        result = await hub.update_overview(inst)
-        # Should return empty CheckAlarmStatus, not raise
-        assert not result.protom_response
-
-    async def test_update_overview_cooldown_between_calls(self):
-        """update_overview updates _api_queue._last_api_time after API calls."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.get_general_status = AsyncMock(
-            return_value=SStatus(status="D", timestampUpdate="2024-01-01")
-        )
-        inst = make_installation()
-
-        assert hub._api_queue._last_api_time == 0
-        await hub.update_overview(inst)
-        # The queue should have updated _last_api_time
-        assert hub._api_queue._last_api_time > 0
 
 
 # ===========================================================================
@@ -977,54 +904,6 @@ class TestValidateAndStoreImage:
         )
         assert result is None
         assert "123_Z1" not in hub.camera_images
-
-
-# ===========================================================================
-# 5e. TestScheduleInitialUpdates
-# ===========================================================================
-
-
-class TestScheduleInitialUpdates:
-    """Tests for schedule_initial_updates() in entity.py."""
-
-    def test_empty_entities_no_op(self, hass):
-        """Empty entities list should not schedule anything."""
-        from custom_components.securitas.entity import schedule_initial_updates
-
-        # Should not raise
-        schedule_initial_updates(hass, [])
-
-    def test_schedules_callback(self, hass):
-        """Non-empty entities should schedule a callback via async_call_later."""
-        from custom_components.securitas.entity import schedule_initial_updates
-
-        entity = MagicMock()
-        with patch(
-            "custom_components.securitas.entity.async_call_later"
-        ) as mock_call_later:
-            schedule_initial_updates(hass, [entity], delay=10)
-        mock_call_later.assert_called_once()
-        assert mock_call_later.call_args[0][1] == 10
-
-    def test_callback_refreshes_entities(self, hass):
-        """The scheduled callback should call async_schedule_update_ha_state on each entity."""
-        from custom_components.securitas.entity import schedule_initial_updates
-
-        entity1 = MagicMock()
-        entity2 = MagicMock()
-        with patch(
-            "custom_components.securitas.entity.async_call_later"
-        ) as mock_call_later:
-            schedule_initial_updates(hass, [entity1, entity2])
-        # Extract the callback and invoke it
-        cb = mock_call_later.call_args[0][2]
-        cb(None)
-        entity1.async_schedule_update_ha_state.assert_called_once_with(
-            force_refresh=True
-        )
-        entity2.async_schedule_update_ha_state.assert_called_once_with(
-            force_refresh=True
-        )
 
 
 # ===========================================================================

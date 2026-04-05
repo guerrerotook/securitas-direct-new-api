@@ -124,19 +124,10 @@ class TestSanitizeResponseForLog:
 
 
 class TestHubCameraOperations:
-    def test_signal_constant_exists(self):
-        from custom_components.securitas import SIGNAL_CAMERA_UPDATE
-
-        assert isinstance(SIGNAL_CAMERA_UPDATE, str)
-
     def test_signal_camera_state_constant_exists(self):
-        from custom_components.securitas import (
-            SIGNAL_CAMERA_STATE,
-            SIGNAL_CAMERA_UPDATE,
-        )
+        from custom_components.securitas import SIGNAL_CAMERA_STATE
 
         assert isinstance(SIGNAL_CAMERA_STATE, str)
-        assert SIGNAL_CAMERA_STATE != SIGNAL_CAMERA_UPDATE
 
     def test_get_camera_image_returns_none_when_empty(self):
         """Test that get_camera_image returns None for missing keys."""
