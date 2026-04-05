@@ -1,7 +1,6 @@
 """Securitas direct sentinel sensor."""
 
 import logging
-from datetime import timedelta
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.components.sensor.const import SensorStateClass
@@ -9,16 +8,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, SecuritasDirectDevice, SecuritasHub
-from .const import SENTINEL_SERVICE_NAMES
-from .entity import SecuritasEntity, schedule_initial_updates
-from .securitas_direct_new_api import Installation, SecuritasDirectError
-from .securitas_direct_new_api.models import AirQuality, Service
+from . import DOMAIN
+from .coordinators import SentinelCoordinator, SentinelData
+from .entity import securitas_device_info
+from .securitas_direct_new_api import Installation
 
 _LOGGER = logging.getLogger(__name__)
-
-SCAN_INTERVAL = timedelta(minutes=30)
 
 
 async def async_setup_entry(
@@ -26,120 +23,81 @@ async def async_setup_entry(
 ) -> None:
     """Set up Securitas Direct sentinel sensors based on config_entry.
 
-    No API calls are made here beyond service discovery (already cached from
-    __init__ setup).  Entities start with unknown state; the first periodic
-    ``async_update`` populates values via rate-limited hub methods.
+    No API calls are made here.  Entities start with unknown state;
+    the coordinator drives periodic updates.
     """
     entry_data = hass.data[DOMAIN][entry.entry_id]
-    client: SecuritasHub = entry_data["hub"]
-    sensors: list[SensorEntity] = []
-    securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
+    coordinator: SentinelCoordinator | None = entry_data["sentinel_coordinator"]
 
-    for device in securitas_devices:
-        try:
-            services: list[Service] = await client.get_services(device.installation)
-        except SecuritasDirectError as err:
-            _LOGGER.warning(
-                "Skipping installation %s for sensor setup: %s",
-                device.installation.number,
-                err.log_detail(),
-            )
-            continue
-        first_sentinel_service: Service | None = None
-        for service in services:
-            if service.request in SENTINEL_SERVICE_NAMES:
-                sensors.append(
-                    SentinelTemperature(service, client, device.installation)
-                )
-                sensors.append(SentinelHumidity(service, client, device.installation))
-                if first_sentinel_service is None:
-                    first_sentinel_service = service
-        # One pair of air quality entities per installation (not per service).
-        # Air quality data is per-installation; the sentinel service is only
-        # needed for zone discovery.
-        if first_sentinel_service is not None:
-            fetcher = AirQualityFetcher(
-                first_sentinel_service, client, device.installation
-            )
-            sensors.append(SentinelAirQuality(fetcher, device.installation))
-            sensors.append(SentinelAirQualityStatus(fetcher, device.installation))
+    if coordinator is None:
+        return
+
+    installation: Installation = coordinator._installation
+    service_id: int = coordinator._service.id
+
+    sensors: list[SensorEntity] = [
+        SentinelTemperature(coordinator, installation, service_id),
+        SentinelHumidity(coordinator, installation, service_id),
+        SentinelAirQuality(coordinator, installation, service_id),
+        SentinelAirQualityStatus(coordinator, installation, service_id),
+    ]
     async_add_entities(sensors, False)
 
-    schedule_initial_updates(hass, sensors)
 
-
-class SentinelTemperature(SecuritasEntity, SensorEntity):
+class SentinelTemperature(CoordinatorEntity[SentinelData], SensorEntity):
     """Sentinel temperature sensor."""
 
+    _attr_has_entity_name = False
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     def __init__(
         self,
-        service: Service,
-        client: SecuritasHub,
+        coordinator: SentinelCoordinator,
         installation: Installation,
+        service_id: int,
     ) -> None:
         """Init the component."""
-        super().__init__(installation, client)
-        self._attr_unique_id = f"v4_{installation.number}_temperature_{service.id}"
+        super().__init__(coordinator)
+        self._attr_device_info = securitas_device_info(installation)
+        self._attr_unique_id = f"v4_{installation.number}_temperature_{service_id}"
         self._attr_name = f"{installation.alias} Temperature"
-        self._service: Service = service
 
-    async def async_update(self):
-        """Update the sensor via the hub's rate-limited method."""
-        if self.hass is None:
-            return
-        try:
-            sentinel = await self._client.get_sentinel(
-                self._installation, self._service
-            )
-        except SecuritasDirectError as err:
-            _LOGGER.warning(
-                "Error updating temperature for %s: %s",
-                self._installation.number,
-                err.log_detail(),
-            )
-            return
-        self._attr_native_value = sentinel.temperature
+    @property
+    def native_value(self) -> float | None:
+        """Return the temperature from coordinator data."""
+        if self.coordinator.data is None or self.coordinator.data.sentinel is None:
+            return None
+        return self.coordinator.data.sentinel.temperature
 
 
-class SentinelHumidity(SecuritasEntity, SensorEntity):
+class SentinelHumidity(CoordinatorEntity[SentinelData], SensorEntity):
     """Sentinel Humidity sensor."""
 
+    _attr_has_entity_name = False
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
 
     def __init__(
         self,
-        service: Service,
-        client: SecuritasHub,
+        coordinator: SentinelCoordinator,
         installation: Installation,
+        service_id: int,
     ) -> None:
         """Init the component."""
-        super().__init__(installation, client)
-        self._attr_unique_id = f"v4_{installation.number}_humidity_{service.id}"
+        super().__init__(coordinator)
+        self._attr_device_info = securitas_device_info(installation)
+        self._attr_unique_id = f"v4_{installation.number}_humidity_{service_id}"
         self._attr_name = f"{installation.alias} Humidity"
-        self._service: Service = service
 
-    async def async_update(self):
-        """Update the sensor via the hub's rate-limited method."""
-        if self.hass is None:
-            return
-        try:
-            sentinel = await self._client.get_sentinel(
-                self._installation, self._service
-            )
-        except SecuritasDirectError as err:
-            _LOGGER.warning(
-                "Error updating humidity for %s: %s",
-                self._installation.number,
-                err.log_detail(),
-            )
-            return
-        self._attr_native_value = sentinel.humidity
+    @property
+    def native_value(self) -> float | None:
+        """Return the humidity from coordinator data."""
+        if self.coordinator.data is None or self.coordinator.data.sentinel is None:
+            return None
+        return self.coordinator.data.sentinel.humidity
 
 
 AIR_QUALITY_LABELS: dict[str, str] = {
@@ -149,98 +107,67 @@ AIR_QUALITY_LABELS: dict[str, str] = {
 }
 
 
-class AirQualityFetcher:
-    """Fetches air quality data for an installation.
-
-    Both numeric and status entities share one fetcher so they use the same
-    data.  Deduplication across update cycles is handled by the hub's
-    time-based API cache (30s TTL) — no manual reset is needed.
-    """
-
-    def __init__(
-        self,
-        service: Service,
-        client: SecuritasHub,
-        installation: Installation,
-    ) -> None:
-        self._service = service
-        self._client = client
-        self._installation = installation
-
-    async def fetch(self) -> AirQuality | None:
-        """Fetch air quality data via the hub's cached API calls."""
-        try:
-            sentinel = await self._client.get_sentinel(
-                self._installation, self._service
-            )
-        except SecuritasDirectError:
-            return None
-        zone = sentinel.zone if sentinel.zone else ""
-
-        try:
-            return await self._client.get_air_quality(self._installation, zone)
-        except SecuritasDirectError:
-            _LOGGER.debug(
-                "[%s] Air quality data not available",
-                self._installation.alias,
-            )
-            return None
-
-
-class SentinelAirQuality(SecuritasEntity, SensorEntity):
+class SentinelAirQuality(CoordinatorEntity[SentinelData], SensorEntity):
     """Air Quality sensor — numeric value from the most recent hourly reading."""
 
+    _attr_has_entity_name = False
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
-        fetcher: AirQualityFetcher,
+        coordinator: SentinelCoordinator,
         installation: Installation,
+        service_id: int,
     ) -> None:
-        super().__init__(installation, fetcher._client)
-        self._fetcher = fetcher
-        self._attr_unique_id = (
-            f"v4_{installation.number}_airquality_{fetcher._service.id}"
-        )
+        """Init the component."""
+        super().__init__(coordinator)
+        self._attr_device_info = securitas_device_info(installation)
+        self._attr_unique_id = f"v4_{installation.number}_airquality_{service_id}"
         self._attr_name = f"{installation.alias} Air Quality"
 
-    async def async_update(self):
-        """Update the sensor via the hub's rate-limited method."""
-        if self.hass is None:
-            return
-        air_quality = await self._fetcher.fetch()
-        if air_quality is not None:
-            self._attr_native_value = air_quality.value
+    @property
+    def native_value(self) -> int | None:
+        """Return the air quality value from coordinator data."""
+        if self.coordinator.data is None or self.coordinator.data.air_quality is None:
+            return None
+        return self.coordinator.data.air_quality.value
 
 
-class SentinelAirQualityStatus(SecuritasEntity, SensorEntity):
+class SentinelAirQualityStatus(CoordinatorEntity[SentinelData], SensorEntity):
     """Air Quality Status sensor — categorical status (Good/Fair/Poor/Bad)."""
+
+    _attr_has_entity_name = False
 
     def __init__(
         self,
-        fetcher: AirQualityFetcher,
+        coordinator: SentinelCoordinator,
         installation: Installation,
+        service_id: int,
     ) -> None:
-        super().__init__(installation, fetcher._client)
-        self._fetcher = fetcher
+        """Init the component."""
+        super().__init__(coordinator)
+        self._attr_device_info = securitas_device_info(installation)
         self._attr_unique_id = (
-            f"v4_{installation.number}_airquality_status_{fetcher._service.id}"
+            f"v4_{installation.number}_airquality_status_{service_id}"
         )
         self._attr_name = f"{installation.alias} Air Quality Status"
 
-    async def async_update(self):
-        """Update the sensor via the hub's rate-limited method."""
-        if self.hass is None:
-            return
-        air_quality = await self._fetcher.fetch()
-        if air_quality is not None:
-            code = str(air_quality.status_current)
-            label = AIR_QUALITY_LABELS.get(code)
-            if label is None:
-                _LOGGER.warning(
-                    "Unknown air quality status code '%s' for %s — please report this",
-                    code,
-                    self._installation.number,
-                )
-                label = code
-            self._attr_native_value = label
+    @property
+    def native_value(self) -> str | None:
+        """Return the air quality status label from coordinator data."""
+        if self.coordinator.data is None or self.coordinator.data.air_quality is None:
+            return None
+        return self._status_label(self.coordinator.data.air_quality.status_current)
+
+    @staticmethod
+    def _status_label(status_current: int) -> str:
+        """Map numeric status_current to a text label."""
+        code = str(status_current)
+        label = AIR_QUALITY_LABELS.get(code)
+        if label is None:
+            _LOGGER.warning(
+                "Unknown air quality status code '%s' — please report this",
+                code,
+            )
+            label = code
+        return label
