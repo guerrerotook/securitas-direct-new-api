@@ -180,7 +180,7 @@ class SecuritasHub:
 
     async def send_opt(self, challange: str, phone_index: int) -> None:
         """Call for the SMS challange."""
-        return await self.client.send_otp(phone_index, challange)
+        await self.client.send_otp(phone_index, challange)
 
     async def get_services(
         self, instalation: Installation, priority: int | None = None
