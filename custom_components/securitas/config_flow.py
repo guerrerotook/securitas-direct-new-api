@@ -59,12 +59,12 @@ from .securitas_direct_new_api import (
     STD_OPTIONS,
     AccountBlockedError,
     Attribute,
+    AuthenticationError,
     Installation,
-    Login2FAError,
-    LoginError,
     OtpPhone,
     SecuritasDirectError,
     Service,
+    TwoFactorRequiredError,
 )
 
 VERSION = 3
@@ -316,7 +316,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Login — catches credential errors and network failures
         try:
             await self.securitas.login()
-        except Login2FAError:
+        except TwoFactorRequiredError:
             # 2FA required — proceed to device validation for phone list
             return await self._start_2fa_flow()
         except AccountBlockedError:
@@ -325,7 +325,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(user_input),
                 errors={"base": "account_blocked"},
             )
-        except LoginError:
+        except AuthenticationError:
             return self.async_show_form(
                 step_id="user",
                 data_schema=self._user_schema(user_input),
@@ -387,7 +387,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         try:
             if self.securitas.get_authentication_token() is None:
                 await self.securitas.login()
-        except Login2FAError:
+        except TwoFactorRequiredError:
             return await self._start_2fa_flow()
         except AccountBlockedError:
             return self.async_show_form(
@@ -395,7 +395,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "account_blocked"},
             )
-        except LoginError:
+        except AuthenticationError:
             return self.async_show_form(
                 step_id="user",
                 data_schema=self._user_schema(self.config),

@@ -122,13 +122,3 @@ class UnexpectedStateError(SecuritasDirectError):
     def __init__(self, proto_code: str) -> None:
         self.proto_code = proto_code
         super().__init__(f"Unexpected protocol code: {proto_code!r}")
-
-
-# ── Backward-compatibility aliases ───────────────────────────────────────────
-# Existing code that imports these names continues to work unchanged.
-
-LoginError = AuthenticationError
-Login2FAError = TwoFactorRequiredError
-AuthError = AuthenticationError
-TokenRefreshError = SessionExpiredError
-APIError = APIResponseError

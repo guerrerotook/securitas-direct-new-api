@@ -24,13 +24,13 @@ from custom_components.securitas import (
 from custom_components.securitas.securitas_direct_new_api import (
     AccountBlockedError,
     Attribute,
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     OtpPhone,
     PERI_DEFAULTS,
     STD_DEFAULTS,
     SecuritasDirectError,
     SecuritasState,
+    TwoFactorRequiredError,
 )
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import (
@@ -118,7 +118,7 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
     finish_setup's ``get_authentication_token() is None`` check works
     correctly for both non-2FA (calls login) and 2FA paths.
 
-    When two_fa=True, login() raises Login2FAError (establishing a session)
+    When two_fa=True, login() raises TwoFactorRequiredError (establishing a session)
     and validate_device() returns the phone list — matching production behavior.
     """
     hub = make_securitas_hub_mock(**overrides)
@@ -133,7 +133,7 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
 
     async def _login():
         if two_fa:
-            raise Login2FAError("2FA required")
+            raise TwoFactorRequiredError("2FA required")
         _token_holder["token"] = FAKE_JWT
 
     async def _send_sms_code(*_args):
@@ -280,7 +280,7 @@ async def test_step_user_non_2fa_advances_to_options(hass):
 
 
 async def test_step_user_2fa_flow_shows_phone_list(hass):
-    """2FA flow should login (raising Login2FAError), then validate device and show phone list."""
+    """2FA flow should login (raising TwoFactorRequiredError), then validate device and show phone list."""
     mock_hub = _hub_factory(two_fa=True)
 
     with _patches(mock_hub):
@@ -312,7 +312,7 @@ async def test_step_user_login_succeeds_skips_2fa(hass):
 async def test_step_user_login_error_shows_invalid_auth(hass):
     """Wrong credentials should re-show the form with invalid_auth error."""
     mock_hub = _hub_factory()
-    mock_hub.login.side_effect = LoginError("bad credentials")
+    mock_hub.login.side_effect = AuthenticationError("bad credentials")
 
     with _patches(mock_hub):
         result = await hass.config_entries.flow.async_init(
@@ -541,7 +541,7 @@ async def test_otp_challenge_advances_to_options(hass):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
-    # login was called once during async_step_user (raised Login2FAError);
+    # login was called once during async_step_user (raised TwoFactorRequiredError);
     # finish_setup skips login because send_sms_code already set the token
     assert mock_hub.login.await_count == 1
 

@@ -31,9 +31,9 @@ from .models import (
 from .exceptions import (
     AccountBlockedError,
     ArmingExceptionError,
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
 )
 from .graphql_queries import (
     AIR_QUALITY_QUERY,
@@ -288,15 +288,15 @@ class ApiManager(SecuritasHttpClient):
                     if data.get("xSLoginToken"):
                         if data["xSLoginToken"].get("needDeviceAuthorization"):
                             # needs a 2FA
-                            _new = Login2FAError(err.message)
+                            _new = TwoFactorRequiredError(err.message)
                             _new.response_body = result_json
                             raise _new from err
-                    _new = LoginError(err.message)
+                    _new = AuthenticationError(err.message)
                     _new.response_body = result_json
                     raise _new from err
                 # Has response dict = server responded with error
                 # → login failure.
-                _new = LoginError(err.message)
+                _new = AuthenticationError(err.message)
                 _new.response_body = result_json
                 raise _new from err
             # No response dict = network/connection error
@@ -305,7 +305,7 @@ class ApiManager(SecuritasHttpClient):
 
         if "errors" in response:
             _LOGGER.error("Login error %s", response["errors"][0]["message"])
-            _new_err = LoginError(response["errors"][0]["message"])
+            _new_err = AuthenticationError(response["errors"][0]["message"])
             _new_err.response_body = response
             raise _new_err
 
@@ -313,7 +313,7 @@ class ApiManager(SecuritasHttpClient):
         login_data = self._extract_response_data(response, "xSLoginToken")
         if login_data.get("needDeviceAuthorization", False):
             # needs a 2FA
-            _new_err = Login2FAError("2FA authentication required")
+            _new_err = TwoFactorRequiredError("2FA authentication required")
             _new_err.response_body = response
             raise _new_err
 

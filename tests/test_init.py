@@ -50,9 +50,9 @@ from custom_components.securitas.securitas_direct_new_api.models import (
     SStatus,
 )
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
 )
 
 from tests.conftest import (
@@ -477,8 +477,8 @@ class TestAsyncSetupEntry:
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
 
     async def test_setup_login_2fa_error(self, hass, mock_hub):
-        """Login2FAError should return False and create a notification."""
-        mock_hub.login = AsyncMock(side_effect=Login2FAError("2FA required"))
+        """TwoFactorRequiredError should return False and create a notification."""
+        mock_hub.login = AsyncMock(side_effect=TwoFactorRequiredError("2FA required"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
@@ -497,8 +497,8 @@ class TestAsyncSetupEntry:
         assert mock_notify.call_args[0][1] == "2fa_error"
 
     async def test_setup_login_error(self, hass, mock_hub):
-        """LoginError should return False and create a notification."""
-        mock_hub.login = AsyncMock(side_effect=LoginError("bad credentials"))
+        """AuthenticationError should return False and create a notification."""
+        mock_hub.login = AsyncMock(side_effect=AuthenticationError("bad credentials"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 

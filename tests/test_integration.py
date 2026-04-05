@@ -303,7 +303,7 @@ async def test_check_alarm_sends_operation_name(
 async def test_setup_login_error_returns_false(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """LoginError during setup causes async_setup_entry to return False."""
+    """AuthenticationError during setup causes async_setup_entry to return False."""
     mock_server.add_response("mkLoginToken", graphql_login_error("Invalid credentials"))
 
     entry = _make_entry(hass)
@@ -323,8 +323,8 @@ async def test_setup_login_error_returns_false(
 async def test_setup_2fa_error_returns_false(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Login2FAError during setup causes async_setup_entry to return False."""
-    # Response that sets needDeviceAuthorization=True triggers Login2FAError
+    """TwoFactorRequiredError during setup causes async_setup_entry to return False."""
+    # Response that sets needDeviceAuthorization=True triggers TwoFactorRequiredError
     mock_server.add_response(
         "mkLoginToken",
         {

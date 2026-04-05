@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    # New typed hierarchy
     APIConnectionError,
     APIResponseError,
     ArmingExceptionError,
@@ -18,12 +17,6 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     TwoFactorRequiredError,
     UnexpectedStateError,
     WAFBlockedError,
-    # Backward-compat aliases
-    APIError,
-    AuthError,
-    Login2FAError,
-    LoginError,
-    TokenRefreshError,
 )
 
 
@@ -224,33 +217,3 @@ class TestLogDetail:
         assert "raw" in err.log_detail()
 
 
-# ── Backward-compatibility aliases ────────────────────────────────────────────
-
-
-class TestBackwardCompatAliases:
-    def test_login_error_is_authentication_error(self):
-        assert LoginError is AuthenticationError
-
-    def test_login_2fa_error_is_two_factor_required_error(self):
-        assert Login2FAError is TwoFactorRequiredError
-
-    def test_auth_error_is_authentication_error(self):
-        assert AuthError is AuthenticationError
-
-    def test_token_refresh_error_is_session_expired_error(self):
-        assert TokenRefreshError is SessionExpiredError
-
-    def test_api_error_is_api_response_error(self):
-        assert APIError is APIResponseError
-
-    def test_login_error_instance_caught_as_authentication_error(self):
-        with pytest.raises(AuthenticationError):
-            raise LoginError("bad credentials")
-
-    def test_login_2fa_instance_caught_as_two_factor_required(self):
-        with pytest.raises(TwoFactorRequiredError):
-            raise Login2FAError("need 2fa")
-
-    def test_alias_instances_are_subclass_of_base(self):
-        for alias in (LoginError, Login2FAError, AuthError, TokenRefreshError, APIError):
-            assert issubclass(alias, SecuritasDirectError)

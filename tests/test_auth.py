@@ -7,9 +7,9 @@ import pytest
 
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     AccountBlockedError,
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
 )
 
 from .conftest import (
@@ -54,18 +54,18 @@ class TestLogin:
         after = int(datetime.now().timestamp() * 1000)
         assert before <= api.login_timestamp <= after
 
-    async def test_2fa_required_raises_login2fa_error(self, api, mock_execute):
+    async def test_2fa_required_raises_two_factor_required_error(self, api, mock_execute):
         mock_execute.return_value = login_response(need_2fa=True)
 
-        with pytest.raises(Login2FAError):
+        with pytest.raises(TwoFactorRequiredError):
             await api.login()
 
-    async def test_error_response_raises_login_error(self, api, mock_execute):
+    async def test_error_response_raises_authentication_error(self, api, mock_execute):
         mock_execute.return_value = {
             "errors": [{"message": "Invalid credentials"}],
         }
 
-        with pytest.raises(LoginError):
+        with pytest.raises(AuthenticationError):
             await api.login()
 
     async def test_execute_request_error_raises_securitas_error(
@@ -314,11 +314,11 @@ class TestValidateDevice:
 
 
 class TestLoginEdgeCases:
-    async def test_error_with_need_device_authorization_raises_login2fa_error(
+    async def test_error_with_need_device_authorization_raises_two_factor_required_error(
         self, api, mock_execute
     ):
         """When _execute_request raises SecuritasDirectError whose response data
-        contains xSLoginToken.needDeviceAuthorization=True, Login2FAError is raised."""
+        contains xSLoginToken.needDeviceAuthorization=True, TwoFactorRequiredError is raised."""
         error_response = {
             "data": {
                 "xSLoginToken": {
@@ -332,12 +332,12 @@ class TestLoginEdgeCases:
         _err.response_body = error_response
         mock_execute.side_effect = _err
 
-        with pytest.raises(Login2FAError):
+        with pytest.raises(TwoFactorRequiredError):
             await api.login()
 
-    async def test_error_response_with_data_raises_login_error(self, api, mock_execute):
+    async def test_error_response_with_data_raises_authentication_error(self, api, mock_execute):
         """When _execute_request raises SecuritasDirectError whose response data
-        has xSLoginToken but needDeviceAuthorization is False, LoginError is raised."""
+        has xSLoginToken but needDeviceAuthorization is False, AuthenticationError is raised."""
         error_response = {
             "data": {
                 "xSLoginToken": {
@@ -351,7 +351,7 @@ class TestLoginEdgeCases:
         _err.response_body = error_response
         mock_execute.side_effect = _err
 
-        with pytest.raises(LoginError):
+        with pytest.raises(AuthenticationError):
             await api.login()
 
     async def test_null_xslogintoken_raises_error(self, api, mock_execute):
@@ -383,9 +383,9 @@ class TestLoginEdgeCases:
             ],
             "data": {"xSLoginToken": None},
         }
-        mock_execute.side_effect = SecuritasDirectError(
-            "Utilisateur bloqué.", blocked_response
-        )
+        err = SecuritasDirectError("Utilisateur bloqué.")
+        err.response_body = blocked_response
+        mock_execute.side_effect = err
 
         with pytest.raises(AccountBlockedError):
             await api.login()

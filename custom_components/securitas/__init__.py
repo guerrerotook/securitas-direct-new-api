@@ -68,10 +68,10 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
 from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
     ApiDomains,
+    AuthenticationError,
     Installation,
-    Login2FAError,
-    LoginError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
     generate_device_id,
     generate_uuid,
 )
@@ -232,14 +232,14 @@ async def _get_or_create_session(
             client = SecuritasHub(config, entry, async_get_clientsession(hass), hass)
             try:
                 await client.login()
-            except Login2FAError:
+            except TwoFactorRequiredError:
                 msg = (
                     "Securitas Direct need a 2FA SMS code."
                     "Please login again with your phone"
                 )
                 _notify_error(hass, "2fa_error", "Securitas Direct", msg)
                 raise
-            except LoginError as err:
+            except AuthenticationError as err:
                 _notify_error(hass, "login_error", "Securitas Direct", str(err))
                 _LOGGER.error(
                     "Could not log in to Securitas: %s",
@@ -406,9 +406,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not need_sign_in:
         try:
             client = await _get_or_create_session(hass, config, entry)
-        except Login2FAError:
+        except TwoFactorRequiredError:
             return False
-        except LoginError:
+        except AuthenticationError:
             return False
 
         _get_or_create_api_queue(hass, client, config, entry)
