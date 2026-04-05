@@ -569,8 +569,14 @@ async def _discover_cameras(
         )
         if camera_add:
             camera_add(
-                [SecuritasCamera(hub, installation, cam) for cam in cameras]
-                + [SecuritasCameraFull(hub, installation, cam) for cam in cameras],
+                [
+                    SecuritasCamera(camera_coord, hub, installation, cam)
+                    for cam in cameras
+                ]
+                + [
+                    SecuritasCameraFull(camera_coord, hub, installation, cam)
+                    for cam in cameras
+                ],
                 False,
             )
         if button_add:

@@ -8,6 +8,7 @@ import pytest
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
     API_CACHE_TTL,
+    DOMAIN,
     SIGNAL_CAMERA_STATE,
     SIGNAL_CAMERA_UPDATE,
 )
@@ -351,22 +352,34 @@ class TestCaptureImage:
         # First dispatch must be SIGNAL_CAMERA_STATE
         assert calls[0][1] == SIGNAL_CAMERA_STATE
 
-    async def test_camera_update_signal_dispatched_on_success(self):
-        """SIGNAL_CAMERA_UPDATE is dispatched when a new image is captured."""
+    async def test_coordinator_updated_on_successful_capture(self):
+        """Camera coordinator is updated when a new image is captured."""
+        from custom_components.securitas.coordinators import CameraData
+
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
         _setup_capture(hub)
 
-        calls = []
+        # Set up a mock config entry with entry_id
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        hub.config_entry = mock_entry
+
+        # Set up a mock camera coordinator in entry_data
+        mock_coord = MagicMock()
+        mock_coord.data = CameraData(thumbnails={}, full_images={})
+        mock_coord.async_set_updated_data = MagicMock()
+        hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
+
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
-            side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
 
-        signal_names = [c[1] for c in calls]
-        assert SIGNAL_CAMERA_UPDATE in signal_names
+        mock_coord.async_set_updated_data.assert_called_once()
+        new_data = mock_coord.async_set_updated_data.call_args[0][0]
+        assert device.zone_id in new_data.thumbnails
 
     async def test_camera_state_signal_dispatched_when_no_image(self):
         """SIGNAL_CAMERA_STATE (not UPDATE) is dispatched when no image arrives."""
@@ -456,9 +469,9 @@ class TestFullImageCapture:
         key = f"{installation.number}_{device.zone_id}"
         assert hub._full_images[key] == full_jpeg
 
-    async def test_capture_fires_signal_full_image_update(self):
-        """SIGNAL_FULL_IMAGE_UPDATE is dispatched after the full image is stored."""
-        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
+    async def test_capture_updates_coordinator_full_image(self):
+        """Camera coordinator is updated with full image after capture."""
+        from custom_components.securitas.coordinators import CameraData
 
         hub = make_hub()
         installation = make_installation()
@@ -475,25 +488,35 @@ class TestFullImageCapture:
         hub.client.get_full_image = AsyncMock(return_value=full_jpeg)
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
 
+        # Set up mock coordinator
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        hub.config_entry = mock_entry
+
+        mock_coord = MagicMock()
+        mock_coord.data = CameraData(thumbnails={}, full_images={})
+        mock_coord.async_set_updated_data = MagicMock()
+        hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
+
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
-        calls = []
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
-            side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
             for task in _tasks:
                 await task
 
-        signal_names = [c[1] for c in calls]
-        assert SIGNAL_FULL_IMAGE_UPDATE in signal_names
+        # Coordinator should have been updated twice: once for thumbnail, once for full image
+        assert mock_coord.async_set_updated_data.call_count == 2
+        # Last call should contain the full image
+        last_data = mock_coord.async_set_updated_data.call_args_list[-1][0][0]
+        assert device.zone_id in last_data.full_images
+        assert last_data.full_images[device.zone_id] == full_jpeg
 
     async def test_capture_skips_full_image_when_id_signal_is_none(self):
         """PIR cameras (idSignal=None) do not trigger a get_full_image call."""
-        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
-
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -507,16 +530,12 @@ class TestFullImageCapture:
         hub.client.get_full_image = AsyncMock()
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
 
-        calls = []
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
-            side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
 
         hub.client.get_full_image.assert_not_called()
-        signal_names = [c[1] for c in calls]
-        assert SIGNAL_FULL_IMAGE_UPDATE not in signal_names
 
     async def test_get_full_image_returns_none_when_empty(self):
         """get_full_image returns None when no full image has been stored."""
@@ -553,9 +572,7 @@ class TestFullImageCapture:
         )
 
     async def test_fetch_latest_thumbnail_also_fetches_full_image(self):
-        """fetch_latest_thumbnail fires SIGNAL_FULL_IMAGE_UPDATE when id_signal is set."""
-        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
-
+        """fetch_latest_thumbnail stores full image and updates coordinator."""
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -574,24 +591,18 @@ class TestFullImageCapture:
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
-        calls = []
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
-            side_effect=lambda *a: calls.append(a),
         ):
             await hub.fetch_latest_thumbnail(installation, device)
             for task in _tasks:
                 await task
 
-        signal_names = [c[1] for c in calls]
-        assert SIGNAL_FULL_IMAGE_UPDATE in signal_names
         key = f"{installation.number}_{device.zone_id}"
         assert hub._full_images[key] == full_jpeg
 
     async def test_full_image_not_stored_when_not_jpeg(self):
         """When get_full_image returns non-JPEG bytes, the full image is not stored."""
-        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
-
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -610,10 +621,8 @@ class TestFullImageCapture:
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
-        calls = []
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
-            side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
             for task in _tasks:
@@ -621,13 +630,9 @@ class TestFullImageCapture:
 
         key = f"{installation.number}_{device.zone_id}"
         assert key not in hub._full_images
-        signal_names = [c[1] for c in calls]
-        assert SIGNAL_FULL_IMAGE_UPDATE not in signal_names
 
     async def test_full_image_not_stored_when_get_full_image_returns_none(self):
         """When get_full_image returns None, the full image is not stored."""
-        from custom_components.securitas.const import SIGNAL_FULL_IMAGE_UPDATE
-
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -645,10 +650,8 @@ class TestFullImageCapture:
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
-        calls = []
         with patch(
             "custom_components.securitas.hub.async_dispatcher_send",
-            side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
             for task in _tasks:
@@ -656,5 +659,3 @@ class TestFullImageCapture:
 
         key = f"{installation.number}_{device.zone_id}"
         assert key not in hub._full_images
-        signal_names = [c[1] for c in calls]
-        assert SIGNAL_FULL_IMAGE_UPDATE not in signal_names

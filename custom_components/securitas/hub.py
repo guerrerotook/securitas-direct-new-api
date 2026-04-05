@@ -26,8 +26,6 @@ from .const import (
     CONF_DEVICE_INDIGITALL,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
-    SIGNAL_CAMERA_UPDATE,
-    SIGNAL_FULL_IMAGE_UPDATE,
     SIGNAL_XSSTATUS_UPDATE,
 )
 from .log_filter import SensitiveDataFilter
@@ -256,14 +254,12 @@ class SecuritasHub:
                 thumbnail, installation, device, log_warnings=True
             )
 
-            if image_bytes is not None:
-                async_dispatcher_send(
-                    self.hass,
-                    SIGNAL_CAMERA_UPDATE,
-                    installation.number,
-                    device.zone_id,
-                )
-            else:
+            # Push thumbnail into the camera coordinator so entities update
+            self._update_camera_coordinator_thumbnail(
+                installation, device.zone_id, thumbnail
+            )
+
+            if image_bytes is None:
                 async_dispatcher_send(
                     self.hass,
                     SIGNAL_CAMERA_STATE,
@@ -304,11 +300,8 @@ class SecuritasHub:
             thumbnail, installation, camera_device, log_warnings=False
         )
         if image_bytes is not None:
-            async_dispatcher_send(
-                self.hass,
-                SIGNAL_CAMERA_UPDATE,
-                installation.number,
-                camera_device.zone_id,
+            self._update_camera_coordinator_thumbnail(
+                installation, camera_device.zone_id, thumbnail
             )
 
         if thumbnail.id_signal and thumbnail.signal_type:
@@ -349,11 +342,10 @@ class SecuritasHub:
         self._full_images[key] = full_bytes
         if thumbnail.timestamp:
             self._full_timestamps[key] = thumbnail.timestamp
-        async_dispatcher_send(
-            self.hass,
-            SIGNAL_FULL_IMAGE_UPDATE,
-            installation.number,
-            camera_device.zone_id,
+
+        # Push full image into the camera coordinator so entities update
+        self._update_camera_coordinator_full_image(
+            installation, camera_device.zone_id, full_bytes
         )
 
     def _validate_and_store_image(
@@ -382,6 +374,50 @@ class SecuritasHub:
         if thumbnail.timestamp:
             self.camera_timestamps[key] = thumbnail.timestamp
         return image_bytes
+
+    def _get_camera_coordinator(self, installation: Installation):
+        """Return the CameraCoordinator for an installation, if available."""
+        entry_id = self.config_entry.entry_id if self.config_entry else None
+        if entry_id is None:
+            return None
+        entry_data = self.hass.data.get(DOMAIN, {}).get(entry_id)
+        if entry_data is None:
+            return None
+        return entry_data.get("camera_coordinator")
+
+    def _update_camera_coordinator_thumbnail(
+        self, installation: Installation, zone_id: str, thumbnail
+    ) -> None:
+        """Push a new thumbnail into the CameraCoordinator's data."""
+        if thumbnail is None:
+            return
+        camera_coord = self._get_camera_coordinator(installation)
+        if camera_coord is None or camera_coord.data is None:
+            return
+        from .coordinators import CameraData
+
+        new_thumbnails = {**camera_coord.data.thumbnails, zone_id: thumbnail}
+        new_data = CameraData(
+            thumbnails=new_thumbnails,
+            full_images=dict(camera_coord.data.full_images),
+        )
+        camera_coord.async_set_updated_data(new_data)
+
+    def _update_camera_coordinator_full_image(
+        self, installation: Installation, zone_id: str, full_bytes: bytes
+    ) -> None:
+        """Push a new full-resolution image into the CameraCoordinator's data."""
+        camera_coord = self._get_camera_coordinator(installation)
+        if camera_coord is None or camera_coord.data is None:
+            return
+        from .coordinators import CameraData
+
+        new_full_images = {**camera_coord.data.full_images, zone_id: full_bytes}
+        new_data = CameraData(
+            thumbnails=dict(camera_coord.data.thumbnails),
+            full_images=new_full_images,
+        )
+        camera_coord.async_set_updated_data(new_data)
 
     def get_camera_image(self, installation_number: str, zone_id: str) -> bytes | None:
         """Return the last captured image for a camera."""
