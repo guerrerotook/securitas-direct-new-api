@@ -148,8 +148,8 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
 def _make_hub_class_mock(hub_instance):
     """Create a mock class that mimics SecuritasHub but returns hub_instance.
 
-    The config_flow uses SecuritasHub.__name__ as a dict key, so the mock class
-    must have a proper __name__ attribute (MagicMock does not).
+    MagicMock does not have a proper __name__ attribute, so we set it
+    to make the mock behave like a real class.
     """
     mock_cls = MagicMock(return_value=hub_instance)
     mock_cls.__name__ = "SecuritasHub"
@@ -586,7 +586,7 @@ async def test_finish_setup_sets_hass_data(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
     assert DOMAIN in hass.data
-    assert "SecuritasHub" in hass.data[DOMAIN]
+    assert "sessions" in hass.data[DOMAIN]
 
 
 # ===================================================================

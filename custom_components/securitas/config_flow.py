@@ -370,11 +370,17 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
             )
 
-            # Generate new device IDs for the reauth session
-            uuid = generate_uuid()
-            self.config[CONF_DEVICE_ID] = uuid
-            self.config[CONF_UNIQUE_ID] = uuid
-            self.config.setdefault(CONF_DEVICE_INDIGITALL, "")
+            # Preserve existing device IDs from the entry being reauthenticated
+            self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
+                CONF_DEVICE_ID, generate_uuid()
+            )
+            self.config[CONF_UNIQUE_ID] = self._reauth_entry.data.get(
+                CONF_UNIQUE_ID, self.config[CONF_DEVICE_ID]
+            )
+            self.config.setdefault(
+                CONF_DEVICE_INDIGITALL,
+                self._reauth_entry.data.get(CONF_DEVICE_INDIGITALL, ""),
+            )
             self.config.setdefault(
                 CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
             )
@@ -487,7 +493,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_TOKEN] = self.securitas.get_authentication_token()
 
         self.hass.data.setdefault(DOMAIN, {})
-        self.hass.data[DOMAIN][SecuritasHub.__name__] = self.securitas
 
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
@@ -502,7 +507,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
-        self.hass.data[DOMAIN]["installations_cache"] = {
+        self.hass.data[DOMAIN][f"installations_cache_{username}"] = {
             "data": installations,
             "time": time.monotonic(),
         }

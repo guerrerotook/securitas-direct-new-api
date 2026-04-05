@@ -113,7 +113,7 @@ class SecuritasHub:
 
     def __init__(
         self,
-        domain_config: dict,
+        domain_config: dict[str, Any],
         config_entry: ConfigEntry | None,
         http_client: ClientSession,
         hass: HomeAssistant,

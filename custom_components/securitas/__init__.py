@@ -446,6 +446,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 client.api_queue,
                 first_installation,
                 update_interval=scan_interval,
+                config_entry=entry,
             )
 
             # Discover sentinel and lock services from cached service list
@@ -465,6 +466,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         first_installation,
                         service=service,
                         zone=zone,
+                        config_entry=entry,
                     )
                     break  # one sentinel coordinator per installation
 
@@ -477,6 +479,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     client.api_queue,
                     first_installation,
                     update_interval=scan_interval,
+                    config_entry=entry,
                 )
 
         # Store per-entry data
@@ -552,6 +555,7 @@ async def _discover_cameras(
             hub.api_queue,
             installation,
             cameras=cameras,
+            config_entry=entry,
         )
         entry_data["camera_coordinator"] = camera_coord
         entry.async_create_background_task(

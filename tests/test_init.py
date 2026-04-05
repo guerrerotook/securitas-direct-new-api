@@ -69,8 +69,8 @@ pytestmark = pytest.mark.asyncio
 def _patch_hub(mock_hub):
     """Patch SecuritasHub constructor to return mock_hub while preserving __name__.
 
-    The production code accesses SecuritasHub.__name__ (line 239), so the
-    replacement object must expose that attribute.
+    MagicMock does not have a proper __name__ attribute, so we set it
+    to make the mock behave like a real class.
     """
     mock_cls = MagicMock(return_value=mock_hub)
     mock_cls.__name__ = "SecuritasHub"

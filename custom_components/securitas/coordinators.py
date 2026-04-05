@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -103,11 +104,12 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         installation: Installation,
         *,
         update_interval: timedelta,
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=None,
+            config_entry=config_entry,
             name="securitas_alarm",
             update_interval=update_interval,
         )
@@ -163,11 +165,12 @@ class SentinelCoordinator(DataUpdateCoordinator[SentinelData]):
         *,
         service: Service,
         zone: str,
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=None,
+            config_entry=config_entry,
             name="securitas_sentinel",
             update_interval=_DEFAULT_SENTINEL_INTERVAL,
         )
@@ -223,11 +226,12 @@ class LockCoordinator(DataUpdateCoordinator[LockData]):
         installation: Installation,
         *,
         update_interval: timedelta,
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=None,
+            config_entry=config_entry,
             name="securitas_lock",
             update_interval=update_interval,
         )
@@ -279,11 +283,12 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         installation: Installation,
         *,
         cameras: list[CameraDevice],
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=None,
+            config_entry=config_entry,
             name="securitas_camera",
             update_interval=_DEFAULT_CAMERA_INTERVAL,
         )
