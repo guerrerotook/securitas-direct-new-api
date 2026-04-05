@@ -1,4 +1,4 @@
-"""Tests for ApiManager helper methods."""
+"""Tests for SecuritasClient helper methods."""
 
 import asyncio
 from datetime import datetime

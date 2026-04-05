@@ -158,7 +158,7 @@ async def test_setup_general_status_via_update_overview(
 async def test_login_sets_auth_token(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """After login, ApiManager.authentication_token is set from the JWT."""
+    """After login, SecuritasClient.authentication_token is set from the JWT."""
     queue_standard_setup(mock_server, proto="D")
     entry, _ = await _setup(hass, mock_server)
 
@@ -496,7 +496,7 @@ async def test_services_with_sentinel(
     assert len(sentinel_services) == 1
 
 
-# ── Arm / Disarm via ApiManager ───────────────────────────────────────────────
+# ── Arm / Disarm via SecuritasClient ───────────────────────────────────────────────
 
 
 async def test_arm_away_api_call(hass: HomeAssistant, mock_server: MockGraphQLServer):

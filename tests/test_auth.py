@@ -1,4 +1,4 @@
-"""Tests for ApiManager authentication flow."""
+"""Tests for SecuritasClient authentication flow."""
 
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock

@@ -1,4 +1,4 @@
-"""Tests for ApiManager service methods."""
+"""Tests for SecuritasClient service methods."""
 
 from datetime import datetime
 from unittest.mock import AsyncMock
