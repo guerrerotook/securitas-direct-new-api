@@ -8,6 +8,7 @@ will be added in later tasks.
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import datetime, timedelta
 import json
 import logging
@@ -26,6 +27,7 @@ from .exceptions import (
     TwoFactorRequiredError,
 )
 from .graphql_queries import (
+    AIR_QUALITY_QUERY,
     ARM_PANEL_MUTATION,
     ARM_STATUS_QUERY,
     CHANGE_LOCK_MODE_MUTATION,
@@ -34,37 +36,59 @@ from .graphql_queries import (
     CHECK_ALARM_STATUS_QUERY,
     DANALOCK_CONFIG_QUERY,
     DANALOCK_CONFIG_STATUS_QUERY,
+    DEVICE_LIST_QUERY,
     DISARM_PANEL_MUTATION,
     DISARM_STATUS_QUERY,
     GENERAL_STATUS_QUERY,
     GET_EXCEPTIONS_QUERY,
+    GET_PHOTO_IMAGES_QUERY,
+    GET_THUMBNAIL_QUERY,
+    INSTALLATION_LIST_QUERY,
     LOCK_CURRENT_MODE_QUERY,
     LOGIN_TOKEN_MUTATION,
     REFRESH_LOGIN_MUTATION,
+    REQUEST_IMAGES_MUTATION,
+    REQUEST_IMAGES_STATUS_QUERY,
     SEND_OTP_MUTATION,
+    SENTINEL_QUERY,
+    SERVICES_QUERY,
     SMARTLOCK_CONFIG_QUERY,
     VALIDATE_DEVICE_MUTATION,
 )
 from .http_transport import HttpTransport
 from .models import (
+    AirQuality,
+    Attribute,
+    CameraDevice,
     Installation,
     LockFeatures,
     OperationStatus,
     OtpPhone,
+    Sentinel,
+    Service,
     SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
     SStatus,
+    ThumbnailResponse,
 )
 from .responses import (
+    AirQualityEnvelope,
     ArmPanelEnvelope,
     ChangeLockModeEnvelope,
     CheckAlarmEnvelope,
     DanalockConfigEnvelope,
+    DeviceListEnvelope,
     DisarmPanelEnvelope,
     GeneralStatusEnvelope,
+    InstallationListEnvelope,
     LockModeEnvelope,
+    PhotoImagesEnvelope,
+    RequestImagesEnvelope,
+    RequestImagesStatusEnvelope,
+    SentinelEnvelope,
     SmartlockConfigEnvelope,
+    ThumbnailEnvelope,
 )
 
 if TYPE_CHECKING:
@@ -83,6 +107,12 @@ ALARM_STATUS_SERVICE_ID = "11"
 SMARTLOCK_DEVICE_ID = "1"
 SMARTLOCK_DEVICE_TYPE = "DR"
 SMARTLOCK_KEY_TYPE = "MASTER"
+
+# Camera / image constants
+CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
+IMAGE_RESOLUTION = 0
+IMAGE_MEDIA_TYPE = 1
+IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
 
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
@@ -1263,8 +1293,454 @@ class SecuritasClient:
         self.protom_response = raw["protomResponse"]
         return SmartLockModeStatus.model_validate(raw)
 
-    # ── Stub: get_services (full implementation in Task 5) ───────────────
+    # ── Camera operations ──────────────────────────────────────────────────
 
-    async def get_services(self, installation: Any) -> list[Any]:
-        """Fetch services for an installation. Stub -- full implementation in Task 5."""
-        raise NotImplementedError("get_services will be implemented in Task 5")
+    async def get_camera_devices(
+        self, installation: Installation
+    ) -> list[CameraDevice]:
+        """Get list of camera devices (QR, YR, YP, QP) for an installation.
+
+        Returns:
+            A list of CameraDevice instances for active camera devices.
+        """
+        content = {
+            "operationName": "xSDeviceList",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+            },
+            "query": DEVICE_LIST_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "xSDeviceList",
+            DeviceListEnvelope,
+            installation=installation,
+        )
+        devices = envelope.data.xSDeviceList.devices or []
+        result: list[CameraDevice] = []
+        for d in devices:
+            if d.get("type") not in CAMERA_DEVICE_TYPES or d.get("isActive") is False:
+                continue
+            code = int(d["code"]) if str(d.get("code", "")).isdigit() else None
+            result.append(
+                CameraDevice(
+                    id=d["id"],
+                    code=code or 0,
+                    zone_id=d["zoneId"]
+                    or (f"{d['type']}{code:02d}" if code is not None else d["id"]),
+                    name=d["name"],
+                    device_type=d["type"],
+                    serial_number=d.get("serialNumber"),
+                )
+            )
+        return result
+
+    async def capture_image(
+        self,
+        installation: Installation,
+        device_code: int,
+        device_type: str,
+        zone_id: str,
+        *,
+        capture_timeout: float = 30.0,
+    ) -> ThumbnailResponse:
+        """Request a new image capture and poll until the thumbnail updates.
+
+        Follows the flow: get baseline thumbnail -> submit capture request ->
+        poll capture status until not processing -> poll thumbnail until
+        idSignal changes from baseline.
+
+        Args:
+            installation: The installation containing the camera.
+            device_code: Camera device code.
+            device_type: Camera device type (e.g. "QR", "YR").
+            zone_id: Camera zone ID.
+            capture_timeout: Wall-clock timeout for the entire flow (default 30s).
+
+        Returns:
+            The new ThumbnailResponse (or baseline if timed out).
+        """
+        # Get baseline thumbnail
+        baseline = await self.get_thumbnail(installation, device_type, zone_id)
+        baseline_id = baseline.id_signal
+        baseline_image = baseline.image
+
+        # Submit capture request
+        submit_content = {
+            "operationName": "RequestImages",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "devices": [device_code],
+                "resolution": IMAGE_RESOLUTION,
+                "mediaType": IMAGE_MEDIA_TYPE,
+                "deviceType": IMAGE_DEVICE_TYPE_MAP.get(device_type, 106),
+            },
+            "query": REQUEST_IMAGES_MUTATION,
+        }
+        submit_envelope = await self._execute_graphql(
+            submit_content,
+            "RequestImages",
+            RequestImagesEnvelope,
+            installation=installation,
+        )
+        reference_id = submit_envelope.data.xSRequestImages.reference_id
+
+        thumbnail: ThumbnailResponse | None = None
+
+        async def _poll_capture_result() -> None:
+            nonlocal thumbnail
+            counter = 0
+
+            # Poll status until not processing
+            while True:
+                counter += 1
+                status_content = {
+                    "operationName": "RequestImagesStatus",
+                    "variables": {
+                        "numinst": installation.number,
+                        "panel": installation.panel,
+                        "devices": [device_code],
+                        "referenceId": reference_id,
+                        "counter": counter,
+                    },
+                    "query": REQUEST_IMAGES_STATUS_QUERY,
+                }
+                status_envelope = await self._execute_graphql(
+                    status_content,
+                    "RequestImagesStatus",
+                    RequestImagesStatusEnvelope,
+                    installation=installation,
+                )
+                inner = status_envelope.data.xSRequestImagesStatus
+                msg = inner.msg or ""
+                if "processing" not in msg and inner.res != "WAIT":
+                    break
+                await asyncio.sleep(self.poll_delay)
+
+            # Poll thumbnail until idSignal changes
+            while True:
+                thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
+                if thumbnail.id_signal != baseline_id:
+                    return
+                if baseline_id is None and thumbnail.image != baseline_image:
+                    return
+                await asyncio.sleep(max(self.poll_delay, 1.0))
+
+        try:
+            await asyncio.wait_for(_poll_capture_result(), timeout=capture_timeout)
+        except (TimeoutError, asyncio.TimeoutError):
+            _LOGGER.warning(
+                "Image capture timed out after %.0f seconds", capture_timeout
+            )
+            if thumbnail is None:
+                thumbnail = baseline
+
+        return thumbnail  # type: ignore[return-value]
+
+    async def get_thumbnail(
+        self,
+        installation: Installation,
+        device_type: str,
+        zone_id: str,
+    ) -> ThumbnailResponse:
+        """Fetch the latest thumbnail image for a camera device.
+
+        Args:
+            installation: The installation to query.
+            device_type: Camera device type string (e.g. "QR").
+            zone_id: Camera zone ID.
+
+        Returns:
+            ThumbnailResponse with image data and metadata.
+        """
+        content = {
+            "operationName": "mkGetThumbnail",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "device": device_type,
+                "zoneId": zone_id,
+            },
+            "query": GET_THUMBNAIL_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "mkGetThumbnail",
+            ThumbnailEnvelope,
+            installation=installation,
+        )
+        return envelope.data.xSGetThumbnail
+
+    async def get_full_image(
+        self,
+        installation: Installation,
+        id_signal: str,
+        signal_type: str,
+    ) -> bytes | None:
+        """Fetch full-resolution images for a completed capture.
+
+        Selects the largest BINARY image, base64-decodes it, and validates
+        JPEG magic bytes.
+
+        Args:
+            installation: The installation to query.
+            id_signal: The idSignal from a ThumbnailResponse.
+            signal_type: The signalType from a ThumbnailResponse.
+
+        Returns:
+            Decoded JPEG bytes, or None if no valid image found.
+        """
+        content = {
+            "operationName": "mkGetPhotoImages",
+            "variables": {
+                "numinst": installation.number,
+                "idSignal": id_signal,
+                "signalType": signal_type,
+                "panel": installation.panel,
+            },
+            "query": GET_PHOTO_IMAGES_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "mkGetPhotoImages",
+            PhotoImagesEnvelope,
+            installation=installation,
+        )
+        devices = envelope.data.xSGetPhotoImages.devices or []
+        if not devices:
+            return None
+        images = devices[0].get("images") or []
+        binary_images = [
+            img for img in images if img.get("type") == "BINARY" and img.get("image")
+        ]
+        if not binary_images:
+            return None
+        best = max(binary_images, key=lambda img: len(img["image"]))
+        try:
+            decoded = base64.b64decode(best["image"])
+        except Exception:  # noqa: BLE001
+            return None
+        # Validate JPEG magic bytes
+        if not decoded[:2] == b"\xff\xd8":
+            return None
+        return decoded
+
+    # ── Sensor operations ────────────────────────────────────────────────────
+
+    async def get_sentinel_data(
+        self,
+        installation: Installation,
+        service: Service,
+    ) -> Sentinel:
+        """Get sentinel environmental sensor data.
+
+        Args:
+            installation: The installation to query.
+            service: The sentinel service (uses first attribute for zone).
+
+        Returns:
+            Sentinel with temperature, humidity, and air quality.
+        """
+        content = {
+            "operationName": "Sentinel",
+            "variables": {
+                "numinst": installation.number,
+            },
+            "query": SENTINEL_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "Sentinel",
+            SentinelEnvelope,
+            installation=installation,
+        )
+        comfort_data = envelope.data.xSComfort
+        empty = Sentinel(alias="", air_quality="", humidity=0, temperature=0)
+
+        if not service.attributes or not isinstance(service.attributes, list):
+            _LOGGER.warning("No attributes found for sentinel service %s", service.id)
+            return empty
+
+        zone = service.attributes[0].value
+        devices = comfort_data.devices or []
+        target_device = None
+        for device in devices:
+            if device.get("zone") == zone:
+                target_device = device
+                break
+
+        if target_device is None:
+            return empty
+
+        air_quality_code = target_device["status"].get("airQualityCode")
+        return Sentinel(
+            alias=target_device["alias"],
+            air_quality=str(air_quality_code) if air_quality_code is not None else "",
+            humidity=int(target_device["status"]["humidity"]),
+            temperature=int(target_device["status"]["temperature"]),
+            zone=target_device.get("zone", ""),
+        )
+
+    async def get_air_quality_data(
+        self,
+        installation: Installation,
+        zone: str,
+    ) -> AirQuality | None:
+        """Get air quality data from xSAirQuality API.
+
+        Args:
+            installation: The installation to query.
+            zone: Zone identifier string.
+
+        Returns:
+            AirQuality with latest reading, or None if no data available.
+        """
+        content = {
+            "operationName": "AirQuality",
+            "variables": {
+                "numinst": installation.number,
+                "zone": zone,
+            },
+            "query": AIR_QUALITY_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "AirQuality",
+            AirQualityEnvelope,
+            installation=installation,
+        )
+        aq_inner = envelope.data.xSAirQuality
+        aq_data = aq_inner.data
+        if aq_data is None:
+            return None
+
+        hours = aq_data.get("hours", [])
+        if not hours:
+            return None
+
+        try:
+            value = int(hours[-1].get("value", 0))
+        except (ValueError, TypeError):
+            return None
+
+        status = aq_data.get("status", {})
+        return AirQuality(
+            value=value,
+            status_current=int(status.get("current", 0)),
+        )
+
+    # ── Installation / Services operations ───────────────────────────────────
+
+    async def list_installations(self) -> list[Installation]:
+        """List all securitas direct installations.
+
+        Returns:
+            A list of Installation instances.
+        """
+        content = {
+            "operationName": "mkInstallationList",
+            "query": INSTALLATION_LIST_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "mkInstallationList",
+            InstallationListEnvelope,
+        )
+        return list(envelope.data.xSInstallations.installations)
+
+    async def get_services(self, installation: Installation) -> list[Service]:
+        """Fetch services for an installation.
+
+        Calls xSSrv, extracts the capabilities JWT token and stores it in
+        ``self._capabilities[installation.number]``, extracts alarm partitions,
+        and builds the Service list.
+
+        Args:
+            installation: The installation to query.
+
+        Returns:
+            A list of Service instances.
+        """
+        content = {
+            "operationName": "Srv",
+            "variables": {"numinst": installation.number, "uuid": self.uuid},
+            "query": SERVICES_QUERY,
+        }
+        await self._check_authentication_token()
+        self._register_installation(installation)
+        response = await self._execute_raw(content, "Srv", installation=installation)
+
+        installation_data = (response.get("data") or {}).get("xSSrv") or {}
+        installation_data = installation_data.get("installation")
+        if installation_data is None:
+            _LOGGER.warning(
+                "API returned no installation data for %s", installation.number
+            )
+            return []
+
+        raw_data = installation_data.get("services")
+        if raw_data is None:
+            _LOGGER.warning("API returned no services for %s", installation.number)
+            return []
+
+        capabilities = installation_data.get("capabilities")
+        if capabilities is None:
+            _LOGGER.warning("API returned no capabilities for %s", installation.number)
+            return []
+
+        # Decode capabilities JWT and store in self._capabilities
+        try:
+            token = jwt.decode(
+                capabilities,
+                algorithms=["HS256"],
+                options={"verify_signature": False},
+            )
+        except jwt.exceptions.DecodeError as err:
+            raise SecuritasDirectError("Failed to decode capabilities token") from err
+
+        expiry = datetime.min
+        if "exp" in token:
+            expiry = datetime.fromtimestamp(token["exp"])
+
+        self._capabilities[installation.number] = (capabilities, expiry)
+
+        # Build service list
+        result: list[Service] = []
+        for item in raw_data:
+            attribute_list: list[Attribute] = []
+            attributes = item.get("attributes")
+            if attributes and attributes.get("attributes"):
+                for attr_item in attributes["attributes"]:
+                    attribute_list.append(
+                        Attribute(
+                            name=attr_item["name"],
+                            value=attr_item["value"],
+                            active=bool(attr_item["active"]),
+                        )
+                    )
+
+            result.append(
+                Service(
+                    id=int(item["idService"]),
+                    id_service=int(item["idService"]),
+                    active=bool(item["active"]),
+                    visible=bool(item["visible"]),
+                    bde=bool(item["bde"]),
+                    is_premium=bool(item["isPremium"]),
+                    cod_oper=bool(item["codOper"]),
+                    total_device=int(item.get("totalDevice", 0)),
+                    request=item["request"],
+                    multiple_req=False,
+                    num_devices_mr=0,
+                    secret_word=False,
+                    min_wrapper_version=item["minWrapperVersion"],
+                    description=item.get("description", ""),
+                    attributes=attribute_list,
+                    listdiy=[],
+                    listprompt=[],
+                    installation=installation,
+                )
+            )
+        return result
