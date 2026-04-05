@@ -32,8 +32,8 @@ async def async_setup_entry(
     if coordinator is None:
         return
 
-    installation: Installation = coordinator._installation
-    service_id: int = coordinator._service.id
+    installation: Installation = coordinator.installation
+    service_id: int = coordinator.service.id
 
     sensors: list[SensorEntity] = [
         SentinelTemperature(coordinator, installation, service_id),

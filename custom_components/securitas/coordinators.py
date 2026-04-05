@@ -173,21 +173,21 @@ class SentinelCoordinator(DataUpdateCoordinator[SentinelData]):
         )
         self._client = client
         self._queue = queue
-        self._installation = installation
-        self._service = service
+        self.installation = installation
+        self.service = service
         self._zone = zone
 
     async def _fetch_data(self) -> SentinelData:
         """Fetch sentinel and air quality data sequentially."""
         sentinel = await self._queue.submit(
             self._client.get_sentinel_data,
-            self._installation,
-            self._service,
+            self.installation,
+            self.service,
             priority=ApiQueue.BACKGROUND,
         )
         air_quality = await self._queue.submit(
             self._client.get_air_quality_data,
-            self._installation,
+            self.installation,
             self._zone,
             priority=ApiQueue.BACKGROUND,
         )

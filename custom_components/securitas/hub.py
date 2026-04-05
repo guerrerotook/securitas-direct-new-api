@@ -368,7 +368,10 @@ class SecuritasHub:
             self.camera_timestamps[key] = thumbnail.timestamp
         return image_bytes
 
-    def _get_camera_coordinator(self, installation: Installation):
+    def _get_camera_coordinator(
+        self,
+        installation: Installation,  # pylint: disable=unused-argument
+    ):
         """Return the CameraCoordinator for an installation, if available."""
         entry_id = self.config_entry.entry_id if self.config_entry else None
         if entry_id is None:
