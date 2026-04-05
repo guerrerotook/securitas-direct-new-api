@@ -2366,7 +2366,9 @@ class TestExecuteTransition:
         alarm.client.disarm_alarm = AsyncMock(
             return_value=OperationStatus(protom_response="D", operation_status="OK")
         )
-        await alarm._execute_transition(AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF))
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
         alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
 
     async def test_disarm_compound_fallback_to_darm1(self):
@@ -2379,7 +2381,9 @@ class TestExecuteTransition:
                 OperationStatus(protom_response="D", operation_status="OK"),
             ]
         )
-        await alarm._execute_transition(AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF))
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
         calls = alarm.client.disarm_alarm.call_args_list
         assert calls[0].args == (alarm.installation, "DARM1DARMPERI")
         assert calls[1].args == (alarm.installation, "DARM1")
@@ -2394,7 +2398,9 @@ class TestExecuteTransition:
                 OperationStatus(protom_response="D", operation_status="OK"),
             ]
         )
-        await alarm._execute_transition(AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF))
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
         assert "DARM1DARMPERI" in alarm._resolver.unsupported
 
     async def test_409_not_treated_as_unsupported(self):

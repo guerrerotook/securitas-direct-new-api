@@ -215,5 +215,3 @@ class TestLogDetail:
         assert err.log_detail() == "late body"
         err.response_body = {"raw": "data"}
         assert "raw" in err.log_detail()
-
-

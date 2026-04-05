@@ -54,7 +54,9 @@ class TestLogin:
         after = int(datetime.now().timestamp() * 1000)
         assert before <= api.login_timestamp <= after
 
-    async def test_2fa_required_raises_two_factor_required_error(self, api, mock_execute):
+    async def test_2fa_required_raises_two_factor_required_error(
+        self, api, mock_execute
+    ):
         mock_execute.return_value = login_response(need_2fa=True)
 
         with pytest.raises(TwoFactorRequiredError):
@@ -335,7 +337,9 @@ class TestLoginEdgeCases:
         with pytest.raises(TwoFactorRequiredError):
             await api.login()
 
-    async def test_error_response_with_data_raises_authentication_error(self, api, mock_execute):
+    async def test_error_response_with_data_raises_authentication_error(
+        self, api, mock_execute
+    ):
         """When _execute_request raises SecuritasDirectError whose response data
         has xSLoginToken but needDeviceAuthorization is False, AuthenticationError is raised."""
         error_response = {

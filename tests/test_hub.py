@@ -201,6 +201,7 @@ class TestChangeLockMode:
         hub._LOCK_CMD_MIN_WAIT = 0
         installation = make_installation()
         hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+
         def _make_no_response_err():
             _e = SecuritasDirectError(
                 "alarm-manager.error_no_response_to_request", http_status=200

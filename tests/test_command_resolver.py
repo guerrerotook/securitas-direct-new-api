@@ -61,7 +61,10 @@ class TestAlarmState:
         """AlarmState can be used as dict key."""
         state = AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON)
         d = {state: "test"}
-        assert d[AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON)] == "test"
+        assert (
+            d[AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON)]
+            == "test"
+        )
 
 
 class TestCommandResolverDisarm:

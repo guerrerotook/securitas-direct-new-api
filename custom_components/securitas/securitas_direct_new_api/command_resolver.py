@@ -34,7 +34,9 @@ SECURITAS_STATE_TO_ALARM_STATE: dict[SecuritasState, AlarmState] = {
     SecuritasState.TOTAL: PROTO_TO_STATE[ProtoCode.TOTAL],
     SecuritasState.PERI_ONLY: PROTO_TO_STATE[ProtoCode.PERIMETER_ONLY],
     SecuritasState.PARTIAL_DAY_PERI: PROTO_TO_STATE[ProtoCode.PARTIAL_DAY_PERIMETER],
-    SecuritasState.PARTIAL_NIGHT_PERI: PROTO_TO_STATE[ProtoCode.PARTIAL_NIGHT_PERIMETER],
+    SecuritasState.PARTIAL_NIGHT_PERI: PROTO_TO_STATE[
+        ProtoCode.PARTIAL_NIGHT_PERIMETER
+    ],
     SecuritasState.TOTAL_PERI: PROTO_TO_STATE[ProtoCode.TOTAL_PERIMETER],
 }
 
@@ -111,7 +113,8 @@ class CommandResolver:
             steps.extend(self._resolve_disarm(current))
             steps.extend(
                 self._resolve_arm(
-                    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF), target
+                    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF),
+                    target,
                 )
             )
             return steps

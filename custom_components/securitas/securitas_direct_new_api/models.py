@@ -94,27 +94,59 @@ def parse_proto_code(code: str) -> ProtoCode:
 # ── Mapping tables ────────────────────────────────────────────────────────────
 
 PROTO_TO_STATE: dict[ProtoCode, AlarmState] = {
-    ProtoCode.DISARMED: AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF),
-    ProtoCode.PERIMETER_ONLY: AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.ON),
-    ProtoCode.PARTIAL_DAY: AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF),
-    ProtoCode.PARTIAL_NIGHT: AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF),
-    ProtoCode.PARTIAL_DAY_PERIMETER: AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.ON),
-    ProtoCode.PARTIAL_NIGHT_PERIMETER: AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON),
-    ProtoCode.TOTAL: AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF),
-    ProtoCode.TOTAL_PERIMETER: AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON),
+    ProtoCode.DISARMED: AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
+    ),
+    ProtoCode.PERIMETER_ONLY: AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.ON
+    ),
+    ProtoCode.PARTIAL_DAY: AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF
+    ),
+    ProtoCode.PARTIAL_NIGHT: AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF
+    ),
+    ProtoCode.PARTIAL_DAY_PERIMETER: AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.ON
+    ),
+    ProtoCode.PARTIAL_NIGHT_PERIMETER: AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON
+    ),
+    ProtoCode.TOTAL: AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF
+    ),
+    ProtoCode.TOTAL_PERIMETER: AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON
+    ),
 }
 
 STATE_TO_PROTO: dict[AlarmState, ProtoCode] = {v: k for k, v in PROTO_TO_STATE.items()}
 
 STATE_TO_COMMAND: dict[AlarmState, ArmCommand] = {
-    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF): ArmCommand.DISARM,
-    AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.ON): ArmCommand.ARM_PERIMETER,
-    AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF): ArmCommand.ARM_DAY,
-    AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF): ArmCommand.ARM_NIGHT,
-    AlarmState(interior=InteriorMode.DAY, perimeter=PerimeterMode.ON): ArmCommand.ARM_DAY_PERIMETER,
-    AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON): ArmCommand.ARM_NIGHT_PERIMETER,
-    AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF): ArmCommand.ARM_TOTAL,
-    AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON): ArmCommand.ARM_TOTAL_PERIMETER,
+    AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
+    ): ArmCommand.DISARM,
+    AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.ON
+    ): ArmCommand.ARM_PERIMETER,
+    AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF
+    ): ArmCommand.ARM_DAY,
+    AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF
+    ): ArmCommand.ARM_NIGHT,
+    AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.ON
+    ): ArmCommand.ARM_DAY_PERIMETER,
+    AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON
+    ): ArmCommand.ARM_NIGHT_PERIMETER,
+    AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF
+    ): ArmCommand.ARM_TOTAL,
+    AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON
+    ): ArmCommand.ARM_TOTAL_PERIMETER,
 }
 
 
@@ -220,9 +252,18 @@ class SmartLock(BaseModel):
     def _coerce_none_strings(cls, data: Any) -> Any:
         """Coerce None values to empty strings for required str fields."""
         if isinstance(data, dict):
-            for key in ("deviceId", "device_id", "referenceId", "reference_id",
-                        "zoneId", "zone_id", "serialNumber", "serial_number",
-                        "family", "label"):
+            for key in (
+                "deviceId",
+                "device_id",
+                "referenceId",
+                "reference_id",
+                "zoneId",
+                "zone_id",
+                "serialNumber",
+                "serial_number",
+                "family",
+                "label",
+            ):
                 if key in data and data[key] is None:
                     data[key] = ""
         return data

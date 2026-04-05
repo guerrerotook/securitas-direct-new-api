@@ -828,7 +828,9 @@ class ApiManager(SecuritasHttpClient):
         return SmartLock(
             res=raw.get("res"),
             device_id=raw.get("deviceNumber") or device_id,
-            features=LockFeatures.model_validate(raw["features"]) if raw.get("features") else None,
+            features=LockFeatures.model_validate(raw["features"])
+            if raw.get("features")
+            else None,
         )
 
     async def get_lock_current_mode(

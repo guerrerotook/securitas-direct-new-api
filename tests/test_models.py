@@ -137,11 +137,21 @@ class TestAlarmState:
 
     def test_usable_as_dict_key(self):
         states = {
-            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF): "disarmed",
-            AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF): "armed_away",
+            AlarmState(
+                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
+            ): "disarmed",
+            AlarmState(
+                interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF
+            ): "armed_away",
         }
-        assert states[AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)] == "disarmed"
-        assert states[AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)] == "armed_away"
+        assert (
+            states[AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)]
+            == "disarmed"
+        )
+        assert (
+            states[AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)]
+            == "armed_away"
+        )
 
     def test_hash_equal_objects_same_hash(self):
         a = AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON)
@@ -261,16 +271,19 @@ class TestStateToCommand:
 
 
 class TestParseProtoCode:
-    @pytest.mark.parametrize("code,expected", [
-        ("D", ProtoCode.DISARMED),
-        ("E", ProtoCode.PERIMETER_ONLY),
-        ("P", ProtoCode.PARTIAL_DAY),
-        ("Q", ProtoCode.PARTIAL_NIGHT),
-        ("B", ProtoCode.PARTIAL_DAY_PERIMETER),
-        ("C", ProtoCode.PARTIAL_NIGHT_PERIMETER),
-        ("T", ProtoCode.TOTAL),
-        ("A", ProtoCode.TOTAL_PERIMETER),
-    ])
+    @pytest.mark.parametrize(
+        "code,expected",
+        [
+            ("D", ProtoCode.DISARMED),
+            ("E", ProtoCode.PERIMETER_ONLY),
+            ("P", ProtoCode.PARTIAL_DAY),
+            ("Q", ProtoCode.PARTIAL_NIGHT),
+            ("B", ProtoCode.PARTIAL_DAY_PERIMETER),
+            ("C", ProtoCode.PARTIAL_NIGHT_PERIMETER),
+            ("T", ProtoCode.TOTAL),
+            ("A", ProtoCode.TOTAL_PERIMETER),
+        ],
+    )
     def test_valid_codes(self, code, expected):
         assert parse_proto_code(code) == expected
 
@@ -623,7 +636,9 @@ class TestThumbnailResponse:
 
 class TestSentinel:
     def test_construction(self):
-        s = Sentinel(alias="Living Room", air_quality="GOOD", humidity=55, temperature=22)
+        s = Sentinel(
+            alias="Living Room", air_quality="GOOD", humidity=55, temperature=22
+        )
         assert s.alias == "Living Room"
         assert s.air_quality == "GOOD"
         assert s.humidity == 55
@@ -631,7 +646,13 @@ class TestSentinel:
         assert s.zone == ""
 
     def test_with_zone(self):
-        s = Sentinel(alias="Bedroom", air_quality="MODERATE", humidity=60, temperature=20, zone="zone-3")
+        s = Sentinel(
+            alias="Bedroom",
+            air_quality="MODERATE",
+            humidity=60,
+            temperature=20,
+            zone="zone-3",
+        )
         assert s.zone == "zone-3"
 
 

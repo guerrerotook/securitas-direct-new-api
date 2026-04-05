@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 
 from custom_components.securitas.securitas_direct_new_api.responses import (
     ArmStatusEnvelope,
     CheckAlarmEnvelope,
     ErrorResponse,
     GeneralStatusEnvelope,
-    GraphQLError,
     GraphQLErrorData,
     InstallationListEnvelope,
     LoginEnvelope,
@@ -116,13 +114,7 @@ class TestInstallationListEnvelope:
         assert inst.city == "Madrid"
 
     def test_parse_empty_installation_list(self):
-        payload = {
-            "data": {
-                "xSInstallations": {
-                    "installations": []
-                }
-            }
-        }
+        payload = {"data": {"xSInstallations": {"installations": []}}}
         env = InstallationListEnvelope.model_validate(payload)
         assert env.data.xSInstallations.installations == []
 
@@ -177,11 +169,7 @@ class TestGeneralStatusEnvelope:
         assert env.data.xSStatus.wifi_connected is False
 
     def test_all_optional_fields_none(self):
-        payload = {
-            "data": {
-                "xSStatus": {}
-            }
-        }
+        payload = {"data": {"xSStatus": {}}}
         env = GeneralStatusEnvelope.model_validate(payload)
         status = env.data.xSStatus
         assert status.status is None
@@ -397,11 +385,7 @@ class TestThumbnailEnvelope:
         assert thumb.image == "base64data=="
 
     def test_parse_all_none(self):
-        payload = {
-            "data": {
-                "xSGetThumbnail": {}
-            }
-        }
+        payload = {"data": {"xSGetThumbnail": {}}}
         env = ThumbnailEnvelope.model_validate(payload)
         thumb = env.data.xSGetThumbnail
         assert thumb.id_signal is None
@@ -444,11 +428,7 @@ class TestErrorResponse:
         assert data.auth_phones[0]["phone"] == "+34 555 000 111"
 
     def test_parse_simple_error_no_data(self):
-        payload = {
-            "errors": [
-                {"message": "Internal Server Error"}
-            ]
-        }
+        payload = {"errors": [{"message": "Internal Server Error"}]}
         err = ErrorResponse.model_validate(payload)
         assert len(err.errors) == 1
         assert err.errors[0].message == "Internal Server Error"
@@ -468,11 +448,13 @@ class TestErrorResponse:
 
     def test_graphql_error_data_alias_mapping(self):
         """Verify hyphenated aliases auth-otp-hash and auth-phones are parsed."""
-        data = GraphQLErrorData.model_validate({
-            "auth-otp-hash": "myhash",
-            "auth-phones": [{"id": 2, "phone": "+1 555 9999"}],
-            "needDeviceAuthorization": False,
-        })
+        data = GraphQLErrorData.model_validate(
+            {
+                "auth-otp-hash": "myhash",
+                "auth-phones": [{"id": 2, "phone": "+1 555 9999"}],
+                "needDeviceAuthorization": False,
+            }
+        )
         assert data.auth_otp_hash == "myhash"
         assert data.auth_phones is not None
         assert data.auth_phones[0]["id"] == 2

@@ -83,7 +83,9 @@ class LoginEnvelope(BaseModel):
         refresh_token: str | None = Field(None, alias="refreshToken")
         legals: Any | None = None
         change_password: bool | None = Field(None, alias="changePassword")
-        need_device_authorization: bool | None = Field(None, alias="needDeviceAuthorization")
+        need_device_authorization: bool | None = Field(
+            None, alias="needDeviceAuthorization"
+        )
         main_user: bool | None = Field(None, alias="mainUser")
 
     class Data(BaseModel):
@@ -104,7 +106,9 @@ class RefreshLoginEnvelope(BaseModel):
         refresh_token: str | None = Field(None, alias="refreshToken")
         legals: Any | None = None
         change_password: bool | None = Field(None, alias="changePassword")
-        need_device_authorization: bool | None = Field(None, alias="needDeviceAuthorization")
+        need_device_authorization: bool | None = Field(
+            None, alias="needDeviceAuthorization"
+        )
         main_user: bool | None = Field(None, alias="mainUser")
 
     class Data(BaseModel):
@@ -444,7 +448,9 @@ class GraphQLErrorData(BaseModel):
 
     reason: str | None = None
     status: int | None = None
-    need_device_authorization: bool | None = Field(None, alias="needDeviceAuthorization")
+    need_device_authorization: bool | None = Field(
+        None, alias="needDeviceAuthorization"
+    )
     auth_otp_hash: str | None = Field(None, alias="auth-otp-hash")
     auth_phones: list[dict[str, Any]] | None = Field(None, alias="auth-phones")
 
