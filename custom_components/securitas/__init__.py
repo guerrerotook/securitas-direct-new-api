@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from datetime import timedelta
 import logging
 from pathlib import Path
 import time
@@ -55,10 +56,17 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
+    SENTINEL_SERVICE_NAMES,
     SIGNAL_CAMERA_STATE,
     SIGNAL_CAMERA_UPDATE,
     SIGNAL_FULL_IMAGE_UPDATE,
     SIGNAL_XSSTATUS_UPDATE,
+)
+from .coordinators import (
+    AlarmCoordinator,
+    CameraCoordinator,
+    LockCoordinator,
+    SentinelCoordinator,
 )
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     SecuritasDirectDevice,
@@ -421,11 +429,71 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Unable to connect to Securitas Direct: %s", err.log_detail())
             raise ConfigEntryNotReady("Unable to connect to Securitas Direct") from None
 
+        # ── Create coordinators ──────────────────────────────────────
+        scan_interval = timedelta(seconds=config[CONF_SCAN_INTERVAL])
+        alarm_coord: AlarmCoordinator | None = None
+        sentinel_coord: SentinelCoordinator | None = None
+        lock_coord: LockCoordinator | None = None
+
+        # Use the first installation for shared coordinators.
+        # (Each config entry is scoped to one installation via CONF_INSTALLATION.)
+        if devices:
+            first_installation = devices[0].installation
+            alarm_coord = AlarmCoordinator(
+                hass,
+                client.client,
+                client.api_queue,
+                first_installation,
+                update_interval=scan_interval,
+            )
+
+            # Discover sentinel and lock services from cached service list
+            try:
+                services = await client.get_services(first_installation)
+            except SecuritasDirectError:
+                services = []
+
+            # Sentinel coordinator — needs a sentinel service and its zone
+            for service in services:
+                if service.request in SENTINEL_SERVICE_NAMES:
+                    zone = service.attributes[0].value if service.attributes else ""
+                    sentinel_coord = SentinelCoordinator(
+                        hass,
+                        client.client,
+                        client.api_queue,
+                        first_installation,
+                        service=service,
+                        zone=zone,
+                    )
+                    break  # one sentinel coordinator per installation
+
+            # Lock coordinator — if any lock service exists
+            lock_service_names = {"DOORLOCK", "DANALOCK"}
+            if any(s.request in lock_service_names for s in services):
+                lock_coord = LockCoordinator(
+                    hass,
+                    client.client,
+                    client.api_queue,
+                    first_installation,
+                    update_interval=scan_interval,
+                )
+
         # Store per-entry data
         hass.data[DOMAIN][entry.entry_id] = {
             "hub": client,
             "devices": devices,
+            "alarm_coordinator": alarm_coord,
+            "sentinel_coordinator": sentinel_coord,
+            "lock_coordinator": lock_coord,
         }
+
+        # Schedule non-blocking first refresh for each coordinator
+        for coord in filter(None, [alarm_coord, sentinel_coord, lock_coord]):
+            entry.async_create_background_task(
+                hass,
+                coord.async_refresh(),
+                f"securitas_refresh_{coord.name}",
+            )
 
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -443,9 +511,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _discover_cameras(
+    hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
     entry_data: dict,
+    entry: ConfigEntry,
 ) -> None:
     """Discover camera devices for an installation and add entities."""
     from .button import SecuritasCaptureButton
@@ -474,6 +544,21 @@ async def _discover_cameras(
     )
 
     if cameras:
+        # Create and store camera coordinator
+        camera_coord = CameraCoordinator(
+            hass,
+            hub.client,
+            hub.api_queue,
+            installation,
+            cameras=cameras,
+        )
+        entry_data["camera_coordinator"] = camera_coord
+        entry.async_create_background_task(
+            hass,
+            camera_coord.async_refresh(),
+            "securitas_camera_refresh",
+        )
+
         camera_add = entry_data.get("camera_add_entities")
         button_add = entry_data.get("button_add_entities")
         _LOGGER.debug(
@@ -640,7 +725,7 @@ async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> No
 
     for device in devices:
         installation = device.installation
-        await _discover_cameras(client, installation, entry_data)
+        await _discover_cameras(hass, client, installation, entry_data, entry)
         await _discover_locks(hass, client, installation, entry_data)
 
 

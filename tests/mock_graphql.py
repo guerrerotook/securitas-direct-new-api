@@ -630,6 +630,10 @@ def queue_standard_setup(
         "CheckAlarmStatus", graphql_alarm_status(proto=proto, numinst=numinst)
     )
 
+    # AlarmCoordinator fires a background refresh via get_general_status (Status)
+    # immediately after setup — provide a default so it doesn't crash.
+    server.set_default_response("Status", graphql_general_status(status=proto))
+
 
 def make_doorlock_service() -> dict:
     """Return a DOORLOCK service dict for use in graphql_services."""

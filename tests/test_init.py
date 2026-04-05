@@ -1669,6 +1669,7 @@ class TestDiscoverCameras:
         from custom_components.securitas import _discover_cameras
         from tests.conftest import make_installation
 
+        hass = MagicMock()
         hub = MagicMock()
         hub.get_camera_devices = AsyncMock(return_value=[])
         camera_add = MagicMock()
@@ -1677,8 +1678,9 @@ class TestDiscoverCameras:
             "camera_add_entities": camera_add,
             "button_add_entities": button_add,
         }
+        entry = MagicMock()
 
-        await _discover_cameras(hub, make_installation(), entry_data)
+        await _discover_cameras(hass, hub, make_installation(), entry_data, entry)
 
         camera_add.assert_not_called()
         button_add.assert_not_called()
@@ -1690,6 +1692,7 @@ class TestDiscoverCameras:
         from custom_components.securitas import _discover_cameras
         from tests.conftest import make_installation
 
+        hass = MagicMock()
         hub = MagicMock()
         hub.get_camera_devices = AsyncMock(side_effect=Exception("network failure"))
         camera_add = MagicMock()
@@ -1698,10 +1701,11 @@ class TestDiscoverCameras:
             "camera_add_entities": camera_add,
             "button_add_entities": button_add,
         }
+        entry = MagicMock()
 
         with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
             # Must not raise
-            await _discover_cameras(hub, make_installation(), entry_data)
+            await _discover_cameras(hass, hub, make_installation(), entry_data, entry)
 
         assert "Failed to get camera devices" in caplog.text
         camera_add.assert_not_called()

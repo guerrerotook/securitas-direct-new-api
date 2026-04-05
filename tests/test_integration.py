@@ -105,6 +105,10 @@ async def test_setup_makes_only_expected_api_calls(
     synchronous platform setup, this test will fail — forcing the developer to
     either move the call to the background discovery task or explicitly update
     the allowed list.
+
+    The AlarmCoordinator fires a background refresh (Status) immediately after
+    setup via async_create_background_task.  This may or may not have executed
+    by the time we inspect the call log, so Status is allowed but not required.
     """
     queue_standard_setup(mock_server)
 
@@ -127,8 +131,17 @@ async def test_setup_makes_only_expected_api_calls(
         await async_setup_entry(hass, entry)
 
     operations = [op for op, _, _ in mock_server.calls]
-    assert operations == ["mkLoginToken", "mkInstallationList", "Srv"], (
+    # The first three calls are the synchronous setup path.
+    # "Status" may appear if the AlarmCoordinator background refresh has fired.
+    required = ["mkLoginToken", "mkInstallationList", "Srv"]
+    background_allowed = {"Status"}
+    assert operations[:3] == required, (
         f"Unexpected API calls during setup: {operations}. "
+        "New calls should run in _async_discover_devices, not during setup."
+    )
+    extra = set(operations[3:]) - background_allowed
+    assert not extra, (
+        f"Unexpected extra API calls during setup: {extra}. "
         "New calls should run in _async_discover_devices, not during setup."
     )
 
