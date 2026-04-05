@@ -44,7 +44,7 @@ async def async_setup_entry(
     async_add_entities(sensors, False)
 
 
-class SentinelTemperature(CoordinatorEntity[SentinelCoordinator], SensorEntity):
+class SentinelTemperature(CoordinatorEntity[SentinelCoordinator], SensorEntity):  # type: ignore[reportIncompatibleVariableOverride]
     """Sentinel temperature sensor."""
 
     _attr_has_entity_name = False
@@ -65,14 +65,14 @@ class SentinelTemperature(CoordinatorEntity[SentinelCoordinator], SensorEntity):
         self._attr_name = f"{installation.alias} Temperature"
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> float | None:  # type: ignore[reportIncompatibleVariableOverride]
         """Return the temperature from coordinator data."""
         if self.coordinator.data is None or self.coordinator.data.sentinel is None:
             return None
         return self.coordinator.data.sentinel.temperature
 
 
-class SentinelHumidity(CoordinatorEntity[SentinelCoordinator], SensorEntity):
+class SentinelHumidity(CoordinatorEntity[SentinelCoordinator], SensorEntity):  # type: ignore[reportIncompatibleVariableOverride]
     """Sentinel Humidity sensor."""
 
     _attr_has_entity_name = False
@@ -93,7 +93,7 @@ class SentinelHumidity(CoordinatorEntity[SentinelCoordinator], SensorEntity):
         self._attr_name = f"{installation.alias} Humidity"
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> float | None:  # type: ignore[reportIncompatibleVariableOverride]
         """Return the humidity from coordinator data."""
         if self.coordinator.data is None or self.coordinator.data.sentinel is None:
             return None
@@ -107,7 +107,7 @@ AIR_QUALITY_LABELS: dict[str, str] = {
 }
 
 
-class SentinelAirQuality(CoordinatorEntity[SentinelCoordinator], SensorEntity):
+class SentinelAirQuality(CoordinatorEntity[SentinelCoordinator], SensorEntity):  # type: ignore[reportIncompatibleVariableOverride]
     """Air Quality sensor — numeric value from the most recent hourly reading."""
 
     _attr_has_entity_name = False
@@ -126,14 +126,14 @@ class SentinelAirQuality(CoordinatorEntity[SentinelCoordinator], SensorEntity):
         self._attr_name = f"{installation.alias} Air Quality"
 
     @property
-    def native_value(self) -> int | None:
+    def native_value(self) -> int | None:  # type: ignore[reportIncompatibleVariableOverride]
         """Return the air quality value from coordinator data."""
         if self.coordinator.data is None or self.coordinator.data.air_quality is None:
             return None
         return self.coordinator.data.air_quality.value
 
 
-class SentinelAirQualityStatus(CoordinatorEntity[SentinelCoordinator], SensorEntity):
+class SentinelAirQualityStatus(CoordinatorEntity[SentinelCoordinator], SensorEntity):  # type: ignore[reportIncompatibleVariableOverride]
     """Air Quality Status sensor — categorical status (Good/Fair/Poor/Bad)."""
 
     _attr_has_entity_name = False
@@ -153,7 +153,7 @@ class SentinelAirQualityStatus(CoordinatorEntity[SentinelCoordinator], SensorEnt
         self._attr_name = f"{installation.alias} Air Quality Status"
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> str | None:  # type: ignore[reportIncompatibleVariableOverride]
         """Return the air quality status label from coordinator data."""
         if self.coordinator.data is None or self.coordinator.data.air_quality is None:
             return None

@@ -35,7 +35,7 @@ async def async_setup_entry(
     async_add_entities(entities, False)
 
 
-class WifiConnectedSensor(CoordinatorEntity[AlarmCoordinator], BinarySensorEntity):
+class WifiConnectedSensor(CoordinatorEntity[AlarmCoordinator], BinarySensorEntity):  # type: ignore[reportIncompatibleVariableOverride]
     """WiFi connection status from coordinator — no independent polling."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
@@ -53,7 +53,7 @@ class WifiConnectedSensor(CoordinatorEntity[AlarmCoordinator], BinarySensorEntit
         self._attr_device_info = securitas_device_info(installation)
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool | None:  # type: ignore[reportIncompatibleVariableOverride]
         """Return True if WiFi is connected."""
         if self.coordinator.data is None:
             return None
