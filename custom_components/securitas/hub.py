@@ -241,39 +241,51 @@ class SecuritasHub:
             self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
         )
 
-        # Delegate capture + polling entirely to the client
-        thumbnail = await self._api_queue.submit(
-            self.client.capture_image,
-            installation,
-            device.code,
-            device.device_type,
-            device.zone_id,
-            priority=ApiQueue.FOREGROUND,
-        )
-
-        image_bytes = self._validate_and_store_image(
-            thumbnail, installation, device, log_warnings=True
-        )
-
-        self._camera_capturing.discard(capture_key)
-        if image_bytes is not None:
-            async_dispatcher_send(
-                self.hass, SIGNAL_CAMERA_UPDATE, installation.number, device.zone_id
-            )
-        else:
-            # Even if no image arrived, clear the capturing state on the frontend
-            async_dispatcher_send(
-                self.hass, SIGNAL_CAMERA_STATE, installation.number, device.zone_id
+        try:
+            # Delegate capture + polling entirely to the client
+            thumbnail = await self._api_queue.submit(
+                self.client.capture_image,
+                installation,
+                device.code,
+                device.device_type,
+                device.zone_id,
+                priority=ApiQueue.FOREGROUND,
             )
 
-        # Fetch the full-resolution image as an independent background task so it
-        # is not cancelled if the camera-proxy request that triggered this times out.
-        if thumbnail is not None and thumbnail.id_signal and thumbnail.signal_type:
-            self.hass.async_create_task(
-                self._fetch_and_store_full_image(installation, device, thumbnail)
+            image_bytes = self._validate_and_store_image(
+                thumbnail, installation, device, log_warnings=True
             )
 
-        return image_bytes
+            if image_bytes is not None:
+                async_dispatcher_send(
+                    self.hass,
+                    SIGNAL_CAMERA_UPDATE,
+                    installation.number,
+                    device.zone_id,
+                )
+            else:
+                async_dispatcher_send(
+                    self.hass,
+                    SIGNAL_CAMERA_STATE,
+                    installation.number,
+                    device.zone_id,
+                )
+
+            # Fetch full-resolution image in background
+            if (
+                thumbnail is not None
+                and thumbnail.id_signal
+                and thumbnail.signal_type
+            ):
+                self.hass.async_create_task(
+                    self._fetch_and_store_full_image(
+                        installation, device, thumbnail
+                    )
+                )
+
+            return image_bytes
+        finally:
+            self._camera_capturing.discard(capture_key)
 
     async def fetch_latest_thumbnail(
         self, installation: Installation, camera_device: CameraDevice

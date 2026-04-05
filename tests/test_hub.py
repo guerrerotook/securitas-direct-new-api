@@ -406,8 +406,8 @@ class TestCaptureImage:
             device.zone_id,
         )
 
-    async def test_capturing_flag_set_during_error(self):
-        """The capturing flag stays set when the client raises (no try/finally)."""
+    async def test_capturing_flag_cleared_on_error(self):
+        """The capturing flag is cleared even when the client raises."""
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -421,8 +421,8 @@ class TestCaptureImage:
         ):
             await hub.capture_image(installation, device)
 
-        # Flag stays set because queue.submit raises before cleanup
-        assert hub.is_capturing(installation.number, device.zone_id)
+        # Flag is cleared in finally block even on error
+        assert not hub.is_capturing(installation.number, device.zone_id)
 
 
 class TestFullImageCapture:
