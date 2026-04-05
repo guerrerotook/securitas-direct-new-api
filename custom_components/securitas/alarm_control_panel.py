@@ -103,7 +103,7 @@ async def async_setup_entry(
     )
 
 
-class SecuritasAlarm(  # type: ignore[reportIncompatibleVariableOverride]
+class SecuritasAlarm(  # type: ignore[override]
     CoordinatorEntity[AlarmCoordinator], alarm.AlarmControlPanelEntity
 ):
     """Representation of a Securitas alarm status."""
@@ -121,7 +121,9 @@ class SecuritasAlarm(  # type: ignore[reportIncompatibleVariableOverride]
         super().__init__(coordinator)
         self._installation = installation
         self._client = client
-        self._attr_device_info: DeviceInfo = securitas_device_info(installation)  # type: ignore[reportIncompatibleVariableOverride]
+        self._attr_device_info: DeviceInfo = (  # type: ignore[override]
+            securitas_device_info(installation)
+        )
         self._state: str | None = None
         self._last_state: str | None = None
         self._device: str = installation.address

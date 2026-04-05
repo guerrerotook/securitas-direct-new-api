@@ -51,7 +51,10 @@ async def async_setup_entry(
     entry_data["lock_add_entities"] = async_add_entities
 
 
-class SecuritasLock(CoordinatorEntity[LockCoordinator], lock.LockEntity):  # type: ignore[reportIncompatibleVariableOverride]
+class SecuritasLock(  # type: ignore[override]
+    CoordinatorEntity[LockCoordinator],
+    lock.LockEntity,
+):
     """Representation of a Securitas Direct smart lock."""
 
     _attr_has_entity_name = False
