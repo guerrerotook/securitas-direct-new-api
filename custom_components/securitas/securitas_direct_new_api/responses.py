@@ -1,5 +1,7 @@
 """GraphQL response envelope models for the Securitas Direct API."""
 
+# pylint: disable=missing-class-docstring
+
 from __future__ import annotations
 
 from typing import Any
@@ -26,7 +28,7 @@ class _ResMsgRef(BaseModel):
 
     res: str
     msg: str | None = None
-    reference_id: str = Field(alias="referenceId")
+    reference_id: str = Field(validation_alias="referenceId")
 
 
 class PanelError(BaseModel):
@@ -36,9 +38,11 @@ class PanelError(BaseModel):
 
     code: str | None = None
     type: str | None = None
-    allow_forcing: bool | None = Field(None, alias="allowForcing")
-    exceptions_number: int | None = Field(None, alias="exceptionsNumber")
-    reference_id: str | None = Field(None, alias="referenceId")
+    allow_forcing: bool | None = Field(default=None, validation_alias="allowForcing")
+    exceptions_number: int | None = Field(
+        default=None, validation_alias="exceptionsNumber"
+    )
+    reference_id: str | None = Field(default=None, validation_alias="referenceId")
     suid: str | None = None
 
 
@@ -51,9 +55,11 @@ class _OperationResult(BaseModel):
     msg: str | None = None
     status: str | None = None
     numinst: str | None = None
-    protom_response: str | None = Field(None, alias="protomResponse")
-    protom_response_data: str | None = Field(None, alias="protomResponseDate")
-    request_id: str | None = Field(None, alias="requestId")
+    protom_response: str | None = Field(default=None, validation_alias="protomResponse")
+    protom_response_data: str | None = Field(
+        None, validation_alias="protomResponseDate"
+    )
+    request_id: str | None = Field(default=None, validation_alias="requestId")
     error: PanelError | None = None
 
 
@@ -63,8 +69,10 @@ class _GeneralStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     status: str | None = None
-    timestamp_update: str | None = Field(None, alias="timestampUpdate")
-    wifi_connected: bool | None = Field(None, alias="wifiConnected")
+    timestamp_update: str | None = Field(
+        default=None, validation_alias="timestampUpdate"
+    )
+    wifi_connected: bool | None = Field(default=None, validation_alias="wifiConnected")
     exceptions: list[dict[str, Any]] | None = None
 
 
@@ -80,13 +88,15 @@ class LoginEnvelope(BaseModel):
         res: str
         msg: str | None = None
         hash: str | None = None  # noqa: A003
-        refresh_token: str | None = Field(None, alias="refreshToken")
+        refresh_token: str | None = Field(default=None, validation_alias="refreshToken")
         legals: Any | None = None
-        change_password: bool | None = Field(None, alias="changePassword")
-        need_device_authorization: bool | None = Field(
-            None, alias="needDeviceAuthorization"
+        change_password: bool | None = Field(
+            default=None, validation_alias="changePassword"
         )
-        main_user: bool | None = Field(None, alias="mainUser")
+        need_device_authorization: bool | None = Field(
+            None, validation_alias="needDeviceAuthorization"
+        )
+        main_user: bool | None = Field(default=None, validation_alias="mainUser")
 
     class Data(BaseModel):
         xSLoginToken: "LoginEnvelope._Inner"  # noqa: N815
@@ -103,13 +113,15 @@ class RefreshLoginEnvelope(BaseModel):
         res: str
         msg: str | None = None
         hash: str | None = None  # noqa: A003
-        refresh_token: str | None = Field(None, alias="refreshToken")
+        refresh_token: str | None = Field(default=None, validation_alias="refreshToken")
         legals: Any | None = None
-        change_password: bool | None = Field(None, alias="changePassword")
-        need_device_authorization: bool | None = Field(
-            None, alias="needDeviceAuthorization"
+        change_password: bool | None = Field(
+            default=None, validation_alias="changePassword"
         )
-        main_user: bool | None = Field(None, alias="mainUser")
+        need_device_authorization: bool | None = Field(
+            None, validation_alias="needDeviceAuthorization"
+        )
+        main_user: bool | None = Field(default=None, validation_alias="mainUser")
 
     class Data(BaseModel):
         xSRefreshLogin: "RefreshLoginEnvelope._Inner"  # noqa: N815
@@ -126,7 +138,7 @@ class ValidateDeviceEnvelope(BaseModel):
         res: str
         msg: str | None = None
         hash: str | None = None  # noqa: A003
-        refresh_token: str | None = Field(None, alias="refreshToken")
+        refresh_token: str | None = Field(default=None, validation_alias="refreshToken")
         legals: Any | None = None
 
     class Data(BaseModel):
@@ -168,7 +180,9 @@ class ServicesEnvelope(BaseModel):
         numinst: str | None = None
         capabilities: str | None = None
         services: list[dict[str, Any]] = Field(default_factory=list)
-        config_repo_user: dict[str, Any] | None = Field(None, alias="configRepoUser")
+        config_repo_user: dict[str, Any] | None = Field(
+            None, validation_alias="configRepoUser"
+        )
 
     class _Inner(BaseModel):
         res: str
@@ -254,7 +268,7 @@ class GetExceptionsEnvelope(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
 
         status: str | None = None
-        device_type: str | None = Field(None, alias="deviceType")
+        device_type: str | None = Field(default=None, validation_alias="deviceType")
         alias: str | None = None
 
     class _Inner(BaseModel):
@@ -297,7 +311,7 @@ class DanalockConfigStatusEnvelope(BaseModel):
 
         res: str
         msg: str | None = None
-        device_number: str | None = Field(None, alias="deviceNumber")
+        device_number: str | None = Field(default=None, validation_alias="deviceNumber")
         features: LockFeatures | None = None
 
     class Data(BaseModel):
@@ -313,7 +327,9 @@ class LockModeEnvelope(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
 
         res: str
-        smartlock_info: list[dict[str, Any]] | None = Field(None, alias="smartlockInfo")
+        smartlock_info: list[dict[str, Any]] | None = Field(
+            None, validation_alias="smartlockInfo"
+        )
 
     class Data(BaseModel):
         xSGetLockCurrentMode: "LockModeEnvelope._Inner"  # noqa: N815
@@ -338,7 +354,9 @@ class ChangeLockModeStatusEnvelope(BaseModel):
 
         res: str
         msg: str | None = None
-        protom_response: str | None = Field(None, alias="protomResponse")
+        protom_response: str | None = Field(
+            default=None, validation_alias="protomResponse"
+        )
         status: str | None = None
 
     class Data(BaseModel):
@@ -449,10 +467,12 @@ class GraphQLErrorData(BaseModel):
     reason: str | None = None
     status: int | None = None
     need_device_authorization: bool | None = Field(
-        None, alias="needDeviceAuthorization"
+        None, validation_alias="needDeviceAuthorization"
     )
-    auth_otp_hash: str | None = Field(None, alias="auth-otp-hash")
-    auth_phones: list[dict[str, Any]] | None = Field(None, alias="auth-phones")
+    auth_otp_hash: str | None = Field(default=None, validation_alias="auth-otp-hash")
+    auth_phones: list[dict[str, Any]] | None = Field(
+        None, validation_alias="auth-phones"
+    )
 
 
 class GraphQLError(BaseModel):

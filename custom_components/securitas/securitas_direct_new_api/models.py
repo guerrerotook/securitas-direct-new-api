@@ -87,8 +87,8 @@ def parse_proto_code(code: str) -> ProtoCode:
     """
     try:
         return ProtoCode(code)
-    except ValueError:
-        raise UnexpectedStateError(code)
+    except ValueError as exc:
+        raise UnexpectedStateError(code) from exc
 
 
 # ── Mapping tables ────────────────────────────────────────────────────────────
@@ -158,15 +158,15 @@ class Installation(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    number: str = Field("", alias="numinst")
+    number: str = Field(default="", validation_alias="numinst")
     alias: str = ""
     panel: str = ""
     type: str = ""
     name: str = ""
-    last_name: str = Field("", alias="surname")
+    last_name: str = Field(default="", validation_alias="surname")
     address: str = ""
     city: str = ""
-    postal_code: str = Field("", alias="postcode")
+    postal_code: str = Field(default="", validation_alias="postcode")
     province: str = ""
     email: str = ""
     phone: str = ""
@@ -180,13 +180,13 @@ class OperationStatus(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    operation_status: str = Field("", alias="res")
-    message: str = Field("", alias="msg")
+    operation_status: str = Field(default="", validation_alias="res")
+    message: str = Field(default="", validation_alias="msg")
     status: str = ""
-    installation_number: str = Field("", alias="numinst")
-    protom_response: str = Field("", alias="protomResponse")
-    protom_response_data: str = Field("", alias="protomResponseDate")
-    request_id: str = Field("", alias="requestId")
+    installation_number: str = Field(default="", validation_alias="numinst")
+    protom_response: str = Field(default="", validation_alias="protomResponse")
+    protom_response_data: str = Field(default="", validation_alias="protomResponseDate")
+    request_id: str = Field(default="", validation_alias="requestId")
     error: dict | None = None
 
     @field_validator("error", mode="before")
@@ -204,8 +204,10 @@ class SStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     status: str | None = None
-    timestamp_update: str | None = Field(None, alias="timestampUpdate")
-    wifi_connected: bool | None = Field(None, alias="wifiConnected")
+    timestamp_update: str | None = Field(
+        default=None, validation_alias="timestampUpdate"
+    )
+    wifi_connected: bool | None = Field(default=None, validation_alias="wifiConnected")
 
 
 class OtpPhone(BaseModel):
@@ -227,8 +229,8 @@ class LockFeatures(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    hold_back_latch_time: int = Field(0, alias="holdBackLatchTime")
-    calibration_type: int = Field(0, alias="calibrationType")
+    hold_back_latch_time: int = Field(default=0, validation_alias="holdBackLatchTime")
+    calibration_type: int = Field(default=0, validation_alias="calibrationType")
     autolock: LockAutolock | None = None
 
 
@@ -239,10 +241,10 @@ class SmartLock(BaseModel):
 
     res: str | None = None
     location: str | None = None
-    device_id: str = Field("", alias="deviceId")
-    reference_id: str = Field("", alias="referenceId")
-    zone_id: str = Field("", alias="zoneId")
-    serial_number: str = Field("", alias="serialNumber")
+    device_id: str = Field(default="", validation_alias="deviceId")
+    reference_id: str = Field(default="", validation_alias="referenceId")
+    zone_id: str = Field(default="", validation_alias="zoneId")
+    serial_number: str = Field(default="", validation_alias="serialNumber")
     family: str = ""
     label: str = ""
     features: LockFeatures | None = None
@@ -275,9 +277,9 @@ class SmartLockMode(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     res: str | None = None
-    lock_status: str = Field("", alias="lockStatus")
-    device_id: str = Field("", alias="deviceId")
-    status_timestamp: str = Field("", alias="statusTimestamp")
+    lock_status: str = Field(default="", validation_alias="lockStatus")
+    device_id: str = Field(default="", validation_alias="deviceId")
+    status_timestamp: str = Field(default="", validation_alias="statusTimestamp")
 
 
 class SmartLockModeStatus(BaseModel):
@@ -285,9 +287,9 @@ class SmartLockModeStatus(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    request_id: str = Field("", alias="requestId")
-    message: str = Field("", alias="msg")
-    protom_response: str = Field("", alias="protomResponse")
+    request_id: str = Field(default="", validation_alias="requestId")
+    message: str = Field(default="", validation_alias="msg")
+    protom_response: str = Field(default="", validation_alias="protomResponse")
     status: str = ""
 
 
@@ -298,10 +300,10 @@ class CameraDevice(BaseModel):
 
     id: str = ""
     code: int = 0
-    zone_id: str = Field("", alias="zoneId")
+    zone_id: str = Field(default="", validation_alias="zoneId")
     name: str = ""
-    device_type: str = Field("", alias="type")
-    serial_number: str | None = Field(None, alias="serialNumber")
+    device_type: str = Field(default="", validation_alias="type")
+    serial_number: str | None = Field(default=None, validation_alias="serialNumber")
 
 
 class ThumbnailResponse(BaseModel):
@@ -309,11 +311,11 @@ class ThumbnailResponse(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id_signal: str | None = Field(None, alias="idSignal")
-    device_code: str | None = Field(None, alias="deviceCode")
-    device_alias: str | None = Field(None, alias="deviceAlias")
+    id_signal: str | None = Field(default=None, validation_alias="idSignal")
+    device_code: str | None = Field(default=None, validation_alias="deviceCode")
+    device_alias: str | None = Field(default=None, validation_alias="deviceAlias")
     timestamp: str | None = None
-    signal_type: str | None = Field(None, alias="signalType")
+    signal_type: str | None = Field(default=None, validation_alias="signalType")
     image: str | None = None
 
 
@@ -348,18 +350,18 @@ class Service(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: int = 0
-    id_service: int = Field(0, alias="idService")
+    id_service: int = Field(default=0, validation_alias="idService")
     active: bool = False
     visible: bool = False
     bde: bool = False
-    is_premium: bool = Field(False, alias="isPremium")
-    cod_oper: bool = Field(False, alias="codOper")
-    total_device: int = Field(0, alias="totalDevice")
+    is_premium: bool = Field(default=False, validation_alias="isPremium")
+    cod_oper: bool = Field(default=False, validation_alias="codOper")
+    total_device: int = Field(default=0, validation_alias="totalDevice")
     request: str = ""
     multiple_req: bool = False
     num_devices_mr: int = 0
     secret_word: bool = False
-    min_wrapper_version: Any = Field(None, alias="minWrapperVersion")
+    min_wrapper_version: Any = Field(default=None, validation_alias="minWrapperVersion")
     description: str = ""
     attributes: list[Attribute] = Field(default_factory=list)
     listdiy: list[Any] = Field(default_factory=list)
