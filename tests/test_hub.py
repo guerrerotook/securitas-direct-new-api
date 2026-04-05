@@ -201,18 +201,17 @@ class TestChangeLockMode:
         hub._LOCK_CMD_MIN_WAIT = 0
         installation = make_installation()
         hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
+        def _make_no_response_err():
+            _e = SecuritasDirectError(
+                "alarm-manager.error_no_response_to_request", http_status=200
+            )
+            _e.response_body = {"errors": [], "data": None}
+            return _e
+
         hub.session.check_change_lock_mode = AsyncMock(
             side_effect=[
-                SecuritasDirectError(
-                    "alarm-manager.error_no_response_to_request",
-                    {"errors": [], "data": None},
-                    http_status=200,
-                ),
-                SecuritasDirectError(
-                    "alarm-manager.error_no_response_to_request",
-                    {"errors": [], "data": None},
-                    http_status=200,
-                ),
+                _make_no_response_err(),
+                _make_no_response_err(),
                 self._STATUS_NOT_FOUND,
             ]
         )
@@ -227,13 +226,11 @@ class TestChangeLockMode:
         hub._LOCK_CMD_MIN_WAIT = 0
         installation = make_installation()
         hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
-        hub.session.check_change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError(
-                "alarm-manager.error_no_response_to_request",
-                {"errors": [], "data": None},
-                http_status=200,
-            )
+        _no_response_err = SecuritasDirectError(
+            "alarm-manager.error_no_response_to_request", http_status=200
         )
+        _no_response_err.response_body = {"errors": [], "data": None}
+        hub.session.check_change_lock_mode = AsyncMock(side_effect=_no_response_err)
 
         with patch.object(hub, "_max_poll_attempts", return_value=3):
             with pytest.raises(SecuritasDirectError, match="error_no_response"):
@@ -247,13 +244,9 @@ class TestChangeLockMode:
         hub._LOCK_CMD_MIN_WAIT = 0
         installation = make_installation()
         hub.session.submit_change_lock_mode_request = AsyncMock(return_value="ref-123")
-        hub.session.check_change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError(
-                "some-other-error",
-                {"errors": [], "data": None},
-                http_status=500,
-            )
-        )
+        _other_err = SecuritasDirectError("some-other-error", http_status=500)
+        _other_err.response_body = {"errors": [], "data": None}
+        hub.session.check_change_lock_mode = AsyncMock(side_effect=_other_err)
 
         with pytest.raises(SecuritasDirectError, match="some-other-error"):
             await hub.change_lock_mode(installation, True, "device-1")

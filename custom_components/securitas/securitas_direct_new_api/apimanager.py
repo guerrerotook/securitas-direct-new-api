@@ -183,9 +183,9 @@ class ApiManager(SecuritasHttpClient):
             self.authentication_otp_challenge_value = None
         except SecuritasDirectError as err:
             # the API call fails but we want the phone data in the response
-            if len(err.args) > 1 and err.args[1] is not None:
+            if err.response_body is not None:
                 try:
-                    error_data = err.args[1]["errors"][0]["data"]
+                    error_data = err.response_body["errors"][0]["data"]
                     # Only return OTP data if it actually contains OTP fields;
                     # otherwise the error is unrelated (e.g. invalid code format)
                     if "auth-otp-hash" in error_data or "auth-phones" in error_data:
@@ -294,35 +294,46 @@ class ApiManager(SecuritasHttpClient):
         try:
             response = await self._execute_request(content, "mkLoginToken")
         except SecuritasDirectError as err:
-            result_json: dict | None = err.args[1] if len(err.args) > 1 else None
-            message = str(err.args[0]) if err.args else "Login failed"
+            result_json: dict | None = err.response_body
             if result_json is not None:
                 # Check for account-blocked error (60052)
                 if self._is_account_blocked(result_json):
-                    raise AccountBlockedError(message, result_json) from err
+                    _new = AccountBlockedError(err.message)
+                    _new.response_body = result_json
+                    raise _new from err
                 if result_json.get("data"):
                     data = result_json["data"]
                     if data.get("xSLoginToken"):
                         if data["xSLoginToken"].get("needDeviceAuthorization"):
                             # needs a 2FA
-                            raise Login2FAError(message, result_json) from err
-                    raise LoginError(message, result_json) from err
+                            _new = Login2FAError(err.message)
+                            _new.response_body = result_json
+                            raise _new from err
+                    _new = LoginError(err.message)
+                    _new.response_body = result_json
+                    raise _new from err
                 # Has response dict = server responded with error
                 # → login failure.
-                raise LoginError(message, result_json) from err
+                _new = LoginError(err.message)
+                _new.response_body = result_json
+                raise _new from err
             # No response dict = network/connection error
             # → let propagate.
             raise
 
         if "errors" in response:
             _LOGGER.error("Login error %s", response["errors"][0]["message"])
-            raise LoginError(response["errors"][0]["message"], response)
+            _new_err = LoginError(response["errors"][0]["message"])
+            _new_err.response_body = response
+            raise _new_err
 
         # Check if 2FA is required even on successful response
         login_data = self._extract_response_data(response, "xSLoginToken")
         if login_data.get("needDeviceAuthorization", False):
             # needs a 2FA
-            raise Login2FAError("2FA authentication required", response)
+            _new_err = Login2FAError("2FA authentication required")
+            _new_err.response_body = response
+            raise _new_err
 
         if login_data.get("refreshToken"):
             self.refresh_token_value = login_data["refreshToken"]

@@ -225,9 +225,6 @@ class SecuritasHttpClient:
                     continue
                 raise SecuritasDirectError(
                     f"Connection error with URL {self.api_url}: {os_err}",
-                    None,
-                    headers,
-                    content,
                 ) from err
 
             _LOGGER.debug(
@@ -248,9 +245,6 @@ class SecuritasHttpClient:
                     )
                     raise SecuritasDirectError(
                         f"HTTP {http_status} from Securitas API ({operation})",
-                        None,
-                        headers,
-                        content,
                         http_status=http_status,
                     )
                 retry_after = response.headers.get("Retry-After")
@@ -275,9 +269,6 @@ class SecuritasHttpClient:
                 )
                 raise SecuritasDirectError(
                     f"HTTP {http_status} from Securitas API ({operation})",
-                    None,
-                    headers,
-                    content,
                     http_status=http_status,
                 )
 
@@ -287,7 +278,7 @@ class SecuritasHttpClient:
             response_dict = json.loads(response_text)
         except json.JSONDecodeError as err:
             _LOGGER.error("Problems decoding response %s", response_text)
-            raise SecuritasDirectError(err.msg, None, headers, content) from err
+            raise SecuritasDirectError(err.msg) from err
 
         if "errors" in response_dict:
             errors = response_dict["errors"]
@@ -296,12 +287,9 @@ class SecuritasHttpClient:
                 and "data" in errors
                 and "reason" in errors["data"]
             ):
-                raise SecuritasDirectError(
-                    errors["data"]["reason"],
-                    response_dict,
-                    headers,
-                    content,
-                )
+                _err = SecuritasDirectError(errors["data"]["reason"])
+                _err.response_body = response_dict
+                raise _err
             if isinstance(errors, list) and errors:
                 # GraphQL error response. When there's no "data" key at all, it's
                 # a pure validation error (e.g. BAD_USER_INPUT). When there IS a
@@ -358,13 +346,9 @@ class SecuritasHttpClient:
                             content, operation, installation=installation, _retried=True
                         )
 
-                    raise SecuritasDirectError(
-                        message,
-                        response_dict,
-                        headers,
-                        content,
-                        http_status=error_status,
-                    )
+                    _err = SecuritasDirectError(message, http_status=error_status)
+                    _err.response_body = response_dict
+                    raise _err
 
         return response_dict
 
@@ -403,9 +387,9 @@ class SecuritasHttpClient:
         data = self._extract_response_data(response, response_field)
 
         if check_ok and data.get("res") != "OK":
-            raise SecuritasDirectError(
-                data.get("msg", f"{operation_name} failed"), response
-            )
+            _err = SecuritasDirectError(data.get("msg", f"{operation_name} failed"))
+            _err.response_body = response
+            raise _err
 
         return data
 
@@ -482,10 +466,14 @@ class SecuritasHttpClient:
         """
         data = response.get("data")
         if data is None:
-            raise SecuritasDirectError(f"{field_name}: no data in response", response)
+            _err = SecuritasDirectError(f"{field_name}: no data in response")
+            _err.response_body = response
+            raise _err
         result = data.get(field_name)
         if result is None:
-            raise SecuritasDirectError(f"{field_name} response is None", response)
+            _err = SecuritasDirectError(f"{field_name} response is None")
+            _err.response_body = response
+            raise _err
         return result
 
     async def _poll_operation(

@@ -72,7 +72,7 @@ class TestLogin:
         self, api, mock_execute
     ):
         """Connection error (no response data) re-raises SecuritasDirectError."""
-        mock_execute.side_effect = SecuritasDirectError("Connection failed", None)
+        mock_execute.side_effect = SecuritasDirectError("Connection failed")
 
         with pytest.raises(SecuritasDirectError):
             await api.login()
@@ -221,7 +221,7 @@ class TestCheckAuthenticationToken:
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=SecuritasDirectError("boom", None))
+        api.refresh_token = AsyncMock(side_effect=SecuritasDirectError("boom"))
         api.login = AsyncMock()
 
         await api._check_authentication_token()
@@ -328,9 +328,9 @@ class TestLoginEdgeCases:
                 }
             }
         }
-        mock_execute.side_effect = SecuritasDirectError(
-            "Session expired", error_response
-        )
+        _err = SecuritasDirectError("Session expired")
+        _err.response_body = error_response
+        mock_execute.side_effect = _err
 
         with pytest.raises(Login2FAError):
             await api.login()
@@ -347,7 +347,9 @@ class TestLoginEdgeCases:
                 }
             }
         }
-        mock_execute.side_effect = SecuritasDirectError("Some error", error_response)
+        _err = SecuritasDirectError("Some error")
+        _err.response_body = error_response
+        mock_execute.side_effect = _err
 
         with pytest.raises(LoginError):
             await api.login()
@@ -410,7 +412,9 @@ class TestValidateDeviceEdgeCases:
                 }
             ]
         }
-        mock_execute.side_effect = SecuritasDirectError("Unauthorized", error_response)
+        _err = SecuritasDirectError("Unauthorized")
+        _err.response_body = error_response
+        mock_execute.side_effect = _err
 
         result = await api.validate_device(
             otp_succeed=False, auth_otp_hash="", sms_code=""
@@ -468,7 +472,7 @@ class TestRefreshTokenEdgeCases:
         api.authentication_token_exp = datetime.min  # expired
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(
-            side_effect=SecuritasDirectError("Refresh failed", None)
+            side_effect=SecuritasDirectError("Refresh failed")
         )
         api.login = AsyncMock()
 

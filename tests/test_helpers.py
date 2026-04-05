@@ -132,7 +132,7 @@ class TestPollOperation:
 
     async def test_raises_on_non_transient_error(self, api):
         """Should immediately raise non-transient errors (no http_status)."""
-        check_fn = AsyncMock(side_effect=SecuritasDirectError("bad request", None))
+        check_fn = AsyncMock(side_effect=SecuritasDirectError("bad request"))
         api.delay_check_operation = 0
 
         with pytest.raises(SecuritasDirectError, match="bad request"):
@@ -199,7 +199,7 @@ class TestCheckAuthenticationTokenErrorHandling:
         api.authentication_token = None
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(
-            side_effect=SecuritasDirectError("refresh failed", None)
+            side_effect=SecuritasDirectError("refresh failed")
         )
         api.login = AsyncMock()
 
@@ -266,7 +266,7 @@ class TestLogoutTokenCleanup:
         api.authentication_token_exp = datetime.now()
         api.login_timestamp = 12345
 
-        mock_execute.side_effect = SecuritasDirectError("logout failed", None)
+        mock_execute.side_effect = SecuritasDirectError("logout failed")
 
         with pytest.raises(SecuritasDirectError):
             await api.logout()

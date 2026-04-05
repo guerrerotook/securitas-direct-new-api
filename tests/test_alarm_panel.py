@@ -2302,14 +2302,9 @@ class TestDynamicDisarm:
         alarm._last_proto_code = "T"  # resolver needs armed proto
         alarm._notify_error = MagicMock()
 
-        alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError(
-                "API error message",
-                {"response": "data"},
-                {"auth": "secret-token"},
-                {"query": "mutation"},
-            )
-        )
+        _err = SecuritasDirectError("API error message", http_status=500)
+        _err.response_body = {"response": "data", "auth": "secret-token"}
+        alarm.client.disarm_alarm = AsyncMock(side_effect=_err)
 
         await alarm.async_alarm_disarm()
 
