@@ -156,6 +156,25 @@
     },
     "response": {
       "data": {
+        "xSChangeSmartlockModeStatus": {
+          "res": "OK",
+          "msg": "alarm-manager.error_status_not_found",
+          "protomResponse": "01",
+          "status": null,
+          "__typename": "XSCommonPanelPollingStatus"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSGetLockCurrentMode",
+      "variables": {
+        "numinst": "100003"
+      }
+    },
+    "response": {
+      "data": {
         "xSGetLockCurrentMode": {
           "res": "OK",
           "smartlockInfo": [
