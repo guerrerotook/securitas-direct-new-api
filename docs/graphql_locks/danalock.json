@@ -1,0 +1,174 @@
+[
+  {
+    "request": {
+      "operationName": "xSGetDanalockConfig",
+      "variables": {
+        "numinst": "100003",
+        "panel": "PANEL03",
+        "deviceType": "DR",
+        "deviceId": "01"
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetDanalockConfig": {
+          "res": "OK",
+          "msg": "alarm-manager.processed.request",
+          "referenceId": "439132f4-32d9-4aa7-9199-f71a4bb99d3d",
+          "__typename": "XSCommonPollingResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSGetDanalockConfigStatus",
+      "variables": {
+        "numinst": "100003",
+        "referenceId": "439132f4-32d9-4aa7-9199-f71a4bb99d3d",
+        "counter": 1
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetDanalockConfigStatus": {
+          "res": "WAIT",
+          "msg": "peripherals.processing.request",
+          "action": null,
+          "deviceNumber": null,
+          "asyncCylinder": null,
+          "batteryLowPercenteage": null,
+          "lockBeforePartialArm": null,
+          "lockBeforeFullArm": null,
+          "unlockAfterDisarm": null,
+          "lockBeforePerimeterArm": null,
+          "periodicBitExtension": null,
+          "autoLockTime": null,
+          "features": {
+            "holdBackLatchTime": null,
+            "calibrationType": null,
+            "autolock": {
+              "active": null,
+              "timeout": null,
+              "__typename": "XSSmartlockAutolock"
+            },
+            "__typename": "XSSmartlockFeatures"
+          },
+          "__typename": "XSDanalockConfigResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSGetDanalockConfigStatus",
+      "variables": {
+        "numinst": "100003",
+        "referenceId": "439132f4-32d9-4aa7-9199-f71a4bb99d3d",
+        "counter": 2
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetDanalockConfigStatus": {
+          "res": "OK",
+          "msg": "peripherals.lock-configuration-request.success",
+          "action": "0",
+          "deviceNumber": "001",
+          "asyncCylinder": "0",
+          "batteryLowPercenteage": "40",
+          "lockBeforePartialArm": "1",
+          "lockBeforeFullArm": "1",
+          "unlockAfterDisarm": "0",
+          "lockBeforePerimeterArm": "1",
+          "periodicBitExtension": "10080",
+          "autoLockTime": "000",
+          "features": {
+            "holdBackLatchTime": 3,
+            "calibrationType": 0,
+            "autolock": {
+              "active": null,
+              "timeout": null,
+              "__typename": "XSSmartlockAutolock"
+            },
+            "__typename": "XSSmartlockFeatures"
+          },
+          "__typename": "XSDanalockConfigResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSChangeSmartlockMode",
+      "variables": {
+        "numinst": "100003",
+        "panel": "PANEL03",
+        "deviceId": "01",
+        "deviceType": "DR",
+        "lock": false
+      }
+    },
+    "response": {
+      "data": {
+        "xSChangeSmartlockMode": {
+          "res": "OK",
+          "msg": "alarm-manager.processed.request",
+          "referenceId": "a04ebbf6-40ff-4b23-af98-197959a63807",
+          "__typename": "XSCommonPollingResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSChangeSmartlockModeStatus",
+      "variables": {
+        "numinst": "100003",
+        "panel": "PANEL03",
+        "deviceId": "01",
+        "referenceId": "a04ebbf6-40ff-4b23-af98-197959a63807",
+        "counter": 1
+      }
+    },
+    "response": {
+      "data": {
+        "xSChangeSmartlockModeStatus": {
+          "res": "WAIT",
+          "msg": "peripherals.processing.request",
+          "protomResponse": null,
+          "status": null,
+          "__typename": "XSCommonPanelPollingStatus"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSChangeSmartlockModeStatus",
+      "variables": {
+        "numinst": "100003",
+        "panel": "PANEL03",
+        "deviceId": "01",
+        "referenceId": "a04ebbf6-40ff-4b23-af98-197959a63807",
+        "counter": 3
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetLockCurrentMode": {
+          "res": "OK",
+          "smartlockInfo": [
+            {
+              "lockStatus": "1",
+              "deviceId": "01",
+              "statusTimestamp": "1772728828235",
+              "__typename": "XSSmartlockInfo"
+            }
+          ],
+          "__typename": "XSSmartlockCurrentModeResponse"
+        }
+      }
+    }
+  }
+]

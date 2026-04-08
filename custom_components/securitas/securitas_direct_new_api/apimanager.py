@@ -921,10 +921,13 @@ class ApiManager(SecuritasHttpClient):
             return []
         modes: list[SmartLockMode] = []
         for info in raw_data.get("smartlockInfo") or []:
+            lock_status = info.get("lockStatus")
+            if lock_status is None:
+                continue
             modes.append(
                 SmartLockMode(
                     res=raw_data["res"],
-                    lockStatus=info.get("lockStatus", "0"),
+                    lockStatus=lock_status,
                     deviceId=info.get("deviceId", ""),
                     statusTimestamp=info.get("statusTimestamp", ""),
                 )

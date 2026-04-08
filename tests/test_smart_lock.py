@@ -315,6 +315,97 @@ class TestGetLockCurrentMode:
         assert result[1].lockStatus == "1"
         assert result[1].statusTimestamp == "222"
 
+    async def test_null_lock_status_entry_skipped(
+        self, authed_api, mock_execute, installation
+    ):
+        """Entries with lockStatus: null are phantom — skip them entirely."""
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": [
+                        {
+                            "lockStatus": None,
+                            "deviceId": "01",
+                            "statusTimestamp": "0",
+                        }
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert result == []
+
+    async def test_null_lock_status_entry_skipped_keeps_real(
+        self, authed_api, mock_execute, installation
+    ):
+        """Phantom null-status entry is skipped; real entry for same device kept."""
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": [
+                        {
+                            "lockStatus": None,
+                            "deviceId": "01",
+                            "statusTimestamp": "0",
+                        },
+                        {
+                            "lockStatus": "1",
+                            "deviceId": "01",
+                            "statusTimestamp": "1775579984679",
+                        },
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert len(result) == 1
+        assert result[0].deviceId == "01"
+        assert result[0].lockStatus == "1"
+        assert result[0].statusTimestamp == "1775579984679"
+
+    async def test_null_lock_status_skipped_other_devices_kept(
+        self, authed_api, mock_execute, installation
+    ):
+        """Phantom entry skipped; other devices unaffected."""
+        mock_execute.return_value = {
+            "data": {
+                "xSGetLockCurrentMode": {
+                    "res": "OK",
+                    "smartlockInfo": [
+                        {
+                            "lockStatus": None,
+                            "deviceId": "01",
+                            "statusTimestamp": "0",
+                        },
+                        {
+                            "lockStatus": "1",
+                            "deviceId": "01",
+                            "statusTimestamp": "1775579984679",
+                        },
+                        {
+                            "lockStatus": "2",
+                            "deviceId": "02",
+                            "statusTimestamp": "1775579984680",
+                        },
+                    ],
+                }
+            }
+        }
+
+        result = await authed_api.get_lock_current_mode(installation)
+
+        assert len(result) == 2
+        assert result[0].deviceId == "01"
+        assert result[0].lockStatus == "1"
+        assert result[1].deviceId == "02"
+        assert result[1].lockStatus == "2"
+
     async def test_status_timestamp_extracted(
         self, authed_api, mock_execute, installation
     ):
