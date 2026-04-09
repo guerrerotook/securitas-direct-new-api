@@ -352,6 +352,20 @@ class TestSentinelAirQuality:
         await sensor.async_update()
         assert sensor._attr_native_value is None
 
+    async def test_async_update_with_null_value(self):
+        """When hours is null, value is None — sensor should not update."""
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=None, status_current=1)
+        )
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQuality(fetcher, make_installation())
+        sensor.hass = MagicMock()
+
+        await sensor.async_update()
+        assert sensor._attr_native_value is None
+
     def test_unique_id_contains_airquality(self):
         service = make_service()
         installation = make_installation()
@@ -407,6 +421,20 @@ class TestSentinelAirQualityStatus:
 
         await sensor.async_update()
         assert sensor._attr_native_value == "Poor"
+
+    async def test_status_works_when_value_is_none(self):
+        """Issue #428: status should show 'Good' even when hours is null."""
+        client = make_client()
+        client.get_sentinel = AsyncMock(return_value=_mock_sentinel_with_zone())
+        client.get_air_quality = AsyncMock(
+            return_value=AirQuality(value=None, status_current=1)
+        )
+        fetcher = _make_fetcher(client=client)
+        sensor = SentinelAirQualityStatus(fetcher, make_installation())
+        sensor.hass = MagicMock()
+
+        await sensor.async_update()
+        assert sensor._attr_native_value == "Good"
 
     async def test_unknown_status_code(self, caplog):
         """Unknown codes fall back to the raw code string and log a warning."""

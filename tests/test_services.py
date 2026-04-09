@@ -557,25 +557,33 @@ class TestGetAirQualityData:
 
         assert result is None
 
-    async def test_returns_none_when_no_hours(
+    async def test_returns_status_when_hours_null(
         self, authed_api, mock_execute, installation
     ):
-        """Returns None when hours list is empty."""
-        mock_execute.return_value = {
-            "data": {
-                "xSAirQuality": {
-                    "res": "OK",
-                    "data": {
-                        "status": {"current": 1},
-                        "hours": [],
-                    },
-                }
-            }
-        }
+        """Returns status even when hours is null (issue #428 — Chipre)."""
+        from tests.mock_graphql import graphql_air_quality
+
+        mock_execute.return_value = graphql_air_quality(status_current=1, hours=None)
 
         result = await authed_api.get_air_quality_data(installation, "1")
 
-        assert result is None
+        assert result is not None
+        assert result.value is None
+        assert result.status_current == 1
+
+    async def test_returns_status_when_hours_empty(
+        self, authed_api, mock_execute, installation
+    ):
+        """Returns status even when hours list is empty."""
+        from tests.mock_graphql import graphql_air_quality
+
+        mock_execute.return_value = graphql_air_quality(status_current=1, hours=[])
+
+        result = await authed_api.get_air_quality_data(installation, "1")
+
+        assert result is not None
+        assert result.value is None
+        assert result.status_current == 1
 
     async def test_returns_none_when_xsairquality_null(
         self, authed_api, mock_execute, installation

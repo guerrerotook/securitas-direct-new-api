@@ -209,7 +209,7 @@ class SentinelAirQuality(SecuritasEntity, SensorEntity):
         if self.hass is None:
             return
         air_quality = await self._fetcher.fetch()
-        if air_quality is not None:
+        if air_quality is not None and air_quality.value is not None:
             self._attr_native_value = air_quality.value
 
 

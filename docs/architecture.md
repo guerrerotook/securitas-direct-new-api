@@ -410,10 +410,12 @@ Four sensor types:
 
 - **SentinelTemperature** — Temperature in Celsius
 - **SentinelHumidity** — Humidity as percentage
-- **SentinelAirQuality** — Numeric air quality index
+- **SentinelAirQuality** — Numeric air quality index (may remain unknown if the installation only provides status data)
 - **SentinelAirQualityStatus** — Categorical air quality label (Good, Fair, Poor)
 
 Sentinel sensors are discovered during platform setup by scanning services for ones whose `request` field matches any name in `SENTINEL_SERVICE_NAMES` (currently "CONFORT", "COMFORTO", "COMFORT"). No API calls are made during setup — entities start with unknown state. Data is populated by `async_update()` using HA's built-in polling at a 30-minute interval (see [Polling intervals](#polling-intervals)).
+
+**Air quality data model:** The `xSAirQuality` API may return hourly readings (`hours` array) and/or a categorical status code. Some installations provide both; others return `hours: null` with only the status. `AirQuality.value` is `int | None` to handle this — the status sensor works regardless, while the numeric sensor only updates when hourly data is available.
 
 ### Binary sensors (`binary_sensor.py`)
 

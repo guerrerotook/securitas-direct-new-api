@@ -113,7 +113,7 @@ class Sentinel:
 class AirQuality:
     """Air Quality from xSAirQuality API."""
 
-    value: int
+    value: int | None
     status_current: int = 0
 
 
