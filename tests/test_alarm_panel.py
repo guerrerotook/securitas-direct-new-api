@@ -2830,19 +2830,22 @@ class TestNotifyError:
 
 
 class TestNotificationContent:
-    """Tests for arming exception notification content."""
+    """Tests for arming exception notification content (event-driven path)."""
 
-    def _make_exc(self, exceptions=None):
-        if exceptions is None:
-            exceptions = [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}]
-        return ArmingExceptionError("ref-123", "suid-123", exceptions)
+    def _make_event(self, zones=None):
+        """Create a mock event with zones data as fired by _fire_arming_exception_event."""
+        if zones is None:
+            zones = ["Kitchen Door"]
+        event = MagicMock()
+        event.data = {"zones": zones}
+        return event
 
     def test_persistent_notification_content(self):
         """Persistent notification has correct title, message, and notification_id."""
         alarm = make_alarm()
-        exc = self._make_exc()
+        event = self._make_event()
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         # Find the persistent_notification.create call
         calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
@@ -2856,9 +2859,9 @@ class TestNotificationContent:
         """Mobile notification includes the per-installation tag."""
         alarm = make_alarm()
         alarm.client.config["notify_group"] = "mobile_app_phone"
-        exc = self._make_exc()
+        event = self._make_event()
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
         mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
@@ -2869,9 +2872,9 @@ class TestNotificationContent:
         """Mobile notification has Force Arm and Cancel action buttons."""
         alarm = make_alarm()
         alarm.client.config["notify_group"] = "mobile_app_phone"
-        exc = self._make_exc()
+        event = self._make_event()
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
         mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
@@ -2886,9 +2889,9 @@ class TestNotificationContent:
         """Mobile message is shorter than persistent message and contains sensor alias."""
         alarm = make_alarm()
         alarm.client.config["notify_group"] = "mobile_app_phone"
-        exc = self._make_exc()
+        event = self._make_event()
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
@@ -2902,11 +2905,9 @@ class TestNotificationContent:
         """Multiple sensors appear in both persistent and mobile notifications."""
         alarm = make_alarm()
         alarm.client.config["notify_group"] = "mobile_app_phone"
-        exc = self._make_exc(
-            exceptions=[{"alias": "Kitchen Door"}, {"alias": "Bedroom Window"}]
-        )
+        event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
@@ -2919,25 +2920,25 @@ class TestNotificationContent:
         assert "Bedroom Window" in mobile_msg
 
     def test_notification_sensor_alias_fallback(self):
-        """Sensor without alias key shows 'unknown' in notification."""
+        """Empty zones list shows 'unknown sensor' fallback in notification."""
         alarm = make_alarm()
         alarm.client.config["notify_group"] = "mobile_app_phone"
-        exc = self._make_exc(exceptions=[{"status": "0", "deviceType": "MG"}])
+        event = self._make_event(zones=[])
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
         assert "unknown" in pn_call[1]["service_data"]["message"]
-        assert "unknown" in mobile_call[1]["service_data"]["message"]
+        assert "open sensor" in mobile_call[1]["service_data"]["message"]
 
     def test_no_mobile_notification_without_notify_group(self):
         """Without notify_group, only persistent notification fires with correct content."""
         alarm = make_alarm()
-        exc = self._make_exc()
+        event = self._make_event()
 
-        alarm._notify_arm_exceptions(exc)
+        alarm._notify_arm_exceptions_from_event(event)
 
         # Only 1 async_create_task call (persistent only)
         assert alarm.hass.async_create_task.call_count == 1  # type: ignore[attr-defined]
