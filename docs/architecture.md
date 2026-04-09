@@ -421,12 +421,12 @@ The main entity. One `SecuritasAlarm` per installation. Inherits from `Coordinat
 ```
 1. set_arm_state() catches ArmingExceptionError from _send_arm_command()
 2. _set_force_context(exc, mode) — stores reference_id, suid, mode, exceptions
-3. _notify_arm_exceptions(exc):
-   a. Persistent notification: lists each open sensor by name (from _get_exceptions
-      polling), explains how to force-arm
+3. _fire_arming_exception_event(exc, mode) — fires securitas_arming_exception event
+4. (if force_arm_notifications enabled) built-in handler listens for event:
+   a. Persistent notification: lists each open sensor by name, explains how to force-arm
    b. Mobile notification (if notify_group configured): short message with
       Force Arm / Cancel action buttons
-4. State reverts to _last_state
+5. State reverts to _last_state
 ```
 
 **Force arm flow** (`securitas.force_arm` / `securitas.force_arm_cancel` services):
@@ -434,21 +434,21 @@ The main entity. One `SecuritasAlarm` per installation. Inherits from `Coordinat
 force_arm:
   1. Read stored reference_id, suid, mode from _force_context
   2. _clear_force_context(force=True)
-  3. _dismiss_arming_exception_notification()
+  3. _dismiss_arming_exception_notification() (if notifications enabled)
   4. set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
      → API accepts force params and overrides the open-sensor exceptions
 
 force_arm_cancel:
   1. _clear_force_context(force=True)
-  2. _dismiss_arming_exception_notification()
+  2. _dismiss_arming_exception_notification() (if notifications enabled)
   3. async_write_ha_state()
 
-Mobile notification actions:
+Mobile notification actions (when built-in handler enabled):
   - SECURITAS_FORCE_ARM_<num> → async_force_arm()
   - SECURITAS_CANCEL_FORCE_ARM_<num> → _clear_force_context() + write state
 ```
 
-**Force-arm context expiry:** The force-arm context has a 180-second TTL (`_FORCE_ARM_TTL`). When `_get_force_context()` is called and the context has aged past the TTL, it is cleared and a persistent notification is shown explaining the force-arm option has expired. This prevents stale force-arm contexts from being used after the panel has moved on.
+**Force-arm context expiry:** The force-arm context has a 180-second TTL (`_FORCE_ARM_TTL`). When `_clear_force_context()` is called by a coordinator update and the context has aged past the TTL, it is cleared. If the built-in notification handler is enabled, a persistent notification is shown explaining the force-arm option has expired. This prevents stale force-arm contexts from being used after the panel has moved on.
 
 The `_get_exceptions()` API call uses the same polling pattern as arm/disarm — the server returns `WAIT` on the first poll while the panel reports the open sensors, then `OK` with the full exception list on a subsequent poll.
 

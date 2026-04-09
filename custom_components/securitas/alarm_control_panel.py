@@ -24,6 +24,7 @@ from homeassistant.exceptions import ServiceValidationError
 
 from . import (
     CONF_CODE_ARM_REQUIRED,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
@@ -683,7 +684,7 @@ class SecuritasAlarm(  # type: ignore[override]
     @property
     def _notifications_enabled(self) -> bool:
         """Return True if the built-in force-arm notification handler is active."""
-        return self._client.config.get("force_arm_notifications", True)
+        return self._client.config.get(CONF_FORCE_ARM_NOTIFICATIONS, True)
 
     def _register_arming_exception_handler(self) -> None:
         """Register event listener for built-in arming exception notifications."""
