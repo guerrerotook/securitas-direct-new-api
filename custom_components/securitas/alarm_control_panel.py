@@ -24,6 +24,7 @@ from homeassistant.exceptions import ServiceValidationError
 
 from . import (
     CONF_CODE_ARM_REQUIRED,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
@@ -583,7 +584,7 @@ class SecuritasAlarm(  # type: ignore[override]
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state
-            self._notify_arm_exceptions(exc)
+            self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
         except SecuritasDirectError as err:
             if self._last_arm_result.protom_response:
@@ -613,6 +614,24 @@ class SecuritasAlarm(  # type: ignore[override]
             e.get("alias", "unknown") for e in exc.exceptions
         ]
         self._attr_extra_state_attributes["force_arm_available"] = True
+
+    def _fire_arming_exception_event(
+        self, exc: ArmingExceptionError, mode: str
+    ) -> None:
+        """Fire securitas_arming_exception event on the HA event bus."""
+        zones = [e.get("alias", "unknown") for e in exc.exceptions]
+        self.hass.bus.async_fire(
+            "securitas_arming_exception",
+            {
+                "entity_id": self.entity_id,
+                "mode": mode,
+                "zones": zones,
+                "details": {
+                    "installation": self.installation.number,
+                    "exceptions": exc.exceptions,
+                },
+            },
+        )
 
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 

@@ -72,6 +72,30 @@ class TestForceArmNotificationsConfig:
         })
         assert alarm.client.config.get("force_arm_notifications") is False
 
+    async def test_arming_exception_fires_event(self):
+        """ArmingExceptionError fires securitas_arming_exception event."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        exc = ArmingExceptionError(
+            "ref-123", "suid-123",
+            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door", "zone_id": "3"}],
+        )
+        alarm.client.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        alarm.hass.bus.async_fire.assert_called_once()
+        call_args = alarm.hass.bus.async_fire.call_args
+        assert call_args[0][0] == "securitas_arming_exception"
+        event_data = call_args[0][1]
+        assert event_data["entity_id"] == alarm.entity_id
+        assert event_data["mode"] == AlarmControlPanelState.ARMED_HOME
+        assert event_data["zones"] == ["Kitchen Door"]
+        assert event_data["details"]["installation"] == "123456"
+        assert event_data["details"]["exceptions"] == exc.exceptions
+
 
 # ---------------------------------------------------------------------------
 # Helper
