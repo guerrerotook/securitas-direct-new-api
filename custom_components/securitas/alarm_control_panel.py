@@ -24,7 +24,6 @@ from homeassistant.exceptions import ServiceValidationError
 
 from . import (
     CONF_CODE_ARM_REQUIRED,
-    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
