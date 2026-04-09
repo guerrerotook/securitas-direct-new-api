@@ -55,7 +55,8 @@
                 "data": {
                     "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
                     "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
-                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)"
+                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
+                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
                 },
                 "sections": {
                     "advanced": {
@@ -86,7 +87,8 @@
                 "data": {
                     "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
                     "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
-                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)"
+                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
+                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
                 },
                 "sections": {
                     "advanced": {

@@ -41,6 +41,8 @@ from . import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
@@ -119,6 +121,12 @@ def _build_settings_schema(
                     }
                 }
             ),
+            vol.Optional(
+                CONF_FORCE_ARM_NOTIFICATIONS,
+                default=defaults.get(
+                    CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
+                ),
+            ): bool,
             vol.Optional(CONF_ADVANCED): section(
                 vol.Schema(
                     {
@@ -733,6 +741,9 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
                 ),
                 CONF_NOTIFY_GROUP: self._get(CONF_NOTIFY_GROUP, ""),
+                CONF_FORCE_ARM_NOTIFICATIONS: self._get(
+                    CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
+                ),
                 CONF_SCAN_INTERVAL: self._get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                 ),

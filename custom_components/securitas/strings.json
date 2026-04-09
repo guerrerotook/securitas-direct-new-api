@@ -55,7 +55,8 @@
                 "data": {
                     "code": "PIN Code (leave empty for no PIN)",
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
-                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)"
+                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
+                    "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
                 },
                 "sections": {
                     "advanced": {
@@ -86,7 +87,8 @@
                 "data": {
                     "code": "PIN Code (leave empty for no PIN)",
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
-                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)"
+                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
+                    "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
                 },
                 "sections": {
                     "advanced": {

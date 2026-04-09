@@ -53,6 +53,25 @@ class TestForceArmNotificationsConfig:
         assert CONF_FORCE_ARM_NOTIFICATIONS == "force_arm_notifications"
         assert DEFAULT_FORCE_ARM_NOTIFICATIONS is True
 
+    def test_make_alarm_default_notifications_enabled(self):
+        """By default, force_arm_notifications is True in config."""
+        alarm = make_alarm()
+        assert alarm.client.config.get("force_arm_notifications", True) is True
+
+    def test_make_alarm_notifications_disabled(self):
+        """force_arm_notifications=False is passed through config."""
+        alarm = make_alarm(config={
+            "has_peri": False,
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": STD_DEFAULTS["map_vacation"],
+            "scan_interval": 120,
+            "force_arm_notifications": False,
+        })
+        assert alarm.client.config.get("force_arm_notifications") is False
+
 
 # ---------------------------------------------------------------------------
 # Helper

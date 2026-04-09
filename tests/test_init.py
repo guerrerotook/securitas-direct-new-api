@@ -31,6 +31,7 @@ from custom_components.securitas import (
     CONF_MAP_VACATION,
     CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     DOMAIN,
     PLATFORMS,
     SecuritasDirectDevice,
@@ -936,6 +937,7 @@ class TestAsyncUpdateOptions:
                 CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
                 CONF_MAP_VACATION: data[CONF_MAP_VACATION],
                 CONF_NOTIFY_GROUP: "",
+                CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
             },
         )
         entry.add_to_hass(hass)
