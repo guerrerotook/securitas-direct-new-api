@@ -1,0 +1,368 @@
+[
+  {
+    "request": {
+      "operationName": "xSGetSmartlockConfig",
+      "variables": {
+        "numinst": "100002",
+        "panel": "PANEL02",
+        "deviceType": "DR",
+        "deviceId": "02",
+        "keytype": "0"
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetSmartlockConfig": {
+          "res": "OK",
+          "referenceId": null,
+          "zoneId": "DR02",
+          "serialNumber": "SERIAL02",
+          "location": "Pl_0_Hall",
+          "family": "User",
+          "label": "Cerradura",
+          "features": {
+            "holdBackLatchTime": 3,
+            "calibrationType": 0,
+            "autolock": {
+              "active": true,
+              "timeout": "1800",
+              "__typename": "XSSmartlockAutolock"
+            },
+            "__typename": "XSSmartlockFeatures"
+          },
+          "__typename": "XSDoorlockConfigResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSEditSmartlockConfig",
+      "variables": {
+        "numinst": "100002",
+        "panel": "PANEL02",
+        "deviceType": "DR",
+        "deviceId": "02",
+        "input": {
+          "holdBackLatchTime": 5
+        }
+      }
+    },
+    "response": {
+      "data": {
+        "xSEditSmartlockConfig": {
+          "res": "OK",
+          "msg": "alarm-manager.processed.request",
+          "referenceId": "89052c51-1373-483d-a433-7f8592999708",
+          "__typename": "XSCommonPollingResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSEditSmartlockAutolockStatus",
+      "variables": {
+        "numinst": "100002",
+        "referenceId": "89052c51-1373-483d-a433-7f8592999708",
+        "counter": 1
+      }
+    },
+    "response": {
+      "data": {
+        "xSEditSmartlockAutolockStatus": {
+          "res": "WAIT",
+          "msg": "peripherals.processing.request",
+          "__typename": "XSCommonPollingStatusResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSEditSmartlockAutolockStatus",
+      "variables": {
+        "numinst": "100002",
+        "referenceId": "89052c51-1373-483d-a433-7f8592999708",
+        "counter": 6
+      }
+    },
+    "response": {
+      "data": {
+        "xSEditSmartlockAutolockStatus": {
+          "res": "OK",
+          "msg": "peripherals.processed.request",
+          "__typename": "XSCommonPollingStatusResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSEditSmartlockAutolockStatus",
+      "variables": {
+        "numinst": "100002",
+        "referenceId": "ea30d29f-eebe-4536-a1f9-8dddac5dbeec",
+        "counter": 6
+      }
+    },
+    "response": {
+      "data": {
+        "xSEditSmartlockAutolockStatus": {
+          "res": "WAIT",
+          "msg": "peripherals.processing.request",
+          "__typename": "XSCommonPollingStatusResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSEditSmartlockAutolockStatus",
+      "variables": {
+        "numinst": "100002",
+        "referenceId": "ea30d29f-eebe-4536-a1f9-8dddac5dbeec",
+        "counter": 7
+      }
+    },
+    "response": {
+      "data": {
+        "xSEditSmartlockAutolockStatus": {
+          "res": "OK",
+          "msg": "peripherals.processed.request",
+          "__typename": "XSCommonPollingStatusResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSEditSmartlockAutolock",
+      "variables": {
+        "numinst": "100002",
+        "panel": "PANEL02",
+        "autoLockTimeOut": "1200",
+        "holdBackLatchTime": 3,
+        "doorStatusCalibration": 0
+      }
+    },
+    "response": {
+      "data": {
+        "xSEditSmartlockAutolock": {
+          "res": "OK",
+          "msg": "alarm-manager.processed.request",
+          "referenceId": "6b274ad4-3296-4ca5-8aee-532198e150e2",
+          "__typename": "XSCommonPollingResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSDeviceList",
+      "variables": {
+        "numinst": "100002",
+        "panel": "PANEL02"
+      }
+    },
+    "response": {
+      "data": {
+        "xSDeviceList": {
+          "res": "OK",
+          "devices": [
+            {
+              "id": "1",
+              "code": "1",
+              "zoneId": "QR01",
+              "name": "Salon1",
+              "type": "QR",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": "SERIAL03",
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "2",
+              "code": "2",
+              "zoneId": "QR02",
+              "name": "Pasillo",
+              "type": "QR",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": "SERIAL04",
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "3",
+              "code": "1",
+              "zoneId": "VV01",
+              "name": "Entrada",
+              "type": "VV",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "4",
+              "code": "3",
+              "zoneId": "YP03",
+              "name": "Fachada",
+              "type": "YP",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "5",
+              "code": "4",
+              "zoneId": "MG04",
+              "name": "Ptaentrada",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "6",
+              "code": "5",
+              "zoneId": "MG05",
+              "name": "Ventana",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "7",
+              "code": "6",
+              "zoneId": "MG06",
+              "name": "Vtana",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "8",
+              "code": "7",
+              "zoneId": "MG07",
+              "name": "Ptacocina",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "9",
+              "code": "8",
+              "zoneId": "MG08",
+              "name": "Vdespacho",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "10",
+              "code": "9",
+              "zoneId": "MG09",
+              "name": "Dorm1",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "11",
+              "code": "10",
+              "zoneId": "MG10",
+              "name": "Dorm2",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "13",
+              "code": "11",
+              "zoneId": "MG11",
+              "name": "Vba\u00f1o",
+              "type": "MG",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": null,
+              "ventilationMode": null,
+              "config": null,
+              "__typename": "XSDevice"
+            },
+            {
+              "id": "14",
+              "code": "2",
+              "zoneId": "DR02",
+              "name": "Cerradura",
+              "type": "DR",
+              "subtype": null,
+              "idService": null,
+              "isActive": true,
+              "serialNumber": "SERIAL02",
+              "ventilationMode": null,
+              "config": {
+                "flags": {
+                  "pinCode": null,
+                  "doorbellButton": null,
+                  "__typename": "XSDeviceFlags"
+                },
+                "__typename": "XSDeviceConfig"
+              },
+              "__typename": "XSDevice"
+            }
+          ],
+          "__typename": "XSDeviceList"
+        }
+      }
+    }
+  }
+]

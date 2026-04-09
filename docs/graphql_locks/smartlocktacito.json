@@ -1,0 +1,136 @@
+[
+  {
+    "request": {
+      "operationName": "xSGetSmartlockConfig",
+      "variables": {
+        "numinst": "100001",
+        "panel": "PANEL01",
+        "deviceType": "DR",
+        "deviceId": "01",
+        "keytype": "0"
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetSmartlockConfig": {
+          "res": "OK",
+          "referenceId": null,
+          "zoneId": "DR01",
+          "serialNumber": "SERIAL01",
+          "location": "Pl_0_entrada",
+          "family": "User",
+          "label": "Cerradura",
+          "features": {
+            "holdBackLatchTime": 3,
+            "calibrationType": 0,
+            "autolock": {
+              "active": false,
+              "timeout": "300",
+              "__typename": "XSSmartlockAutolock"
+            },
+            "__typename": "XSSmartlockFeatures"
+          },
+          "__typename": "XSDoorlockConfigResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSChangeSmartlockMode",
+      "variables": {
+        "numinst": "100001",
+        "panel": "PANEL01",
+        "deviceId": "01",
+        "deviceType": "DR",
+        "lock": false
+      }
+    },
+    "response": {
+      "data": {
+        "xSChangeSmartlockMode": {
+          "res": "OK",
+          "msg": "alarm-manager.processed.request",
+          "referenceId": "077de2b0-1d46-4700-bdea-d9ca970c6c05",
+          "__typename": "XSCommonPollingResponse"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSChangeSmartlockModeStatus",
+      "variables": {
+        "numinst": "100001",
+        "panel": "PANEL01",
+        "deviceId": "01",
+        "referenceId": "077de2b0-1d46-4700-bdea-d9ca970c6c05",
+        "counter": 1
+      }
+    },
+    "response": {
+      "data": {
+        "xSChangeSmartlockModeStatus": {
+          "res": "WAIT",
+          "msg": "peripherals.processing.request",
+          "protomResponse": null,
+          "status": null,
+          "__typename": "XSCommonPanelPollingStatus"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSChangeSmartlockModeStatus",
+      "variables": {
+        "numinst": "100001",
+        "panel": "PANEL01",
+        "deviceId": "01",
+        "referenceId": "077de2b0-1d46-4700-bdea-d9ca970c6c05",
+        "counter": 2
+      }
+    },
+    "response": {
+      "data": {
+        "xSChangeSmartlockModeStatus": {
+          "res": "OK",
+          "msg": "alarm-manager.error_status_not_found",
+          "protomResponse": null,
+          "status": null,
+          "__typename": "XSCommonPanelPollingStatus"
+        }
+      }
+    }
+  },
+  {
+    "request": {
+      "operationName": "xSGetLockCurrentMode",
+      "variables": {
+        "numinst": "100001"
+      }
+    },
+    "response": {
+      "data": {
+        "xSGetLockCurrentMode": {
+          "res": "OK",
+          "smartlockInfo": [
+            {
+              "lockStatus": null,
+              "deviceId": "01",
+              "statusTimestamp": "0",
+              "__typename": "XSSmartlockInfo"
+            },
+            {
+              "lockStatus": "1",
+              "deviceId": "01",
+              "statusTimestamp": "1775579984679",
+              "__typename": "XSSmartlockInfo"
+            }
+          ],
+          "__typename": "XSSmartlockCurrentModeResponse"
+        }
+      }
+    }
+  }
+]
