@@ -652,7 +652,8 @@ class SecuritasAlarm(  # type: ignore[override]
             if age < self._FORCE_ARM_TTL:
                 return
             # Expired — update notification to inform user
-            self._notify_force_arm_expired()
+            if self._notifications_enabled:
+                self._notify_force_arm_expired()
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
@@ -868,7 +869,8 @@ class SecuritasAlarm(  # type: ignore[override]
             return
         _LOGGER.info("Force-arm cancelled by user")
         self._clear_force_context(force=True)
-        self._dismiss_arming_exception_notification()
+        if self._notifications_enabled:
+            self._dismiss_arming_exception_notification()
         self.async_write_ha_state()
 
     async def async_force_arm(self) -> None:
@@ -892,7 +894,8 @@ class SecuritasAlarm(  # type: ignore[override]
             [e.get("alias") for e in self._force_context.get("exceptions", [])],
         )
         self._clear_force_context(force=True)
-        self._dismiss_arming_exception_notification()
+        if self._notifications_enabled:
+            self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 

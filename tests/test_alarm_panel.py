@@ -161,6 +161,65 @@ class TestForceArmNotificationsConfig:
         assert alarm._force_context is not None
         assert alarm._attr_extra_state_attributes["force_arm_available"] is True
 
+    def test_force_context_expiry_silent_when_disabled(self):
+        """When notifications disabled, force context expiry does not notify."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm._force_context = {
+            "reference_id": "ref-123",
+            "suid": "suid-123",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [],
+            "created_at": datetime.now() - timedelta(seconds=300),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
+
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="D"), protom_response="D"
+        )
+
+        alarm._handle_coordinator_update()
+
+        # Force context cleared
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        # No notification calls
+        alarm.hass.async_create_task.assert_not_called()
+
+    async def test_force_arm_no_dismiss_when_disabled(self):
+        """When notifications disabled, force_arm skips notification dismissal."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-456",
+            "suid": "suid-456",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_data="",
+            )
+        )
+
+        # Reset call tracking before the force_arm call
+        alarm.hass.async_create_task.reset_mock()
+
+        await alarm.async_force_arm()
+
+        # No notification dismissal calls
+        alarm.hass.async_create_task.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Helper
