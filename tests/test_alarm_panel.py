@@ -39,6 +39,20 @@ from custom_components.securitas.securitas_direct_new_api.command_resolver impor
     InteriorMode,
     PerimeterMode,
 )
+from custom_components.securitas.const import (
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_FORCE_ARM_NOTIFICATIONS,
+)
+
+
+class TestForceArmNotificationsConfig:
+    """Tests for the force_arm_notifications config toggle."""
+
+    def test_constants_exist(self):
+        """Config constants for force_arm_notifications are defined."""
+        assert CONF_FORCE_ARM_NOTIFICATIONS == "force_arm_notifications"
+        assert DEFAULT_FORCE_ARM_NOTIFICATIONS is True
+
 
 # ---------------------------------------------------------------------------
 # Helper
