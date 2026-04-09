@@ -183,6 +183,7 @@ class SecuritasAlarm(  # type: ignore[override]
         # override the exception.  Cleared on status refresh.
         self._force_context: dict[str, Any] | None = None
         self._mobile_action_unsub = None
+        self._arming_event_unsub = None
 
     # -- Properties formerly from SecuritasEntity --------------------------
 
@@ -223,12 +224,14 @@ class SecuritasAlarm(  # type: ignore[override]
         )
 
     async def async_added_to_hass(self) -> None:
-        """Register mobile notification action listener when added to HA."""
+        """Register event listeners when added to HA."""
         await super().async_added_to_hass()
-        self._mobile_action_unsub = self.hass.bus.async_listen(
-            "mobile_app_notification_action",
-            self._handle_mobile_action,
-        )
+        if self._notifications_enabled:
+            self._register_arming_exception_handler()
+            self._mobile_action_unsub = self.hass.bus.async_listen(
+                "mobile_app_notification_action",
+                self._handle_mobile_action,
+            )
 
     @callback
     def _handle_mobile_action(self, event: Event) -> None:
@@ -241,7 +244,9 @@ class SecuritasAlarm(  # type: ignore[override]
             self.hass.async_create_task(self.async_force_arm_cancel())
 
     async def async_will_remove_from_hass(self) -> None:
-        """When entity will be removed from Home Assistant."""
+        """Unregister event listeners when removed from HA."""
+        if self._arming_event_unsub:
+            self._arming_event_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
 
@@ -674,6 +679,88 @@ class SecuritasAlarm(  # type: ignore[override]
     def _arming_exception_notification_id(self) -> str:
         """Return a per-installation persistent-notification ID."""
         return f"{DOMAIN}.arming_exception_{self.installation.number}"
+
+    @property
+    def _notifications_enabled(self) -> bool:
+        """Return True if the built-in force-arm notification handler is active."""
+        return self._client.config.get("force_arm_notifications", True)
+
+    def _register_arming_exception_handler(self) -> None:
+        """Register event listener for built-in arming exception notifications."""
+        @callback
+        def _handle_arming_exception_event(event: Event) -> None:
+            """Handle securitas_arming_exception event for this entity."""
+            if event.data.get("entity_id") != self.entity_id:
+                return
+            self._notify_arm_exceptions_from_event(event)
+
+        self._arming_event_unsub = self.hass.bus.async_listen(
+            "securitas_arming_exception",
+            _handle_arming_exception_event,
+        )
+
+    def _notify_arm_exceptions_from_event(self, event: Event) -> None:
+        """Send notifications about arming exceptions from event data."""
+        zones = event.data.get("zones", [])
+        if zones:
+            sensor_list = "\n".join(f"- {z}" for z in zones)
+            short_details = ", ".join(zones)
+        else:
+            sensor_list = "- (unknown sensor)"
+            short_details = "open sensor"
+
+        title = "Securitas: Arm blocked — open sensor(s)"
+        persistent_message = (
+            f"Arming was blocked because the following sensor(s) are open:\n"
+            f"{sensor_list}\n\n"
+            f"To arm anyway, tap **Force Arm** on the alarm card "
+            f"or on your mobile notification."
+        )
+        mobile_message = f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
+
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                domain="persistent_notification",
+                service="create",
+                service_data={
+                    "title": title,
+                    "message": persistent_message,
+                    "notification_id": self._arming_exception_notification_id,
+                },
+            )
+        )
+
+        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        if notify_group:
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="notify",
+                    service=notify_group,
+                    service_data={
+                        "title": title,
+                        "message": mobile_message,
+                        "data": {
+                            "tag": self._arming_exception_notification_id,
+                            "actions": [
+                                {
+                                    "action": (
+                                        "SECURITAS_FORCE_ARM"
+                                        f"_{self.installation.number}"
+                                    ),
+                                    "title": "Force Arm",
+                                },
+                                {
+                                    "action": (
+                                        "SECURITAS_CANCEL_FORCE_ARM"
+                                        f"_{self.installation.number}"
+                                    ),
+                                    "title": "Cancel",
+                                },
+                            ],
+                        },
+                    },
+                )
+            )
 
     def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
         """Send notifications about arming exceptions."""

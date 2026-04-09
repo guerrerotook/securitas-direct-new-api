@@ -96,6 +96,71 @@ class TestForceArmNotificationsConfig:
         assert event_data["details"]["installation"] == "123456"
         assert event_data["details"]["exceptions"] == exc.exceptions
 
+    async def test_handler_creates_notifications_when_enabled(self):
+        """Built-in handler creates persistent + mobile notifications when enabled."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        exc = ArmingExceptionError(
+            "ref-123", "suid-123",
+            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
+        )
+        alarm.client.arm_alarm = AsyncMock(side_effect=exc)
+
+        # Register the built-in handler (simulates async_added_to_hass)
+        alarm._register_arming_exception_handler()
+
+        # Capture the callback that was registered with async_listen
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        arming_exc_call = [
+            c for c in listen_calls
+            if c[0][0] == "securitas_arming_exception"
+        ]
+        assert len(arming_exc_call) == 1
+        handler_cb = arming_exc_call[0][0][1]
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Event fired
+        alarm.hass.bus.async_fire.assert_called_once()
+
+        # Manually invoke the captured handler with the event data
+        # (since MagicMock bus doesn't actually dispatch)
+        fire_args = alarm.hass.bus.async_fire.call_args
+        mock_event = MagicMock()
+        mock_event.data = fire_args[0][1]
+        handler_cb(mock_event)
+
+        # persistent_notification + notify group = 2 async_create_task calls
+        assert alarm.hass.async_create_task.call_count == 2
+
+    async def test_handler_skips_notifications_when_disabled(self):
+        """No notifications when force_arm_notifications is False."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        exc = ArmingExceptionError(
+            "ref-123", "suid-123",
+            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
+        )
+        alarm.client.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Event still fires
+        alarm.hass.bus.async_fire.assert_called_once()
+        # No notifications
+        alarm.hass.async_create_task.assert_not_called()
+        # But force context is still stored
+        assert alarm._force_context is not None
+        assert alarm._attr_extra_state_attributes["force_arm_available"] is True
+
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -1109,6 +1174,25 @@ class TestAsyncWillRemoveFromHass:
         # Should not raise
         await alarm.async_will_remove_from_hass()
 
+    async def test_unsubscribes_arming_event_listener(self):
+        """Calls _arming_event_unsub() when it is set."""
+        alarm = make_alarm()
+        arming_unsub_mock = MagicMock()
+        alarm._arming_event_unsub = arming_unsub_mock
+
+        await alarm.async_will_remove_from_hass()
+
+        arming_unsub_mock.assert_called_once()
+
+    async def test_handles_none_arming_event_unsub_gracefully(self):
+        """Handles None _arming_event_unsub gracefully (no crash)."""
+        alarm = make_alarm()
+        alarm._arming_event_unsub = None
+        alarm._mobile_action_unsub = None
+
+        # Should not raise
+        await alarm.async_will_remove_from_hass()
+
 
 # ===========================================================================
 # _handle_coordinator_update / _update_from_coordinator
@@ -1573,22 +1657,33 @@ class TestForceArmContext:
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_arming_exception_sends_persistent_notification(self):
-        """ArmingExceptionError triggers persistent notification."""
+        """ArmingExceptionError triggers persistent notification via event handler."""
         alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         exc = self._make_arming_exception()
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
 
+        # Register handler and capture callback
+        alarm._register_arming_exception_handler()
+        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Manually dispatch the event to the captured handler
+        mock_event = MagicMock()
+        mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
+        handler_cb(mock_event)
 
         # Verify persistent notification was created
         alarm.hass.async_create_task.assert_called()  # type: ignore[attr-defined]
 
     async def test_arming_exception_notifies_configured_group(self):
-        """ArmingExceptionError sends to configured notify group."""
+        """ArmingExceptionError sends to configured notify group via event handler."""
         alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
         alarm.client.config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
@@ -1596,21 +1691,40 @@ class TestForceArmContext:
         exc = self._make_arming_exception()
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
 
+        # Register handler and capture callback
+        alarm._register_arming_exception_handler()
+        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Manually dispatch the event to the captured handler
+        mock_event = MagicMock()
+        mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
+        handler_cb(mock_event)
 
         # Should have two async_create_task calls: persistent_notification + notify
         assert alarm.hass.async_create_task.call_count == 2  # type: ignore[attr-defined]
 
     async def test_arming_exception_no_notify_group_only_persistent(self):
-        """Without notify_group configured, only persistent notification fires."""
+        """Without notify_group configured, only persistent notification fires via handler."""
         alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         exc = self._make_arming_exception()
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
 
+        # Register handler and capture callback
+        alarm._register_arming_exception_handler()
+        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
+
+        # Manually dispatch the event to the captured handler
+        mock_event = MagicMock()
+        mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
+        handler_cb(mock_event)
 
         # Only persistent notification
         assert alarm.hass.async_create_task.call_count == 1  # type: ignore[attr-defined]
@@ -2868,10 +2982,40 @@ class TestAsyncAddedToHass:
 
         await alarm.async_added_to_hass()
 
-        alarm.hass.bus.async_listen.assert_called_once_with(  # type: ignore[attr-defined]
+        alarm.hass.bus.async_listen.assert_any_call(  # type: ignore[attr-defined]
             "mobile_app_notification_action",
             alarm._handle_mobile_action,
         )
+
+    async def test_registers_arming_exception_listener(self):
+        """async_added_to_hass registers listener for securitas_arming_exception."""
+        alarm = make_alarm()
+
+        await alarm.async_added_to_hass()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        arming_exc_calls = [
+            c for c in listen_calls
+            if c[0][0] == "securitas_arming_exception"
+        ]
+        assert len(arming_exc_calls) == 1
+
+    async def test_no_listeners_when_notifications_disabled(self):
+        """async_added_to_hass registers no listeners when notifications disabled."""
+        alarm = make_alarm(config={
+            "has_peri": False,
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": STD_DEFAULTS["map_vacation"],
+            "scan_interval": 120,
+            "force_arm_notifications": False,
+        })
+
+        await alarm.async_added_to_hass()
+
+        alarm.hass.bus.async_listen.assert_not_called()  # type: ignore[attr-defined]
 
     async def test_mobile_action_unsub_stored(self):
         """async_added_to_hass stores the unsubscribe callable from bus.async_listen."""
@@ -2894,8 +3038,9 @@ class TestForceArmWorkflow:
     """End-to-end integration tests for the force-arm workflow."""
 
     async def test_full_force_arm_workflow(self):
-        """Full workflow: arm fails -> notifications -> force arm succeeds."""
+        """Full workflow: arm fails -> event handler sends notifications -> force arm succeeds."""
         alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
         alarm.client.config["notify_group"] = "mobile_app_phone"
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._last_state = AlarmControlPanelState.DISARMED
@@ -2916,6 +3061,10 @@ class TestForceArmWorkflow:
         # First call raises ArmingExceptionError, second succeeds
         alarm.client.arm_alarm = AsyncMock(side_effect=[exc, success_result])
 
+        # Register handler (simulates async_added_to_hass)
+        alarm._register_arming_exception_handler()
+        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+
         # Step 1: initial arm attempt fails
         alarm._state = AlarmControlPanelState.ARMING
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
@@ -2925,6 +3074,11 @@ class TestForceArmWorkflow:
         assert alarm._force_context["reference_id"] == "ref-force-123"
         assert alarm._force_context["suid"] == "suid-force-123"
         assert alarm._force_context["mode"] == AlarmControlPanelState.ARMED_HOME
+
+        # Manually dispatch the event to the captured handler
+        mock_event = MagicMock()
+        mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
+        handler_cb(mock_event)
 
         # Notifications should have been sent (persistent + mobile)
         assert alarm.hass.async_create_task.call_count == 2  # type: ignore[attr-defined]
