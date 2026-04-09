@@ -133,5 +133,6 @@ tmp_cache
 # python-language-server / Rope
 .ropeproject
 .worktrees/
+docs/handoffs/
 docs/plans/
 docs/superpowers/

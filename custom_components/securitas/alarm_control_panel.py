@@ -14,11 +14,12 @@ from homeassistant.components.alarm_control_panel.const import AlarmControlPanel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     async_get_current_platform,
 )
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.exceptions import ServiceValidationError
 
 from . import (
@@ -30,7 +31,8 @@ from . import (
     SecuritasDirectDevice,
     SecuritasHub,
 )
-from .entity import SecuritasEntity, schedule_initial_updates
+from .coordinators import AlarmCoordinator, AlarmStatusData
+from .entity import securitas_device_info
 from .securitas_direct_new_api import (
     ArmingExceptionError,
     Installation,
@@ -69,26 +71,24 @@ async def async_setup_entry(
     """Set up Securitas Direct based on config_entry.
 
     No API calls are made here.  Entities start with unknown state;
-    the first periodic ``async_update_status`` populates values via
-    the rate-limited hub ``update_overview`` method.
+    the coordinator drives periodic updates.
     """
     entry_data = hass.data[DOMAIN][entry.entry_id]
     client: SecuritasHub = entry_data["hub"]
+    coordinator: AlarmCoordinator = entry_data["alarm_coordinator"]
     alarms = []
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
     for devices in securitas_devices:
         alarms.append(
             SecuritasAlarm(
                 devices.installation,
-                state=OperationStatus(),
                 client=client,
                 hass=hass,
+                coordinator=coordinator,
             )
         )
     async_add_entities(alarms, False)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
-
-    schedule_initial_updates(hass, alarms)
 
     platform = async_get_current_platform()
     platform.async_register_entity_service(
@@ -103,18 +103,29 @@ async def async_setup_entry(
     )
 
 
-class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
+class SecuritasAlarm(  # type: ignore[override]
+    CoordinatorEntity[AlarmCoordinator], alarm.AlarmControlPanelEntity
+):
     """Representation of a Securitas alarm status."""
+
+    _attr_has_entity_name = False
 
     def __init__(
         self,
         installation: Installation,
-        state: OperationStatus,
         client: SecuritasHub,
         hass: HomeAssistant,
+        coordinator: AlarmCoordinator,
     ) -> None:
         """Initialize the Securitas alarm panel."""
-        super().__init__(installation, client)
+        super().__init__(coordinator)
+        self._installation = installation
+        self._client = client
+        self._attr_device_info: DeviceInfo = (  # type: ignore[override]
+            securitas_device_info(installation)
+        )
+        self._state: str | None = None
+        self._last_state: str | None = None
         self._device: str = installation.address
         self._attr_name = installation.alias
         self._attr_unique_id: str | None = f"v4_securitas_direct.{installation.number}"
@@ -122,7 +133,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}
         self.hass: HomeAssistant = hass
-        self._has_peri = self.client.config.get(CONF_HAS_PERI, False)
+        self._has_peri = self._client.config.get(CONF_HAS_PERI, False)
         self._last_proto_code: str | None = None
         self._resolver = CommandResolver(has_peri=self._has_peri)
 
@@ -134,7 +145,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._securitas_state_map: dict[str, SecuritasState] = {}
 
         for ha_state, conf_key in HA_STATE_TO_CONF_KEY.items():
-            sec_state_str = self.client.config.get(conf_key)
+            sec_state_str = self._client.config.get(conf_key)
             if not sec_state_str:
                 continue
             sec_state = SecuritasState(sec_state_str)
@@ -152,8 +163,6 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._update_interval: timedelta = timedelta(
             seconds=scan_seconds if scan_seconds > 0 else DEFAULT_SCAN_INTERVAL
         )
-        self._scan_seconds = scan_seconds
-        self._update_unsub = None
         self._operation_in_progress: bool = False
         self._operation_epoch: int = 0
         self._code: str | None = client.config.get(CONF_CODE, None)
@@ -174,14 +183,47 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._force_context: dict[str, Any] | None = None
         self._mobile_action_unsub = None
 
-        self.update_status_alarm(state)
+    # -- Properties formerly from SecuritasEntity --------------------------
+
+    @property
+    def installation(self) -> Installation:
+        """Return the installation."""
+        return self._installation
+
+    @property
+    def client(self) -> SecuritasHub:
+        """Return the client hub."""
+        return self._client
+
+    def _force_state(self, state: AlarmControlPanelState) -> None:
+        """Force entity state and schedule HA update."""
+        self._last_state = self._state
+        self._state = state
+        if self.hass is not None:
+            self.async_schedule_update_ha_state()
+
+    def _notify_error(self, title: str, message: str) -> None:
+        """Send persistent notification with auto-generated ID."""
+        import re
+
+        notification_id = re.sub(r"\W+", "_", title.lower()).strip("_")
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                domain="persistent_notification",
+                service="create",
+                service_data={
+                    "title": title,
+                    "message": message,
+                    "notification_id": (
+                        f"{DOMAIN}.{notification_id}_{self._installation.number}"
+                    ),
+                },
+            )
+        )
 
     async def async_added_to_hass(self) -> None:
-        """Register timer and mobile notification action listener when added to HA."""
-        if self._scan_seconds > 0:
-            self._update_unsub = async_track_time_interval(
-                self.hass, self.async_update_status, self._update_interval
-            )
+        """Register mobile notification action listener when added to HA."""
+        await super().async_added_to_hass()
         self._mobile_action_unsub = self.hass.bus.async_listen(
             "mobile_app_notification_action",
             self._handle_mobile_action,
@@ -199,61 +241,40 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
-        if self._update_unsub:
-            self._update_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
 
-    async def async_update(self) -> None:
-        """Update the status of the alarm based on the configuration.
-
-        This is called when HA reloads.
-        """
-        await self.async_update_status()
-
-    async def async_update_status(self, _now=None) -> None:
-        """Update the status of the alarm."""
-        if self.hass is None:
-            return
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
         if self._operation_in_progress:
-            _LOGGER.debug(
-                "[%s] Skipping status poll - arm/disarm operation in progress",
-                self.entity_id,
-            )
-            return
+            return  # Skip stale updates during arm/disarm
         self._clear_force_context()
-        # Snapshot the operation epoch before the poll. If an arm/disarm
-        # starts (and possibly finishes) while update_overview is awaited,
-        # the epoch will have changed and this poll result is stale.
-        epoch_before = self._operation_epoch
-        alarm_status: OperationStatus = OperationStatus()
-        try:
-            alarm_status = await self.client.update_overview(self.installation)
-        except SecuritasDirectError as err:
-            if self._operation_epoch != epoch_before:
-                _LOGGER.debug(
-                    "[%s] Discarding stale poll error - operation occurred during poll",
-                    self.entity_id,
-                )
-                return
-            _LOGGER.warning(
-                "Error updating alarm status for %s: %s",
-                self.installation.number,
-                err.log_detail(),
-            )
-            if getattr(err, "http_status", None) == 403:
-                self._set_waf_blocked(True)
-            self.async_write_ha_state()
+        if self.coordinator.data is not None:
+            self._update_from_coordinator(self.coordinator.data)
+        self.async_write_ha_state()
+
+    def _update_from_coordinator(self, data: AlarmStatusData) -> None:
+        """Update internal state from coordinator data."""
+        status = data.status
+        if not status.status:
+            return
+        # status.status is the proto code like "D", "T", etc.
+        proto_code = status.status
+        # Only update _last_proto_code when it is a known proto code
+        if proto_code == PROTO_DISARMED or proto_code in PROTO_TO_STATE:
+            self._last_proto_code = proto_code
+        if proto_code == PROTO_DISARMED:
+            self._state = AlarmControlPanelState.DISARMED
+        elif proto_code in self._status_map:
+            self._state = self._status_map[proto_code]
         else:
-            if self._operation_epoch != epoch_before:
-                _LOGGER.debug(
-                    "[%s] Discarding stale poll result - operation occurred during poll",
-                    self.entity_id,
-                )
-                return
-            self._set_waf_blocked(False)
-            self.update_status_alarm(alarm_status)
-            self.async_write_ha_state()
+            self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+            _LOGGER.info(
+                "Unmapped alarm status code '%s' from Securitas. "
+                "Check your Alarm State Mappings in the integration options",
+                proto_code,
+            )
 
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:
         """Update alarm status, from last alarm setting register or EST."""
@@ -261,10 +282,10 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             self._message = status.message
             self._attr_extra_state_attributes["message"] = status.message
             self._attr_extra_state_attributes["response_data"] = (
-                status.protomResponseData
+                status.protom_response_data
             )
 
-            if not status.protomResponse:
+            if not status.protom_response:
                 _LOGGER.debug(
                     "[%s] Received empty protomResponse"
                     " (operation_status: %s, message: %s, status: %s,"
@@ -273,7 +294,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
                     status.operation_status,
                     status.message,
                     status.status,
-                    status.protomResponseData,
+                    status.protom_response_data,
                 )
                 return
             # Only update _last_proto_code when protomResponse is a known proto
@@ -282,20 +303,20 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             # the last proto code or the resolver's state-based command
             # selection will break.
             if (
-                status.protomResponse == PROTO_DISARMED
-                or status.protomResponse in PROTO_TO_STATE
+                status.protom_response == PROTO_DISARMED
+                or status.protom_response in PROTO_TO_ALARM_STATE
             ):
-                self._last_proto_code = status.protomResponse
-            if status.protomResponse == PROTO_DISARMED:
+                self._last_proto_code = status.protom_response
+            if status.protom_response == PROTO_DISARMED:
                 self._state = AlarmControlPanelState.DISARMED
-            elif status.protomResponse in self._status_map:
-                self._state = self._status_map[status.protomResponse]
+            elif status.protom_response in self._status_map:
+                self._state = self._status_map[status.protom_response]
             else:
                 self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
                 _LOGGER.info(
                     "Unmapped alarm status code '%s' from Securitas. "
                     "Check your Alarm State Mappings in the integration options",
-                    status.protomResponse,
+                    status.protom_response,
                 )
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
@@ -322,7 +343,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         return OperationStatus(
             operation_status=getattr(result, "operation_status", ""),
             message=getattr(result, "message", ""),
-            protomResponse=result.protomResponse,
+            protom_response=result.protom_response,
         )
 
     def _handle_arm_disarm_error(self, err: SecuritasDirectError, context: str) -> None:
@@ -357,13 +378,13 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         for attempt in range(2):
             current = PROTO_TO_ALARM_STATE.get(
                 self._last_proto_code or "D",
-                AlarmState(InteriorMode.OFF, PerimeterMode.OFF),
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF),
             )
             steps = self._resolver.resolve(current, target)
 
             if not steps:
                 # Resolver says we're already in the target state.
-                return OperationStatus(protomResponse=self._last_proto_code or "D")
+                return OperationStatus(protom_response=self._last_proto_code or "D")
 
             for step in steps:
                 result = await self._execute_step(step, **force_params)
@@ -371,7 +392,7 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             assert result is not None
 
             # Check whether we actually reached the target state.
-            actual_proto = result.protomResponse
+            actual_proto = result.protom_response
             if actual_proto and actual_proto in PROTO_TO_ALARM_STATE:
                 actual_state = PROTO_TO_ALARM_STATE[actual_proto]
                 if actual_state == target:
@@ -518,11 +539,12 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._operation_in_progress = True
         self._operation_epoch += 1
         try:
-            target = AlarmState(InteriorMode.OFF, PerimeterMode.OFF)
+            target = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             result = await self._execute_transition(target)
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
             self.async_write_ha_state()
+            await self.coordinator.async_request_refresh()
         except SecuritasDirectError as err:
             self._state = self._last_state
             _LOGGER.error(
@@ -557,12 +579,14 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
             self.async_write_ha_state()
+            await self.coordinator.async_request_refresh()
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state
             self._notify_arm_exceptions(exc)
+            self.async_write_ha_state()
         except SecuritasDirectError as err:
-            if self._last_arm_result.protomResponse:
+            if self._last_arm_result.protom_response:
                 self.update_status_alarm(
                     self._build_operation_status(self._last_arm_result)
                 )
@@ -590,21 +614,42 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         ]
         self._attr_extra_state_attributes["force_arm_available"] = True
 
+    _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
+
     def _clear_force_context(self, force: bool = False) -> None:
         """Clear stored force-arm context and related attributes.
 
-        When called from async_update_status (force=False), only clears if
-        the context has aged past one scan interval.  HA triggers an immediate
-        status refresh after every service call, so without this guard the
-        context would be wiped before the user can re-arm.
+        When called from coordinator updates (force=False), only clears if
+        the context has aged past _FORCE_ARM_TTL (180s).  On expiry, the
+        notification is updated to inform the user the alarm was not armed.
         """
         if not force and self._force_context is not None:
             age = datetime.datetime.now() - self._force_context["created_at"]
-            if age < self._update_interval:
+            if age < self._FORCE_ARM_TTL:
                 return
+            # Expired — update notification to inform user
+            self._notify_force_arm_expired()
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
+
+    def _notify_force_arm_expired(self) -> None:
+        """Update the persistent notification to indicate force-arm expired."""
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                domain="persistent_notification",
+                service="create",
+                service_data={
+                    "title": "Securitas: Alarm not armed",
+                    "message": (
+                        "The force-arm option has expired. "
+                        "The alarm was **not armed**. "
+                        "Please try arming again."
+                    ),
+                    "notification_id": self._arming_exception_notification_id,
+                },
+            )
+        )
 
     @property
     def _arming_exception_notification_id(self) -> str:
@@ -626,8 +671,8 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         persistent_message = (
             f"Arming was blocked because the following sensor(s) are open:\n"
             f"{sensor_list}\n\n"
-            f"To arm anyway, call the **securitas.force_arm** service, "
-            f"or tap **Force Arm** on your mobile notification."
+            f"To arm anyway, tap **Force Arm** on the alarm card "
+            f"or on your mobile notification."
         )
         mobile_message = f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
 
@@ -745,23 +790,23 @@ class SecuritasAlarm(SecuritasEntity, alarm.AlarmControlPanelEntity):
         self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
-    async def async_alarm_arm_home(self, code: str | None = None):
+    async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Send arm home command."""
         await self._async_arm(AlarmControlPanelState.ARMED_HOME, code)
 
-    async def async_alarm_arm_away(self, code: str | None = None):
+    async def async_alarm_arm_away(self, code: str | None = None) -> None:
         """Send arm away command."""
         await self._async_arm(AlarmControlPanelState.ARMED_AWAY, code)
 
-    async def async_alarm_arm_night(self, code: str | None = None):
+    async def async_alarm_arm_night(self, code: str | None = None) -> None:
         """Send arm night command."""
         await self._async_arm(AlarmControlPanelState.ARMED_NIGHT, code)
 
-    async def async_alarm_arm_custom_bypass(self, code: str | None = None):
+    async def async_alarm_arm_custom_bypass(self, code: str | None = None) -> None:
         """Send arm perimeter command."""
         await self._async_arm(AlarmControlPanelState.ARMED_CUSTOM_BYPASS, code)
 
-    async def async_alarm_arm_vacation(self, code: str | None = None):
+    async def async_alarm_arm_vacation(self, code: str | None = None) -> None:
         """Send arm vacation command."""
         await self._async_arm(AlarmControlPanelState.ARMED_VACATION, code)
 

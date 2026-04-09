@@ -24,15 +24,15 @@ from custom_components.securitas import (
 from custom_components.securitas.securitas_direct_new_api import (
     AccountBlockedError,
     Attribute,
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     OtpPhone,
     PERI_DEFAULTS,
     STD_DEFAULTS,
     SecuritasDirectError,
     SecuritasState,
+    TwoFactorRequiredError,
 )
-from homeassistant.config_entries import SOURCE_USER
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -60,15 +60,6 @@ pytestmark = pytest.mark.asyncio
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable custom integrations for all tests in this module."""
     yield
-
-
-@pytest.fixture(autouse=True)
-def mock_call_later():
-    """Prevent lingering timers from schedule_initial_updates in entity.py."""
-    with patch(
-        "custom_components.securitas.entity.async_call_later",
-    ):
-        yield
 
 
 # ---------------------------------------------------------------------------
@@ -118,12 +109,12 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
     finish_setup's ``get_authentication_token() is None`` check works
     correctly for both non-2FA (calls login) and 2FA paths.
 
-    When two_fa=True, login() raises Login2FAError (establishing a session)
+    When two_fa=True, login() raises TwoFactorRequiredError (establishing a session)
     and validate_device() returns the phone list — matching production behavior.
     """
     hub = make_securitas_hub_mock(**overrides)
     hub.validate_device = AsyncMock(return_value=("otp-hash-abc", MOCK_PHONES))
-    hub.session.list_installations = AsyncMock(return_value=[make_installation()])
+    hub.client.list_installations = AsyncMock(return_value=[make_installation()])
 
     # Start without a token; login() and send_sms_code() set it.
     _token_holder: dict[str, str | None] = {"token": None}
@@ -133,7 +124,7 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
 
     async def _login():
         if two_fa:
-            raise Login2FAError("2FA required")
+            raise TwoFactorRequiredError("2FA required")
         _token_holder["token"] = FAKE_JWT
 
     async def _send_sms_code(*_args):
@@ -157,8 +148,8 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
 def _make_hub_class_mock(hub_instance):
     """Create a mock class that mimics SecuritasHub but returns hub_instance.
 
-    The config_flow uses SecuritasHub.__name__ as a dict key, so the mock class
-    must have a proper __name__ attribute (MagicMock does not).
+    MagicMock does not have a proper __name__ attribute, so we set it
+    to make the mock behave like a real class.
     """
     mock_cls = MagicMock(return_value=hub_instance)
     mock_cls.__name__ = "SecuritasHub"
@@ -280,7 +271,7 @@ async def test_step_user_non_2fa_advances_to_options(hass):
 
 
 async def test_step_user_2fa_flow_shows_phone_list(hass):
-    """2FA flow should login (raising Login2FAError), then validate device and show phone list."""
+    """2FA flow should login (raising TwoFactorRequiredError), then validate device and show phone list."""
     mock_hub = _hub_factory(two_fa=True)
 
     with _patches(mock_hub):
@@ -312,7 +303,7 @@ async def test_step_user_login_succeeds_skips_2fa(hass):
 async def test_step_user_login_error_shows_invalid_auth(hass):
     """Wrong credentials should re-show the form with invalid_auth error."""
     mock_hub = _hub_factory()
-    mock_hub.login.side_effect = LoginError("bad credentials")
+    mock_hub.login.side_effect = AuthenticationError("bad credentials")
 
     with _patches(mock_hub):
         result = await hass.config_entries.flow.async_init(
@@ -541,7 +532,7 @@ async def test_otp_challenge_advances_to_options(hass):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
-    # login was called once during async_step_user (raised Login2FAError);
+    # login was called once during async_step_user (raised TwoFactorRequiredError);
     # finish_setup skips login because send_sms_code already set the token
     assert mock_hub.login.await_count == 1
 
@@ -579,7 +570,7 @@ async def test_finish_setup_lists_installations(hass):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
-    mock_hub.session.list_installations.assert_awaited_once()
+    mock_hub.client.list_installations.assert_awaited_once()
     mock_hub.get_services.assert_awaited_once()
 
 
@@ -595,7 +586,7 @@ async def test_finish_setup_sets_hass_data(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
     assert DOMAIN in hass.data
-    assert "SecuritasHub" in hass.data[DOMAIN]
+    assert "sessions" in hass.data[DOMAIN]
 
 
 # ===================================================================
@@ -921,7 +912,7 @@ async def test_options_get_falls_back_to_data(hass):
 async def test_single_installation_auto_selects(hass):
     """When there is exactly one unconfigured installation, auto-select it."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[make_installation(number="111", alias="My Home")]
     )
 
@@ -938,7 +929,7 @@ async def test_single_installation_auto_selects(hass):
 async def test_multiple_installations_show_picker(hass):
     """When multiple unconfigured installations exist, show a selection form."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -957,7 +948,7 @@ async def test_multiple_installations_show_picker(hass):
 async def test_select_installation_advances_to_options(hass):
     """Picking an installation from the list advances to options."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -984,7 +975,7 @@ async def test_select_installation_advances_to_options(hass):
 async def test_unique_id_includes_installation(hass):
     """The config entry unique_id should be username_installationNumber."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[make_installation(number="42", alias="Cabin")]
     )
 
@@ -1011,7 +1002,7 @@ async def test_already_configured_filtered_out(hass):
     existing.add_to_hass(hass)
 
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -1039,7 +1030,7 @@ async def test_all_configured_aborts(hass):
     existing.add_to_hass(hass)
 
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[make_installation(number="111", alias="Home")]
     )
 
@@ -1101,7 +1092,7 @@ async def test_full_flow_2fa_creates_entry(hass):
 async def test_full_flow_select_installation_creates_entry(hass):
     """Complete flow with installation picker creates entry."""
     mock_hub = _hub_factory()
-    mock_hub.session.list_installations = AsyncMock(
+    mock_hub.client.list_installations = AsyncMock(
         return_value=[
             make_installation(number="111", alias="Home"),
             make_installation(number="222", alias="Office"),
@@ -1262,3 +1253,207 @@ async def test_no_peri_when_no_peri_service_attribute(hass):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_HAS_PERI] is False
+
+
+# ===================================================================
+# TestReauthFlow
+# ===================================================================
+
+REAUTH_ENTRY_DATA = {
+    CONF_USERNAME: "test@example.com",
+    CONF_PASSWORD: "old-password",
+    CONF_COUNTRY: "ES",
+    CONF_INSTALLATION: "123456",
+    CONF_DEVICE_ID: "test-device-id",
+    CONF_UNIQUE_ID: "test-uuid",
+    CONF_DEVICE_INDIGITALL: "test-indigitall",
+    CONF_DELAY_CHECK_OPERATION: DEFAULT_DELAY_CHECK_OPERATION,
+}
+
+
+def _make_reauth_entry(hass) -> MockConfigEntry:
+    """Create a MockConfigEntry for reauth tests and add it to hass."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_123456",
+        data=dict(REAUTH_ENTRY_DATA),
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def _start_reauth_flow(hass, entry):
+    """Initiate a reauth flow for the given entry."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+        data=dict(entry.data),
+    )
+    return result
+
+
+async def test_reauth_shows_confirm_form(hass):
+    """Reauth flow should show the reauth_confirm form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+
+
+async def test_reauth_confirm_valid_credentials(hass):
+    """Valid credentials in reauth should update entry and abort with reauth_successful."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+
+    with (
+        _patches(mock_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    # Verify the entry was updated with new password
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reauth_confirm_invalid_auth(hass):
+    """Invalid credentials in reauth should show error on form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = AuthenticationError("bad credentials")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "wrong-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_reauth_confirm_account_blocked(hass):
+    """Account blocked during reauth should show error on form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = AccountBlockedError("account blocked")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "account_blocked"}
+
+
+async def test_reauth_confirm_cannot_connect(hass):
+    """Connection error during reauth should show error on form."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.login.side_effect = SecuritasDirectError("connection failed")
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_reauth_with_2fa_flow(hass):
+    """Reauth with 2FA: confirm -> phone_list -> otp_challenge -> reauth_successful."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory(two_fa=True)
+
+    # Step 1: Submit credentials — triggers 2FA
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "phone_list"
+
+    # Step 2: Select phone
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={"phones": "0_555-1234"}
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "otp_challenge"
+
+    # Step 3: Submit OTP — should complete reauth
+    with (
+        _patches(mock_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_PASSWORD] == "new-password"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reauth_preserves_username_from_entry(hass):
+    """Reauth form should pre-populate the username from the existing entry."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    # The schema should have the username pre-filled
+    schema = result["data_schema"]
+    assert schema is not None

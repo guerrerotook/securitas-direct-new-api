@@ -1,4 +1,4 @@
-"""Tests for ApiManager authentication flow."""
+"""Tests for SecuritasClient authentication flow."""
 
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
@@ -7,9 +7,9 @@ import pytest
 
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
     AccountBlockedError,
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
 )
 
 from .conftest import (
@@ -54,25 +54,27 @@ class TestLogin:
         after = int(datetime.now().timestamp() * 1000)
         assert before <= api.login_timestamp <= after
 
-    async def test_2fa_required_raises_login2fa_error(self, api, mock_execute):
+    async def test_2fa_required_raises_two_factor_required_error(
+        self, api, mock_execute
+    ):
         mock_execute.return_value = login_response(need_2fa=True)
 
-        with pytest.raises(Login2FAError):
+        with pytest.raises(TwoFactorRequiredError):
             await api.login()
 
-    async def test_error_response_raises_login_error(self, api, mock_execute):
+    async def test_error_response_raises_authentication_error(self, api, mock_execute):
         mock_execute.return_value = {
             "errors": [{"message": "Invalid credentials"}],
         }
 
-        with pytest.raises(LoginError):
+        with pytest.raises(AuthenticationError):
             await api.login()
 
     async def test_execute_request_error_raises_securitas_error(
         self, api, mock_execute
     ):
         """Connection error (no response data) re-raises SecuritasDirectError."""
-        mock_execute.side_effect = SecuritasDirectError("Connection failed", None)
+        mock_execute.side_effect = SecuritasDirectError("Connection failed")
 
         with pytest.raises(SecuritasDirectError):
             await api.login()
@@ -83,7 +85,7 @@ class TestLogin:
         await api.login()
 
         assert api.login_timestamp > 0
-        assert api.authentication_token == ""  # unchanged from init
+        assert api.authentication_token is None  # unchanged from init
 
     async def test_invalid_jwt_raises_error(self, api, mock_execute):
         mock_execute.return_value = login_response(hash_token="not-a-jwt")
@@ -221,7 +223,7 @@ class TestCheckAuthenticationToken:
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=SecuritasDirectError("boom", None))
+        api.refresh_token = AsyncMock(side_effect=SecuritasDirectError("boom"))
         api.login = AsyncMock()
 
         await api._check_authentication_token()
@@ -314,11 +316,11 @@ class TestValidateDevice:
 
 
 class TestLoginEdgeCases:
-    async def test_error_with_need_device_authorization_raises_login2fa_error(
+    async def test_error_with_need_device_authorization_raises_two_factor_required_error(
         self, api, mock_execute
     ):
         """When _execute_request raises SecuritasDirectError whose response data
-        contains xSLoginToken.needDeviceAuthorization=True, Login2FAError is raised."""
+        contains xSLoginToken.needDeviceAuthorization=True, TwoFactorRequiredError is raised."""
         error_response = {
             "data": {
                 "xSLoginToken": {
@@ -328,16 +330,18 @@ class TestLoginEdgeCases:
                 }
             }
         }
-        mock_execute.side_effect = SecuritasDirectError(
-            "Session expired", error_response
-        )
+        _err = SecuritasDirectError("Session expired")
+        _err.response_body = error_response
+        mock_execute.side_effect = _err
 
-        with pytest.raises(Login2FAError):
+        with pytest.raises(TwoFactorRequiredError):
             await api.login()
 
-    async def test_error_response_with_data_raises_login_error(self, api, mock_execute):
+    async def test_error_response_with_data_raises_authentication_error(
+        self, api, mock_execute
+    ):
         """When _execute_request raises SecuritasDirectError whose response data
-        has xSLoginToken but needDeviceAuthorization is False, LoginError is raised."""
+        has xSLoginToken but needDeviceAuthorization is False, AuthenticationError is raised."""
         error_response = {
             "data": {
                 "xSLoginToken": {
@@ -347,9 +351,11 @@ class TestLoginEdgeCases:
                 }
             }
         }
-        mock_execute.side_effect = SecuritasDirectError("Some error", error_response)
+        _err = SecuritasDirectError("Some error")
+        _err.response_body = error_response
+        mock_execute.side_effect = _err
 
-        with pytest.raises(LoginError):
+        with pytest.raises(AuthenticationError):
             await api.login()
 
     async def test_null_xslogintoken_raises_error(self, api, mock_execute):
@@ -360,12 +366,12 @@ class TestLoginEdgeCases:
             await api.login()
 
     async def test_login_stores_empty_token_for_null_hash(self, api, mock_execute):
-        """When hash is None (2FA flow), auth token stays empty but timestamp is set."""
+        """When hash is None (2FA flow), auth token stays None but timestamp is set."""
         mock_execute.return_value = login_response(hash_token=None)  # type: ignore[arg-type]
 
         await api.login()
 
-        assert api.authentication_token == ""
+        assert api.authentication_token is None
         assert api.login_timestamp > 0
 
     async def test_account_blocked_raises_account_blocked_error(
@@ -381,9 +387,9 @@ class TestLoginEdgeCases:
             ],
             "data": {"xSLoginToken": None},
         }
-        mock_execute.side_effect = SecuritasDirectError(
-            "Utilisateur bloqué.", blocked_response
-        )
+        err = SecuritasDirectError("Utilisateur bloqué.")
+        err.response_body = blocked_response
+        mock_execute.side_effect = err
 
         with pytest.raises(AccountBlockedError):
             await api.login()
@@ -410,7 +416,9 @@ class TestValidateDeviceEdgeCases:
                 }
             ]
         }
-        mock_execute.side_effect = SecuritasDirectError("Unauthorized", error_response)
+        _err = SecuritasDirectError("Unauthorized")
+        _err.response_body = error_response
+        mock_execute.side_effect = _err
 
         result = await api.validate_device(
             otp_succeed=False, auth_otp_hash="", sms_code=""
@@ -468,7 +476,7 @@ class TestRefreshTokenEdgeCases:
         api.authentication_token_exp = datetime.min  # expired
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(
-            side_effect=SecuritasDirectError("Refresh failed", None)
+            side_effect=SecuritasDirectError("Refresh failed")
         )
         api.login = AsyncMock()
 

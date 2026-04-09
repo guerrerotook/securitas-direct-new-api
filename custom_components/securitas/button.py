@@ -13,7 +13,8 @@ from .securitas_direct_new_api import (
     Installation,
     SecuritasDirectError,
 )
-from .securitas_direct_new_api.dataTypes import CameraDevice
+from .securitas_direct_new_api.exceptions import OperationTimeoutError
+from .securitas_direct_new_api.models import CameraDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ async def async_setup_entry(
     buttons = []
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
     for device in securitas_devices:
-        buttons.append(SecuritasRefreshButton(device.installation, client, hass))
+        buttons.append(
+            SecuritasRefreshButton(device.installation, client, hass, entry.entry_id)
+        )
     async_add_entities(buttons, True)
 
     # Store callback for deferred camera capture button discovery
@@ -42,55 +45,56 @@ class SecuritasRefreshButton(SecuritasEntity, ButtonEntity):
         installation: Installation,
         client: SecuritasHub,
         hass: HomeAssistant,
+        entry_id: str,
     ) -> None:
         """Initialize the refresh button."""
         super().__init__(installation, client)
         self._attr_name = f"Refresh {installation.alias}"
         self._attr_unique_id = f"v4_refresh_button_{installation.number}"
+        self._entry_id = entry_id
         self.hass = hass
 
     def _get_alarm_entity(self):
         """Return the alarm entity for this installation, if available."""
         alarm_entities = self.hass.data.get(DOMAIN, {}).get("alarm_entities", {})
-        return alarm_entities.get(self.installation.number)
+        return alarm_entities.get(self._installation.number)
 
     async def async_press(self) -> None:
-        """Update alarm status when button pressed."""
+        """Full alarm status refresh via CheckAlarm + poll.
+
+        This triggers an authoritative round-trip with the panel, not just
+        a lightweight xSStatus read.
+        """
         if self.hass is None:
             return
         try:
-            alarm_status = await self.client.refresh_alarm_status(self.installation)
+            alarm_status = await self._client.refresh_alarm_status(self._installation)
 
-            self.client.session.protom_response = alarm_status.protomResponse
+            self._client.client.protom_response = alarm_status.protom_response
 
             _LOGGER.info(
                 "Status of the Alarm via API: %s installation id: %s",
-                alarm_status.protomResponse,
-                self.installation.number,
+                alarm_status.protom_response,
+                self._installation.number,
             )
 
             alarm_entity = self._get_alarm_entity()
             if alarm_entity is not None:
-                alarm_entity._set_refresh_failed(False)  # pylint: disable=protected-access  # no public API on alarm entity
+                alarm_entity._set_refresh_failed(False)  # noqa: SLF001  # pylint: disable=protected-access
                 alarm_entity.async_write_ha_state()
-
-            if alarm_entity is not None:
-                _LOGGER.info(
-                    "Updating alarm panel entity for %s", self.installation.number
-                )
                 alarm_entity.async_schedule_update_ha_state(force_refresh=True)
 
-        except TimeoutError:
-            _LOGGER.warning("Refresh timed out for %s", self.installation.number)
+        except OperationTimeoutError:
+            _LOGGER.warning("Refresh timed out for %s", self._installation.number)
             alarm_entity = self._get_alarm_entity()
             if alarm_entity is not None:
-                alarm_entity._set_refresh_failed(True)  # pylint: disable=protected-access  # no public API on alarm entity
+                alarm_entity._set_refresh_failed(True)  # noqa: SLF001  # pylint: disable=protected-access
                 alarm_entity.async_write_ha_state()
 
         except SecuritasDirectError as err:
             _LOGGER.error(
                 "Error refreshing alarm status for %s: %s",
-                self.installation.number,
+                self._installation.number,
                 err.log_detail(),
             )
             if getattr(err, "http_status", None) == 403:
@@ -104,13 +108,14 @@ class SecuritasRefreshButton(SecuritasEntity, ButtonEntity):
                             "Please wait a few minutes before trying again."
                         ),
                         "notification_id": (
-                            f"{DOMAIN}.securitas_rate_limited_{self.installation.number}"
+                            f"{DOMAIN}.securitas_rate_limited_"
+                            f"{self._installation.number}"
                         ),
                     },
                 )
                 alarm_entity = self._get_alarm_entity()
                 if alarm_entity is not None:
-                    alarm_entity._set_waf_blocked(True)  # pylint: disable=protected-access  # no public API on alarm entity
+                    alarm_entity._set_waf_blocked(True)  # noqa: SLF001  # pylint: disable=protected-access
                     alarm_entity.async_write_ha_state()
 
 

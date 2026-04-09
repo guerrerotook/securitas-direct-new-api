@@ -5,13 +5,11 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.event import async_call_later
 
 from . import DOMAIN
-from .securitas_direct_new_api.dataTypes import CameraDevice, Installation
+from .securitas_direct_new_api.models import CameraDevice, Installation
 
 if TYPE_CHECKING:
     from .hub import SecuritasHub
@@ -73,7 +71,7 @@ class SecuritasEntity(Entity):
         """Return the client hub."""
         return self._client
 
-    def _force_state(self, state) -> None:
+    def _force_state(self, state: str | None) -> None:
         """Force entity state and schedule HA update."""
         self._last_state = self._state
         self._state = state
@@ -96,18 +94,3 @@ class SecuritasEntity(Entity):
                 },
             )
         )
-
-
-def schedule_initial_updates(
-    hass: HomeAssistant, entities: list, delay: int = 5
-) -> None:
-    """Schedule initial state refresh for entities after a delay."""
-    if not entities:
-        return
-
-    @callback
-    def _initial_update(_now) -> None:
-        for entity in entities:
-            entity.async_schedule_update_ha_state(force_refresh=True)
-
-    async_call_later(hass, delay, _initial_update)

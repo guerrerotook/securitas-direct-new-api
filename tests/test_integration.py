@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
@@ -105,6 +105,10 @@ async def test_setup_makes_only_expected_api_calls(
     synchronous platform setup, this test will fail — forcing the developer to
     either move the call to the background discovery task or explicitly update
     the allowed list.
+
+    The AlarmCoordinator fires a background refresh (Status) immediately after
+    setup via async_create_background_task.  This may or may not have executed
+    by the time we inspect the call log, so Status is allowed but not required.
     """
     queue_standard_setup(mock_server)
 
@@ -127,43 +131,30 @@ async def test_setup_makes_only_expected_api_calls(
         await async_setup_entry(hass, entry)
 
     operations = [op for op, _, _ in mock_server.calls]
-    assert operations == ["mkLoginToken", "mkInstallationList", "Srv"], (
+    # The first three calls are the synchronous setup path.
+    # "Status" may appear if the AlarmCoordinator background refresh has fired.
+    required = ["mkLoginToken", "mkInstallationList", "Srv"]
+    background_allowed = {"Status"}
+    assert operations[:3] == required, (
         f"Unexpected API calls during setup: {operations}. "
         "New calls should run in _async_discover_devices, not during setup."
     )
-
-
-async def test_setup_general_status_via_update_overview(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """update_overview() uses check_general_status (Status), not CheckAlarm."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server)
-    mock_server.set_default_response("Status", graphql_general_status(status="D"))
-    entry, _ = await _setup(hass, mock_server)
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-
-    # Reset call log to only count calls from update_overview
-    mock_server.reset()
-    status = await hub.update_overview(devices[0].installation)
-    assert mock_server.call_count("Status") >= 1
-    assert mock_server.call_count("CheckAlarm") == 0
-    assert status.protomResponse == "D"
+    extra = set(operations[3:]) - background_allowed
+    assert not extra, (
+        f"Unexpected extra API calls during setup: {extra}. "
+        "New calls should run in _async_discover_devices, not during setup."
+    )
 
 
 async def test_login_sets_auth_token(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """After login, ApiManager.authentication_token is set from the JWT."""
+    """After login, SecuritasClient.authentication_token is set from the JWT."""
     queue_standard_setup(mock_server, proto="D")
     entry, _ = await _setup(hass, mock_server)
 
     hub = hass.data[DOMAIN][entry.entry_id]["hub"]
-    assert hub.session.authentication_token == FAKE_JWT
+    assert hub.client.authentication_token == FAKE_JWT
 
 
 async def test_login_token_stored(hass: HomeAssistant, mock_server: MockGraphQLServer):
@@ -277,7 +268,7 @@ async def test_installation_scoped_requests_carry_numinst(
     devices = entry_data["devices"]
 
     # Trigger a scoped call by calling check_alarm directly
-    await hub.session.check_alarm(devices[0].installation)
+    await hub.client.check_alarm(devices[0].installation)
 
     calls = mock_server.get_calls("CheckAlarm")
     assert calls, "CheckAlarm was never called"
@@ -300,31 +291,30 @@ async def test_check_alarm_sends_operation_name(
 # ── Error handling during setup ───────────────────────────────────────────────
 
 
-async def test_setup_login_error_returns_false(
+async def test_setup_login_error_raises_auth_failed(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """LoginError during setup causes async_setup_entry to return False."""
+    """AuthenticationError during setup raises ConfigEntryAuthFailed."""
     mock_server.add_response("mkLoginToken", graphql_login_error("Invalid credentials"))
 
     entry = _make_entry(hass)
     mock_http = mock_server.make_http_client()
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=mock_http,
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch.object(hass, "async_create_task"),
+        pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
     ):
-        # Suppress background flow.async_init that fails because 'securitas'
-        # is not registered in the test HA loader
-        with patch.object(hass, "async_create_task"):
-            result = await async_setup_entry(hass, entry)
-
-    assert result is False
+        await async_setup_entry(hass, entry)
 
 
-async def test_setup_2fa_error_returns_false(
+async def test_setup_2fa_error_raises_auth_failed(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Login2FAError during setup causes async_setup_entry to return False."""
-    # Response that sets needDeviceAuthorization=True triggers Login2FAError
+    """TwoFactorRequiredError during setup raises ConfigEntryAuthFailed."""
+    # Response that sets needDeviceAuthorization=True triggers TwoFactorRequiredError
     mock_server.add_response(
         "mkLoginToken",
         {
@@ -345,14 +335,15 @@ async def test_setup_2fa_error_returns_false(
     )
     entry = _make_entry(hass)
     mock_http = mock_server.make_http_client()
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=mock_http,
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch.object(hass, "async_create_task"),
+        pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
     ):
-        # Suppress background flow.async_init that fails in test loader
-        with patch.object(hass, "async_create_task"):
-            result = await async_setup_entry(hass, entry)
-    assert result is False
+        await async_setup_entry(hass, entry)
 
 
 async def test_setup_connection_error_raises_not_ready(
@@ -377,71 +368,6 @@ async def test_setup_connection_error_raises_not_ready(
     ):
         with pytest.raises(ConfigEntryNotReady):
             await async_setup_entry(hass, entry)
-
-
-# ── Alarm state from API response ─────────────────────────────────────────────
-
-
-async def test_initial_state_disarmed(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """Status 'D' from check_general_status → alarm state is disarmed."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server, proto="D")
-    mock_server.set_default_response("Status", graphql_general_status(status="D"))
-    entry, _ = await _setup(hass, mock_server)
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-    assert len(devices) == 1
-
-    status = await hub.update_overview(devices[0].installation)
-    assert status.protomResponse == "D"
-
-
-async def test_initial_state_armed_away(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """Status 'T' from check_general_status → total armed."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server, proto="T")
-    mock_server.set_default_response("Status", graphql_general_status(status="T"))
-    entry, result = await _setup(hass, mock_server)
-    assert result is True
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-
-    status = await hub.update_overview(devices[0].installation)
-    assert status.protomResponse == "T"
-
-
-async def test_general_status_used_by_update_overview(
-    hass: HomeAssistant, mock_server: MockGraphQLServer
-):
-    """update_overview() always uses Status (check_general_status), not CheckAlarm."""
-    from .mock_graphql import graphql_general_status
-
-    queue_standard_setup(mock_server)
-    mock_server.set_default_response("Status", graphql_general_status(status="T"))
-
-    entry, result = await _setup(hass, mock_server)
-    assert result is True
-
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    hub = entry_data["hub"]
-    devices = entry_data["devices"]
-
-    # Reset call log to only count calls from update_overview
-    mock_server.reset()
-    status = await hub.update_overview(devices[0].installation)
-    assert mock_server.call_count("Status") >= 1
-    assert mock_server.call_count("CheckAlarm") == 0
-    assert status.protomResponse == "T"
 
 
 # ── Services create correct entities ─────────────────────────────────────────
@@ -496,7 +422,7 @@ async def test_services_with_sentinel(
     assert len(sentinel_services) == 1
 
 
-# ── Arm / Disarm via ApiManager ───────────────────────────────────────────────
+# ── Arm / Disarm via SecuritasClient ───────────────────────────────────────────────
 
 
 async def test_arm_away_api_call(hass: HomeAssistant, mock_server: MockGraphQLServer):
@@ -514,7 +440,7 @@ async def test_arm_away_api_call(hass: HomeAssistant, mock_server: MockGraphQLSe
     mock_server.add_response("ArmStatus", graphql_arm_status(proto="T"))
 
     status = await hub.arm_alarm(installation, "ARM1")
-    assert status.protomResponse == "T"
+    assert status.protom_response == "T"
     assert mock_server.call_count("xSArmPanel") == 1
     assert mock_server.call_count("ArmStatus") >= 1
 
@@ -534,7 +460,7 @@ async def test_disarm_api_call(hass: HomeAssistant, mock_server: MockGraphQLServ
     mock_server.add_response("DisarmStatus", graphql_disarm_status(proto="D"))
 
     status = await hub.disarm_alarm(installation, "DARM1")
-    assert status.protomResponse == "D"
+    assert status.protom_response == "D"
     assert mock_server.call_count("xSDisarmPanel") == 1
 
 
@@ -557,7 +483,7 @@ async def test_arm_poll_waits_for_ok(
     mock_server.add_response("ArmStatus", graphql_arm_status(res="OK", proto="T"))
 
     status = await hub.arm_alarm(installation, "ARM1")
-    assert status.protomResponse == "T"
+    assert status.protom_response == "T"
     assert mock_server.call_count("ArmStatus") == 3
 
 
@@ -586,7 +512,7 @@ async def test_sentinel_data_returned(
         "Sentinel", graphql_sentinel(temperature=23, humidity=60, zone="1")
     )
 
-    sentinel = await hub.session.get_sentinel_data(installation, svc)
+    sentinel = await hub.client.get_sentinel_data(installation, svc)
     assert sentinel.temperature == 23
     assert sentinel.humidity == 60
 
@@ -653,7 +579,7 @@ async def test_graphql_error_response_raises(
     mock_server.add_response("CheckAlarm", graphql_error("Some API error"))
 
     with pytest.raises(SecuritasDirectError):
-        await hub.session.check_alarm(installation)
+        await hub.client.check_alarm(installation)
 
 
 async def test_malformed_json_raises(
@@ -670,9 +596,9 @@ async def test_malformed_json_raises(
     devices = entry_data["devices"]
     installation = devices[0].installation
 
-    # Patch http_client.post to return invalid JSON
+    # Patch transport session.post to return invalid JSON
     bad_response = MockContextManager(MockResponse("not-valid-json"))
-    hub.session.http_client.post = lambda *a, **kw: bad_response
+    hub.client._transport._session.post = lambda *a, **kw: bad_response
 
     with pytest.raises(SecuritasDirectError):
-        await hub.session.check_alarm(installation)
+        await hub.client.check_alarm(installation)
