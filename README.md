@@ -7,7 +7,7 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 - **Multiple installations** — accounts with multiple installations (e.g. home + office) are fully supported. Each installation gets its own config entry and entities, with a shared API session to minimize login requests.
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
 - **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Securitas alarm mode.
-- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration notifies you and lets you force-arm via mobile notification, the `securitas.force_arm` service, or the custom alarm card.
+- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration fires a `securitas_arming_exception` event and (optionally) notifies you. Force-arm via mobile notification, the `securitas.force_arm` service, the custom alarm card, or your own automations.
 - **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI, plus a badge.
 - **Refresh button** — manually trigger an alarm status check.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
@@ -99,6 +99,7 @@ After setup, you can change most settings via **Settings → Integrations → Se
 | PIN Code                                | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Securitas — it only protects the panel in Home Assistant. Can be numeric or alphanumeric.                       |
 | Require PIN to arm                      | No        | When enabled, the PIN is also required to arm the alarm (not just to disarm). Has no effect if no PIN is set.                                                                          |
 | Notify service                          | _(none)_  | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
+| Built-in force-arm notifications        | Yes       | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable this to handle the `securitas_arming_exception` event with your own automations instead. See [Force Arming](#force-arming). |
 | Update interval _(Advanced)_            | 120s      | How often (in seconds) the integration checks the alarm status. Set to 0 to disable automatic polling.                                                                                 |
 | Delay between API requests _(Advanced)_ | 2s        | Minimum delay between consecutive API requests. Higher values reduce the risk of WAF rate limiting.                                                                                    |
 
@@ -168,19 +169,108 @@ To see which status code the alarm is reporting, [enable debug logging](#reporti
 When you arm the alarm and a sensor is in a fault state (e.g. a window is open), Securitas may block the arm and report a non-blocking exception. The integration handles this as follows:
 
 1. The alarm panel reverts to its previous state.
-2. The [custom alarm card](#custom-alarm-card) shows a warning listing the problematic sensors, with **Force Arm** and **Cancel** buttons.
-3. A **persistent notification** appears in Home Assistant listing the affected sensors.
-4. If a **Notify service** is configured, a **mobile notification** is sent with two action buttons: **Force Arm** and **Cancel**.
+2. The alarm entity attributes `force_arm_available` and `arm_exceptions` are set.
+3. A `securitas_arming_exception` event is fired on the Home Assistant event bus (always, regardless of settings).
+4. The [custom alarm card](#custom-alarm-card) shows a warning listing the problematic sensors, with **Force Arm** and **Cancel** buttons.
+5. If **Built-in force-arm notifications** is enabled (default):
+   - A **persistent notification** appears listing the affected sensors.
+   - If a **Notify service** is configured, a **mobile notification** is sent with **Force Arm** and **Cancel** action buttons.
 
 ### Resolving the exception
 
 - **Fix the issue** (close the window, clear the fault) and arm again normally.
 - **Force arm** to arm despite the exception. You can do this from:
-  - The **Force Arm** button in the mobile notification.
+  - The **Force Arm** button in the mobile notification (if built-in notifications are enabled).
   - The `securitas.force_arm` service, targeted at the alarm panel entity.
   - The **Force Arm** button in the [custom alarm card](#custom-alarm-card).
+  - Your own automation triggered by the `securitas_arming_exception` event.
 
-The force-arm context expires automatically at the next status refresh, so force-arming is only possible immediately after the exception occurs.
+The force-arm context expires after 180 seconds, so force-arming is only possible shortly after the exception occurs.
+
+### The `securitas_arming_exception` event
+
+Every time arming is blocked by open sensors, the integration fires this event with the following data:
+
+| Field | Description |
+| ----- | ----------- |
+| `entity_id` | The alarm panel entity that failed to arm |
+| `mode` | The HA alarm state that was attempted (e.g. `armed_away`, `armed_home`) |
+| `zones` | List of open zone names (e.g. `["Kitchen window", "Bedroom sensor"]`) |
+| `details.installation` | The Securitas installation number |
+| `details.exceptions` | Full exception list from the API with `alias`, `zone_id`, `device_type` |
+
+This event fires **regardless** of the **Built-in force-arm notifications** toggle, so you can always build automations against it.
+
+### Custom automations
+
+To write your own force-arm automations, disable **Built-in force-arm notifications** in the integration options, then create automations that listen for the `securitas_arming_exception` event. Some examples:
+
+**Auto force-arm when leaving home:**
+```yaml
+- id: securitas_auto_force_arm
+  alias: "Alarm: auto force-arm when leaving"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.mode == 'armed_away' }}"
+  actions:
+    - action: securitas.force_arm
+      target:
+        entity_id: "{{ trigger.event.data.entity_id }}"
+  mode: single
+```
+
+**Notify with open zone details:**
+```yaml
+- id: securitas_notify_open_zones
+  alias: "Alarm: notify about open zones"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  actions:
+    - action: notify.mobile_app_phone
+      data:
+        title: "Alarm blocked"
+        message: >
+          Cannot arm {{ trigger.event.data.mode }}.
+          Open zones: {{ trigger.event.data.zones | join(', ') }}
+  mode: single
+```
+
+**Different behaviour per mode** (force-arm for away, notify for night):
+```yaml
+- id: securitas_smart_force_arm
+  alias: "Alarm: smart force-arm by mode"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  actions:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.mode == 'armed_away' }}"
+          sequence:
+            - action: notify.mobile_app_phone
+              data:
+                message: >
+                  Open zones: {{ trigger.event.data.zones | join(', ') }}
+                  — force-arming...
+            - action: securitas.force_arm
+              target:
+                entity_id: "{{ trigger.event.data.entity_id }}"
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.mode == 'armed_night' }}"
+          sequence:
+            - action: notify.mobile_app_phone
+              data:
+                title: "Cannot arm night mode"
+                message: >
+                  Please close: {{ trigger.event.data.zones | join(', ') }}
+  mode: single
+```
 
 ### Notifying multiple people
 
