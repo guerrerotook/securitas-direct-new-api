@@ -421,12 +421,12 @@ The main entity. One `SecuritasAlarm` per installation. Inherits from `Coordinat
 ```
 1. set_arm_state() catches ArmingExceptionError from _send_arm_command()
 2. _set_force_context(exc, mode) — stores reference_id, suid, mode, exceptions
-3. _notify_arm_exceptions(exc):
-   a. Persistent notification: lists each open sensor by name (from _get_exceptions
-      polling), explains how to force-arm
+3. _fire_arming_exception_event(exc, mode) — fires securitas_arming_exception event
+4. (if force_arm_notifications enabled) built-in handler listens for event:
+   a. Persistent notification: lists each open sensor by name, explains how to force-arm
    b. Mobile notification (if notify_group configured): short message with
       Force Arm / Cancel action buttons
-4. State reverts to _last_state
+5. State reverts to _last_state
 ```
 
 **Force arm flow** (`securitas.force_arm` / `securitas.force_arm_cancel` services):
@@ -434,21 +434,21 @@ The main entity. One `SecuritasAlarm` per installation. Inherits from `Coordinat
 force_arm:
   1. Read stored reference_id, suid, mode from _force_context
   2. _clear_force_context(force=True)
-  3. _dismiss_arming_exception_notification()
+  3. _dismiss_arming_exception_notification() (if notifications enabled)
   4. set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
      → API accepts force params and overrides the open-sensor exceptions
 
 force_arm_cancel:
   1. _clear_force_context(force=True)
-  2. _dismiss_arming_exception_notification()
+  2. _dismiss_arming_exception_notification() (if notifications enabled)
   3. async_write_ha_state()
 
-Mobile notification actions:
+Mobile notification actions (when built-in handler enabled):
   - SECURITAS_FORCE_ARM_<num> → async_force_arm()
   - SECURITAS_CANCEL_FORCE_ARM_<num> → _clear_force_context() + write state
 ```
 
-**Force-arm context expiry:** The force-arm context has a 180-second TTL (`_FORCE_ARM_TTL`). When `_get_force_context()` is called and the context has aged past the TTL, it is cleared and a persistent notification is shown explaining the force-arm option has expired. This prevents stale force-arm contexts from being used after the panel has moved on.
+**Force-arm context expiry:** The force-arm context has a 180-second TTL (`_FORCE_ARM_TTL`). When `_clear_force_context()` is called by a coordinator update and the context has aged past the TTL, it is cleared. If the built-in notification handler is enabled, a persistent notification is shown explaining the force-arm option has expired. This prevents stale force-arm contexts from being used after the panel has moved on.
 
 The `_get_exceptions()` API call uses the same polling pattern as arm/disarm — the server returns `WAIT` on the first poll while the panel reports the open sensors, then `OK` with the full exception list on a subsequent poll.
 
@@ -463,6 +463,150 @@ The `_get_exceptions()` API call uses the same polling pattern as arm/disarm —
 - `_check_code(code)` — Always checked for disarm. Raises `ServiceValidationError` if the code doesn't match the configured PIN. No PIN configured = any code accepted.
 - `_check_code_for_arm_if_required(code)` — Only checked for arm operations if `code_arm_required` is True AND a PIN is configured.
 - `code_format` — `None` if no PIN configured, `NUMBER` if the PIN is all digits, `TEXT` otherwise.
+
+### Event-driven force-arm architecture
+
+When arming is blocked by open sensors (the API returns a `NON_BLOCKING` error), the alarm panel raises an `ArmingExceptionError` and immediately does three things:
+
+1. Stores force-arm context (`reference_id`, `suid`, `mode`, `exceptions`) with a 180-second TTL (`_FORCE_ARM_TTL`).
+2. Sets entity attributes `force_arm_available: true` and `arm_exceptions` (list of open zone names) on `extra_state_attributes`.
+3. Fires a `securitas_arming_exception` event on the HA event bus.
+
+**Event payload:**
+```python
+{
+    "entity_id": "alarm_control_panel.securitas_my_home",
+    "mode": "armed_away",
+    "zones": ["Kitchen window", "Bedroom sensor"],
+    "details": {
+        "installation": "12345",
+        "exceptions": [
+            {"alias": "Kitchen window", "zone_id": "3", "device_type": "MAG"},
+        ],
+    },
+}
+```
+
+**Built-in handler (enabled by default):**
+
+When the built-in handler is active it:
+- Creates a persistent notification listing open zones with instructions for how to force-arm.
+- Sends a mobile notification (if `notify_group` is configured) with **Force Arm** / **Cancel** action buttons.
+- Listens for `mobile_app_notification_action` events to handle button taps (`SECURITAS_FORCE_ARM_<num>` → `async_force_arm()`, `SECURITAS_CANCEL_FORCE_ARM_<num>` → cancel).
+- When force-arm context expires (180 s), updates the notification to inform the user the alarm was not armed.
+
+**Disabling the built-in handler:**
+
+Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & Services → Securitas → Configure). The `securitas_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `securitas.force_arm` / `securitas.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
+
+**Custom automation examples:**
+
+#### Auto force-arm when leaving home
+```yaml
+- id: securitas_auto_force_arm
+  alias: "Alarm: auto force-arm when leaving"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.mode == 'armed_away' }}"
+  actions:
+    - action: securitas.force_arm
+      target:
+        entity_id: "{{ trigger.event.data.entity_id }}"
+  mode: single
+```
+
+#### Notify with open zone details
+```yaml
+- id: securitas_notify_open_zones
+  alias: "Alarm: notify about open zones"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  actions:
+    - action: notify.mobile_app_phone
+      data:
+        title: "Alarm blocked"
+        message: >
+          Cannot arm {{ trigger.event.data.mode }}.
+          Open zones: {{ trigger.event.data.zones | join(', ') }}
+  mode: single
+```
+
+#### Different behaviour per mode
+```yaml
+- id: securitas_smart_force_arm
+  alias: "Alarm: smart force-arm by mode"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  actions:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.mode == 'armed_away' }}"
+          sequence:
+            - action: notify.mobile_app_phone
+              data:
+                message: >
+                  Open zones: {{ trigger.event.data.zones | join(', ') }}
+                  — force-arming...
+            - action: securitas.force_arm
+              target:
+                entity_id: "{{ trigger.event.data.entity_id }}"
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.mode == 'armed_night' }}"
+          sequence:
+            - action: notify.mobile_app_phone
+              data:
+                title: "Cannot arm night mode"
+                message: >
+                  Please close: {{ trigger.event.data.zones | join(', ') }}
+  mode: single
+```
+
+#### Notify then auto force-arm after delay
+```yaml
+- id: securitas_delayed_force_arm
+  alias: "Alarm: notify then force-arm after 30s"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  actions:
+    - action: notify.mobile_app_phone
+      data:
+        title: "Alarm blocked"
+        message: >
+          Open zones: {{ trigger.event.data.zones | join(', ') }}.
+          Force-arming in 30 seconds...
+    - delay: "00:00:30"
+    - action: securitas.force_arm
+      target:
+        entity_id: "{{ trigger.event.data.entity_id }}"
+  mode: single
+```
+
+#### TTS announcement of open zones
+```yaml
+- id: securitas_tts_open_zones
+  alias: "Alarm: announce open zones on speaker"
+  triggers:
+    - trigger: event
+      event_type: securitas_arming_exception
+  actions:
+    - action: tts.speak
+      target:
+        entity_id: tts.google_en_com
+      data:
+        media_player_entity_id: media_player.living_room
+        message: >
+          Alarm cannot arm. The following zones are open:
+          {{ trigger.event.data.zones | join(', ') }}
+  mode: single
+```
 
 ### Sensors (`sensor.py`)
 

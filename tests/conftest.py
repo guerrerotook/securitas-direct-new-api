@@ -21,6 +21,7 @@ from custom_components.securitas import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -210,6 +211,7 @@ def make_config_entry_data(
     map_custom: str | None = None,
     map_vacation: str | None = None,
     notify_group: str = "",
+    force_arm_notifications: bool = True,
 ) -> dict:
     """Build config entry data dict with sensible defaults."""
     defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
@@ -237,6 +239,7 @@ def make_config_entry_data(
         if map_vacation is not None
         else defaults[CONF_MAP_VACATION],
         CONF_NOTIFY_GROUP: notify_group,
+        CONF_FORCE_ARM_NOTIFICATIONS: force_arm_notifications,
     }
 
 

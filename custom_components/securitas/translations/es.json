@@ -55,7 +55,8 @@
                 "data": {
                     "code": "Código PIN (dejar vacío si no hay PIN)",
                     "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
-                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)"
+                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
+                    "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
                 },
                 "sections": {
                     "advanced": {
@@ -86,7 +87,8 @@
                 "data": {
                     "code": "Código PIN (dejar vacío si no hay PIN)",
                     "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
-                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)"
+                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
+                    "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
                 },
                 "sections": {
                     "advanced": {

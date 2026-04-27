@@ -49,6 +49,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
@@ -134,6 +136,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_MAP_CUSTOM,
             CONF_MAP_VACATION,
             CONF_NOTIFY_GROUP,
+            CONF_FORCE_ARM_NOTIFICATIONS,
         )
     ):
         # update entry replacing data with new options
@@ -189,6 +192,9 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     )
     config[CONF_ENTRY_ID] = entry.entry_id
     config[CONF_NOTIFY_GROUP] = _opt(CONF_NOTIFY_GROUP, "")
+    config[CONF_FORCE_ARM_NOTIFICATIONS] = _opt(
+        CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
+    )
     config = add_device_information(config)
 
     # Read mapping config (options override data)

@@ -55,7 +55,8 @@
                 "data": {
                     "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
                     "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
-                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)"
+                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
+                    "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
                 },
                 "sections": {
                     "advanced": {
@@ -86,7 +87,8 @@
                 "data": {
                     "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
                     "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
-                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)"
+                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
+                    "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
                 },
                 "sections": {
                     "advanced": {

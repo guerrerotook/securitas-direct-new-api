@@ -24,6 +24,7 @@ from homeassistant.exceptions import ServiceValidationError
 
 from . import (
     CONF_CODE_ARM_REQUIRED,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
@@ -182,6 +183,7 @@ class SecuritasAlarm(  # type: ignore[override]
         # override the exception.  Cleared on status refresh.
         self._force_context: dict[str, Any] | None = None
         self._mobile_action_unsub = None
+        self._arming_event_unsub = None
 
     # -- Properties formerly from SecuritasEntity --------------------------
 
@@ -222,12 +224,14 @@ class SecuritasAlarm(  # type: ignore[override]
         )
 
     async def async_added_to_hass(self) -> None:
-        """Register mobile notification action listener when added to HA."""
+        """Register event listeners when added to HA."""
         await super().async_added_to_hass()
-        self._mobile_action_unsub = self.hass.bus.async_listen(
-            "mobile_app_notification_action",
-            self._handle_mobile_action,
-        )
+        if self._notifications_enabled:
+            self._register_arming_exception_handler()
+            self._mobile_action_unsub = self.hass.bus.async_listen(
+                "mobile_app_notification_action",
+                self._handle_mobile_action,
+            )
 
     @callback
     def _handle_mobile_action(self, event: Event) -> None:
@@ -240,9 +244,12 @@ class SecuritasAlarm(  # type: ignore[override]
             self.hass.async_create_task(self.async_force_arm_cancel())
 
     async def async_will_remove_from_hass(self) -> None:
-        """When entity will be removed from Home Assistant."""
+        """Unregister event listeners when removed from HA."""
+        if self._arming_event_unsub:
+            self._arming_event_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
+        await super().async_will_remove_from_hass()
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -583,7 +590,7 @@ class SecuritasAlarm(  # type: ignore[override]
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state
-            self._notify_arm_exceptions(exc)
+            self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
         except SecuritasDirectError as err:
             if self._last_arm_result.protom_response:
@@ -614,6 +621,24 @@ class SecuritasAlarm(  # type: ignore[override]
         ]
         self._attr_extra_state_attributes["force_arm_available"] = True
 
+    def _fire_arming_exception_event(
+        self, exc: ArmingExceptionError, mode: str
+    ) -> None:
+        """Fire securitas_arming_exception event on the HA event bus."""
+        zones = [e.get("alias", "unknown") for e in exc.exceptions]
+        self.hass.bus.async_fire(
+            "securitas_arming_exception",
+            {
+                "entity_id": self.entity_id,
+                "mode": mode,
+                "zones": zones,
+                "details": {
+                    "installation": self.installation.number,
+                    "exceptions": exc.exceptions,
+                },
+            },
+        )
+
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 
     def _clear_force_context(self, force: bool = False) -> None:
@@ -628,7 +653,8 @@ class SecuritasAlarm(  # type: ignore[override]
             if age < self._FORCE_ARM_TTL:
                 return
             # Expired — update notification to inform user
-            self._notify_force_arm_expired()
+            if self._notifications_enabled:
+                self._notify_force_arm_expired()
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
@@ -656,13 +682,32 @@ class SecuritasAlarm(  # type: ignore[override]
         """Return a per-installation persistent-notification ID."""
         return f"{DOMAIN}.arming_exception_{self.installation.number}"
 
-    def _notify_arm_exceptions(self, exc: ArmingExceptionError) -> None:
-        """Send notifications about arming exceptions."""
-        if exc.exceptions:
-            sensor_list = "\n".join(
-                f"- {e.get('alias', 'unknown')}" for e in exc.exceptions
-            )
-            short_details = ", ".join(e.get("alias", "unknown") for e in exc.exceptions)
+    @property
+    def _notifications_enabled(self) -> bool:
+        """Return True if the built-in force-arm notification handler is active."""
+        return self._client.config.get(CONF_FORCE_ARM_NOTIFICATIONS, True)
+
+    def _register_arming_exception_handler(self) -> None:
+        """Register event listener for built-in arming exception notifications."""
+
+        @callback
+        def _handle_arming_exception_event(event: Event) -> None:
+            """Handle securitas_arming_exception event for this entity."""
+            if event.data.get("entity_id") != self.entity_id:
+                return
+            self._notify_arm_exceptions_from_event(event)
+
+        self._arming_event_unsub = self.hass.bus.async_listen(
+            "securitas_arming_exception",
+            _handle_arming_exception_event,
+        )
+
+    def _notify_arm_exceptions_from_event(self, event: Event) -> None:
+        """Send notifications about arming exceptions from event data."""
+        zones = event.data.get("zones", [])
+        if zones:
+            sensor_list = "\n".join(f"- {z}" for z in zones)
+            short_details = ", ".join(zones)
         else:
             sensor_list = "- (unknown sensor)"
             short_details = "open sensor"
@@ -688,7 +733,6 @@ class SecuritasAlarm(  # type: ignore[override]
             )
         )
 
-        # Notify configured group if set (Companion App with action buttons)
         notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
         if notify_group:
             self.hass.async_create_task(
@@ -762,7 +806,8 @@ class SecuritasAlarm(  # type: ignore[override]
             return
         _LOGGER.info("Force-arm cancelled by user")
         self._clear_force_context(force=True)
-        self._dismiss_arming_exception_notification()
+        if self._notifications_enabled:
+            self._dismiss_arming_exception_notification()
         self.async_write_ha_state()
 
     async def async_force_arm(self) -> None:
@@ -786,7 +831,8 @@ class SecuritasAlarm(  # type: ignore[override]
             [e.get("alias") for e in self._force_context.get("exceptions", [])],
         )
         self._clear_force_context(force=True)
-        self._dismiss_arming_exception_notification()
+        if self._notifications_enabled:
+            self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
 
