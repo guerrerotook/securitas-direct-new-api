@@ -688,6 +688,7 @@ class SecuritasAlarm(  # type: ignore[override]
 
     def _register_arming_exception_handler(self) -> None:
         """Register event listener for built-in arming exception notifications."""
+
         @callback
         def _handle_arming_exception_event(event: Event) -> None:
             """Handle securitas_arming_exception event for this entity."""

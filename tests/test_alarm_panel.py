@@ -60,16 +60,18 @@ class TestForceArmNotificationsConfig:
 
     def test_make_alarm_notifications_disabled(self):
         """force_arm_notifications=False is passed through config."""
-        alarm = make_alarm(config={
-            "has_peri": False,
-            "map_home": STD_DEFAULTS["map_home"],
-            "map_away": STD_DEFAULTS["map_away"],
-            "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": STD_DEFAULTS["map_vacation"],
-            "scan_interval": 120,
-            "force_arm_notifications": False,
-        })
+        alarm = make_alarm(
+            config={
+                "has_peri": False,
+                "map_home": STD_DEFAULTS["map_home"],
+                "map_away": STD_DEFAULTS["map_away"],
+                "map_night": STD_DEFAULTS["map_night"],
+                "map_custom": STD_DEFAULTS["map_custom"],
+                "map_vacation": STD_DEFAULTS["map_vacation"],
+                "scan_interval": 120,
+                "force_arm_notifications": False,
+            }
+        )
         assert alarm.client.config.get("force_arm_notifications") is False
 
     async def test_arming_exception_fires_event(self):
@@ -79,8 +81,16 @@ class TestForceArmNotificationsConfig:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         exc = ArmingExceptionError(
-            "ref-123", "suid-123",
-            [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door", "zone_id": "3"}],
+            "ref-123",
+            "suid-123",
+            [
+                {
+                    "status": "0",
+                    "deviceType": "MG",
+                    "alias": "Kitchen Door",
+                    "zone_id": "3",
+                }
+            ],
         )
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
 
@@ -105,7 +115,8 @@ class TestForceArmNotificationsConfig:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         exc = ArmingExceptionError(
-            "ref-123", "suid-123",
+            "ref-123",
+            "suid-123",
             [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
         )
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
@@ -116,8 +127,7 @@ class TestForceArmNotificationsConfig:
         # Capture the callback that was registered with async_listen
         listen_calls = alarm.hass.bus.async_listen.call_args_list
         arming_exc_call = [
-            c for c in listen_calls
-            if c[0][0] == "securitas_arming_exception"
+            c for c in listen_calls if c[0][0] == "securitas_arming_exception"
         ]
         assert len(arming_exc_call) == 1
         handler_cb = arming_exc_call[0][0][1]
@@ -146,7 +156,8 @@ class TestForceArmNotificationsConfig:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         exc = ArmingExceptionError(
-            "ref-123", "suid-123",
+            "ref-123",
+            "suid-123",
             [{"status": "0", "deviceType": "MG", "alias": "Kitchen Door"}],
         )
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
@@ -3055,23 +3066,24 @@ class TestAsyncAddedToHass:
 
         listen_calls = alarm.hass.bus.async_listen.call_args_list
         arming_exc_calls = [
-            c for c in listen_calls
-            if c[0][0] == "securitas_arming_exception"
+            c for c in listen_calls if c[0][0] == "securitas_arming_exception"
         ]
         assert len(arming_exc_calls) == 1
 
     async def test_no_listeners_when_notifications_disabled(self):
         """async_added_to_hass registers no listeners when notifications disabled."""
-        alarm = make_alarm(config={
-            "has_peri": False,
-            "map_home": STD_DEFAULTS["map_home"],
-            "map_away": STD_DEFAULTS["map_away"],
-            "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": STD_DEFAULTS["map_vacation"],
-            "scan_interval": 120,
-            "force_arm_notifications": False,
-        })
+        alarm = make_alarm(
+            config={
+                "has_peri": False,
+                "map_home": STD_DEFAULTS["map_home"],
+                "map_away": STD_DEFAULTS["map_away"],
+                "map_night": STD_DEFAULTS["map_night"],
+                "map_custom": STD_DEFAULTS["map_custom"],
+                "map_vacation": STD_DEFAULTS["map_vacation"],
+                "scan_interval": 120,
+                "force_arm_notifications": False,
+            }
+        )
 
         await alarm.async_added_to_hass()
 
