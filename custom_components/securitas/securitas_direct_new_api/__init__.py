@@ -2,7 +2,8 @@
 
 import logging
 
-from .apimanager import ApiManager, generate_device_id, generate_uuid  # noqa: F401
+from .client import SecuritasClient, generate_device_id, generate_uuid  # noqa: F401
+from .http_transport import HttpTransport  # noqa: F401
 from .const import (  # noqa: F401
     CommandType,
     PERI_DEFAULTS,
@@ -15,28 +16,36 @@ from .const import (  # noqa: F401
     STATE_TO_COMMAND,
     SecuritasState,
 )
-from .dataTypes import (  # noqa: F401
+from .models import (  # noqa: F401
+    AirQuality,
+    AlarmState,
+    ArmCommand,
     Attribute,
-    Attributes,
     CameraDevice,
     Installation,
+    InteriorMode,
+    LockAutolock,
     LockFeatures,
     OperationStatus,
     OtpPhone,
+    PerimeterMode,
+    ProtoCode,
+    Sentinel,
     Service,
     SStatus,
     SmartLock,
     SmartLockMode,
     SmartLockModeStatus,
     ThumbnailResponse,
+    parse_proto_code,
 )
 from .domains import ApiDomains  # noqa: F401
 from .exceptions import (  # noqa: F401
     AccountBlockedError,
     ArmingExceptionError,
-    Login2FAError,
-    LoginError,
+    AuthenticationError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
 )
 
 _LOGGER = logging.getLogger(__name__)

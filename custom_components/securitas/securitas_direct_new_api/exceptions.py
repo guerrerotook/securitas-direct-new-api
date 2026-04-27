@@ -6,29 +6,21 @@ from typing import Any
 
 
 class SecuritasDirectError(Exception):
-    """Base class for Securitas Direct errors.
-
-    Typically raised as ``SecuritasDirectError(message, response_dict,
-    headers, graphql_content)``.  Only ``message`` is guaranteed; the
-    remaining args are optional.
-    """
+    """Base class for all Securitas Direct errors."""
 
     # http_status values that are well-understood and need no extra context.
     _KNOWN_STATUSES: frozenset[int] = frozenset({400, 403, 409})
 
-    def __init__(self, *args, http_status: int | None = None) -> None:
-        super().__init__(*args)
+    def __init__(self, message: str, *, http_status: int | None = None) -> None:
+        super().__init__(message)
         self.http_status = http_status
+        # May be set by callers after construction to attach the raw response.
+        self.response_body: Any | None = None
 
     @property
     def message(self) -> str:
-        """Short human-readable error description (args[0])."""
+        """Short human-readable error description."""
         return str(self.args[0]) if self.args else str(self)
-
-    @property
-    def response_body(self) -> Any | None:
-        """Raw API response dict (args[1]), if available."""
-        return self.args[1] if len(self.args) > 1 else None
 
     def log_detail(self) -> str:
         """Return a log string: concise for known errors, verbose otherwise.
@@ -38,34 +30,63 @@ class SecuritasDirectError(Exception):
         """
         if self.http_status in self._KNOWN_STATUSES:
             return self.message
-        body = self.response_body
-        if body is None:
+        if self.response_body is None:
             return self.message
-        return f"{self.message} | response: {body}"
+        return f"{self.message} | response: {self.response_body}"
 
 
-class APIError(SecuritasDirectError):
-    """Exception raised when API fails."""
+class AuthenticationError(SecuritasDirectError):
+    """Raised when credentials are rejected."""
 
 
-class LoginError(SecuritasDirectError):
-    """Exception raised when login fails."""
+class TwoFactorRequiredError(SecuritasDirectError):
+    """Raised when the device requires 2FA authorisation."""
 
 
-class AuthError(LoginError):
-    """Exception raised when API denies access."""
+class SessionExpiredError(SecuritasDirectError):
+    """Raised when the JWT has expired and must be refreshed."""
 
 
-class TokenRefreshError(LoginError):
-    """Exception raised when the token needs refreshing."""
+class APIResponseError(SecuritasDirectError):
+    """Raised when the API returns a GraphQL-level error.
+
+    Carries the HTTP status code so callers can make routing decisions
+    without inspecting the response body.
+    """
 
 
-class AccountBlockedError(LoginError):
-    """Exception raised when the user account is blocked by Securitas."""
+class AccountBlockedError(AuthenticationError):
+    """Raised when the user account is blocked by Securitas."""
 
 
-class Login2FAError(LoginError):
-    """Exception raised when a 2FA authentication is needed."""
+class WAFBlockedError(SecuritasDirectError):
+    """Raised when the Incapsula WAF blocks the request."""
+
+
+class APIConnectionError(SecuritasDirectError):
+    """Raised on network-level failures (DNS, TCP, TLS)."""
+
+
+class OperationTimeoutError(SecuritasDirectError):
+    """Raised when a panel operation does not complete within the timeout."""
+
+
+class OperationFailedError(SecuritasDirectError):
+    """Raised when the panel explicitly rejects an operation.
+
+    Carries the vendor error codes for diagnostics.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.error_type = error_type
 
 
 class ArmingExceptionError(SecuritasDirectError):
@@ -86,3 +107,15 @@ class ArmingExceptionError(SecuritasDirectError):
         self.exceptions = exceptions  # [{status, deviceType, alias}, ...]
         details = ", ".join(e.get("alias", "unknown") for e in exceptions)
         super().__init__(f"Arming blocked by exceptions: {details}")
+
+
+class ImageCaptureError(SecuritasDirectError):
+    """Raised when a camera image capture request fails."""
+
+
+class UnexpectedStateError(SecuritasDirectError):
+    """Raised when the API returns an unrecognised protocol code."""
+
+    def __init__(self, proto_code: str) -> None:
+        self.proto_code = proto_code
+        super().__init__(f"Unexpected protocol code: {proto_code!r}")

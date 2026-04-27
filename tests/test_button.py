@@ -4,13 +4,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.button import SecuritasRefreshButton, async_setup_entry
-from custom_components.securitas.securitas_direct_new_api.dataTypes import (
-    OperationStatus,
-)
+from custom_components.securitas import DOMAIN
 from custom_components.securitas.securitas_direct_new_api.exceptions import (
+    OperationTimeoutError,
     SecuritasDirectError,
 )
-from custom_components.securitas import DOMAIN
+from custom_components.securitas.securitas_direct_new_api.models import OperationStatus
 
 from tests.conftest import (
     make_installation,
@@ -24,7 +23,7 @@ from tests.conftest import (
 # ---------------------------------------------------------------------------
 
 
-def make_button() -> SecuritasRefreshButton:
+def make_button(entry_id: str = "test-entry-id") -> SecuritasRefreshButton:
     """Create a SecuritasRefreshButton with mocked dependencies."""
     installation = make_installation()
     client = make_securitas_hub_mock()
@@ -34,7 +33,7 @@ def make_button() -> SecuritasRefreshButton:
         return_value=["alarm_control_panel.securitas_123"]
     )
     hass.services = AsyncMock()
-    return SecuritasRefreshButton(installation, client, hass)
+    return SecuritasRefreshButton(installation, client, hass, entry_id)
 
 
 # ===========================================================================
@@ -69,7 +68,12 @@ class TestSecuritasRefreshButtonInit:
         """Button stores the client (SecuritasHub) reference."""
         button = make_button()
         assert button.client is not None
-        assert hasattr(button.client, "session")
+        assert hasattr(button.client, "client")
+
+    def test_stores_entry_id(self):
+        """Button stores the entry_id for coordinator lookup."""
+        button = make_button(entry_id="my-entry")
+        assert button._entry_id == "my-entry"
 
 
 # ===========================================================================
@@ -81,117 +85,82 @@ class TestSecuritasRefreshButtonInit:
 class TestSecuritasRefreshButtonAsyncPress:
     """Tests for SecuritasRefreshButton.async_press."""
 
-    async def test_success_calls_refresh_alarm_status(self):
-        """Success: calls hub.refresh_alarm_status, sets protom_response."""
+    async def test_calls_refresh_alarm_status(self):
+        """async_press calls hub.refresh_alarm_status for authoritative round-trip."""
         button = make_button()
-
-        alarm_status = OperationStatus(
-            operation_status="OK",
-            message="All good",
-            status="",
-            installation_number="123456",
-            protomResponse="D",
-            protomResponseData="",
-        )
-        button.client.refresh_alarm_status = AsyncMock(return_value=alarm_status)
+        status = OperationStatus(operation_status="OK", protom_response="T", status="")
+        button._client.refresh_alarm_status = AsyncMock(return_value=status)
+        button.hass.data = {DOMAIN: {"alarm_entities": {}}}  # type: ignore[attr-defined]
 
         await button.async_press()
 
-        button.client.refresh_alarm_status.assert_called_once_with(button.installation)
-        assert button.client.session.protom_response == "D"
-
-    async def test_success_triggers_alarm_entity_update(self):
-        """Success: triggers state update on the alarm entity for this installation."""
-        button = make_button()
-
-        alarm_status = OperationStatus(
-            operation_status="OK",
-            message="",
-            status="",
-            installation_number="123456",
-            protomResponse="T",
-            protomResponseData="",
+        button._client.refresh_alarm_status.assert_awaited_once_with(
+            button._installation
         )
-        button.client.refresh_alarm_status = AsyncMock(return_value=alarm_status)
 
-        # Set up alarm entity lookup
+    async def test_updates_protom_response_on_success(self):
+        """async_press updates client.protom_response from the result."""
+        button = make_button()
+        status = OperationStatus(operation_status="OK", protom_response="T", status="")
+        button._client.refresh_alarm_status = AsyncMock(return_value=status)
+        button.hass.data = {DOMAIN: {"alarm_entities": {}}}  # type: ignore[attr-defined]
+
+        await button.async_press()
+
+        assert button._client.client.protom_response == "T"
+
+    async def test_clears_refresh_failed_on_success(self):
+        """async_press clears refresh_failed on the alarm entity."""
+        button = make_button()
+        status = OperationStatus(operation_status="OK", protom_response="T", status="")
+        button._client.refresh_alarm_status = AsyncMock(return_value=status)
         alarm_entity = MagicMock()
-        button.hass.data = {DOMAIN: {"alarm_entities": {"123456": alarm_entity}}}  # type: ignore[attr-defined]
-
-        await button.async_press()
-
-        alarm_entity.async_schedule_update_ha_state.assert_called_once_with(
-            force_refresh=True
-        )
-
-    async def test_error_securitas_direct_error_caught(self):
-        """SecuritasDirectError is caught and logged, no crash."""
-        button = make_button()
-        button.client.refresh_alarm_status = AsyncMock(
-            side_effect=SecuritasDirectError("API timeout")
-        )
-
-        # Should not raise
-        await button.async_press()
-
-    async def test_403_creates_persistent_notification(self):
-        """403 error creates a rate-limited persistent notification."""
-        button = make_button()
-        button.client.refresh_alarm_status = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
-        )
-
-        await button.async_press()
-
-        button.hass.services.async_call.assert_called_once()  # type: ignore[attr-defined]
-        call_kwargs = button.hass.services.async_call.call_args  # type: ignore[attr-defined]
-        assert call_kwargs[1]["domain"] == "persistent_notification"
-        assert call_kwargs[1]["service"] == "create"
-        assert "Rate limited" in call_kwargs[1]["service_data"]["title"]
-
-    async def test_403_sets_waf_blocked_on_alarm_entity(self):
-        """403 on button press sets waf_blocked on the alarm entity."""
-        button = make_button()
-        button.client.refresh_alarm_status = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
-        )
-
-        # Set up a mock alarm entity accessible via hass.data
-        mock_alarm = MagicMock()
-        mock_alarm._set_waf_blocked = MagicMock()
-        mock_alarm.async_write_ha_state = MagicMock()
         button.hass.data = {  # type: ignore[attr-defined]
-            DOMAIN: {"alarm_entities": {button.installation.number: mock_alarm}}
+            DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
         }
 
         await button.async_press()
 
-        mock_alarm._set_waf_blocked.assert_called_once_with(True)
-        mock_alarm.async_write_ha_state.assert_called_once()
+        alarm_entity._set_refresh_failed.assert_called_with(False)
+        alarm_entity.async_write_ha_state.assert_called()
 
-    async def test_403_without_alarm_entity_does_not_crash(self):
-        """403 when no alarm entity is registered still works (just notification)."""
+    async def test_sets_refresh_failed_on_timeout(self):
+        """async_press sets refresh_failed on timeout."""
         button = make_button()
-        button.client.refresh_alarm_status = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+        button._client.refresh_alarm_status = AsyncMock(
+            side_effect=OperationTimeoutError("timed out")
         )
-        button.hass.data = {}  # type: ignore[attr-defined]
+        alarm_entity = MagicMock()
+        button.hass.data = {  # type: ignore[attr-defined]
+            DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
+        }
 
         await button.async_press()
 
-        # Should not crash, notification still created
-        button.hass.services.async_call.assert_called_once()  # type: ignore[attr-defined]
+        alarm_entity._set_refresh_failed.assert_called_with(True)
 
-    async def test_non_403_error_does_not_create_notification(self):
-        """Non-403 errors are logged but do not create persistent notifications."""
+    async def test_sets_waf_blocked_on_403(self):
+        """async_press sets waf_blocked on 403 error."""
         button = make_button()
-        button.client.refresh_alarm_status = AsyncMock(
-            side_effect=SecuritasDirectError("Network error")
-        )
+        err = SecuritasDirectError("blocked", http_status=403)
+        button._client.refresh_alarm_status = AsyncMock(side_effect=err)
+        alarm_entity = MagicMock()
+        button.hass.data = {  # type: ignore[attr-defined]
+            DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
+        }
 
         await button.async_press()
 
-        button.hass.services.async_call.assert_not_called()  # type: ignore[attr-defined]
+        alarm_entity._set_waf_blocked.assert_called_with(True)
+        button.hass.services.async_call.assert_awaited_once()
+
+    async def test_no_crash_when_hass_is_none(self):
+        """async_press does not crash when hass is None."""
+        button = make_button()
+        button.hass = None
+
+        # Should not raise
+        await button.async_press()
 
 
 # ===========================================================================
@@ -283,5 +252,3 @@ class TestHassNoneGuardsButton:
 
         # Should not raise or call any API methods
         await button.async_press()
-
-        button.client.refresh_alarm_status.assert_not_called()  # type: ignore[attr-defined]

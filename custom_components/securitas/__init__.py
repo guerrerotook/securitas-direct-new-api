@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from datetime import timedelta
 import logging
 from pathlib import Path
 import time
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import voluptuous as vol
@@ -14,7 +16,7 @@ import voluptuous as vol
 from homeassistant.components import frontend
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -55,10 +57,14 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
+    SENTINEL_SERVICE_NAMES,
     SIGNAL_CAMERA_STATE,
-    SIGNAL_CAMERA_UPDATE,
-    SIGNAL_FULL_IMAGE_UPDATE,
-    SIGNAL_XSSTATUS_UPDATE,
+)
+from .coordinators import (
+    AlarmCoordinator,
+    CameraCoordinator,
+    LockCoordinator,
+    SentinelCoordinator,
 )
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     SecuritasDirectDevice,
@@ -68,13 +74,16 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
 from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
     ApiDomains,
+    AuthenticationError,
     Installation,
-    Login2FAError,
-    LoginError,
     SecuritasDirectError,
+    TwoFactorRequiredError,
     generate_device_id,
     generate_uuid,
 )
+
+if TYPE_CHECKING:
+    from .lock import SecuritasLock
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -154,14 +163,14 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
-def _build_config_dict(entry: ConfigEntry) -> tuple[dict, bool]:
+def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     """Build config dict from entry.data + entry.options.
 
     Returns the config dict and a flag indicating whether sign-in is needed
     (True if any device ID fields are missing from entry.data).
     """
 
-    def _opt(key, default=None):
+    def _opt(key: str, default: Any = None) -> Any:
         """Read from options first, then data, then default."""
         return entry.options.get(key, entry.data.get(key, default))
 
@@ -207,12 +216,12 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict, bool]:
 
 
 async def _get_or_create_session(
-    hass: HomeAssistant, config: dict, entry: ConfigEntry
+    hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> SecuritasHub:
     """Get or create a shared SecuritasHub session with reference counting.
 
     Multiple config entries for the same username share a single
-    SecuritasHub / ApiManager session to avoid duplicate logins
+    SecuritasHub / SecuritasClient session to avoid duplicate logins
     and WAF rate-limit blocks.  A per-username lock prevents concurrent
     async_setup_entry calls from creating duplicate hubs.
     """
@@ -232,14 +241,14 @@ async def _get_or_create_session(
             client = SecuritasHub(config, entry, async_get_clientsession(hass), hass)
             try:
                 await client.login()
-            except Login2FAError:
+            except TwoFactorRequiredError:
                 msg = (
                     "Securitas Direct need a 2FA SMS code."
                     "Please login again with your phone"
                 )
                 _notify_error(hass, "2fa_error", "Securitas Direct", msg)
                 raise
-            except LoginError as err:
+            except AuthenticationError as err:
                 _notify_error(hass, "login_error", "Securitas Direct", str(err))
                 _LOGGER.error(
                     "Could not log in to Securitas: %s",
@@ -263,7 +272,7 @@ async def _get_or_create_session(
 def _get_or_create_api_queue(
     hass: HomeAssistant,
     session: SecuritasHub,
-    config: dict,
+    config: dict[str, Any],
     entry: ConfigEntry,
 ) -> None:
     """Create or reuse an ApiQueue for the session's API domain.
@@ -321,7 +330,7 @@ async def _fetch_and_cache_installations(
         all_installations: list[Installation] = install_cache["data"]
     else:
         all_installations = await hub.api_queue.submit(
-            hub.session.list_installations,
+            hub.client.list_installations,
             priority=ApiQueue.FOREGROUND,
         )
         hass.data[DOMAIN][install_cache_key] = {
@@ -357,9 +366,9 @@ async def _fetch_and_cache_installations(
         elif installation.number not in hub.services_cache:
             # HA restart: fetch directly (bypass queue — we just logged
             # in, no WAF risk yet) so platforms don't block on queue.
-            hub.services_cache[
-                installation.number
-            ] = await hub.session.get_all_services(installation)
+            hub.services_cache[installation.number] = await hub.client.get_services(
+                installation
+            )
         devices.append(SecuritasDirectDevice(installation))
     return devices
 
@@ -406,10 +415,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not need_sign_in:
         try:
             client = await _get_or_create_session(hass, config, entry)
-        except Login2FAError:
-            return False
-        except LoginError:
-            return False
+        except TwoFactorRequiredError as err:
+            raise ConfigEntryAuthFailed("2FA required — please reauthenticate") from err
+        except AuthenticationError as err:
+            raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
 
         _get_or_create_api_queue(hass, client, config, entry)
 
@@ -421,11 +430,74 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Unable to connect to Securitas Direct: %s", err.log_detail())
             raise ConfigEntryNotReady("Unable to connect to Securitas Direct") from None
 
+        # ── Create coordinators ──────────────────────────────────────
+        scan_interval = timedelta(seconds=config[CONF_SCAN_INTERVAL])
+        alarm_coord: AlarmCoordinator | None = None
+        sentinel_coord: SentinelCoordinator | None = None
+        lock_coord: LockCoordinator | None = None
+
+        # Use the first installation for shared coordinators.
+        # (Each config entry is scoped to one installation via CONF_INSTALLATION.)
+        if devices:
+            first_installation = devices[0].installation
+            alarm_coord = AlarmCoordinator(
+                hass,
+                client.client,
+                client.api_queue,
+                first_installation,
+                update_interval=scan_interval,
+                config_entry=entry,
+            )
+
+            # Discover sentinel and lock services from cached service list
+            try:
+                services = await client.get_services(first_installation)
+            except SecuritasDirectError:
+                services = []
+
+            # Sentinel coordinator — needs a sentinel service and its zone
+            for service in services:
+                if service.request in SENTINEL_SERVICE_NAMES:
+                    zone = service.attributes[0].value if service.attributes else ""
+                    sentinel_coord = SentinelCoordinator(
+                        hass,
+                        client.client,
+                        client.api_queue,
+                        first_installation,
+                        service=service,
+                        zone=zone,
+                        config_entry=entry,
+                    )
+                    break  # one sentinel coordinator per installation
+
+            # Lock coordinator — if any lock service exists
+            lock_service_names = {"DOORLOCK", "DANALOCK"}
+            if any(s.request in lock_service_names for s in services):
+                lock_coord = LockCoordinator(
+                    hass,
+                    client.client,
+                    client.api_queue,
+                    first_installation,
+                    update_interval=scan_interval,
+                    config_entry=entry,
+                )
+
         # Store per-entry data
         hass.data[DOMAIN][entry.entry_id] = {
             "hub": client,
             "devices": devices,
+            "alarm_coordinator": alarm_coord,
+            "sentinel_coordinator": sentinel_coord,
+            "lock_coordinator": lock_coord,
         }
+
+        # Schedule non-blocking first refresh for each coordinator
+        for coord in filter(None, [alarm_coord, sentinel_coord, lock_coord]):
+            entry.async_create_background_task(
+                hass,
+                coord.async_refresh(),
+                f"securitas_refresh_{coord.name}",
+            )
 
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -443,9 +515,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _discover_cameras(
+    hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
-    entry_data: dict,
+    entry_data: dict[str, Any],
+    entry: ConfigEntry,
 ) -> None:
     """Discover camera devices for an installation and add entities."""
     from .button import SecuritasCaptureButton
@@ -474,6 +548,22 @@ async def _discover_cameras(
     )
 
     if cameras:
+        # Create and store camera coordinator
+        camera_coord = CameraCoordinator(
+            hass,
+            hub.client,
+            hub.api_queue,
+            installation,
+            cameras=cameras,
+            config_entry=entry,
+        )
+        entry_data["camera_coordinator"] = camera_coord
+        entry.async_create_background_task(
+            hass,
+            camera_coord.async_refresh(),
+            "securitas_camera_refresh",
+        )
+
         camera_add = entry_data.get("camera_add_entities")
         button_add = entry_data.get("button_add_entities")
         _LOGGER.debug(
@@ -484,8 +574,14 @@ async def _discover_cameras(
         )
         if camera_add:
             camera_add(
-                [SecuritasCamera(hub, installation, cam) for cam in cameras]
-                + [SecuritasCameraFull(hub, installation, cam) for cam in cameras],
+                [
+                    SecuritasCamera(camera_coord, hub, installation, cam)
+                    for cam in cameras
+                ]
+                + [
+                    SecuritasCameraFull(camera_coord, hub, installation, cam)
+                    for cam in cameras
+                ],
                 False,
             )
         if button_add:
@@ -502,7 +598,7 @@ def _schedule_lock_config_retry(
     hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
-    lock_entity,
+    lock_entity: SecuritasLock,
     attempt: int = 0,
 ) -> None:
     """Schedule a background retry to fetch lock config."""
@@ -518,7 +614,7 @@ def _schedule_lock_config_retry(
 
     delay = _LOCK_CONFIG_RETRY_DELAYS[attempt]
 
-    async def _retry(_now) -> None:
+    async def _retry(_now: Any) -> None:
         # Guard: entity may have been removed while the timer was pending.
         if lock_entity.hass is None:
             return
@@ -559,17 +655,16 @@ async def _discover_locks(
     hass: HomeAssistant,
     hub: SecuritasHub,
     installation: Installation,
-    entry_data: dict,
+    entry_data: dict[str, Any],
 ) -> None:
     """Discover lock devices for an installation and add entities."""
-    from .entity import schedule_initial_updates
     from .lock import (
         DOORLOCK_SERVICE,
         LOCK_STATUS_UNKNOWN,
         SecuritasLock,
     )
     from .securitas_direct_new_api import SmartLock, SmartLockMode
-    from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
+    from .securitas_direct_new_api.client import SMARTLOCK_DEVICE_ID
 
     try:
         services = await hub.get_services(installation)
@@ -591,16 +686,17 @@ async def _discover_locks(
         lock_modes = [
             SmartLockMode(
                 res=None,
-                lockStatus=LOCK_STATUS_UNKNOWN,
-                deviceId=SMARTLOCK_DEVICE_ID,
+                lock_status=LOCK_STATUS_UNKNOWN,
+                device_id=SMARTLOCK_DEVICE_ID,
             )
         ]
 
+    lock_coordinator = entry_data.get("lock_coordinator")
     lock_add = entry_data.get("lock_add_entities")
-    if lock_add:
+    if lock_add and lock_coordinator is not None:
         locks = []
         for mode in lock_modes:
-            device_id = mode.deviceId or SMARTLOCK_DEVICE_ID
+            device_id = mode.device_id or SMARTLOCK_DEVICE_ID
             lock_config: SmartLock | None = None
             try:
                 lock_config = await hub.get_lock_config(installation, device_id)
@@ -612,16 +708,15 @@ async def _discover_locks(
                 )
             locks.append(
                 SecuritasLock(
-                    installation,
+                    coordinator=lock_coordinator,
+                    installation=installation,
                     client=hub,
-                    hass=hass,
                     device_id=device_id,
-                    initial_status=mode.lockStatus,
+                    initial_status=mode.lock_status,
                     lock_config=lock_config,
                 )
             )
         lock_add(locks, False)
-        schedule_initial_updates(hass, locks)
 
         # Schedule deferred config retry for locks without config.
         for lk in locks:
@@ -640,7 +735,7 @@ async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> No
 
     for device in devices:
         installation = device.installation
-        await _discover_cameras(client, installation, entry_data)
+        await _discover_cameras(hass, client, installation, entry_data, entry)
         await _discover_locks(hass, client, installation, entry_data)
 
 

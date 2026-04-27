@@ -27,12 +27,15 @@ from custom_components.securitas import (
     SecuritasDirectDevice,
     SecuritasHub,
 )
-from custom_components.securitas.securitas_direct_new_api.apimanager import ApiManager
+from custom_components.securitas.securitas_direct_new_api.client import SecuritasClient
+from custom_components.securitas.securitas_direct_new_api.http_transport import (
+    HttpTransport,
+)
 from custom_components.securitas.securitas_direct_new_api.const import (
     PERI_DEFAULTS,
     STD_DEFAULTS,
 )
-from custom_components.securitas.securitas_direct_new_api.dataTypes import Installation
+from custom_components.securitas.securitas_direct_new_api.models import Installation
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -135,23 +138,24 @@ def validate_device_response(
     }
 
 
-# ── ApiManager fixture ───────────────────────────────────────────────────────
+# ── SecuritasClient fixture ──────────────────────────────────────────────────
 
 
 @pytest.fixture
-def mock_session():
-    """Create a mock aiohttp.ClientSession (never actually used since we mock _execute_request)."""
-    return MagicMock()
+def mock_transport():
+    """Create a mock HttpTransport."""
+    return AsyncMock(spec=HttpTransport)
 
 
 @pytest.fixture
-def api(mock_session):
-    """Create an ApiManager instance with test credentials."""
-    return ApiManager(
+def api(mock_transport):
+    """Create a SecuritasClient instance with test credentials."""
+    return SecuritasClient(
+        transport=mock_transport,
+        country="ES",
+        language="es_ES",
         username="test@example.com",
         password="test-password",
-        country="ES",
-        http_client=mock_session,
         device_id="test-device-id",
         uuid="test-uuid",
         id_device_indigitall="test-indigitall",
@@ -159,11 +163,9 @@ def api(mock_session):
 
 
 @pytest.fixture
-def mock_execute(api):
-    """Patch _execute_request on the api instance and return the AsyncMock."""
-    mock = AsyncMock()
-    api._execute_request = mock
-    return mock
+def mock_execute(api, mock_transport):
+    """Patch transport.execute on the api instance and return the AsyncMock."""
+    return mock_transport.execute
 
 
 # ── Integration test helpers ────────────────────────────────────────────────
@@ -177,10 +179,10 @@ def make_installation(**overrides) -> Installation:
         "panel": "SDVFAST",
         "type": "PLUS",
         "name": "John",
-        "lastName": "Doe",
+        "last_name": "Doe",
         "address": "123 St",
         "city": "Madrid",
-        "postalCode": "28001",
+        "postal_code": "28001",
         "province": "Madrid",
         "email": "test@example.com",
         "phone": "555-1234",
@@ -241,7 +243,7 @@ def make_config_entry_data(
 def make_securitas_hub_mock(**overrides) -> MagicMock:
     """Create a MagicMock mimicking SecuritasHub."""
     hub = MagicMock(spec=SecuritasHub)
-    hub.session = AsyncMock()
+    hub.client = AsyncMock()
     hub.country = "ES"
     hub.lang = "es"
     hub.config = {}
@@ -256,7 +258,6 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub._services_cache = {}
     hub.get_services = AsyncMock(return_value=[])
     hub.logout = AsyncMock(return_value=True)
-    hub.update_overview = AsyncMock()
     hub.get_authentication_token = MagicMock(return_value=FAKE_JWT)
     hub.set_authentication_token = MagicMock()
     for key, val in overrides.items():

@@ -59,13 +59,12 @@ from .securitas_direct_new_api import (
     STD_OPTIONS,
     AccountBlockedError,
     Attribute,
-    Attributes,
+    AuthenticationError,
     Installation,
-    Login2FAError,
-    LoginError,
     OtpPhone,
     SecuritasDirectError,
     Service,
+    TwoFactorRequiredError,
 )
 
 VERSION = 3
@@ -159,6 +158,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._selected_installation: Installation | None = None
         self._options_data: dict[str, Any] = {}
         self._has_peri: bool = False
+        self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def _create_entry_for_installation(
         self, installation: Installation
@@ -222,7 +222,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
         )
 
-    async def async_step_otp_challenge(self, user_input: dict[str, Any] | None = None):
+    async def async_step_otp_challenge(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Last step of the OTP challenge."""
         assert self.securitas is not None
         assert self.otp_challenge is not None
@@ -260,6 +262,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
         # MFA may succeed without returning a token (hash: null).
         # finish_setup() will call login() to obtain it.
+        if self._reauth_entry is not None:
+            return await self._finish_reauth()
         return await self.finish_setup()
 
     def _user_schema(self, defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -317,7 +321,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Login — catches credential errors and network failures
         try:
             await self.securitas.login()
-        except Login2FAError:
+        except TwoFactorRequiredError:
             # 2FA required — proceed to device validation for phone list
             return await self._start_2fa_flow()
         except AccountBlockedError:
@@ -326,7 +330,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(user_input),
                 errors={"base": "account_blocked"},
             )
-        except LoginError:
+        except AuthenticationError:
             return self.async_show_form(
                 step_id="user",
                 data_schema=self._user_schema(user_input),
@@ -341,6 +345,84 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Login succeeded without 2FA — proceed directly
         return await self.finish_setup()
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Handle reauth when ConfigEntryAuthFailed is raised."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]  # type: ignore[typeddict-item]
+        )
+        assert self._reauth_entry is not None
+        self.config = dict(entry_data)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Show reauth form and handle credential re-entry."""
+        assert self._reauth_entry is not None
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+            self.config[CONF_USERNAME] = user_input.get(
+                CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
+            )
+
+            # Preserve existing device IDs from the entry being reauthenticated
+            self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
+                CONF_DEVICE_ID, generate_uuid()
+            )
+            self.config[CONF_UNIQUE_ID] = self._reauth_entry.data.get(
+                CONF_UNIQUE_ID, self.config[CONF_DEVICE_ID]
+            )
+            self.config.setdefault(
+                CONF_DEVICE_INDIGITALL,
+                self._reauth_entry.data.get(CONF_DEVICE_INDIGITALL, ""),
+            )
+            self.config.setdefault(
+                CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+            )
+            self.config.setdefault(CONF_ENTRY_ID, "")
+
+            self.securitas = self._create_client()
+
+            try:
+                await self.securitas.login()
+            except TwoFactorRequiredError:
+                return await self._start_2fa_flow()
+            except AccountBlockedError:
+                errors["base"] = "account_blocked"
+            except AuthenticationError:
+                errors["base"] = "invalid_auth"
+            except SecuritasDirectError:
+                errors["base"] = "cannot_connect"
+            else:
+                return await self._finish_reauth()
+
+        username = self._reauth_entry.data.get(CONF_USERNAME, "")
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_USERNAME, default=username): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
+        """Complete reauth by updating entry credentials and reloading."""
+        assert self._reauth_entry is not None
+        await self.async_set_unique_id(self._reauth_entry.unique_id)
+        new_data = {**self._reauth_entry.data}
+        new_data[CONF_USERNAME] = self.config[CONF_USERNAME]
+        new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+        self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
+        await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+        return self.async_abort(reason="reauth_successful")
 
     async def _start_2fa_flow(
         self, errors: dict[str, str] | None = None
@@ -382,13 +464,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Re-show phone list form with an error."""
         return await self._start_2fa_flow(errors={"base": error_key})
 
-    async def finish_setup(self):
+    async def finish_setup(self) -> config_entries.ConfigFlowResult:
         """Login, discover installations, detect peri, advance to options."""
         assert self.securitas is not None
         try:
             if self.securitas.get_authentication_token() is None:
                 await self.securitas.login()
-        except Login2FAError:
+        except TwoFactorRequiredError:
             return await self._start_2fa_flow()
         except AccountBlockedError:
             return self.async_show_form(
@@ -396,7 +478,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "account_blocked"},
             )
-        except LoginError:
+        except AuthenticationError:
             return self.async_show_form(
                 step_id="user",
                 data_schema=self._user_schema(self.config),
@@ -411,7 +493,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_TOKEN] = self.securitas.get_authentication_token()
 
         self.hass.data.setdefault(DOMAIN, {})
-        self.hass.data[DOMAIN][SecuritasHub.__name__] = self.securitas
 
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
@@ -419,14 +500,14 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             sessions[username] = {"hub": self.securitas, "ref_count": 0}
 
         try:
-            installations = await self.securitas.session.list_installations()
+            installations = await self.securitas.client.list_installations()
         except SecuritasDirectError:
             return self.async_show_form(
                 step_id="user",
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
-        self.hass.data[DOMAIN]["installations_cache"] = {
+        self.hass.data[DOMAIN][f"installations_cache_{username}"] = {
             "data": installations,
             "time": time.monotonic(),
         }
@@ -447,7 +528,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._available_installations = available
         return await self.async_step_select_installation()
 
-    async def _select_installation(self, installation: Installation):
+    async def _select_installation(
+        self, installation: Installation
+    ) -> config_entries.ConfigFlowResult:
         """Set installation, call get_services, detect peri, advance to options."""
         self.config[CONF_INSTALLATION] = installation.number
         self._selected_installation = installation
@@ -486,8 +569,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Check service attributes (e.g. SCH with PERI attribute — Spanish panels)
         for svc in services:
             attrs = svc.attributes
-            if isinstance(attrs, Attributes):
-                attrs = attrs.attributes
             if isinstance(attrs, list):
                 for attr in attrs:
                     if isinstance(attr, Attribute) and attr.name == "PERI":
@@ -626,7 +707,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._general_data: dict[str, Any] = {}
 
-    def _get(self, key, default=None):
+    def _get(self, key: str, default: Any = None) -> Any:
         """Read current value from options, falling back to entry data."""
         return self.config_entry.options.get(
             key, self.config_entry.data.get(key, default)

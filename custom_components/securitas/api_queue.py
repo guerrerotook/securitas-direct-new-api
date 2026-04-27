@@ -8,6 +8,8 @@ requests and lets foreground (user-initiated) requests preempt background
 import asyncio
 import logging
 import time
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,8 +49,12 @@ class ApiQueue:
         self._bg_event.set()  # initially no foreground work pending
 
     async def submit(
-        self, coro_fn, *args, priority: int = BACKGROUND, label: str | None = None
-    ):
+        self,
+        coro_fn: Callable[..., Coroutine[Any, Any, Any]],
+        *args: Any,
+        priority: int = BACKGROUND,
+        label: str | None = None,
+    ) -> Any:
         """Submit an API call and wait for its result.
 
         Args:

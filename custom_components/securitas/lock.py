@@ -2,33 +2,26 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
-
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_SCAN_INTERVAL
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import (
-    DEFAULT_SCAN_INTERVAL,
-    DOMAIN,
-    SecuritasHub,
-)
-from .entity import SecuritasEntity
+from . import DOMAIN, SecuritasHub
+from .coordinators import LockCoordinator
 from .securitas_direct_new_api import (
     Installation,
     SecuritasDirectError,
     SmartLock,
 )
 from .api_queue import ApiQueue
-from .securitas_direct_new_api.apimanager import SMARTLOCK_DEVICE_ID
+from .securitas_direct_new_api.client import SMARTLOCK_DEVICE_ID
 
 if TYPE_CHECKING:
     from .securitas_direct_new_api import SmartLockMode
@@ -58,19 +51,26 @@ async def async_setup_entry(
     entry_data["lock_add_entities"] = async_add_entities
 
 
-class SecuritasLock(SecuritasEntity, lock.LockEntity):
+class SecuritasLock(  # type: ignore[override]
+    CoordinatorEntity[LockCoordinator],
+    lock.LockEntity,
+):
     """Representation of a Securitas Direct smart lock."""
+
+    _attr_has_entity_name = False
 
     def __init__(
         self,
+        coordinator: LockCoordinator,
         installation: Installation,
         client: SecuritasHub,
-        hass: HomeAssistant,
         device_id: str = SMARTLOCK_DEVICE_ID,
         initial_status: str = LOCK_STATUS_LOCKED,
         lock_config: SmartLock | None = None,
     ) -> None:
-        super().__init__(installation, client)
+        super().__init__(coordinator)
+        self._installation = installation
+        self._client = client
         self._state = (
             initial_status
             if initial_status != LOCK_STATUS_UNKNOWN
@@ -105,19 +105,26 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             manufacturer="Securitas Direct",
             model=lock_config.family if lock_config and lock_config.family else None,
             serial_number=(
-                lock_config.serialNumber
-                if lock_config and lock_config.serialNumber
+                lock_config.serial_number
+                if lock_config and lock_config.serial_number
                 else None
             ),
         )
 
-        self.hass: HomeAssistant = hass
-        scan_seconds = client.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        self._update_interval: timedelta = timedelta(seconds=scan_seconds)
-        self._scan_seconds = scan_seconds
-        self._update_unsub: Callable[[], None] | None = None
         self._operation_in_progress: bool = False
         self._config_retry_unsubs: list[Callable[[], None]] = []
+
+    # -- Properties ----------------------------------------------------------
+
+    @property
+    def installation(self) -> Installation:
+        """Return the installation."""
+        return self._installation
+
+    @property
+    def client(self) -> SecuritasHub:
+        """Return the client hub."""
+        return self._client
 
     @property
     def lock_config(self) -> SmartLock | None:
@@ -138,14 +145,14 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             identifiers={
                 (
                     DOMAIN,
-                    f"v4_securitas_direct.{self.installation.number}_lock_{self._device_id}",
+                    f"v4_securitas_direct.{self._installation.number}_lock_{self._device_id}",
                 )
             },
-            via_device=(DOMAIN, f"v4_securitas_direct.{self.installation.number}"),
+            via_device=(DOMAIN, f"v4_securitas_direct.{self._installation.number}"),
             name=self._attr_name,
             manufacturer="Securitas Direct",
             model=lock_config.family or None,
-            serial_number=lock_config.serialNumber or None,
+            serial_number=lock_config.serial_number or None,
         )
         self.async_write_ha_state()
 
@@ -153,68 +160,48 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         """Track a config retry cancel handle for cleanup on removal."""
         self._config_retry_unsubs.append(unsub)
 
-    async def async_added_to_hass(self) -> None:
-        """Register timer when entity is added to HA."""
-        if self._scan_seconds > 0:
-            self._update_unsub = async_track_time_interval(
-                self.hass, self.async_update_status, self._update_interval
-            )
+    # -- Coordinator integration ---------------------------------------------
+
+    @property
+    def _current_mode(self) -> SmartLockMode | None:
+        """Find this lock's mode in coordinator data."""
+        if self.coordinator.data is None:
+            return None
+        for mode in self.coordinator.data.modes:
+            if mode.device_id == self._device_id:
+                return mode
+        return None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator.
+
+        Skip coordinator-driven state writes while a lock/unlock
+        operation is in progress to avoid overwriting transitional state.
+        """
+        if self._operation_in_progress:
+            return
+
+        # Sync _state from coordinator data
+        mode = self._current_mode
+        if mode is not None and mode.lock_status != LOCK_STATUS_UNKNOWN:
+            self._state = mode.lock_status
+
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """When entity will be removed from Home Assistant."""
+        await super().async_will_remove_from_hass()
+        for unsub in self._config_retry_unsubs:
+            unsub()
+        self._config_retry_unsubs.clear()
+
+    # -- State properties ----------------------------------------------------
 
     @property
     def changed_by(self) -> str:  # type: ignore[override]
         """Return the last change triggered by."""
         return self._changed_by
-
-    async def async_will_remove_from_hass(self) -> None:
-        """When entity will be removed from Home Assistant."""
-        if self._update_unsub:
-            self._update_unsub()  # Unsubscribe from updates
-            self._update_unsub = None
-        for unsub in self._config_retry_unsubs:
-            unsub()
-        self._config_retry_unsubs.clear()
-
-    async def async_update(self) -> None:
-        """Update lock state."""
-        await self.async_update_status()
-
-    async def async_update_status(self, _now=None) -> None:
-        """Poll lock status from the API."""
-        if self.hass is None:
-            return
-        if self._operation_in_progress:
-            _LOGGER.debug(
-                "[%s] Skipping status poll - lock operation in progress",
-                self.entity_id,
-            )
-            return
-
-        try:
-            self._new_state = await self.get_lock_state()
-            if self._new_state != LOCK_STATUS_UNKNOWN:
-                self._state = self._new_state
-        except SecuritasDirectError as err:
-            _LOGGER.error(
-                "Error updating lock state for %s device %s: %s",
-                self.installation.number,
-                self._device_id,
-                err,
-            )
-
-        # When called from timer callback (_now is not None), HA does not
-        # automatically write state — we must do it explicitly.
-        if _now is not None:
-            self.async_write_ha_state()
-
-    async def get_lock_state(self, *, priority: int | None = None) -> str:
-        """Return the current lock status from the API."""
-        lock_modes: list[SmartLockMode] = await self.client.get_lock_modes(
-            self.installation, priority=priority
-        )
-        for mode in lock_modes:
-            if mode.deviceId == self._device_id:
-                return mode.lockStatus
-        return LOCK_STATUS_UNKNOWN
 
     @property
     def is_locked(self) -> bool:  # type: ignore[override]
@@ -246,11 +233,20 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         attrs: dict[str, Any] = {}
         cfg = self._lock_config
         if cfg and cfg.features:
-            attrs["hold_back_latch_time"] = cfg.features.holdBackLatchTime
+            attrs["hold_back_latch_time"] = cfg.features.hold_back_latch_time
             if cfg.features.autolock:
                 attrs["autolock_active"] = cfg.features.autolock.active
                 attrs["autolock_timeout"] = cfg.features.autolock.timeout
         return attrs
+
+    # -- Lock/unlock operations ----------------------------------------------
+
+    def _force_state(self, state: str) -> None:
+        """Force entity state and schedule HA update."""
+        self._last_state = self._state
+        self._state = state
+        if self.hass is not None:
+            self.async_schedule_update_ha_state()
 
     async def _change_lock_mode(
         self,
@@ -269,8 +265,8 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         self._force_state(transitional_state)
         try:
             try:
-                await self.client.change_lock_mode(
-                    self.installation, lock_state, self._device_id
+                await self._client.change_lock_mode(
+                    self._installation, lock_state, self._device_id
                 )
             except SecuritasDirectError as err:
                 self._state = self._last_state
@@ -278,7 +274,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
                 _LOGGER.error(
                     "%s operation failed for %s device %s: %s",
                     operation,
-                    self.installation.number,
+                    self._installation.number,
                     self._device_id,
                     err.log_detail(),
                 )
@@ -288,7 +284,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             # time to act.  Catch broadly: aiohttp can raise TimeoutError,
             # ClientError etc. in addition to SecuritasDirectError.
             try:
-                real_state = await self.get_lock_state(priority=ApiQueue.FOREGROUND)
+                real_state = await self._get_lock_state(priority=ApiQueue.FOREGROUND)
             except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
                 real_state = LOCK_STATUS_UNKNOWN
 
@@ -299,8 +295,19 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            await self.coordinator.async_request_refresh()
 
-    async def async_lock(self, **kwargs):
+    async def _get_lock_state(self, *, priority: int | None = None) -> str:
+        """Return the current lock status from the API."""
+        lock_modes: list[SmartLockMode] = await self._client.get_lock_modes(
+            self._installation, priority=priority
+        )
+        for mode in lock_modes:
+            if mode.device_id == self._device_id:
+                return mode.lock_status
+        return LOCK_STATUS_UNKNOWN
+
+    async def async_lock(self, **kwargs: Any) -> None:
         await self._change_lock_mode(
             lock_state=True,
             transitional_state=LOCK_STATUS_LOCKING,
@@ -308,7 +315,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             operation="Lock",
         )
 
-    async def async_unlock(self, **kwargs):
+    async def async_unlock(self, **kwargs: Any) -> None:
         await self._change_lock_mode(
             lock_state=False,
             transitional_state=LOCK_STATUS_UNLOCKING,
@@ -316,7 +323,7 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
             operation="Unlock",
         )
 
-    async def async_open(self, **kwargs):
+    async def async_open(self, **kwargs: Any) -> None:
         await self._change_lock_mode(
             lock_state=False,
             transitional_state=LOCK_STATUS_UNLOCKING,
@@ -331,8 +338,8 @@ class SecuritasLock(SecuritasEntity, lock.LockEntity):
         if (
             cfg
             and cfg.features
-            and cfg.features.holdBackLatchTime
-            and cfg.features.holdBackLatchTime > 0
+            and cfg.features.hold_back_latch_time
+            and cfg.features.hold_back_latch_time > 0
         ):
             return lock.LockEntityFeature.OPEN
         return lock.LockEntityFeature(0)

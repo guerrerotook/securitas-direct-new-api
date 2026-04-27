@@ -8,12 +8,13 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import DOMAIN, SIGNAL_XSSTATUS_UPDATE, SecuritasDirectDevice, SecuritasHub
-from .entity import SecuritasEntity
+from . import DOMAIN, SecuritasDirectDevice
+from .coordinators import AlarmCoordinator
+from .entity import securitas_device_info
 from .securitas_direct_new_api import Installation
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,41 +25,39 @@ async def async_setup_entry(
 ) -> None:
     """Set up Securitas Direct binary sensor entities."""
     entry_data = hass.data[DOMAIN][entry.entry_id]
-    client: SecuritasHub = entry_data["hub"]
+    coordinator: AlarmCoordinator = entry_data["alarm_coordinator"]
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
 
     entities: list[BinarySensorEntity] = [
-        WifiConnectedSensor(client, device.installation) for device in securitas_devices
+        WifiConnectedSensor(coordinator, device.installation)
+        for device in securitas_devices
     ]
     async_add_entities(entities, False)
 
 
-class WifiConnectedSensor(SecuritasEntity, BinarySensorEntity):
-    """WiFi connection status from xSStatus — updated via dispatcher, no polling."""
+class WifiConnectedSensor(  # type: ignore[override]
+    CoordinatorEntity[AlarmCoordinator],
+    BinarySensorEntity,
+):
+    """WiFi connection status from coordinator — no independent polling."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = False
     _attr_should_poll = False
 
-    def __init__(self, client: SecuritasHub, installation: Installation) -> None:
-        super().__init__(installation, client)
+    def __init__(
+        self, coordinator: AlarmCoordinator, installation: Installation
+    ) -> None:
+        super().__init__(coordinator)
+        self._installation = installation
         self._attr_unique_id = f"v4_{installation.number}_wifi_connected"
         self._attr_name = f"{installation.alias} WiFi Connected"
+        self._attr_device_info = securitas_device_info(installation)
 
-    async def async_added_to_hass(self) -> None:
-        """Register dispatcher listener."""
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, SIGNAL_XSSTATUS_UPDATE, self._handle_update
-            )
-        )
-
-    @callback
-    def _handle_update(self, installation_number: str) -> None:
-        """Handle xSStatus update."""
-        if installation_number != self._installation.number:
-            return
-        status = self._client.xsstatus.get(self._installation.number)
-        if status and status.wifi_connected is not None:
-            self._attr_is_on = status.wifi_connected
-            self.async_write_ha_state()
+    @property
+    def is_on(self) -> bool | None:  # type: ignore[override]
+        """Return True if WiFi is connected."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.status.wifi_connected

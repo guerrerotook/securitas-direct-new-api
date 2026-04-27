@@ -39,6 +39,7 @@ class MockResponse:
     def __init__(self, text: str, status: int = 200) -> None:
         self._text = text
         self.status = status
+        self.headers: dict[str, str] = {}
 
     async def text(self) -> str:
         return self._text
@@ -638,6 +639,10 @@ def queue_standard_setup(
     server.set_default_response(
         "CheckAlarmStatus", graphql_alarm_status(proto=proto, numinst=numinst)
     )
+
+    # AlarmCoordinator fires a background refresh via get_general_status (Status)
+    # immediately after setup — provide a default so it doesn't crash.
+    server.set_default_response("Status", graphql_general_status(status=proto))
 
 
 def make_doorlock_service() -> dict:
