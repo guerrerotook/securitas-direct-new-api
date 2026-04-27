@@ -249,6 +249,7 @@ class SecuritasAlarm(  # type: ignore[override]
             self._arming_event_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
+        await super().async_will_remove_from_hass()
 
     @callback
     def _handle_coordinator_update(self) -> None:

@@ -11,6 +11,7 @@ from homeassistant.components.alarm_control_panel.const import (
     CodeFormat,
 )
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.securitas.securitas_direct_new_api.models import (
     Installation,
@@ -1262,6 +1263,19 @@ class TestAsyncWillRemoveFromHass:
 
         # Should not raise
         await alarm.async_will_remove_from_hass()
+
+    async def test_calls_super_to_clean_up_coordinator_listener(self):
+        """Calls super().async_will_remove_from_hass() so CoordinatorEntity unsubscribes its listener."""
+        alarm = make_alarm()
+
+        with patch.object(
+            CoordinatorEntity,
+            "async_will_remove_from_hass",
+            AsyncMock(),
+        ) as super_remove:
+            await alarm.async_will_remove_from_hass()
+
+        super_remove.assert_called_once()
 
 
 # ===========================================================================
