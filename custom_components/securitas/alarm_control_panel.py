@@ -506,15 +506,15 @@ class SecuritasAlarm(  # type: ignore[override]
             self._attr_extra_state_attributes["waf_blocked"] = True
         else:
             if self._attr_extra_state_attributes.pop("waf_blocked", None):
-                # Dismiss the rate-limited persistent notification
+                # Dismiss the rate-limited persistent notification — must match
+                # the ID created by the `rate_limited` _notify call.
                 self.hass.async_create_task(
                     self.hass.services.async_call(
                         domain="persistent_notification",
                         service="dismiss",
                         service_data={
                             "notification_id": (
-                                f"{DOMAIN}.securitas_rate_limited"
-                                f"_{self.installation.number}"
+                                f"{DOMAIN}.rate_limited_{self.installation.number}"
                             ),
                         },
                     )

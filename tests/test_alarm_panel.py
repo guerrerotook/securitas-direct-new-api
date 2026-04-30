@@ -1235,6 +1235,21 @@ class TestForceState:
 
         assert "waf_blocked" not in alarm._attr_extra_state_attributes
 
+    def test_clearing_waf_blocked_dismisses_rate_limited_notification(self):
+        """When WAF clears, dismissing must target the same ID used to create the rate-limited notification."""
+        alarm = make_alarm()
+        alarm._attr_extra_state_attributes["waf_blocked"] = True
+
+        alarm._set_waf_blocked(False)
+
+        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
+        call = alarm.hass.services.async_call.call_args  # type: ignore[attr-defined]
+        assert call[1]["domain"] == "persistent_notification"
+        assert call[1]["service"] == "dismiss"
+        assert call[1]["service_data"]["notification_id"] == (
+            f"securitas.rate_limited_{alarm.installation.number}"
+        )
+
 
 # ===========================================================================
 # async_will_remove_from_hass
