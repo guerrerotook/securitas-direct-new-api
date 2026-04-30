@@ -1,0 +1,131 @@
+{
+    "config": {
+        "error": {
+            "account_blocked": "El vostre compte ha estat bloquejat per Securitas. Feu servir 'He oblidat la contrasenya' al lloc web de Securitas per restablir la contrasenya i desbloquejar el compte; després torneu-ho a provar",
+            "invalid_auth": "Nom d'usuari o contrasenya incorrectes",
+            "cannot_connect": "No es pot connectar amb Securitas Direct",
+            "invalid_otp": "Codi de verificació no vàlid",
+            "otp_expired": "El codi de verificació ha caducat — s'enviarà un codi nou",
+            "otp_send_failed": "No s'ha pogut enviar el codi de verificació — torneu-ho a provar",
+            "service_error": "Error del servei Securitas Direct: {error}"
+        },
+        "abort": {
+            "already_configured": "El servei ja està configurat",
+            "reauth_successful": "Reautenticació correcta"
+        },
+        "step": {
+            "reauth_confirm": {
+                "title": "Reautentica Securitas Direct",
+                "description": "La sessió ha caducat. Torneu a introduir la contrasenya per reconnectar.",
+                "data": {
+                    "username": "Nom d'usuari",
+                    "password": "Contrasenya"
+                }
+            },
+            "user": {
+                "data": {
+                    "country": "País",
+                    "username": "Nom d'usuari",
+                    "password": "Contrasenya"
+                },
+                "description": "Inicia la sessió a Securitas Direct.",
+                "title": "Inici de sessió"
+            },
+            "phone_list": {
+                "description": "A quin número de telèfon voleu que enviem el codi per SMS?",
+                "title": "Securitas Direct 2FA",
+                "data": {
+                    "phones": "Número de telèfon"
+                }
+            },
+            "otp_challenge": {
+                "description": "Introduïu el codi que heu rebut al telèfon",
+                "title": "Securitas Direct 2FA"
+            },
+            "select_installation": {
+                "title": "Selecciona la instal·lació",
+                "description": "Seleccioneu la instal·lació que voleu configurar.",
+                "data": {
+                    "installation": "Instal·lació"
+                }
+            },
+            "options": {
+                "title": "Opcions per a {installation_name}",
+                "description": "Configura les opcions de l'alarma.",
+                "data": {
+                    "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
+                    "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
+                    "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
+                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "Avançat",
+                        "data": {
+                            "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
+                            "delay_check_operation": "Retard entre sol·licituds de l'API (s)"
+                        }
+                    }
+                }
+            },
+            "mappings": {
+                "title": "Assignació d'estats de l'alarma",
+                "description": "Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Securitas. Seleccioneu 'No utilitzat' per desactivar un botó.",
+                "data": {
+                    "map_home": "Casa",
+                    "map_away": "Fora",
+                    "map_night": "Nit",
+                    "map_vacation": "Vacances",
+                    "map_custom": "Personalitzat"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
+                    "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
+                    "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
+                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)"
+                },
+                "sections": {
+                    "advanced": {
+                        "name": "Avançat",
+                        "data": {
+                            "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
+                            "delay_check_operation": "Retard entre sol·licituds de l'API (s)"
+                        }
+                    }
+                }
+            },
+            "mappings": {
+                "title": "Assignació d'estats de l'alarma",
+                "description": "Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Securitas. Seleccioneu 'No utilitzat' per desactivar un botó.",
+                "data": {
+                    "map_home": "Casa",
+                    "map_away": "Fora",
+                    "map_night": "Nit",
+                    "map_vacation": "Vacances",
+                    "map_custom": "Personalitzat"
+                }
+            }
+        }
+    },
+    "services": {
+        "force_arm": {
+            "name": "Força l'armat",
+            "description": "Força l'armat de l'alarma, ignorant les excepcions no bloquejants (p. ex. finestres obertes) d'un intent d'armat fallit anterior."
+        },
+        "force_arm_cancel": {
+            "name": "Cancel·la l'armat forçat",
+            "description": "Cancel·la un armat forçat pendent i descarta la notificació d'excepció d'armat."
+        }
+    },
+    "exceptions": {
+        "invalid_pin_code": {
+            "message": "Codi PIN no vàlid per a {entity_id}"
+        }
+    }
+}
