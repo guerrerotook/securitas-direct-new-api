@@ -126,6 +126,12 @@
     "exceptions": {
         "invalid_pin_code": {
             "message": "Code PIN non valide pour {entity_id}"
+        },
+        "unsupported_alarm_mode": {
+            "message": "Ce mode d'alarme n'est pas pris en charge par votre panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."
+        },
+        "no_supported_command": {
+            "message": "Aucune commande compatible trouvée pour ce panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."
         }
     }
 }

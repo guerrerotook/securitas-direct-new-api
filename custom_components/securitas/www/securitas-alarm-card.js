@@ -137,10 +137,49 @@ const TRANSLATIONS = {
     card_name: "Cart\u00e3o de Alarme Securitas",
     card_description: "Cart\u00e3o de alarme Securitas Direct: modos de armar, PIN e armamento for\u00e7ado.",
   },
+  "pt-BR": {
+    disarmed: "Desarmado", armed_away: "Armado (ausente)", armed_home: "Armado (em casa)",
+    armed_night: "Armado (noite)", armed_vacation: "Armado (f\u00e9rias)",
+    armed_custom: "Armado (personalizado)",
+    arming: "Armando\u2026", pending: "Pendente", triggered: "DISPARADO",
+    unavailable: "Indispon\u00edvel", unknown: "Desconhecido",
+    arm_away: "Armar ausente", arm_home: "Armar em casa", arm_night: "Armar noite",
+    arm_vacation: "Armar f\u00e9rias", arm_custom: "Armar personalizado", disarm: "Desarmar",
+    force_arm: "For\u00e7ar armado", cancel: "Cancelar",
+    open_sensors: "Sensor(es) aberto(s) \u2014 armar mesmo assim?",
+    enter_pin: "Digite o PIN para {action}", enter_code: "Digite o c\u00f3digo para {action}",
+    code: "C\u00f3digo", confirm: "Confirmar",
+    refresh: "Atualizar status",
+    waf_blocked: "Bloqueado pelos servidores da Securitas. Aguarde alguns minutos.",
+    refresh_failed: "A atualiza\u00e7\u00e3o expirou \u2014 os dados podem estar desatualizados.",
+    entity_not_found: "Entidade n\u00e3o encontrada: {entity}",
+    editor_entity: "Entidade", editor_select: "\u2014 Selecionar painel de alarme \u2014",
+    editor_name: "Nome (opcional)", editor_name_placeholder: "Substituir nome",
+    card_name: "Cart\u00e3o de Alarme Securitas",
+    card_description: "Cart\u00e3o de alarme Securitas Direct: modos de armar, PIN e armado for\u00e7ado.",
+  },
+  ca: {
+    disarmed: "Desarmat", armed_away: "Armat (fora)", armed_home: "Armat (casa)",
+    armed_night: "Armat (nit)", armed_vacation: "Armat (vacances)",
+    armed_custom: "Armat (personalitzat)",
+    arming: "Armant\u2026", pending: "Pendent", triggered: "ACTIVADA",
+    unavailable: "No disponible", unknown: "Desconegut",
+    arm_away: "Armar fora", arm_home: "Armar casa", arm_night: "Armar nit",
+    arm_vacation: "Armar vacances", arm_custom: "Armar personalitzat", disarm: "Desarmar",
+    force_arm: "For\u00e7a l\u2019armat", cancel: "Cancel\u00b7la",
+    open_sensors: "Sensor(s) obert(s) \u2014 armar igualment?",
+    enter_pin: "Introdu\u00efu PIN per {action}", enter_code: "Introdu\u00efu codi per {action}",
+    code: "Codi", confirm: "Confirma",
+    refresh: "Actualitza l\u2019estat",
+    waf_blocked: "Bloquejat pels servidors de Verisure. Espereu uns minuts.",
+    refresh_failed: "L\u2019actualitzaci\u00f3 ha caducat \u2014 les dades poden estar desactualitzades.",
+    entity_not_found: "Entitat no trobada: {entity}",
+    editor_entity: "Entitat", editor_select: "\u2014 Seleccioneu el panell d\u2019alarma \u2014",
+    editor_name: "Nom (opcional)", editor_name_placeholder: "Sobreescriu el nom",
+    card_name: "Targeta d\u2019Alarma Verisure",
+    card_description: "Targeta d\u2019alarma per a Verisure: modes d\u2019armat, PIN i armat for\u00e7at.",
+  },
 };
-
-// pt-BR falls back to pt
-TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
 
 function _t(lang, key, vars) {
   const l = TRANSLATIONS[lang] || TRANSLATIONS[lang?.split("-")[0]] || TRANSLATIONS.en;

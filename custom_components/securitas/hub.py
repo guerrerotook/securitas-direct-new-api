@@ -28,6 +28,7 @@ from .const import (
     SIGNAL_CAMERA_STATE,
 )
 from .log_filter import SensitiveDataFilter
+from .notification_translations import get_notification_strings
 from .securitas_direct_new_api import (
     ApiDomains,
     CameraDevice,
@@ -46,20 +47,41 @@ from .securitas_direct_new_api.http_transport import HttpTransport
 _LOGGER = logging.getLogger(__name__)
 
 
-def _notify_error(
-    hass: HomeAssistant, notification_id: str, title: str, message: str
+async def _async_notify(
+    hass: HomeAssistant,
+    notification_id: str,
+    translation_key: str,
+    placeholders: dict[str, str] | None = None,
 ) -> None:
-    """Notify user with persistent notification."""
+    """Send a translated persistent notification."""
+    entry = get_notification_strings(hass, translation_key)
+    title = entry.get("title", "")
+    message = entry.get("message", "")
+    if placeholders:
+        for key, value in placeholders.items():
+            token = "{" + key + "}"
+            title = title.replace(token, str(value))
+            message = message.replace(token, str(value))
+    await hass.services.async_call(
+        domain="persistent_notification",
+        service="create",
+        service_data={
+            "title": title,
+            "message": message,
+            "notification_id": f"{DOMAIN}.{notification_id}",
+        },
+    )
+
+
+def _notify(
+    hass: HomeAssistant,
+    notification_id: str,
+    translation_key: str,
+    placeholders: dict[str, str] | None = None,
+) -> None:
+    """Schedule a translated persistent notification (sync-callable)."""
     hass.async_create_task(
-        hass.services.async_call(
-            domain="persistent_notification",
-            service="create",
-            service_data={
-                "title": title,
-                "message": message,
-                "notification_id": f"{DOMAIN}.{notification_id}",
-            },
-        )
+        _async_notify(hass, notification_id, translation_key, placeholders)
     )
 
 

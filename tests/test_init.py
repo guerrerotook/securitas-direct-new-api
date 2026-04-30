@@ -37,12 +37,15 @@ from custom_components.securitas import (
     SecuritasDirectDevice,
     SecuritasHub,
     _build_config_dict,
-    _notify_error,
     add_device_information,
     async_migrate_entry,
     async_setup_entry,
     async_unload_entry,
     async_update_options,
+)
+from custom_components.securitas.hub import (
+    _async_notify,
+    _notify,
 )
 from custom_components.securitas.securitas_direct_new_api.const import (
     STD_DEFAULTS,
@@ -164,41 +167,61 @@ class TestSecuritasHubInit:
 
 
 # ===========================================================================
-# 2. TestNotifyError
+# 2. TestAsyncNotify — translated persistent notifications
 # ===========================================================================
 
 
-class TestNotifyError:
-    """Tests for _notify_error() helper."""
+class TestAsyncNotify:
+    """Tests for _async_notify() and _notify() helpers."""
 
-    def test_creates_persistent_notification(self):
-        """Should call persistent_notification.create with correct data."""
+    async def test_looks_up_title_and_message_from_translations_dict(self):
+        """Resolves title/message via get_notification_strings and posts to persistent_notification."""
         hass = MagicMock()
-        hass.async_create_task = MagicMock()
-        _notify_error(hass, "test_id", "Test Title", "Test message")
-        hass.async_create_task.assert_called_once()
-        # Verify async_call was invoked correctly
-        hass.services.async_call.assert_called_once_with(
+        hass.config.language = "en"
+        hass.services.async_call = AsyncMock()
+
+        with patch(
+            "custom_components.securitas.hub.get_notification_strings",
+            return_value={"title": "Hello", "message": "World message"},
+        ) as mocked:
+            await _async_notify(hass, "my_id", "my_key")
+
+        mocked.assert_called_once_with(hass, "my_key")
+        hass.services.async_call.assert_awaited_once_with(
             domain="persistent_notification",
             service="create",
             service_data={
-                "title": "Test Title",
-                "message": "Test message",
-                "notification_id": f"{DOMAIN}.test_id",
+                "title": "Hello",
+                "message": "World message",
+                "notification_id": f"{DOMAIN}.my_id",
             },
         )
 
-    def test_notification_id_includes_domain(self):
-        """notification_id should be prefixed with the integration domain."""
+    async def test_interpolates_placeholders_into_title_and_message(self):
+        """Placeholders are substituted in both title and message."""
+        hass = MagicMock()
+        hass.config.language = "es"
+        hass.services.async_call = AsyncMock()
+
+        with patch(
+            "custom_components.securitas.hub.get_notification_strings",
+            return_value={"title": "Hola {name}", "message": "{count} cosas"},
+        ):
+            await _async_notify(hass, "g1", "greeting", {"name": "Bob", "count": 3})
+
+        service_data = hass.services.async_call.call_args[1]["service_data"]
+        assert service_data["title"] == "Hola Bob"
+        assert service_data["message"] == "3 cosas"
+
+    def test_notify_sync_wrapper_schedules_async_notify(self):
+        """_notify() schedules _async_notify via hass.async_create_task."""
         hass = MagicMock()
         hass.async_create_task = MagicMock()
-        _notify_error(hass, "my_error", "Title", "Msg")
-        # async_call is called with keyword args for service_data
-        call_args = hass.services.async_call.call_args
-        service_data = call_args[1].get(
-            "service_data", call_args[0][2] if len(call_args[0]) > 2 else None
-        )
-        assert service_data["notification_id"] == f"{DOMAIN}.my_error"
+        _notify(hass, "id1", "key1", {"x": "y"})
+        hass.async_create_task.assert_called_once()
+        coro = hass.async_create_task.call_args[0][0]
+        # Coroutine is the _async_notify call — close it to avoid RuntimeWarning
+        coro.close()
 
 
 # ===========================================================================
@@ -405,7 +428,7 @@ class TestAsyncSetupEntry:
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
 
     async def test_setup_login_2fa_error(self, hass, mock_hub):
-        """TwoFactorRequiredError should raise ConfigEntryAuthFailed."""
+        """TwoFactorRequiredError raises ConfigEntryAuthFailed and notifies via translation key."""
         mock_hub.login = AsyncMock(side_effect=TwoFactorRequiredError("2FA required"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
@@ -413,13 +436,15 @@ class TestAsyncSetupEntry:
         with (
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify_error"),
+            patch("custom_components.securitas._notify") as mock_notify,
             pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
         ):
             await async_setup_entry(hass, entry)
 
+        mock_notify.assert_called_once_with(hass, "2fa_error", "two_factor_required")
+
     async def test_setup_login_error(self, hass, mock_hub):
-        """AuthenticationError should raise ConfigEntryAuthFailed."""
+        """AuthenticationError raises ConfigEntryAuthFailed and notifies with the API error."""
         mock_hub.login = AsyncMock(side_effect=AuthenticationError("bad credentials"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
@@ -427,10 +452,14 @@ class TestAsyncSetupEntry:
         with (
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify_error"),
+            patch("custom_components.securitas._notify") as mock_notify,
             pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
         ):
             await async_setup_entry(hass, entry)
+
+        mock_notify.assert_called_once_with(
+            hass, "login_error", "login_failed", {"error": "bad credentials"}
+        )
 
     async def test_setup_securitas_error_during_login(self, hass, mock_hub):
         """SecuritasDirectError during login should raise ConfigEntryNotReady."""
@@ -1363,7 +1392,7 @@ class TestAsyncMigrateEntry:
     """Tests for async_migrate_entry — rejects all entries below v3."""
 
     async def test_migration_v1_rejected(self, hass):
-        """v1 entry is rejected with return False (user must delete and re-add)."""
+        """v1 entry is rejected and notifies the user via translation key."""
         data = make_config_entry_data(username="user@example.com")
 
         entry = MockConfigEntry(
@@ -1374,12 +1403,15 @@ class TestAsyncMigrateEntry:
         )
         entry.add_to_hass(hass)
 
-        with patch("custom_components.securitas._notify_error"):
+        with patch("custom_components.securitas._notify") as mock_notify:
             result = await async_migrate_entry(hass, entry)
 
         assert result is False
         # Entry version remains unchanged
         assert entry.version == 1
+        mock_notify.assert_called_once_with(
+            hass, "migration_required", "migration_required"
+        )
 
     async def test_migration_v2_rejected(self, hass):
         """v2 entry is rejected with return False (user must delete and re-add)."""
@@ -1394,7 +1426,7 @@ class TestAsyncMigrateEntry:
         )
         entry.add_to_hass(hass)
 
-        with patch("custom_components.securitas._notify_error"):
+        with patch("custom_components.securitas._notify"):
             result = await async_migrate_entry(hass, entry)
 
         assert result is False

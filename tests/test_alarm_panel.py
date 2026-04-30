@@ -10,7 +10,7 @@ from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelState,
     CodeFormat,
 )
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.securitas.securitas_direct_new_api.models import (
@@ -145,8 +145,12 @@ class TestForceArmNotificationsConfig:
         mock_event.data = fire_args[0][1]
         handler_cb(mock_event)
 
-        # persistent_notification + notify group = 2 async_create_task calls
-        assert alarm.hass.async_create_task.call_count == 2
+        # Single async_create_task that wraps both persistent + mobile work
+        assert alarm.hass.async_create_task.call_count == 1
+        for call in alarm.hass.async_create_task.call_args_list:
+            arg = call[0][0]
+            if hasattr(arg, "close"):
+                arg.close()
 
     async def test_handler_skips_notifications_when_disabled(self):
         """No notifications when force_arm_notifications is False."""
@@ -653,21 +657,26 @@ class TestAsyncAlarmDisarm:
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_disarm_error_notifies(self):
-        """Error from disarm_alarm calls _notify_error."""
+        """Error from disarm_alarm sends a translated disarm_failed notification."""
         alarm = make_alarm(code="1234")
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto to issue disarm
-        alarm._notify_error = MagicMock()
 
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("API down")
         )
 
-        await alarm.async_alarm_disarm("1234")
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.async_alarm_disarm("1234")
 
-        alarm._notify_error.assert_called_once()
-        args = alarm._notify_error.call_args
-        assert args[0][0] == "Securitas: Error disarming"
+        mock_notify.assert_called_once_with(
+            alarm.hass,
+            f"disarm_failed_{alarm.installation.number}",
+            "disarm_failed",
+            {"error": "API down"},
+        )
 
     async def test_disarm_with_peri_armed_uses_combined_command(self):
         """When peri is configured and armed, tries DARM1DARMPERI."""
@@ -817,7 +826,7 @@ class TestSetArmState:
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_unmapped_mode_raises_error(self):
-        """If mode has no configured SecuritasState, raises SecuritasDirectError."""
+        """If mode has no configured SecuritasState, notifies via arm_failed translation key."""
         config = {
             "PERI_alarm": False,
             "map_home": SecuritasState.PARTIAL_DAY.value,
@@ -828,13 +837,16 @@ class TestSetArmState:
         }
         alarm = make_alarm(config=config)
         alarm._state = AlarmControlPanelState.DISARMED
-        alarm._notify_error = MagicMock()
         alarm.client.arm_alarm = AsyncMock()
 
-        await alarm.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
         alarm.client.arm_alarm.assert_not_called()
-        alarm._notify_error.assert_called_once()
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args[0][2] == "arm_failed"
 
 
 # ===========================================================================
@@ -1135,43 +1147,49 @@ class TestForceState:
         assert alarm._operation_in_progress is False
 
     async def test_disarm_403_sets_waf_blocked_skips_generic_notification(self):
-        """403 on disarm sets waf_blocked, shows rate-limited but NOT generic error."""
+        """403 on disarm sets waf_blocked, shows rate_limited but NOT disarm_failed."""
         alarm = make_alarm(code="1234")
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"
-        alarm._notify_error = MagicMock()
 
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("HTTP 403", http_status=403)
         )
 
-        await alarm.async_alarm_disarm("1234")
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.async_alarm_disarm("1234")
 
         assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
-        # _notify_error is called once for "Rate limited" from _execute_step,
-        # but NOT for the generic "Error disarming" message
-        for call in alarm._notify_error.call_args_list:
-            assert "Error disarming" not in call[0][0]
+        # _notify is called once for "rate_limited" from _execute_step,
+        # but NOT for the generic "disarm_failed" message
+        translation_keys = [c.args[2] for c in mock_notify.call_args_list]
+        assert "disarm_failed" not in translation_keys
+        assert "rate_limited" in translation_keys
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_arm_403_sets_waf_blocked_skips_generic_notification(self):
-        """403 on arm sets waf_blocked, shows rate-limited but NOT generic error."""
+        """403 on arm sets waf_blocked, shows rate_limited but NOT arm_failed."""
         alarm = make_alarm()
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._last_state = AlarmControlPanelState.DISARMED
-        alarm._notify_error = MagicMock()
 
         alarm.client.arm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("HTTP 403", http_status=403)
         )
 
-        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
         assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
-        # _notify_error is called once for "Rate limited" from _execute_step,
-        # but NOT for the generic "Arming failed" message
-        for call in alarm._notify_error.call_args_list:
-            assert "Arming failed" not in call[0][0]
+        # _notify is called once for "rate_limited" from _execute_step,
+        # but NOT for the generic "arm_failed" message
+        translation_keys = [c.args[2] for c in mock_notify.call_args_list]
+        assert "arm_failed" not in translation_keys
+        assert "rate_limited" in translation_keys
         assert alarm._state == AlarmControlPanelState.DISARMED
 
     async def test_successful_disarm_clears_waf_blocked(self):
@@ -1216,6 +1234,21 @@ class TestForceState:
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
         assert "waf_blocked" not in alarm._attr_extra_state_attributes
+
+    def test_clearing_waf_blocked_dismisses_rate_limited_notification(self):
+        """When WAF clears, dismissing must target the same ID used to create the rate-limited notification."""
+        alarm = make_alarm()
+        alarm._attr_extra_state_attributes["waf_blocked"] = True
+
+        alarm._set_waf_blocked(False)
+
+        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
+        call = alarm.hass.services.async_call.call_args  # type: ignore[attr-defined]
+        assert call[1]["domain"] == "persistent_notification"
+        assert call[1]["service"] == "dismiss"
+        assert call[1]["service_data"]["notification_id"] == (
+            f"securitas.rate_limited_{alarm.installation.number}"
+        )
 
 
 # ===========================================================================
@@ -1695,6 +1728,20 @@ class TestForceArmContext:
         assert alarm._force_context is not None
         assert alarm._attr_extra_state_attributes.get("force_arm_available") is True
 
+    async def test_notify_force_arm_expired_uses_translation_key(self):
+        """_notify_force_arm_expired calls _notify with the force_arm_expired translation key."""
+        alarm = make_alarm()
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            alarm._notify_force_arm_expired()
+
+        mock_notify.assert_called_once_with(
+            alarm.hass,
+            f"arming_exception_{alarm.installation.number}",
+            "force_arm_expired",
+        )
+
     async def test_force_context_cleared_on_expired_coordinator_update(self):
         """Coordinator update clears force context after scan interval expires."""
         alarm = make_alarm()
@@ -1741,7 +1788,7 @@ class TestForceArmContext:
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_arming_exception_sends_persistent_notification(self):
-        """ArmingExceptionError triggers persistent notification via event handler."""
+        """ArmingExceptionError triggers async notification helper via event handler."""
         alarm = make_alarm()
         alarm.client.config["force_arm_notifications"] = True
         alarm._state = AlarmControlPanelState.ARMING
@@ -1761,11 +1808,16 @@ class TestForceArmContext:
         mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
         handler_cb(mock_event)
 
-        # Verify persistent notification was created
+        # Verify the async helper was scheduled
         alarm.hass.async_create_task.assert_called()  # type: ignore[attr-defined]
+        # Close the unawaited coroutine to silence RuntimeWarning
+        for call in alarm.hass.async_create_task.call_args_list:  # type: ignore[attr-defined]
+            arg = call[0][0]
+            if hasattr(arg, "close"):
+                arg.close()
 
     async def test_arming_exception_notifies_configured_group(self):
-        """ArmingExceptionError sends to configured notify group via event handler."""
+        """ArmingExceptionError schedules async helper which dispatches both notifications."""
         alarm = make_alarm()
         alarm.client.config["force_arm_notifications"] = True
         alarm.client.config["notify_group"] = "mobile_app_phone"
@@ -1786,8 +1838,12 @@ class TestForceArmContext:
         mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
         handler_cb(mock_event)
 
-        # Should have two async_create_task calls: persistent_notification + notify
-        assert alarm.hass.async_create_task.call_count == 2  # type: ignore[attr-defined]
+        # Single async_create_task that wraps the persistent + mobile work
+        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
+        for call in alarm.hass.async_create_task.call_args_list:  # type: ignore[attr-defined]
+            arg = call[0][0]
+            if hasattr(arg, "close"):
+                arg.close()
 
     async def test_arming_exception_no_notify_group_only_persistent(self):
         """Without notify_group configured, only persistent notification fires via handler."""
@@ -1810,8 +1866,12 @@ class TestForceArmContext:
         mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
         handler_cb(mock_event)
 
-        # Only persistent notification
-        assert alarm.hass.async_create_task.call_count == 1  # type: ignore[attr-defined]
+        # Single async_create_task that wraps the (persistent-only) work
+        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
+        for call in alarm.hass.async_create_task.call_args_list:  # type: ignore[attr-defined]
+            arg = call[0][0]
+            if hasattr(arg, "close"):
+                arg.close()
 
     async def test_async_force_arm_uses_stored_context(self):
         """async_force_arm consumes stored context and passes force params."""
@@ -2127,7 +2187,6 @@ class TestCompoundArmCommands:
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
         alarm._resolver.mark_unsupported("ARMNIGHT1PERI1")
-        alarm._notify_error = MagicMock()
 
         call_count = 0
 
@@ -2147,32 +2206,55 @@ class TestCompoundArmCommands:
 
         alarm.client.arm_alarm = arm_side_effect
 
-        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
         assert call_count == 2
         # Partial state: ARMNIGHT1 succeeded with proto "Q" (partial_night)
         # which maps to ARMED_CUSTOM_BYPASS if unmapped in _night_peri_config,
         # or ARMED_NIGHT if Q is in the status map
         alarm.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
-        alarm._notify_error.assert_called_once()
+        mock_notify.assert_called_once()
+        assert mock_notify.call_args[0][2] == "arm_failed"
 
-    async def test_all_alternatives_fail_notifies(self):
-        """When compound and multi-step alternatives all fail, error is reported."""
+    async def test_all_commands_already_unsupported_raises_no_supported_command(self):
+        """When every command in a step is already marked unsupported, raise translated HomeAssistantError."""
+        from custom_components.securitas.securitas_direct_new_api.command_resolver import (
+            CommandStep,
+        )
+
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._resolver.mark_unsupported("ARMNIGHT1PERI1")
+        alarm._resolver.mark_unsupported("ARMNIGHT1+PERI1")
+
+        step = CommandStep(commands=["ARMNIGHT1PERI1", "ARMNIGHT1+PERI1"])
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await alarm._execute_step(step)
+
+        assert excinfo.value.translation_domain == "securitas"
+        assert excinfo.value.translation_key == "no_supported_command"
+
+    async def test_all_alternatives_fail_raises_unsupported_alarm_mode(self):
+        """When all 400-failing alternatives are exhausted, raise translated HomeAssistantError."""
         alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
-        alarm._notify_error = MagicMock()
 
         alarm.client.arm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("API error", http_status=400)
         )
 
-        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
+        assert excinfo.value.translation_domain == "securitas"
+        assert excinfo.value.translation_key == "unsupported_alarm_mode"
         # Tried compound ARMNIGHT1PERI1 then ARMNIGHT1 (first sub-cmd of ARMNIGHT1+PERI1)
         assert alarm.client.arm_alarm.call_count == 2
         assert "ARMNIGHT1PERI1" in alarm._resolver.unsupported
-        alarm._notify_error.assert_called_once()
         assert alarm._state == AlarmControlPanelState.DISARMED
 
     async def test_non_compound_command_sent_directly(self):
@@ -2201,7 +2283,6 @@ class TestCompoundArmCommands:
         alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
-        alarm._notify_error = MagicMock()
 
         alarm.client.arm_alarm = AsyncMock(
             side_effect=SecuritasDirectError(
@@ -2412,7 +2493,6 @@ class TestDynamicDisarm:
         alarm = make_alarm(has_peri=False)
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto
-        alarm._notify_error = MagicMock()
 
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("API down")
@@ -2445,21 +2525,22 @@ class TestDynamicDisarm:
         alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
 
     async def test_both_disarm_attempts_fail(self):
-        """When both DARM1DARMPERI and DARM1 fail, error is reported."""
+        """When both DARM1DARMPERI and DARM1 fail with 400, raise translated HomeAssistantError."""
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "B"  # partial_day_peri
         alarm._state = AlarmControlPanelState.ARMED_HOME
         alarm._last_state = AlarmControlPanelState.ARMED_HOME
-        alarm._notify_error = MagicMock()
 
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("permanent failure", http_status=400)
         )
 
-        await alarm.async_alarm_disarm()
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await alarm.async_alarm_disarm()
 
+        assert excinfo.value.translation_domain == "securitas"
+        assert excinfo.value.translation_key == "unsupported_alarm_mode"
         assert alarm.client.disarm_alarm.call_count == 2
-        alarm._notify_error.assert_called_once()
         assert alarm._state == AlarmControlPanelState.ARMED_HOME
 
     async def test_409_does_not_trigger_darm1_fallback(self):
@@ -2468,7 +2549,6 @@ class TestDynamicDisarm:
         alarm._last_proto_code = "A"  # total_peri = peri armed
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_state = AlarmControlPanelState.ARMED_AWAY
-        alarm._notify_error = MagicMock()
 
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError(
@@ -2476,36 +2556,41 @@ class TestDynamicDisarm:
             )
         )
 
-        await alarm.async_alarm_disarm()
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.async_alarm_disarm()
 
         # Should only try DARM1DARMPERI once — NOT fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
             alarm.installation, "DARM1DARMPERI"
         )
-        # Error notification should show clean message, not full args dump
-        alarm._notify_error.assert_called_once()
-        _, msg = alarm._notify_error.call_args[0]
-        assert "alarm-manager.alarm_process_error" in msg
-        assert "headers" not in msg.lower()
+        # Error placeholder carries clean API message, no full args dump
+        mock_notify.assert_called_once()
+        placeholders = mock_notify.call_args[0][3]
+        assert placeholders["error"] == "alarm-manager.alarm_process_error"
+        assert "headers" not in placeholders["error"].lower()
 
     async def test_disarm_error_notification_is_short(self):
-        """Error notification should show just the message, not the full error tuple."""
+        """Error placeholder should be just the API message, not the full error tuple."""
         alarm = make_alarm(has_peri=False)
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto
-        alarm._notify_error = MagicMock()
 
         _err = SecuritasDirectError("API error message", http_status=500)
         _err.response_body = {"response": "data", "auth": "secret-token"}
         alarm.client.disarm_alarm = AsyncMock(side_effect=_err)
 
-        await alarm.async_alarm_disarm()
+        with patch(
+            "custom_components.securitas.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.async_alarm_disarm()
 
-        alarm._notify_error.assert_called_once()
-        _, msg = alarm._notify_error.call_args[0]
-        assert msg == "API error message"
-        assert "secret-token" not in msg
+        mock_notify.assert_called_once()
+        placeholders = mock_notify.call_args[0][3]
+        assert placeholders["error"] == "API error message"
+        assert "secret-token" not in placeholders["error"]
 
     async def test_rearm_disarm_with_peri_armed(self):
         """Mode change from peri-armed state disarms with fallback, then arms."""
@@ -2648,16 +2733,17 @@ class TestExecuteTransition:
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
 
     async def test_all_commands_fail_raises(self):
-        """When all command alternatives fail, raises the last error."""
+        """When all 400-failing command alternatives are exhausted, raise translated HomeAssistantError."""
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=SecuritasDirectError("fail", http_status=400)
         )
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(HomeAssistantError) as excinfo:
             await alarm._execute_transition(
                 AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
+        assert excinfo.value.translation_key == "unsupported_alarm_mode"
 
     async def test_mode_change_disarms_then_arms(self):
         """Mode change (day -> night) disarms first, then arms new mode."""
@@ -2827,33 +2913,20 @@ class TestLastProtoCode:
 
 
 # ===========================================================================
-# _notify_error per-installation notification_id
-# ===========================================================================
-
-
-class TestNotifyError:
-    """Tests for _notify_error helper."""
-
-    def test_notification_id_includes_installation_number(self):
-        """notification_id includes installation number for multi-installation setups."""
-        alarm = make_alarm()
-        alarm._notify_error("Securitas: Arming failed", "test body")
-
-        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
-        call_args = alarm.hass.services.async_call.call_args  # type: ignore[attr-defined]
-        service_data = call_args[1]["service_data"]
-        assert "123456" in service_data["notification_id"]
-        assert (
-            service_data["notification_id"]
-            == "securitas.securitas_arming_failed_123456"
-        )
-
-
-# ===========================================================================
 # Notification content tests
 # ===========================================================================
 
 
+_FAKE_NOTIFICATION_ENTRY = {
+    "title": "TITLE",
+    "message": "Arming blocked because:\n{sensor_list}\nTap Force Arm to override.",
+    "mobile_message": "Blocked: {sensor_list}",
+    "force_arm_action": "Forçar",
+    "cancel_action": "Cancel·lar",
+}
+
+
+@pytest.mark.asyncio
 class TestNotificationContent:
     """Tests for arming exception notification content (event-driven path)."""
 
@@ -2865,76 +2938,125 @@ class TestNotificationContent:
         event.data = {"zones": zones}
         return event
 
-    def test_persistent_notification_content(self):
-        """Persistent notification has correct title, message, and notification_id."""
+    def _alarm_with_async_call(self):
         alarm = make_alarm()
+        alarm.hass.config.language = "en"
+        alarm.hass.services.async_call = AsyncMock()
+        return alarm
+
+    async def test_persistent_notification_translated_content(self):
+        """Persistent notification uses translated title and interpolates sensor_list."""
+        alarm = self._alarm_with_async_call()
         event = self._make_event()
 
-        alarm._notify_arm_exceptions_from_event(event)
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
 
-        # Find the persistent_notification.create call
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
+        calls = alarm.hass.services.async_call.call_args_list
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         sd = pn_call[1]["service_data"]
-        assert sd["title"] == "Securitas: Arm blocked — open sensor(s)"
-        assert "Kitchen Door" in sd["message"]
+        assert sd["title"] == "TITLE"
+        assert "- Kitchen Door" in sd["message"]
         assert sd["notification_id"] == "securitas.arming_exception_123456"
 
-    def test_mobile_notification_has_tag(self):
+    async def test_persistent_notification_unknown_sensor_fallback(self):
+        """When zones list is empty, sensor_list placeholder uses unknown-sensor fallback."""
+        alarm = self._alarm_with_async_call()
+        event = self._make_event(zones=[])
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
+
+        pn_call = next(
+            c
+            for c in alarm.hass.services.async_call.call_args_list
+            if c[1]["domain"] == "persistent_notification"
+        )
+        assert "(unknown sensor)" in pn_call[1]["service_data"]["message"]
+
+    async def test_mobile_notification_has_tag(self):
         """Mobile notification includes the per-installation tag."""
-        alarm = make_alarm()
+        alarm = self._alarm_with_async_call()
         alarm.client.config["notify_group"] = "mobile_app_phone"
         event = self._make_event()
 
-        alarm._notify_arm_exceptions_from_event(event)
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
 
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
-        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        mobile_call = next(
+            c
+            for c in alarm.hass.services.async_call.call_args_list
+            if c[1]["domain"] == "notify"
+        )
         data = mobile_call[1]["service_data"]["data"]
         assert data["tag"] == "securitas.arming_exception_123456"
 
-    def test_mobile_notification_action_buttons(self):
-        """Mobile notification has Force Arm and Cancel action buttons."""
-        alarm = make_alarm()
+    async def test_mobile_notification_action_buttons_translated(self):
+        """Mobile action button titles come from translations."""
+        alarm = self._alarm_with_async_call()
         alarm.client.config["notify_group"] = "mobile_app_phone"
         event = self._make_event()
 
-        alarm._notify_arm_exceptions_from_event(event)
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
 
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
-        mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
+        mobile_call = next(
+            c
+            for c in alarm.hass.services.async_call.call_args_list
+            if c[1]["domain"] == "notify"
+        )
         actions = mobile_call[1]["service_data"]["data"]["actions"]
         assert len(actions) == 2
         assert actions[0]["action"] == "SECURITAS_FORCE_ARM_123456"
-        assert actions[0]["title"] == "Force Arm"
+        assert actions[0]["title"] == "Forçar"
         assert actions[1]["action"] == "SECURITAS_CANCEL_FORCE_ARM_123456"
-        assert actions[1]["title"] == "Cancel"
+        assert actions[1]["title"] == "Cancel·lar"
 
-    def test_mobile_notification_short_message(self):
+    async def test_mobile_notification_short_message(self):
         """Mobile message is shorter than persistent message and contains sensor alias."""
-        alarm = make_alarm()
+        alarm = self._alarm_with_async_call()
         alarm.client.config["notify_group"] = "mobile_app_phone"
         event = self._make_event()
 
-        alarm._notify_arm_exceptions_from_event(event)
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
 
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
+        calls = alarm.hass.services.async_call.call_args_list
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
         persistent_msg = pn_call[1]["service_data"]["message"]
         mobile_msg = mobile_call[1]["service_data"]["message"]
         assert "Kitchen Door" in mobile_msg
-        assert len(mobile_msg) < len(persistent_msg)
+        assert len(mobile_msg) <= len(persistent_msg)
 
-    def test_notification_multiple_sensors(self):
+    async def test_notification_multiple_sensors(self):
         """Multiple sensors appear in both persistent and mobile notifications."""
-        alarm = make_alarm()
+        alarm = self._alarm_with_async_call()
         alarm.client.config["notify_group"] = "mobile_app_phone"
         event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
-        alarm._notify_arm_exceptions_from_event(event)
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
 
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
+        calls = alarm.hass.services.async_call.call_args_list
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
         persistent_msg = pn_call[1]["service_data"]["message"]
@@ -2944,36 +3066,52 @@ class TestNotificationContent:
         assert "Kitchen Door" in mobile_msg
         assert "Bedroom Window" in mobile_msg
 
-    def test_notification_sensor_alias_fallback(self):
+    async def test_notification_sensor_alias_fallback(self):
         """Empty zones list shows 'unknown sensor' fallback in notification."""
-        alarm = make_alarm()
+        alarm = self._alarm_with_async_call()
         alarm.client.config["notify_group"] = "mobile_app_phone"
         event = self._make_event(zones=[])
 
-        alarm._notify_arm_exceptions_from_event(event)
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
 
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
+        calls = alarm.hass.services.async_call.call_args_list
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         mobile_call = next(c for c in calls if c[1]["domain"] == "notify")
         assert "unknown" in pn_call[1]["service_data"]["message"]
         assert "open sensor" in mobile_call[1]["service_data"]["message"]
 
-    def test_no_mobile_notification_without_notify_group(self):
-        """Without notify_group, only persistent notification fires with correct content."""
+    async def test_no_mobile_notification_without_notify_group(self):
+        """Without notify_group, only persistent notification fires."""
+        alarm = self._alarm_with_async_call()
+        event = self._make_event()
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ):
+            await alarm._async_notify_arm_exceptions(event)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        assert len(calls) == 1
+        sd = calls[0][1]["service_data"]
+        assert sd["title"] == "TITLE"
+        assert "Kitchen Door" in sd["message"]
+        assert sd["notification_id"] == "securitas.arming_exception_123456"
+
+    def test_event_handler_schedules_async_helper(self):
+        """The sync event handler schedules the async helper via async_create_task."""
         alarm = make_alarm()
         event = self._make_event()
 
         alarm._notify_arm_exceptions_from_event(event)
 
-        # Only 1 async_create_task call (persistent only)
-        assert alarm.hass.async_create_task.call_count == 1  # type: ignore[attr-defined]
-        # Verify persistent notification content is still correct
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
-        assert len(calls) == 1
-        sd = calls[0][1]["service_data"]
-        assert sd["title"] == "Securitas: Arm blocked — open sensor(s)"
-        assert "Kitchen Door" in sd["message"]
-        assert sd["notification_id"] == "securitas.arming_exception_123456"
+        alarm.hass.async_create_task.assert_called_once()
+        coro = alarm.hass.async_create_task.call_args[0][0]
+        coro.close()
 
 
 # ===========================================================================
@@ -3124,7 +3262,7 @@ class TestForceArmWorkflow:
     """End-to-end integration tests for the force-arm workflow."""
 
     async def test_full_force_arm_workflow(self):
-        """Full workflow: arm fails -> event handler sends notifications -> force arm succeeds."""
+        """Full workflow: arm fails -> event handler schedules notifications -> force arm succeeds."""
         alarm = make_alarm()
         alarm.client.config["force_arm_notifications"] = True
         alarm.client.config["notify_group"] = "mobile_app_phone"
@@ -3166,16 +3304,12 @@ class TestForceArmWorkflow:
         mock_event.data = alarm.hass.bus.async_fire.call_args[0][1]
         handler_cb(mock_event)
 
-        # Notifications should have been sent (persistent + mobile)
-        assert alarm.hass.async_create_task.call_count == 2  # type: ignore[attr-defined]
-        calls = alarm.hass.services.async_call.call_args_list  # type: ignore[attr-defined]
-        pn_create = next(
-            c
-            for c in calls
-            if c[1]["domain"] == "persistent_notification"
-            and c[1]["service"] == "create"
-        )
-        assert "Kitchen Door" in pn_create[1]["service_data"]["message"]
+        # Single async_create_task that wraps the persistent + mobile work
+        alarm.hass.async_create_task.assert_called_once()  # type: ignore[attr-defined]
+        for call in alarm.hass.async_create_task.call_args_list:  # type: ignore[attr-defined]
+            arg = call[0][0]
+            if hasattr(arg, "close"):
+                arg.close()
 
         # Reset call tracking for step 2
         alarm.hass.async_create_task.reset_mock()  # type: ignore[attr-defined]

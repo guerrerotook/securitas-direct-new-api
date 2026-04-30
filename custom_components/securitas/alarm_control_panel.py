@@ -20,7 +20,7 @@ from homeassistant.helpers.entity_platform import (
     async_get_current_platform,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from . import (
     CONF_CODE_ARM_REQUIRED,
@@ -31,9 +31,11 @@ from . import (
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
+    _notify,
 )
 from .coordinators import AlarmCoordinator, AlarmStatusData
 from .entity import securitas_device_info
+from .notification_translations import get_notification_strings
 from .securitas_direct_new_api import (
     ArmingExceptionError,
     Installation,
@@ -204,25 +206,6 @@ class SecuritasAlarm(  # type: ignore[override]
         if self.hass is not None:
             self.async_schedule_update_ha_state()
 
-    def _notify_error(self, title: str, message: str) -> None:
-        """Send persistent notification with auto-generated ID."""
-        import re
-
-        notification_id = re.sub(r"\W+", "_", title.lower()).strip("_")
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                domain="persistent_notification",
-                service="create",
-                service_data={
-                    "title": title,
-                    "message": message,
-                    "notification_id": (
-                        f"{DOMAIN}.{notification_id}_{self._installation.number}"
-                    ),
-                },
-            )
-        )
-
     async def async_added_to_hass(self) -> None:
         """Register event listeners when added to HA."""
         await super().async_added_to_hass()
@@ -353,12 +336,19 @@ class SecuritasAlarm(  # type: ignore[override]
             protom_response=result.protom_response,
         )
 
-    def _handle_arm_disarm_error(self, err: SecuritasDirectError, context: str) -> None:
+    def _handle_arm_disarm_error(
+        self, err: SecuritasDirectError, translation_key: str
+    ) -> None:
         """Handle errors from arm or disarm operations."""
         if getattr(err, "http_status", None) == 403:
             self._set_waf_blocked(True)
         else:
-            self._notify_error(f"Securitas: {context}", err.message)
+            _notify(
+                self.hass,
+                f"{translation_key}_{self.installation.number}",
+                translation_key,
+                {"error": err.message},
+            )
 
     async def _async_arm(
         self, state: AlarmControlPanelState, code: str | None = None
@@ -455,10 +445,10 @@ class SecuritasAlarm(  # type: ignore[override]
                 raise  # Arming exceptions need special handling upstream
             except SecuritasDirectError as err:
                 if err.http_status == 403:
-                    self._notify_error(
-                        "Securitas: Rate limited",
-                        "Too many requests — blocked by Securitas servers. "
-                        "Please wait a few minutes before trying again.",
+                    _notify(
+                        self.hass,
+                        f"rate_limited_{self.installation.number}",
+                        "rate_limited",
                     )
                     raise
                 if err.http_status == 409:
@@ -482,16 +472,15 @@ class SecuritasAlarm(  # type: ignore[override]
                 last_err = err
 
         if last_err and last_err.http_status == 400:
-            raise SecuritasDirectError(
-                "This alarm mode is not supported by your panel. "
-                "Check the state mappings in the integration options "
-                "(Settings → Devices & Services → Securitas → Configure).",
-                http_status=400,
-            )
-        raise last_err or SecuritasDirectError(
-            "No supported command found for this panel. "
-            "Check the state mappings in the integration options "
-            "(Settings → Devices & Services → Securitas → Configure).",
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unsupported_alarm_mode",
+            ) from last_err
+        if last_err:
+            raise last_err
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="no_supported_command",
         )
 
     async def _send_single_command(
@@ -517,15 +506,15 @@ class SecuritasAlarm(  # type: ignore[override]
             self._attr_extra_state_attributes["waf_blocked"] = True
         else:
             if self._attr_extra_state_attributes.pop("waf_blocked", None):
-                # Dismiss the rate-limited persistent notification
+                # Dismiss the rate-limited persistent notification — must match
+                # the ID created by the `rate_limited` _notify call.
                 self.hass.async_create_task(
                     self.hass.services.async_call(
                         domain="persistent_notification",
                         service="dismiss",
                         service_data={
                             "notification_id": (
-                                f"{DOMAIN}.securitas_rate_limited"
-                                f"_{self.installation.number}"
+                                f"{DOMAIN}.rate_limited_{self.installation.number}"
                             ),
                         },
                     )
@@ -557,8 +546,12 @@ class SecuritasAlarm(  # type: ignore[override]
             _LOGGER.error(
                 "Disarm failed for %s: %s", self.installation.number, err.log_detail()
             )
-            self._handle_arm_disarm_error(err, "Error disarming")
+            self._handle_arm_disarm_error(err, "disarm_failed")
             self.async_write_ha_state()
+        except HomeAssistantError:
+            self._state = self._last_state
+            self.async_write_ha_state()
+            raise
         finally:
             self._operation_in_progress = False
 
@@ -602,8 +595,12 @@ class SecuritasAlarm(  # type: ignore[override]
             _LOGGER.error(
                 "Arm failed for %s: %s", self.installation.number, err.log_detail()
             )
-            self._handle_arm_disarm_error(err, "Arming failed")
+            self._handle_arm_disarm_error(err, "arm_failed")
             self.async_write_ha_state()
+        except HomeAssistantError:
+            self._state = self._last_state
+            self.async_write_ha_state()
+            raise
         finally:
             self._operation_in_progress = False
 
@@ -661,20 +658,10 @@ class SecuritasAlarm(  # type: ignore[override]
 
     def _notify_force_arm_expired(self) -> None:
         """Update the persistent notification to indicate force-arm expired."""
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                domain="persistent_notification",
-                service="create",
-                service_data={
-                    "title": "Securitas: Alarm not armed",
-                    "message": (
-                        "The force-arm option has expired. "
-                        "The alarm was **not armed**. "
-                        "Please try arming again."
-                    ),
-                    "notification_id": self._arming_exception_notification_id,
-                },
-            )
+        _notify(
+            self.hass,
+            f"arming_exception_{self.installation.number}",
+            "force_arm_expired",
         )
 
     @property
@@ -704,6 +691,10 @@ class SecuritasAlarm(  # type: ignore[override]
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
         """Send notifications about arming exceptions from event data."""
+        self.hass.async_create_task(self._async_notify_arm_exceptions(event))
+
+    async def _async_notify_arm_exceptions(self, event: Event) -> None:
+        """Send translated persistent + mobile notifications for an arming exception."""
         zones = event.data.get("zones", [])
         if zones:
             sensor_list = "\n".join(f"- {z}" for z in zones)
@@ -712,57 +703,54 @@ class SecuritasAlarm(  # type: ignore[override]
             sensor_list = "- (unknown sensor)"
             short_details = "open sensor"
 
-        title = "Securitas: Arm blocked — open sensor(s)"
-        persistent_message = (
-            f"Arming was blocked because the following sensor(s) are open:\n"
-            f"{sensor_list}\n\n"
-            f"To arm anyway, tap **Force Arm** on the alarm card "
-            f"or on your mobile notification."
+        entry = get_notification_strings(self.hass, "arm_blocked_open_sensors")
+        title = entry.get("title", "")
+        persistent_message = entry.get("message", "").replace(
+            "{sensor_list}", sensor_list
         )
-        mobile_message = f"Arm blocked — open sensor(s): {short_details}. Arm anyway?"
+        mobile_message = entry.get("mobile_message", "").replace(
+            "{sensor_list}", short_details
+        )
+        force_arm_label = entry.get("force_arm_action", "")
+        cancel_label = entry.get("cancel_action", "")
 
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                domain="persistent_notification",
-                service="create",
-                service_data={
-                    "title": title,
-                    "message": persistent_message,
-                    "notification_id": self._arming_exception_notification_id,
-                },
-            )
+        await self.hass.services.async_call(
+            domain="persistent_notification",
+            service="create",
+            service_data={
+                "title": title,
+                "message": persistent_message,
+                "notification_id": self._arming_exception_notification_id,
+            },
         )
 
         notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
         if notify_group:
-            self.hass.async_create_task(
-                self.hass.services.async_call(
-                    domain="notify",
-                    service=notify_group,
-                    service_data={
-                        "title": title,
-                        "message": mobile_message,
-                        "data": {
-                            "tag": self._arming_exception_notification_id,
-                            "actions": [
-                                {
-                                    "action": (
-                                        "SECURITAS_FORCE_ARM"
-                                        f"_{self.installation.number}"
-                                    ),
-                                    "title": "Force Arm",
-                                },
-                                {
-                                    "action": (
-                                        "SECURITAS_CANCEL_FORCE_ARM"
-                                        f"_{self.installation.number}"
-                                    ),
-                                    "title": "Cancel",
-                                },
-                            ],
-                        },
+            await self.hass.services.async_call(
+                domain="notify",
+                service=notify_group,
+                service_data={
+                    "title": title,
+                    "message": mobile_message,
+                    "data": {
+                        "tag": self._arming_exception_notification_id,
+                        "actions": [
+                            {
+                                "action": (
+                                    f"SECURITAS_FORCE_ARM_{self.installation.number}"
+                                ),
+                                "title": force_arm_label,
+                            },
+                            {
+                                "action": (
+                                    "SECURITAS_CANCEL_FORCE_ARM"
+                                    f"_{self.installation.number}"
+                                ),
+                                "title": cancel_label,
+                            },
+                        ],
                     },
-                )
+                },
             )
 
     def _dismiss_arming_exception_notification(self) -> None:

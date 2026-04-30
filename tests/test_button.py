@@ -1,7 +1,7 @@
 """Tests for button entity (SecuritasRefreshButton)."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.securitas.button import SecuritasRefreshButton, async_setup_entry
 from custom_components.securitas import DOMAIN
@@ -140,7 +140,7 @@ class TestSecuritasRefreshButtonAsyncPress:
         alarm_entity._set_refresh_failed.assert_called_with(True)
 
     async def test_sets_waf_blocked_on_403(self):
-        """async_press sets waf_blocked on 403 error."""
+        """async_press sets waf_blocked on 403 error and triggers a translated rate-limit notification."""
         button = make_button()
         err = SecuritasDirectError("blocked", http_status=403)
         button._client.refresh_alarm_status = AsyncMock(side_effect=err)
@@ -149,10 +149,18 @@ class TestSecuritasRefreshButtonAsyncPress:
             DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
         }
 
-        await button.async_press()
+        with patch(
+            "custom_components.securitas.button._async_notify",
+            AsyncMock(),
+        ) as mock_async_notify:
+            await button.async_press()
 
         alarm_entity._set_waf_blocked.assert_called_with(True)
-        button.hass.services.async_call.assert_awaited_once()
+        mock_async_notify.assert_awaited_once_with(
+            button.hass,
+            f"rate_limited_{button._installation.number}",
+            "rate_limited",
+        )
 
     async def test_no_crash_when_hass_is_none(self):
         """async_press does not crash when hass is None."""

@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import DOMAIN, SecuritasDirectDevice, SecuritasHub
+from . import DOMAIN, SecuritasDirectDevice, SecuritasHub, _async_notify
 from .entity import SecuritasEntity, camera_device_info
 from .securitas_direct_new_api import (
     Installation,
@@ -98,20 +98,10 @@ class SecuritasRefreshButton(SecuritasEntity, ButtonEntity):
                 err.log_detail(),
             )
             if getattr(err, "http_status", None) == 403:
-                await self.hass.services.async_call(
-                    domain="persistent_notification",
-                    service="create",
-                    service_data={
-                        "title": "Securitas: Rate limited",
-                        "message": (
-                            "Too many requests — blocked by Securitas servers. "
-                            "Please wait a few minutes before trying again."
-                        ),
-                        "notification_id": (
-                            f"{DOMAIN}.securitas_rate_limited_"
-                            f"{self._installation.number}"
-                        ),
-                    },
+                await _async_notify(
+                    self.hass,
+                    f"rate_limited_{self._installation.number}",
+                    "rate_limited",
                 )
                 alarm_entity = self._get_alarm_entity()
                 if alarm_entity is not None:

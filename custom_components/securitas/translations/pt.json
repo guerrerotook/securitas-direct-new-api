@@ -126,6 +126,12 @@
     "exceptions": {
         "invalid_pin_code": {
             "message": "Código PIN inválido para {entity_id}"
+        },
+        "unsupported_alarm_mode": {
+            "message": "Este modo de alarme não é suportado pelo seu painel. Verifique os mapeamentos de estado nas opções da integração (Definições → Dispositivos e Serviços → Securitas → Configurar)."
+        },
+        "no_supported_command": {
+            "message": "Nenhum comando compatível encontrado para este painel. Verifique os mapeamentos de estado nas opções da integração (Definições → Dispositivos e Serviços → Securitas → Configurar)."
         }
     }
 }

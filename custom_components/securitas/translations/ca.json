@@ -126,6 +126,12 @@
     "exceptions": {
         "invalid_pin_code": {
             "message": "Codi PIN no vàlid per a {entity_id}"
+        },
+        "unsupported_alarm_mode": {
+            "message": "Aquest mode d'alarma no és compatible amb el teu panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
+        },
+        "no_supported_command": {
+            "message": "No s'ha trobat cap ordre compatible per a aquest panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
         }
     }
 }
