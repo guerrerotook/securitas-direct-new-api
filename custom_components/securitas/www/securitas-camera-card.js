@@ -14,6 +14,102 @@
  *   name: Front Door   # optional — overrides the device name
  */
 
+// ── Translations ──────────────────────────────────────────────────────────────
+
+const TRANSLATIONS = {
+  en: {
+    editor_entity: "Entity",
+    editor_name: "Name",
+    editor_name_placeholder: "Override friendly name",
+    entity_not_found: "Entity not found: {entity}",
+    ago_seconds: "{n}s ago",
+    ago_minutes: "{n} min ago",
+    ago_hours: "{n}h ago",
+    ago_days: "{n}d ago",
+    card_name: "Securitas Camera Card",
+    card_description: "Displays a Securitas Direct camera image with capture trigger and timestamp.",
+  },
+  es: {
+    editor_entity: "Entidad",
+    editor_name: "Nombre",
+    editor_name_placeholder: "Nombre personalizado",
+    entity_not_found: "Entidad no encontrada: {entity}",
+    ago_seconds: "hace {n}s",
+    ago_minutes: "hace {n} min",
+    ago_hours: "hace {n}h",
+    ago_days: "hace {n}d",
+    card_name: "Tarjeta de Cámara Securitas",
+    card_description: "Muestra la imagen de una cámara Securitas Direct con captura y marca de tiempo.",
+  },
+  fr: {
+    editor_entity: "Entité",
+    editor_name: "Nom",
+    editor_name_placeholder: "Remplacer le nom",
+    entity_not_found: "Entité introuvable : {entity}",
+    ago_seconds: "il y a {n}s",
+    ago_minutes: "il y a {n} min",
+    ago_hours: "il y a {n}h",
+    ago_days: "il y a {n}j",
+    card_name: "Carte Caméra Securitas",
+    card_description: "Affiche l’image d’une caméra Securitas Direct avec capture et horodatage.",
+  },
+  it: {
+    editor_entity: "Entità",
+    editor_name: "Nome",
+    editor_name_placeholder: "Nome personalizzato",
+    entity_not_found: "Entità non trovata: {entity}",
+    ago_seconds: "{n}s fa",
+    ago_minutes: "{n} min fa",
+    ago_hours: "{n}h fa",
+    ago_days: "{n}g fa",
+    card_name: "Scheda Camera Securitas",
+    card_description: "Mostra l’immagine di una camera Securitas Direct con cattura e timestamp.",
+  },
+  pt: {
+    editor_entity: "Entidade",
+    editor_name: "Nome",
+    editor_name_placeholder: "Nome personalizado",
+    entity_not_found: "Entidade não encontrada: {entity}",
+    ago_seconds: "há {n}s",
+    ago_minutes: "há {n} min",
+    ago_hours: "há {n}h",
+    ago_days: "há {n}d",
+    card_name: "Cartão de Câmara Securitas",
+    card_description: "Mostra a imagem de uma câmara Securitas Direct com captura e marca temporal.",
+  },
+  "pt-BR": {
+    editor_entity: "Entidade",
+    editor_name: "Nome",
+    editor_name_placeholder: "Substituir nome",
+    entity_not_found: "Entidade não encontrada: {entity}",
+    ago_seconds: "{n}s atrás",
+    ago_minutes: "{n} min atrás",
+    ago_hours: "{n}h atrás",
+    ago_days: "{n}d atrás",
+    card_name: "Cartão de Câmera Securitas",
+    card_description: "Exibe a imagem de uma câmera Securitas Direct com captura e marca de tempo.",
+  },
+  ca: {
+    editor_entity: "Entitat",
+    editor_name: "Nom",
+    editor_name_placeholder: "Sobreescriu el nom",
+    entity_not_found: "Entitat no trobada: {entity}",
+    ago_seconds: "fa {n}s",
+    ago_minutes: "fa {n} min",
+    ago_hours: "fa {n}h",
+    ago_days: "fa {n}d",
+    card_name: "Targeta de Càmera Verisure",
+    card_description: "Mostra la imatge d’una càmera Verisure amb captura i marca de temps.",
+  },
+};
+
+function _t(lang, key, vars) {
+  const l = TRANSLATIONS[lang] || TRANSLATIONS[lang?.split("-")[0]] || TRANSLATIONS.en;
+  let s = l[key] || TRANSLATIONS.en[key] || key;
+  if (vars) Object.entries(vars).forEach(([k, v]) => { s = s.replace(`{${k}}`, v); });
+  return s;
+}
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 function _escHtml(str) {
@@ -56,6 +152,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
   }
 
   _render() {
+    const lang = this._hass?.language || "en";
     this.shadowRoot.innerHTML = `
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -73,7 +170,7 @@ class SecuritasCameraCardEditor extends HTMLElement {
     entityForm.schema = [
       { name: "entity", selector: { entity: { domain: "camera" } } },
     ];
-    entityForm.computeLabel = () => "Entity";
+    entityForm.computeLabel = () => _t(lang, "editor_entity");
     entityForm.addEventListener("value-changed", (e) => {
       const newEntity = e.detail.value?.entity;
       if (newEntity !== undefined) {
@@ -84,9 +181,9 @@ class SecuritasCameraCardEditor extends HTMLElement {
 
     // Name field — ha-textfield with input event (no value-changed → no re-render cycle)
     const nameTf = document.createElement("ha-textfield");
-    nameTf.label = "Name";
+    nameTf.label = _t(lang, "editor_name");
     nameTf.value = this._config.name || "";
-    nameTf.placeholder = "Override friendly name";
+    nameTf.placeholder = _t(lang, "editor_name_placeholder");
     nameTf.addEventListener("input", (e) => {
       const val = e.target.value;
       if (val.trim()) {
@@ -146,13 +243,14 @@ class SecuritasCameraCard extends HTMLElement {
 
   _render() {
     const entityId = this._config.entity;
+    const lang = this._hass?.language || "en";
     const stateObj = this._hass?.states[entityId];
 
     if (!stateObj) {
       this.shadowRoot.innerHTML = `
       <ha-card>
         <div style="padding:16px;color:var(--error-color)">
-          Entity not found: ${_escHtml(entityId)}
+          ${_escHtml(_t(lang, "entity_not_found", { entity: entityId }))}
         </div>
       </ha-card>`;
       return;
@@ -169,7 +267,7 @@ class SecuritasCameraCard extends HTMLElement {
       : null;
     const name = this._config.name || deviceName || stateObj.attributes.friendly_name || entityId;
     const timestamp = stateObj.attributes.image_timestamp;
-    const { relative, absolute } = this._formatTimestamp(timestamp);
+    const { relative, absolute } = this._formatTimestamp(timestamp, lang);
     const hasCapture = !!this._captureEntityId;
     // Only use the full entity if it has a real image (non-null timestamp).
     // PIR cameras may not support full-resolution images.
@@ -270,19 +368,19 @@ class SecuritasCameraCard extends HTMLElement {
     }
   }
 
-  _formatTimestamp(timestamp) {
+  _formatTimestamp(timestamp, lang) {
     if (!timestamp) return { relative: "", absolute: "" };
     const date = new Date(timestamp);
     if (isNaN(date.getTime())) return { relative: timestamp, absolute: timestamp };
-    const absolute = date.toLocaleString();
+    const absolute = date.toLocaleString(lang);
     const diffMs = Date.now() - date.getTime();
     const diffSec = Math.round(diffMs / 1000);
-    if (diffSec < 60) return { relative: `${diffSec}s ago`, absolute };
+    if (diffSec < 60) return { relative: _t(lang, "ago_seconds", { n: diffSec }), absolute };
     const diffMin = Math.round(diffSec / 60);
-    if (diffMin < 60) return { relative: `${diffMin} min ago`, absolute };
+    if (diffMin < 60) return { relative: _t(lang, "ago_minutes", { n: diffMin }), absolute };
     const diffHr = Math.round(diffMin / 60);
-    if (diffHr < 24) return { relative: `${diffHr}h ago`, absolute };
-    return { relative: `${Math.round(diffHr / 24)}d ago`, absolute };
+    if (diffHr < 24) return { relative: _t(lang, "ago_hours", { n: diffHr }), absolute };
+    return { relative: _t(lang, "ago_days", { n: Math.round(diffHr / 24) }), absolute };
   }
 
   _openMoreInfo(entityId) {
@@ -369,8 +467,8 @@ window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === "securitas-camera-card")) {
   window.customCards.push({
     type: "securitas-camera-card",
-    name: "Securitas Camera Card",
-    description: "Displays a Securitas Direct camera image with capture trigger and timestamp.",
+    name: TRANSLATIONS.en.card_name,
+    description: TRANSLATIONS.en.card_description,
     preview: false,
   });
 }
