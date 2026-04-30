@@ -123,43 +123,6 @@
             "description": "Cancelar um armar forçado pendente e dispensar a notificação de exceção de armação."
         }
     },
-    "notifications": {
-        "migration_required": {
-            "title": "Securitas Direct",
-            "message": "A sua configuração do Securitas Direct usa um formato antigo. Por favor, remova a integração e adicione-a novamente."
-        },
-        "two_factor_required": {
-            "title": "Securitas Direct",
-            "message": "Securitas Direct precisa de um código de verificação 2FA. Por favor, inicie sessão novamente."
-        },
-        "login_failed": {
-            "title": "Securitas Direct",
-            "message": "Não foi possível iniciar sessão no Securitas Direct: {error}"
-        },
-        "arm_failed": {
-            "title": "Securitas: Falha ao armar",
-            "message": "{error}"
-        },
-        "disarm_failed": {
-            "title": "Securitas: Falha ao desarmar",
-            "message": "{error}"
-        },
-        "rate_limited": {
-            "title": "Securitas: Demasiados pedidos",
-            "message": "Demasiados pedidos — bloqueado pelos servidores Securitas. Aguarde alguns minutos antes de tentar novamente."
-        },
-        "force_arm_expired": {
-            "title": "Securitas: Alarme não armado",
-            "message": "A opção de armar à força expirou. O alarme **não** foi armado. Tente armar novamente."
-        },
-        "arm_blocked_open_sensors": {
-            "title": "Securitas: Armar bloqueado — sensor(es) aberto(s)",
-            "message": "O armar foi bloqueado porque os seguintes sensores estão abertos:\n{sensor_list}\n\nPara armar na mesma, toque em **Armar na mesma** no cartão do alarme ou na sua notificação móvel.",
-            "mobile_message": "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. Armar na mesma?",
-            "force_arm_action": "Armar na mesma",
-            "cancel_action": "Cancelar"
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Código PIN inválido para {entity_id}"

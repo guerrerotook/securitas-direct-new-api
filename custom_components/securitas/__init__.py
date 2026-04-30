@@ -246,9 +246,7 @@ async def _get_or_create_session(
                 _notify(hass, "2fa_error", "two_factor_required")
                 raise
             except AuthenticationError as err:
-                _notify(
-                    hass, "login_error", "login_failed", {"error": str(err)}
-                )
+                _notify(hass, "login_error", "login_failed", {"error": str(err)})
                 _LOGGER.error(
                     "Could not log in to Securitas: %s",
                     err.log_detail(),

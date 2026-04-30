@@ -123,43 +123,6 @@
             "description": "Cancelar un armado forzado pendiente y descartar la notificación de excepción de armado."
         }
     },
-    "notifications": {
-        "migration_required": {
-            "title": "Securitas Direct",
-            "message": "Tu configuración de Securitas Direct usa un formato antiguo. Por favor, elimina la integración y vuelve a añadirla."
-        },
-        "two_factor_required": {
-            "title": "Securitas Direct",
-            "message": "Securitas Direct necesita un código de verificación 2FA. Por favor, inicia sesión de nuevo."
-        },
-        "login_failed": {
-            "title": "Securitas Direct",
-            "message": "No se pudo iniciar sesión en Securitas Direct: {error}"
-        },
-        "arm_failed": {
-            "title": "Securitas: Error al armar",
-            "message": "{error}"
-        },
-        "disarm_failed": {
-            "title": "Securitas: Error al desarmar",
-            "message": "{error}"
-        },
-        "rate_limited": {
-            "title": "Securitas: Demasiadas solicitudes",
-            "message": "Demasiadas solicitudes — bloqueado por los servidores de Securitas. Espera unos minutos antes de volver a intentarlo."
-        },
-        "force_arm_expired": {
-            "title": "Securitas: Alarma no armada",
-            "message": "La opción de armado forzado ha expirado. La alarma **no** se armó. Por favor, intenta armar de nuevo."
-        },
-        "arm_blocked_open_sensors": {
-            "title": "Securitas: Armado bloqueado — sensor(es) abierto(s)",
-            "message": "El armado se bloqueó porque los siguientes sensores están abiertos:\n{sensor_list}\n\nPara armar de todos modos, pulsa **Armar de todos modos** en la tarjeta de la alarma o en tu notificación móvil.",
-            "mobile_message": "Armado bloqueado — sensor(es) abierto(s): {sensor_list}. ¿Armar de todos modos?",
-            "force_arm_action": "Armar de todos modos",
-            "cancel_action": "Cancelar"
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Código PIN no válido para {entity_id}"

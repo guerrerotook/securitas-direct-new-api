@@ -123,43 +123,6 @@
             "description": "Annullare un'attivazione forzata in sospeso e chiudere la notifica di eccezione di attivazione."
         }
     },
-    "notifications": {
-        "migration_required": {
-            "title": "Securitas Direct",
-            "message": "La tua configurazione Securitas Direct utilizza un formato obsoleto. Rimuovi l'integrazione e aggiungila di nuovo."
-        },
-        "two_factor_required": {
-            "title": "Securitas Direct",
-            "message": "Securitas Direct richiede un codice di verifica 2FA. Effettua di nuovo l'accesso."
-        },
-        "login_failed": {
-            "title": "Securitas Direct",
-            "message": "Impossibile accedere a Securitas Direct: {error}"
-        },
-        "arm_failed": {
-            "title": "Securitas: Attivazione fallita",
-            "message": "{error}"
-        },
-        "disarm_failed": {
-            "title": "Securitas: Disattivazione fallita",
-            "message": "{error}"
-        },
-        "rate_limited": {
-            "title": "Securitas: Troppe richieste",
-            "message": "Troppe richieste — bloccato dai server Securitas. Attendi alcuni minuti prima di riprovare."
-        },
-        "force_arm_expired": {
-            "title": "Securitas: Allarme non attivato",
-            "message": "L'opzione di attivazione forzata è scaduta. L'allarme **non** è stato attivato. Riprova ad attivarlo."
-        },
-        "arm_blocked_open_sensors": {
-            "title": "Securitas: Attivazione bloccata — sensore(i) aperto(i)",
-            "message": "L'attivazione è stata bloccata perché i seguenti sensori sono aperti:\n{sensor_list}\n\nPer attivare comunque, tocca **Attiva comunque** sulla card dell'allarme o sulla tua notifica mobile.",
-            "mobile_message": "Attivazione bloccata — sensore(i) aperto(i): {sensor_list}. Attivare comunque?",
-            "force_arm_action": "Attiva comunque",
-            "cancel_action": "Annulla"
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Codice PIN non valido per {entity_id}"

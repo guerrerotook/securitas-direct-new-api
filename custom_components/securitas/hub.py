@@ -17,7 +17,6 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.translation import async_get_translations
 
 from .api_queue import ApiQueue
 from .const import (
@@ -29,6 +28,7 @@ from .const import (
     SIGNAL_CAMERA_STATE,
 )
 from .log_filter import SensitiveDataFilter
+from .notification_translations import get_notification_strings
 from .securitas_direct_new_api import (
     ApiDomains,
     CameraDevice,
@@ -54,12 +54,9 @@ async def _async_notify(
     placeholders: dict[str, str] | None = None,
 ) -> None:
     """Send a translated persistent notification."""
-    translations = await async_get_translations(
-        hass, hass.config.language, "notifications", {DOMAIN}
-    )
-    base = f"component.{DOMAIN}.notifications.{translation_key}"
-    title = translations.get(f"{base}.title", "")
-    message = translations.get(f"{base}.message", "")
+    entry = get_notification_strings(hass, translation_key)
+    title = entry.get("title", "")
+    message = entry.get("message", "")
     if placeholders:
         for key, value in placeholders.items():
             token = "{" + key + "}"

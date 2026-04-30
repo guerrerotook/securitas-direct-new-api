@@ -2902,20 +2902,12 @@ class TestLastProtoCode:
 # ===========================================================================
 
 
-_FAKE_NOTIFICATION_TRANSLATIONS = {
-    "component.securitas.notifications.arm_blocked_open_sensors.title": "TITLE",
-    "component.securitas.notifications.arm_blocked_open_sensors.message": (
-        "Arming blocked because:\n{sensor_list}\nTap Force Arm to override."
-    ),
-    "component.securitas.notifications.arm_blocked_open_sensors.mobile_message": (
-        "Blocked: {sensor_list}"
-    ),
-    "component.securitas.notifications.arm_blocked_open_sensors.force_arm_action": (
-        "Forçar"
-    ),
-    "component.securitas.notifications.arm_blocked_open_sensors.cancel_action": (
-        "Cancel·lar"
-    ),
+_FAKE_NOTIFICATION_ENTRY = {
+    "title": "TITLE",
+    "message": "Arming blocked because:\n{sensor_list}\nTap Force Arm to override.",
+    "mobile_message": "Blocked: {sensor_list}",
+    "force_arm_action": "Forçar",
+    "cancel_action": "Cancel·lar",
 }
 
 
@@ -2943,8 +2935,8 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
@@ -2961,8 +2953,8 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
@@ -2980,13 +2972,14 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
         mobile_call = next(
-            c for c in alarm.hass.services.async_call.call_args_list
+            c
+            for c in alarm.hass.services.async_call.call_args_list
             if c[1]["domain"] == "notify"
         )
         data = mobile_call[1]["service_data"]["data"]
@@ -2999,13 +2992,14 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
         mobile_call = next(
-            c for c in alarm.hass.services.async_call.call_args_list
+            c
+            for c in alarm.hass.services.async_call.call_args_list
             if c[1]["domain"] == "notify"
         )
         actions = mobile_call[1]["service_data"]["data"]["actions"]
@@ -3022,8 +3016,8 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
@@ -3042,8 +3036,8 @@ class TestNotificationContent:
         event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
@@ -3064,8 +3058,8 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 
@@ -3081,8 +3075,8 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_translations",
-            AsyncMock(return_value=_FAKE_NOTIFICATION_TRANSLATIONS),
+            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
 

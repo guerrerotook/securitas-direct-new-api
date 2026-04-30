@@ -76,4 +76,3 @@ class SecuritasEntity(Entity):
         self._state = state
         if self.hass is not None:
             self.async_schedule_update_ha_state()
-

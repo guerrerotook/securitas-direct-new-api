@@ -22,8 +22,6 @@ from homeassistant.helpers.entity_platform import (
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-from homeassistant.helpers.translation import async_get_translations
-
 from . import (
     CONF_CODE_ARM_REQUIRED,
     CONF_FORCE_ARM_NOTIFICATIONS,
@@ -37,6 +35,7 @@ from . import (
 )
 from .coordinators import AlarmCoordinator, AlarmStatusData
 from .entity import securitas_device_info
+from .notification_translations import get_notification_strings
 from .securitas_direct_new_api import (
     ArmingExceptionError,
     Installation,
@@ -692,9 +691,7 @@ class SecuritasAlarm(  # type: ignore[override]
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
         """Send notifications about arming exceptions from event data."""
-        self.hass.async_create_task(
-            self._async_notify_arm_exceptions(event)
-        )
+        self.hass.async_create_task(self._async_notify_arm_exceptions(event))
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
         """Send translated persistent + mobile notifications for an arming exception."""
@@ -706,19 +703,16 @@ class SecuritasAlarm(  # type: ignore[override]
             sensor_list = "- (unknown sensor)"
             short_details = "open sensor"
 
-        translations = await async_get_translations(
-            self.hass, self.hass.config.language, "notifications", {DOMAIN}
-        )
-        base = f"component.{DOMAIN}.notifications.arm_blocked_open_sensors"
-        title = translations.get(f"{base}.title", "")
-        persistent_message = translations.get(f"{base}.message", "").replace(
+        entry = get_notification_strings(self.hass, "arm_blocked_open_sensors")
+        title = entry.get("title", "")
+        persistent_message = entry.get("message", "").replace(
             "{sensor_list}", sensor_list
         )
-        mobile_message = translations.get(f"{base}.mobile_message", "").replace(
+        mobile_message = entry.get("mobile_message", "").replace(
             "{sensor_list}", short_details
         )
-        force_arm_label = translations.get(f"{base}.force_arm_action", "")
-        cancel_label = translations.get(f"{base}.cancel_action", "")
+        force_arm_label = entry.get("force_arm_action", "")
+        cancel_label = entry.get("cancel_action", "")
 
         await self.hass.services.async_call(
             domain="persistent_notification",
@@ -743,8 +737,7 @@ class SecuritasAlarm(  # type: ignore[override]
                         "actions": [
                             {
                                 "action": (
-                                    "SECURITAS_FORCE_ARM"
-                                    f"_{self.installation.number}"
+                                    f"SECURITAS_FORCE_ARM_{self.installation.number}"
                                 ),
                                 "title": force_arm_label,
                             },

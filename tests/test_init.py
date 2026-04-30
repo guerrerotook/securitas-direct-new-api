@@ -174,23 +174,19 @@ class TestSecuritasHubInit:
 class TestAsyncNotify:
     """Tests for _async_notify() and _notify() helpers."""
 
-    async def test_translates_title_and_message_via_async_get_translations(self):
-        """Looks up title/message from notifications category and posts to persistent_notification."""
+    async def test_looks_up_title_and_message_from_translations_dict(self):
+        """Resolves title/message via get_notification_strings and posts to persistent_notification."""
         hass = MagicMock()
         hass.config.language = "en"
         hass.services.async_call = AsyncMock()
 
-        translations = {
-            f"component.{DOMAIN}.notifications.my_key.title": "Hello",
-            f"component.{DOMAIN}.notifications.my_key.message": "World message",
-        }
         with patch(
-            "custom_components.securitas.hub.async_get_translations",
-            AsyncMock(return_value=translations),
+            "custom_components.securitas.hub.get_notification_strings",
+            return_value={"title": "Hello", "message": "World message"},
         ) as mocked:
             await _async_notify(hass, "my_id", "my_key")
 
-        mocked.assert_awaited_once_with(hass, "en", "notifications", {DOMAIN})
+        mocked.assert_called_once_with(hass, "my_key")
         hass.services.async_call.assert_awaited_once_with(
             domain="persistent_notification",
             service="create",
@@ -207,17 +203,11 @@ class TestAsyncNotify:
         hass.config.language = "es"
         hass.services.async_call = AsyncMock()
 
-        translations = {
-            f"component.{DOMAIN}.notifications.greeting.title": "Hola {name}",
-            f"component.{DOMAIN}.notifications.greeting.message": "{count} cosas",
-        }
         with patch(
-            "custom_components.securitas.hub.async_get_translations",
-            AsyncMock(return_value=translations),
+            "custom_components.securitas.hub.get_notification_strings",
+            return_value={"title": "Hola {name}", "message": "{count} cosas"},
         ):
-            await _async_notify(
-                hass, "g1", "greeting", {"name": "Bob", "count": 3}
-            )
+            await _async_notify(hass, "g1", "greeting", {"name": "Bob", "count": 3})
 
         service_data = hass.services.async_call.call_args[1]["service_data"]
         assert service_data["title"] == "Hola Bob"
@@ -451,9 +441,7 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(hass, entry)
 
-        mock_notify.assert_called_once_with(
-            hass, "2fa_error", "two_factor_required"
-        )
+        mock_notify.assert_called_once_with(hass, "2fa_error", "two_factor_required")
 
     async def test_setup_login_error(self, hass, mock_hub):
         """AuthenticationError raises ConfigEntryAuthFailed and notifies with the API error."""

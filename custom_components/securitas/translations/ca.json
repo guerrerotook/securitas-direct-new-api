@@ -123,43 +123,6 @@
             "description": "Cancel·la un armat forçat pendent i descarta la notificació d'excepció d'armat."
         }
     },
-    "notifications": {
-        "migration_required": {
-            "title": "Verisure",
-            "message": "La teva configuració de Verisure utilitza un format antic. Si us plau, elimina la integració i torna-la a afegir."
-        },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": "Verisure necessita un codi de verificació 2FA. Si us plau, torna a iniciar sessió."
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "No s'ha pogut iniciar sessió a Verisure: {error}"
-        },
-        "arm_failed": {
-            "title": "Verisure: Error en armar",
-            "message": "{error}"
-        },
-        "disarm_failed": {
-            "title": "Verisure: Error en desarmar",
-            "message": "{error}"
-        },
-        "rate_limited": {
-            "title": "Verisure: Massa peticions",
-            "message": "Massa peticions — bloquejat pels servidors de Verisure. Espera uns minuts abans de tornar a provar."
-        },
-        "force_arm_expired": {
-            "title": "Verisure: Alarma no armada",
-            "message": "L'opció d'armat forçat ha expirat. L'alarma **no** s'ha armat. Si us plau, torna a provar a armar."
-        },
-        "arm_blocked_open_sensors": {
-            "title": "Verisure: Armat bloquejat — sensor(s) obert(s)",
-            "message": "L'armat s'ha bloquejat perquè els següents sensors estan oberts:\n{sensor_list}\n\nPer armar igualment, toca **Forçar armat** a la targeta de l'alarma o a la teva notificació mòbil.",
-            "mobile_message": "Armat bloquejat — sensor(s) obert(s): {sensor_list}. Armar igualment?",
-            "force_arm_action": "Forçar armat",
-            "cancel_action": "Cancel·lar"
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Codi PIN no vàlid per a {entity_id}"
