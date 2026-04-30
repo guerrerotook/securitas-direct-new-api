@@ -17,6 +17,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.translation import async_get_translations
 
 from .api_queue import ApiQueue
 from .const import (
@@ -46,20 +47,44 @@ from .securitas_direct_new_api.http_transport import HttpTransport
 _LOGGER = logging.getLogger(__name__)
 
 
-def _notify_error(
-    hass: HomeAssistant, notification_id: str, title: str, message: str
+async def _async_notify(
+    hass: HomeAssistant,
+    notification_id: str,
+    translation_key: str,
+    placeholders: dict[str, str] | None = None,
 ) -> None:
-    """Notify user with persistent notification."""
+    """Send a translated persistent notification."""
+    translations = await async_get_translations(
+        hass, hass.config.language, "notifications", {DOMAIN}
+    )
+    base = f"component.{DOMAIN}.notifications.{translation_key}"
+    title = translations.get(f"{base}.title", "")
+    message = translations.get(f"{base}.message", "")
+    if placeholders:
+        for key, value in placeholders.items():
+            token = "{" + key + "}"
+            title = title.replace(token, str(value))
+            message = message.replace(token, str(value))
+    await hass.services.async_call(
+        domain="persistent_notification",
+        service="create",
+        service_data={
+            "title": title,
+            "message": message,
+            "notification_id": f"{DOMAIN}.{notification_id}",
+        },
+    )
+
+
+def _notify(
+    hass: HomeAssistant,
+    notification_id: str,
+    translation_key: str,
+    placeholders: dict[str, str] | None = None,
+) -> None:
+    """Schedule a translated persistent notification (sync-callable)."""
     hass.async_create_task(
-        hass.services.async_call(
-            domain="persistent_notification",
-            service="create",
-            service_data={
-                "title": title,
-                "message": message,
-                "notification_id": f"{DOMAIN}.{notification_id}",
-            },
-        )
+        _async_notify(hass, notification_id, translation_key, placeholders)
     )
 
 

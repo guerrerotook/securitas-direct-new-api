@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -78,19 +77,3 @@ class SecuritasEntity(Entity):
         if self.hass is not None:
             self.async_schedule_update_ha_state()
 
-    def _notify_error(self, title: str, message: str) -> None:
-        """Send persistent notification with auto-generated ID."""
-        notification_id = re.sub(r"\W+", "_", title.lower()).strip("_")
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                domain="persistent_notification",
-                service="create",
-                service_data={
-                    "title": title,
-                    "message": message,
-                    "notification_id": (
-                        f"{DOMAIN}.{notification_id}_{self._installation.number}"
-                    ),
-                },
-            )
-        )

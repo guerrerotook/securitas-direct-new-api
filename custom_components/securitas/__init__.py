@@ -71,7 +71,8 @@ from .coordinators import (
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     SecuritasDirectDevice,
     SecuritasHub,
-    _notify_error,
+    _async_notify,
+    _notify,
 )
 from .log_filter import SensitiveDataFilter
 from .securitas_direct_new_api import (
@@ -155,13 +156,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             config_entry.entry_id,
             config_entry.version,
         )
-        _notify_error(
-            hass,
-            "migration_required",
-            "Securitas Direct",
-            "Your Securitas Direct configuration uses an old format. "
-            "Please remove the integration entry and re-add it.",
-        )
+        _notify(hass, "migration_required", "migration_required")
         return False
     return True
 
@@ -248,14 +243,12 @@ async def _get_or_create_session(
             try:
                 await client.login()
             except TwoFactorRequiredError:
-                msg = (
-                    "Securitas Direct need a 2FA SMS code."
-                    "Please login again with your phone"
-                )
-                _notify_error(hass, "2fa_error", "Securitas Direct", msg)
+                _notify(hass, "2fa_error", "two_factor_required")
                 raise
             except AuthenticationError as err:
-                _notify_error(hass, "login_error", "Securitas Direct", str(err))
+                _notify(
+                    hass, "login_error", "login_failed", {"error": str(err)}
+                )
                 _LOGGER.error(
                     "Could not log in to Securitas: %s",
                     err.log_detail(),

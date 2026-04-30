@@ -123,9 +123,52 @@
             "description": "Annuler un armement forcé en attente et fermer la notification d'exception d'armement."
         }
     },
+    "notifications": {
+        "migration_required": {
+            "title": "Securitas Direct",
+            "message": "Votre configuration Securitas Direct utilise un ancien format. Veuillez supprimer l'intégration et l'ajouter à nouveau."
+        },
+        "two_factor_required": {
+            "title": "Securitas Direct",
+            "message": "Securitas Direct a besoin d'un code de vérification 2FA. Veuillez vous reconnecter."
+        },
+        "login_failed": {
+            "title": "Securitas Direct",
+            "message": "Impossible de se connecter à Securitas Direct : {error}"
+        },
+        "arm_failed": {
+            "title": "Securitas : Échec de l'armement",
+            "message": "{error}"
+        },
+        "disarm_failed": {
+            "title": "Securitas : Échec du désarmement",
+            "message": "{error}"
+        },
+        "rate_limited": {
+            "title": "Securitas : Trop de requêtes",
+            "message": "Trop de requêtes — bloqué par les serveurs Securitas. Veuillez patienter quelques minutes avant de réessayer."
+        },
+        "force_arm_expired": {
+            "title": "Securitas : Alarme non armée",
+            "message": "L'option d'armement forcé a expiré. L'alarme **n'a pas** été armée. Veuillez réessayer."
+        },
+        "arm_blocked_open_sensors": {
+            "title": "Securitas : Armement bloqué — capteur(s) ouvert(s)",
+            "message": "L'armement a été bloqué car les capteurs suivants sont ouverts :\n{sensor_list}\n\nPour armer quand même, appuyez sur **Armer quand même** sur la carte d'alarme ou sur votre notification mobile.",
+            "mobile_message": "Armement bloqué — capteur(s) ouvert(s) : {sensor_list}. Armer quand même ?",
+            "force_arm_action": "Armer quand même",
+            "cancel_action": "Annuler"
+        }
+    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Code PIN non valide pour {entity_id}"
+        },
+        "unsupported_alarm_mode": {
+            "message": "Ce mode d'alarme n'est pas pris en charge par votre panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."
+        },
+        "no_supported_command": {
+            "message": "Aucune commande compatible trouvée pour ce panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."
         }
     }
 }

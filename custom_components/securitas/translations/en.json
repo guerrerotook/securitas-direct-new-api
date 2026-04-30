@@ -123,9 +123,52 @@
             "description": "Cancel a pending force-arm and dismiss the arming-exception notification."
         }
     },
+    "notifications": {
+        "migration_required": {
+            "title": "Securitas Direct",
+            "message": "Your Securitas Direct configuration uses an old format. Please remove the integration entry and re-add it."
+        },
+        "two_factor_required": {
+            "title": "Securitas Direct",
+            "message": "Securitas Direct needs a 2FA verification code. Please log in again."
+        },
+        "login_failed": {
+            "title": "Securitas Direct",
+            "message": "Could not log in to Securitas Direct: {error}"
+        },
+        "arm_failed": {
+            "title": "Securitas: Arming failed",
+            "message": "{error}"
+        },
+        "disarm_failed": {
+            "title": "Securitas: Disarming failed",
+            "message": "{error}"
+        },
+        "rate_limited": {
+            "title": "Securitas: Rate limited",
+            "message": "Too many requests — blocked by Securitas servers. Please wait a few minutes before trying again."
+        },
+        "force_arm_expired": {
+            "title": "Securitas: Alarm not armed",
+            "message": "The force-arm option has expired. The alarm was **not armed**. Please try arming again."
+        },
+        "arm_blocked_open_sensors": {
+            "title": "Securitas: Arm blocked — open sensor(s)",
+            "message": "Arming was blocked because the following sensor(s) are open:\n{sensor_list}\n\nTo arm anyway, tap **Force Arm** on the alarm card or on your mobile notification.",
+            "mobile_message": "Arm blocked — open sensor(s): {sensor_list}. Arm anyway?",
+            "force_arm_action": "Force Arm",
+            "cancel_action": "Cancel"
+        }
+    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Invalid PIN code for {entity_id}"
+        },
+        "unsupported_alarm_mode": {
+            "message": "This alarm mode is not supported by your panel. Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."
+        },
+        "no_supported_command": {
+            "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."
         }
     }
 }
