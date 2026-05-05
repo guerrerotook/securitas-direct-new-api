@@ -988,5 +988,62 @@ class InteriorSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         return mapping.get(joint_state.interior)
 
 
+class PerimeterSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+    """Sub-panel driving only the perimeter axis.
+
+    Perimeter is binary (ON/OFF). The interior and annex axes are preserved
+    from the coordinator's current joint state when computing target states.
+    """
+
+    _SUFFIX = "_perimeter"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Override unique_id and friendly name with sub-panel suffix
+        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
+        self._attr_name = f"{self._attr_name} Perimeter"
+        self._attr_translation_key = "perimeter_subpanel"
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        """Return supported features for perimeter (binary axis, ARM_AWAY only)."""
+        return AlarmControlPanelEntityFeature.ARM_AWAY
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Map an HA state to a target AlarmState that touches only the perimeter axis."""
+        from .securitas_direct_new_api.models import (
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        perimeter_target_map = {
+            "armed_away": PerimeterMode.ON,
+            "disarmed": PerimeterMode.OFF,
+        }
+        if ha_state not in perimeter_target_map:
+            raise SecuritasDirectError(
+                f"Unsupported alarm mode for Perimeter panel: {ha_state}"
+            )
+        # Preserve interior and annex axes from the coordinator's current joint state
+        current = self.coordinator.alarm_state
+        return AlarmState(
+            interior=current.interior,
+            perimeter=perimeter_target_map[ha_state],
+            annex=current.annex,
+        )
+
+    def _extract_state(
+        self, joint_state: AlarmState
+    ) -> AlarmControlPanelState | None:
+        """Project the joint state onto the perimeter axis only."""
+        from .securitas_direct_new_api.models import PerimeterMode
+
+        mapping = {
+            PerimeterMode.OFF: AlarmControlPanelState.DISARMED,
+            PerimeterMode.ON: AlarmControlPanelState.ARMED_AWAY,
+        }
+        return mapping.get(joint_state.perimeter)
+
+
 # Backwards-compat alias for tests and any external imports.
 SecuritasAlarm = CombinedSecuritasAlarmPanel
