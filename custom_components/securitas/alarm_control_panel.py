@@ -1042,5 +1042,59 @@ class PerimeterSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         return mapping.get(joint_state.perimeter)
 
 
+class AnnexSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+    """Sub-panel driving only the annex axis.
+
+    Annex is binary (ON/OFF). The interior and perimeter axes are preserved
+    from the coordinator's current joint state when computing target states.
+    """
+
+    _SUFFIX = "_annex"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Override unique_id and friendly name with sub-panel suffix
+        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
+        self._attr_name = f"{self._attr_name} Annex"
+        self._attr_translation_key = "annex_subpanel"
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        """Return supported features for annex (binary axis, ARM_AWAY only)."""
+        return AlarmControlPanelEntityFeature.ARM_AWAY
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Map an HA state to a target AlarmState that touches only the annex axis."""
+        from .securitas_direct_new_api.models import AnnexMode
+
+        annex_target_map = {
+            "armed_away": AnnexMode.ON,
+            "disarmed": AnnexMode.OFF,
+        }
+        if ha_state not in annex_target_map:
+            raise SecuritasDirectError(
+                f"Unsupported alarm mode for Annex panel: {ha_state}"
+            )
+        # Preserve interior and perimeter axes from the coordinator's current joint state
+        current = self.coordinator.alarm_state
+        return AlarmState(
+            interior=current.interior,
+            perimeter=current.perimeter,
+            annex=annex_target_map[ha_state],
+        )
+
+    def _extract_state(
+        self, joint_state: AlarmState
+    ) -> AlarmControlPanelState | None:
+        """Project the joint state onto the annex axis only."""
+        from .securitas_direct_new_api.models import AnnexMode
+
+        mapping = {
+            AnnexMode.OFF: AlarmControlPanelState.DISARMED,
+            AnnexMode.ON: AlarmControlPanelState.ARMED_AWAY,
+        }
+        return mapping.get(joint_state.annex)
+
+
 # Backwards-compat alias for tests and any external imports.
 SecuritasAlarm = CombinedSecuritasAlarmPanel

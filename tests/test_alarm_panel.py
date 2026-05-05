@@ -3538,3 +3538,89 @@ class TestPerimeterSubPanel:
         panel = _make_perimeter_panel()
         assert panel.unique_id is not None
         assert panel.unique_id.endswith("_perimeter")
+
+
+def _make_annex_panel(
+    capabilities: frozenset = frozenset(["ARMANNEX", "DARMANNEX"]),
+    current_state=None,
+):
+    """Build an AnnexSecuritasAlarmPanel with mocked dependencies."""
+    from custom_components.securitas.alarm_control_panel import (
+        AnnexSecuritasAlarmPanel,
+    )
+    from custom_components.securitas.securitas_direct_new_api.models import (
+        AnnexMode, InteriorMode, PerimeterMode,
+    )
+
+    if current_state is None:
+        current_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+    coordinator = MagicMock()
+    coordinator.has_peri = "PERI" in capabilities
+    coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
+    coordinator.capabilities = capabilities
+    coordinator.alarm_state = current_state
+
+    installation = MagicMock()
+    installation.number = "12345"
+    installation.alias = "TestHome"
+    installation.address = "123 Test St"
+
+    client = MagicMock()
+    client.config = {}
+
+    hass = MagicMock()
+
+    with (
+        patch.object(AnnexSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()),
+        patch.object(AnnexSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+    ):
+        return AnnexSecuritasAlarmPanel(installation, client, hass, coordinator)
+
+
+class TestAnnexSubPanel:
+    def test_supported_features_only_arm_away(self):
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+        panel = _make_annex_panel()
+        feats = panel.supported_features
+        assert feats & F.ARM_AWAY
+        assert not (feats & F.ARM_HOME)
+        assert not (feats & F.ARM_NIGHT)
+
+    def test_resolve_armed_away_preserves_other_axes(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState, AnnexMode, InteriorMode, PerimeterMode,
+        )
+        panel = _make_annex_panel(current_state=AlarmState(
+            interior=InteriorMode.DAY, perimeter=PerimeterMode.ON, annex=AnnexMode.OFF,
+        ))
+        s = panel._resolve_target_state("armed_away")
+        assert s.annex == AnnexMode.ON
+        assert s.interior == InteriorMode.DAY
+        assert s.perimeter == PerimeterMode.ON
+
+    def test_extract_state(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState, AnnexMode, InteriorMode, PerimeterMode,
+        )
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+        panel = _make_annex_panel()
+        on = panel._extract_state(AlarmState(
+            interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+        ))
+        off = panel._extract_state(AlarmState(
+            interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+        ))
+        assert on == AlarmControlPanelState.ARMED_AWAY
+        assert off == AlarmControlPanelState.DISARMED
+
+    def test_unique_id_suffix(self):
+        panel = _make_annex_panel()
+        assert panel.unique_id is not None
+        assert panel.unique_id.endswith("_annex")
