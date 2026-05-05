@@ -21,6 +21,10 @@ CAMERA_CARD_BASE_URL = "/securitas_panel/securitas-camera-card.js"
 CAMERA_CARD_URL = (
     f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'securitas-camera-card.js')}"
 )
+EVENTS_CARD_BASE_URL = "/securitas_panel/securitas-events-card.js"
+EVENTS_CARD_URL = (
+    f"{EVENTS_CARD_BASE_URL}?v={_file_hash(_WWW / 'securitas-events-card.js')}"
+)
 
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"

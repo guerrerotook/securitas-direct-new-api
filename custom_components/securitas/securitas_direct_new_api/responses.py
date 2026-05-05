@@ -8,7 +8,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import Installation, LockFeatures, SmartLock, ThumbnailResponse
+from .models import (
+    ActivityEvent,
+    Installation,
+    LockFeatures,
+    SmartLock,
+    ThumbnailResponse,
+)
 from .pydantic_utils import NullSafeBase as _NullSafeBase
 
 
@@ -279,6 +285,18 @@ class GetExceptionsEnvelope(BaseModel):
 
     class Data(BaseModel):
         xSGetExceptions: "GetExceptionsEnvelope._Inner"  # noqa: N815
+
+    data: Data
+
+
+class ActivityEnvelope(BaseModel):
+    """Response envelope for xSActV2 (alarm panel activity timeline)."""
+
+    class _Inner(BaseModel):
+        reg: list[ActivityEvent] | None = None
+
+    class Data(BaseModel):
+        xSActV2: "ActivityEnvelope._Inner"  # noqa: N815
 
     data: Data
 

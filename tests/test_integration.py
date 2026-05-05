@@ -132,9 +132,10 @@ async def test_setup_makes_only_expected_api_calls(
 
     operations = [op for op, _, _ in mock_server.calls]
     # The first three calls are the synchronous setup path.
-    # "Status" may appear if the AlarmCoordinator background refresh has fired.
+    # "Status" / "ActV2Timeline" may appear if the AlarmCoordinator /
+    # ActivityCoordinator background refreshes have fired.
     required = ["mkLoginToken", "mkInstallationList", "Srv"]
-    background_allowed = {"Status"}
+    background_allowed = {"Status", "ActV2Timeline"}
     assert operations[:3] == required, (
         f"Unexpected API calls during setup: {operations}. "
         "New calls should run in _async_discover_devices, not during setup."

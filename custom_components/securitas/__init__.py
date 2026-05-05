@@ -8,6 +8,7 @@ from datetime import timedelta
 import logging
 from pathlib import Path
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -35,6 +36,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CAMERA_CARD_URL,
     CARD_BASE_URL,
     CARD_URL,
+    EVENTS_CARD_BASE_URL,
+    EVENTS_CARD_URL,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
@@ -63,11 +66,13 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     SIGNAL_CAMERA_STATE,
 )
 from .coordinators import (
+    ActivityCoordinator,
     AlarmCoordinator,
     CameraCoordinator,
     LockCoordinator,
     SentinelCoordinator,
 )
+from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     SecuritasDirectDevice,
     SecuritasHub,
@@ -390,6 +395,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _register_card_resource(
             hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
         )
+        await _register_card_resource(
+            hass, EVENTS_CARD_BASE_URL, EVENTS_CARD_URL, "events_card_resource_id"
+        )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
     hass.data.setdefault(DOMAIN, {})
@@ -432,6 +440,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         alarm_coord: AlarmCoordinator | None = None
         sentinel_coord: SentinelCoordinator | None = None
         lock_coord: LockCoordinator | None = None
+        activity_coord: ActivityCoordinator | None = None
+        activity_listener_unsub: Callable[[], None] | None = None
 
         # Use the first installation for shared coordinators.
         # (Each config entry is scoped to one installation via CONF_INSTALLATION.)
@@ -444,6 +454,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 first_installation,
                 update_interval=scan_interval,
                 config_entry=entry,
+            )
+
+            activity_coord = ActivityCoordinator(
+                hass,
+                client.client,
+                client.api_queue,
+                first_installation,
+                config_entry=entry,
+            )
+            activity_listener_unsub = attach_activity_listener(
+                hass, activity_coord, first_installation.number
             )
 
             # Discover sentinel and lock services from cached service list
@@ -486,10 +507,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "alarm_coordinator": alarm_coord,
             "sentinel_coordinator": sentinel_coord,
             "lock_coordinator": lock_coord,
+            "activity_coordinator": activity_coord,
+            "activity_listener_unsub": activity_listener_unsub,
         }
 
         # Schedule non-blocking first refresh for each coordinator
-        for coord in filter(None, [alarm_coord, sentinel_coord, lock_coord]):
+        for coord in filter(
+            None, [alarm_coord, sentinel_coord, lock_coord, activity_coord]
+        ):
             entry.async_create_background_task(
                 hass,
                 coord.async_refresh(),
@@ -808,6 +833,11 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         config_entry, PLATFORMS
     )
 
+    entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
+    activity_unsub = entry_data.get("activity_listener_unsub")
+    if callable(activity_unsub):
+        activity_unsub()
+
     # Decrement shared session ref count (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
@@ -839,6 +869,9 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
         await _unregister_card_resource(
             hass, CAMERA_CARD_URL, "camera_card_resource_id"
+        )
+        await _unregister_card_resource(
+            hass, EVENTS_CARD_URL, "events_card_resource_id"
         )
         hass.data.pop(DOMAIN, None)
 

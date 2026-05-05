@@ -9,12 +9,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN, SecuritasDirectDevice, SecuritasHub, _async_notify
 from .entity import SecuritasEntity, camera_device_info
+from .events import inject_ha_event
 from .securitas_direct_new_api import (
     Installation,
     SecuritasDirectError,
 )
 from .securitas_direct_new_api.exceptions import OperationTimeoutError
-from .securitas_direct_new_api.models import CameraDevice
+from .securitas_direct_new_api.models import ActivityCategory, CameraDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -140,3 +141,13 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
                 self._camera_device.name,
                 err,
             )
+            return
+        await inject_ha_event(
+            self.hass,
+            self._installation,
+            category=ActivityCategory.IMAGE_REQUEST,
+            alias="Image request",
+            device=self._camera_device.zone_id,
+            device_name=self._camera_device.name,
+            context=self._context,
+        )

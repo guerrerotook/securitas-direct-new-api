@@ -1,6 +1,7 @@
 """Securitas direct sentinel sensor."""
 
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.components.sensor.const import SensorStateClass
@@ -11,9 +12,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN
-from .coordinators import SentinelCoordinator
+from .coordinators import ActivityCoordinator, SentinelCoordinator
 from .entity import securitas_device_info
 from .securitas_direct_new_api import Installation
+from .securitas_direct_new_api.models import ActivityEvent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,27 +23,35 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up Securitas Direct sentinel sensors based on config_entry.
+    """Set up Securitas Direct sensors based on config_entry.
 
     No API calls are made here.  Entities start with unknown state;
-    the coordinator drives periodic updates.
+    coordinators drive periodic updates.
     """
     entry_data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: SentinelCoordinator | None = entry_data["sentinel_coordinator"]
+    sensors: list[SensorEntity] = []
 
-    if coordinator is None:
-        return
+    sentinel_coord: SentinelCoordinator | None = entry_data["sentinel_coordinator"]
+    if sentinel_coord is not None:
+        sentinel_installation: Installation = sentinel_coord.installation
+        service_id: int = sentinel_coord.service.id
+        sensors.extend(
+            [
+                SentinelTemperature(sentinel_coord, sentinel_installation, service_id),
+                SentinelHumidity(sentinel_coord, sentinel_installation, service_id),
+                SentinelAirQuality(sentinel_coord, sentinel_installation, service_id),
+                SentinelAirQualityStatus(
+                    sentinel_coord, sentinel_installation, service_id
+                ),
+            ]
+        )
 
-    installation: Installation = coordinator.installation
-    service_id: int = coordinator.service.id
+    activity_coord: ActivityCoordinator | None = entry_data.get("activity_coordinator")
+    if activity_coord is not None:
+        sensors.append(ActivityLogSensor(activity_coord, activity_coord.installation))
 
-    sensors: list[SensorEntity] = [
-        SentinelTemperature(coordinator, installation, service_id),
-        SentinelHumidity(coordinator, installation, service_id),
-        SentinelAirQuality(coordinator, installation, service_id),
-        SentinelAirQualityStatus(coordinator, installation, service_id),
-    ]
-    async_add_entities(sensors, False)
+    if sensors:
+        async_add_entities(sensors, False)
 
 
 class SentinelTemperature(  # type: ignore[override]
@@ -183,3 +193,77 @@ class SentinelAirQualityStatus(  # type: ignore[override]
             )
             label = code
         return label
+
+
+# Cap on the `events` attribute — bounds HA's recorder writes per state change.
+_ACTIVITY_LOG_LIMIT = 30
+
+
+class ActivityLogSensor(  # type: ignore[override]
+    CoordinatorEntity[ActivityCoordinator],
+    SensorEntity,
+):
+    """Surfaces the alarm panel's xSActV2 timeline as a sensor.
+
+    State is the alias of the most recent event ("Armed", "Alarm", ...).
+    The `events` attribute holds the last 30 entries for dashboard viewing;
+    `latest` exposes the full top entry.  Automations should use the
+    `securitas_activity` event bus rather than reading these attributes.
+    """
+
+    _attr_has_entity_name = False
+    _attr_icon = "mdi:format-list-bulleted"
+
+    def __init__(
+        self,
+        coordinator: ActivityCoordinator,
+        installation: Installation,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_device_info = securitas_device_info(installation)
+        self._attr_unique_id = f"v4_{installation.number}_activity_log"
+        self._attr_name = f"{installation.alias} Activity Log"
+        # Memoise extra_state_attributes — HA reads it from the recorder, the
+        # frontend, the template engine, and websocket subscribers, often
+        # several times per state update.  Cached by coordinator.data identity.
+        self._attrs_cache_key: int | None = None
+        self._attrs_cache: dict[str, Any] = {"events": []}
+
+    @property
+    def native_value(self) -> str | None:  # type: ignore[override]
+        data = self.coordinator.data
+        if data is None or not data.events:
+            return None
+        return self._format_state(data.events[0])
+
+    @staticmethod
+    def _format_state(event: ActivityEvent) -> str:
+        """Render an event as ``"<alias> (by <user>|(<device>)) at HH:MM"``."""
+        parts = [event.alias]
+        if event.verisure_user:
+            parts.append(f"by {event.verisure_user}")
+        elif event.device_name:
+            parts.append(f"({event.device_name})")
+        # The API returns "YYYY-MM-DD HH:MM:SS" in panel-local time.  Slice
+        # to HH:MM rather than parsing — there is no timezone to interpret.
+        if event.time and len(event.time) >= 16:
+            parts.append(f"at {event.time[11:16]}")
+        return " ".join(parts)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[override]
+        data = self.coordinator.data
+        cache_key = id(data) if data is not None else None
+        if cache_key == self._attrs_cache_key:
+            return self._attrs_cache
+        if data is None or not data.events:
+            attrs: dict[str, Any] = {"events": []}
+        else:
+            events = data.events[:_ACTIVITY_LOG_LIMIT]
+            attrs = {
+                "latest": events[0].model_dump(),
+                "events": [ev.model_dump() for ev in events],
+            }
+        self._attrs_cache_key = cache_key
+        self._attrs_cache = attrs
+        return attrs

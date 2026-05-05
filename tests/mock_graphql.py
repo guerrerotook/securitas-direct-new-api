@@ -350,6 +350,18 @@ def graphql_general_status(
     }
 
 
+def graphql_activity(*, reg: list[dict] | None = None) -> dict:
+    """ActV2Timeline (xSActV2 alarm-panel timeline) response."""
+    return {
+        "data": {
+            "xSActV2": {
+                "reg": reg if reg is not None else [],
+                "__typename": "XSActV2",
+            }
+        }
+    }
+
+
 def graphql_arm(*, reference_id: str = "ref-arm-123") -> dict:
     """xSArmPanel response."""
     return {
@@ -643,6 +655,10 @@ def queue_standard_setup(
     # AlarmCoordinator fires a background refresh via get_general_status (Status)
     # immediately after setup — provide a default so it doesn't crash.
     server.set_default_response("Status", graphql_general_status(status=proto))
+
+    # ActivityCoordinator fires a background refresh via get_activity
+    # (ActV2Timeline) immediately after setup — provide a default.
+    server.set_default_response("ActV2Timeline", graphql_activity())
 
 
 def make_doorlock_service() -> dict:

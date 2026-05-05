@@ -26,6 +26,7 @@ from .securitas_direct_new_api.exceptions import (
     WAFBlockedError,
 )
 from .securitas_direct_new_api.models import (
+    ActivityEvent,
     AirQuality,
     CameraDevice,
     Installation,
@@ -40,6 +41,8 @@ _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_SENTINEL_INTERVAL = timedelta(minutes=30)
 _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
+_DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
+_ACTIVITY_TIMELINE_WINDOW = 30
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -74,6 +77,19 @@ class CameraData:
 
     thumbnails: dict[str, ThumbnailResponse] = field(default_factory=dict)
     full_images: dict[str, bytes] = field(default_factory=dict)
+
+
+@dataclass
+class ActivityData:
+    """Data returned by ActivityCoordinator.
+
+    `events` is the most recent fetch from the panel timeline.
+    `new_events` is the subset whose idSignal was not in the previous poll —
+    empty on the first poll so listeners don't get a flood of historical entries.
+    """
+
+    events: list[ActivityEvent] = field(default_factory=list)
+    new_events: list[ActivityEvent] = field(default_factory=list)
 
 
 # ── Error handling ───────────────────────────────────────────────────────────
@@ -427,3 +443,112 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
                     full_images[zone_id] = full_bytes
 
         return CameraData(thumbnails=thumbnails, full_images=full_images)
+
+
+# ── ActivityCoordinator ──────────────────────────────────────────────────────
+
+
+class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
+    """Coordinator for the alarm panel activity timeline (xSActV2).
+
+    Tracks idSignals seen in the previous poll so each refresh exposes a
+    `new_events` list of just-arrived entries.  The first poll establishes
+    the baseline silently — historical events are not flagged as new.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: SecuritasClient,
+        queue: ApiQueue,
+        installation: Installation,
+        *,
+        config_entry: ConfigEntry | None = None,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=config_entry,
+            name="securitas_activity",
+            update_interval=_DEFAULT_ACTIVITY_INTERVAL,
+        )
+        self._client = client
+        self._queue = queue
+        self.installation = installation
+        self._previous_ids: set[str] | None = None
+        # HA-synthesized events; merged with polled at the front of the timeline.
+        self._injected: list[ActivityEvent] = []
+
+    async def _fetch(self) -> list[ActivityEvent]:
+        return await self._queue.submit(
+            self._client.get_activity,
+            self.installation,
+            priority=ApiQueue.BACKGROUND,
+        )
+
+    async def _async_update_data(self) -> ActivityData:
+        try:
+            events = await self._fetch()
+        except SessionExpiredError:
+            await _handle_session_expired(self._client)
+            try:
+                events = await self._fetch()
+            except SecuritasDirectError as err:
+                raise UpdateFailed(f"Activity update failed: {err}") from err
+        except WAFBlockedError as err:
+            raise UpdateFailed(f"WAF blocked activity request: {err}") from err
+        except SecuritasDirectError as err:
+            raise UpdateFailed(f"Activity update failed: {err}") from err
+
+        # Drop polled entries this integration produced.  We send Android-like
+        # headers but pass no user; the panel records HA-issued actions with
+        # source="Android" and no verisure_user.  Real mobile-app actions
+        # always carry a verisure_user, so this discriminator preserves them.
+        polled = [ev for ev in events if not _is_ha_originated_polled(ev)]
+
+        merged = self._merge(self._injected, polled)
+
+        current_ids = {ev.id_signal for ev in merged}
+        if self._previous_ids is None:
+            new_events: list[ActivityEvent] = []
+        else:
+            new_events = [ev for ev in merged if ev.id_signal not in self._previous_ids]
+        self._previous_ids = current_ids
+
+        return ActivityData(events=merged, new_events=new_events)
+
+    @staticmethod
+    def _merge(
+        injected: list[ActivityEvent], polled: list[ActivityEvent]
+    ) -> list[ActivityEvent]:
+        """Merge injected + polled events, newest first, capped at the window size."""
+        return (injected + polled)[:_ACTIVITY_TIMELINE_WINDOW]
+
+    def inject_event(self, event: ActivityEvent) -> None:
+        """Add a HA-side synthetic event to the front of the timeline.
+
+        Bypasses the polled-side filter and persists across polls until pushed
+        out of the visible window.
+        """
+        self._injected = [event, *self._injected][:_ACTIVITY_TIMELINE_WINDOW]
+        injected_ids = {e.id_signal for e in self._injected}
+        current = self.data
+        prior_polled = (
+            [e for e in current.events if e.id_signal not in injected_ids]
+            if current
+            else []
+        )
+        merged = self._merge(self._injected, prior_polled)
+        # Mark as already-seen so the next poll doesn't re-fire it as new
+        self._previous_ids = (self._previous_ids or set()) | {event.id_signal}
+        new_data = ActivityData(events=merged, new_events=[event])
+        self.async_set_updated_data(new_data)
+
+
+def _is_ha_originated_polled(event: ActivityEvent) -> bool:
+    """Whether a polled event was produced by this integration.
+
+    The integration sends Android-like headers and passes no user, so the
+    panel records HA-issued actions with source="Android" and no verisure_user.
+    """
+    return event.source == "Android" and event.verisure_user is None

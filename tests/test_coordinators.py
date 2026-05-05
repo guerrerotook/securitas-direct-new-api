@@ -12,6 +12,8 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.securitas.coordinators import (
+    ActivityCoordinator,
+    ActivityData,
     AlarmCoordinator,
     AlarmStatusData,
     CameraCoordinator,
@@ -29,6 +31,7 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     WAFBlockedError,
 )
 from custom_components.securitas.securitas_direct_new_api.models import (
+    ActivityEvent,
     AirQuality,
     CameraDevice,
     Installation,
@@ -569,3 +572,394 @@ class TestCameraCoordinator:
         coord = self._make_coordinator(hass, client, queue, installation, cameras)
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
+
+
+# ── ActivityCoordinator ──────────────────────────────────────────────────────
+
+
+def _make_event(id_signal: str, **overrides) -> ActivityEvent:
+    """Factory for ActivityEvent test instances."""
+    base = {
+        "alias": "Armed",
+        "type": 701,
+        "signal_type": 701,
+        "id_signal": id_signal,
+        "time": "2026-05-05 15:00:00",
+        "img": 0,
+        "source": "Web",
+    }
+    base.update(overrides)
+    return ActivityEvent.model_validate(base)
+
+
+class TestActivityCoordinator:
+    """Tests for ActivityCoordinator."""
+
+    def _make_coordinator(
+        self,
+        hass: MagicMock,
+        client: AsyncMock,
+        queue: AsyncMock,
+        installation: Installation,
+    ) -> ActivityCoordinator:
+        return ActivityCoordinator(hass, client, queue, installation)
+
+    @pytest.mark.asyncio
+    async def test_first_refresh_is_silent(self):
+        """First poll establishes the watermark — no events are flagged as new."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        events = [_make_event("999"), _make_event("998"), _make_event("997")]
+        client.get_activity.return_value = events
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        assert isinstance(result, ActivityData)
+        assert result.events == events
+        assert result.new_events == []
+
+    @pytest.mark.asyncio
+    async def test_filters_integration_polled_entries(self):
+        """Polled entries from this integration's own commands are dropped.
+
+        The integration sends Android-like headers, so the panel records
+        HA-issued actions with source="Android" and no verisure_user.
+        That tuple is what we drop — HA already injected these entries
+        with proper HA-side context, so the polled copy would double-count.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        # The integration's own command, as the panel logged it
+        ha_polled = _make_event("999", source="Android", verisure_user=None)
+        # A real action from the user's mobile app — has a user name
+        mobile_event = _make_event("998", source="Android", verisure_user="Luci")
+        # A system event (e.g. alarm trigger) — no user, no source
+        system_event = _make_event("997", source=None, verisure_user=None)
+        # A web action — kept regardless of user
+        web_event = _make_event("996", source="Web", verisure_user="Clinton")
+
+        client.get_activity.return_value = [
+            ha_polled,
+            mobile_event,
+            system_event,
+            web_event,
+        ]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        ids = [e.id_signal for e in result.events]
+        # ha_polled is gone; everything else survives
+        assert "999" not in ids
+        assert "998" in ids
+        assert "997" in ids
+        assert "996" in ids
+
+    @pytest.mark.asyncio
+    async def test_does_not_filter_mobile_app_action_with_home_assistant_account(self):
+        """A user who named their Verisure account 'Home Assistant' still sees mobile-app actions.
+
+        Discriminator is the absence of verisure_user, not the user name itself.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        mobile_event = _make_event(
+            "999", source="Android", verisure_user="Home Assistant"
+        )
+        client.get_activity.return_value = [mobile_event]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        assert mobile_event in result.events
+
+    @pytest.mark.asyncio
+    async def test_filtered_entries_dont_count_as_new(self):
+        """A second-poll HA-issued entry is filtered AND not flagged as new."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        first = [_make_event("100", source="Web", verisure_user="Luci")]
+        second = [
+            # HA-issued: filtered
+            _make_event("200", source="Android", verisure_user=None),
+            _make_event("100", source="Web", verisure_user="Luci"),
+        ]
+        client.get_activity.side_effect = [first, second]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+        result = await coord._async_update_data()
+
+        assert all(e.id_signal != "200" for e in result.events)
+        assert all(e.id_signal != "200" for e in result.new_events)
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """No events fetched yields empty data with empty new_events."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        assert result.events == []
+        assert result.new_events == []
+
+    @pytest.mark.asyncio
+    async def test_second_refresh_with_no_new_entries_yields_empty_new(self):
+        """When no events are added between polls, new_events is empty."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        events = [_make_event("999"), _make_event("998")]
+        client.get_activity.return_value = events
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+        result = await coord._async_update_data()
+
+        assert result.new_events == []
+
+    @pytest.mark.asyncio
+    async def test_second_refresh_returns_only_new_entries(self):
+        """Only entries unseen in the previous poll are flagged as new."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        first_batch = [_make_event("999"), _make_event("998")]
+        new_event = _make_event("1000", alias="Disarmed", type=720, signal_type=720)
+        second_batch = [new_event, *first_batch]
+        client.get_activity.side_effect = [first_batch, second_batch]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+        result = await coord._async_update_data()
+
+        assert result.new_events == [new_event]
+
+    @pytest.mark.asyncio
+    async def test_third_refresh_uses_only_previous_poll_for_dedup(self):
+        """Watermark advances each poll — events from two polls ago aren't re-fired."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        ev_a = _make_event("100")
+        ev_b = _make_event("200")
+        ev_c = _make_event("300")
+        client.get_activity.side_effect = [
+            [ev_a],
+            [ev_b, ev_a],
+            [ev_c, ev_b, ev_a],
+        ]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+        result_2 = await coord._async_update_data()
+        result_3 = await coord._async_update_data()
+
+        assert result_2.new_events == [ev_b]
+        assert result_3.new_events == [ev_c]
+
+    @pytest.mark.asyncio
+    async def test_id_signal_compared_as_set_not_numeric(self):
+        """Events compare by string id, not numeric — id sizes vary by source."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        # The "web" source generates 9-digit ids while panel events use 11-digit
+        # ones. A naive numeric watermark would mis-flag events.
+        big = _make_event("16326008557")
+        small_but_newer = _make_event("824172340")
+        client.get_activity.side_effect = [
+            [big],
+            [small_but_newer, big],
+        ]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+        result = await coord._async_update_data()
+
+        # Even though `824172340` is numerically smaller than `16326008557`,
+        # it's a new event because its id wasn't in the previous poll.
+        assert result.new_events == [small_but_newer]
+
+    @pytest.mark.asyncio
+    async def test_waf_blocked_raises_update_failed(self):
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.side_effect = WAFBlockedError("blocked")
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+
+    @pytest.mark.asyncio
+    async def test_session_expired_retries_login_then_auth_failed(self):
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.side_effect = SessionExpiredError("expired")
+        client.login.side_effect = SecuritasDirectError("login failed")
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
+
+        client.login.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_session_expired_retry_succeeds(self):
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        events = [_make_event("999")]
+        client.get_activity.side_effect = [
+            SessionExpiredError("expired"),
+            events,
+        ]
+        client.login.return_value = None
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        assert result.events == events
+        client.login.assert_awaited_once()
+        assert queue.submit.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_generic_error_raises_update_failed(self):
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.side_effect = SecuritasDirectError("boom")
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+
+    # ── inject_event ─────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_inject_event_appears_in_data(self):
+        """Synthetic events injected by HA show up in coordinator.data."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # establish baseline
+
+        injected = _make_event("ha-abc", alias="Armed", verisure_user="Clinton")
+        coord.inject_event(injected)
+
+        # inject_event calls async_set_updated_data internally so coord.data
+        # IS populated even when tests bypass async_refresh.
+        assert injected in coord.data.events
+        assert injected in coord.data.new_events
+
+    @pytest.mark.asyncio
+    async def test_inject_event_survives_next_poll(self):
+        """Injected events persist across polls — they're stored separately."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        polled = _make_event("100", verisure_user="Luci")
+        client.get_activity.return_value = [polled]
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+
+        injected = _make_event("ha-abc", alias="Armed", verisure_user="Clinton")
+        coord.inject_event(injected)
+
+        # Next poll returns only the original polled event
+        result = await coord._async_update_data()
+
+        # Both are still visible
+        ids = {e.id_signal for e in result.events}
+        assert ids == {"ha-abc", "100"}
+
+    @pytest.mark.asyncio
+    async def test_injected_event_is_not_filtered_by_polled_rule(self):
+        """The polled-side filter does not apply to injected events.
+
+        Injected events live in `_injected` and are merged in directly;
+        they bypass `_async_update_data`'s filter regardless of their
+        source/verisure_user values.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+
+        # An injected event whose shape MATCHES the polled-side filter rule
+        # (source=Android, verisure_user=None) — would be dropped if it had
+        # come through the polled path.
+        injected = _make_event(
+            "ha-auto", alias="Armed", source="Android", verisure_user=None
+        )
+        coord.inject_event(injected)
+
+        assert injected in coord.data.events
+
+        result = await coord._async_update_data()
+        assert any(e.id_signal == "ha-auto" for e in result.events)
+
+    @pytest.mark.asyncio
+    async def test_injected_event_does_not_re_fire_on_next_poll(self):
+        """A just-injected event is not in next poll's `new_events`."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+
+        coord.inject_event(_make_event("ha-abc", alias="Armed"))
+
+        result = await coord._async_update_data()
+
+        assert all(e.id_signal != "ha-abc" for e in result.new_events)
