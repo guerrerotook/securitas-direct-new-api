@@ -69,6 +69,17 @@ class TestPerimeterMode:
         assert isinstance(PerimeterMode.ON, str)
 
 
+class TestAnnexMode:
+    def test_values(self):
+        from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
+        assert AnnexMode.OFF == "off"
+        assert AnnexMode.ON == "on"
+
+    def test_all_members(self):
+        from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
+        assert set(AnnexMode) == {AnnexMode.OFF, AnnexMode.ON}
+
+
 class TestProtoCode:
     def test_values(self):
         assert ProtoCode.DISARMED == "D"

@@ -31,6 +31,13 @@ class PerimeterMode(StrEnum):
     ON = "on"
 
 
+class AnnexMode(StrEnum):
+    """Annex alarm mode."""
+
+    OFF = "off"
+    ON = "on"
+
+
 class ProtoCode(StrEnum):
     """Protocol response codes from the Securitas Direct API."""
 
