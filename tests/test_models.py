@@ -176,6 +176,35 @@ class TestAlarmState:
         assert state.__eq__("not an alarm state") == NotImplemented
 
 
+class TestAlarmStateAnnex:
+    def test_annex_defaults_to_off(self):
+        s = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        assert s.annex == AnnexMode.OFF
+
+    def test_annex_explicit(self):
+        s = AlarmState(
+            interior=InteriorMode.DAY,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.ON,
+        )
+        assert s.annex == AnnexMode.ON
+
+    def test_three_axis_equality(self):
+        a = AlarmState(
+            interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+        )
+        b = AlarmState(
+            interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+        )
+        c = AlarmState(
+            interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+        )
+        assert a == b
+        assert a != c
+        assert hash(a) == hash(b)
+        assert hash(a) != hash(c)
+
+
 # ── Mapping tables ────────────────────────────────────────────────────────────
 
 

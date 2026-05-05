@@ -69,20 +69,25 @@ class ArmCommand(StrEnum):
 
 
 class AlarmState(BaseModel):
-    """Two-axis alarm state: interior mode + perimeter on/off."""
+    """Three-axis alarm state: interior + perimeter + annex."""
 
     model_config = ConfigDict(frozen=True)
 
     interior: InteriorMode
     perimeter: PerimeterMode
+    annex: AnnexMode = AnnexMode.OFF
 
     def __hash__(self) -> int:
-        return hash((self.interior, self.perimeter))
+        return hash((self.interior, self.perimeter, self.annex))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, AlarmState):
             return NotImplemented
-        return self.interior == other.interior and self.perimeter == other.perimeter
+        return (
+            self.interior == other.interior
+            and self.perimeter == other.perimeter
+            and self.annex == other.annex
+        )
 
 
 # ── parse_proto_code ──────────────────────────────────────────────────────────
