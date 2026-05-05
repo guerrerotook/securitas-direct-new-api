@@ -3627,6 +3627,198 @@ class TestAnnexSubPanel:
 
 
 # ===========================================================================
+# TestSubPanelStateExtraction — Issue 1: sub-panels must use _extract_state
+# ===========================================================================
+
+
+class TestSubPanelStateExtraction:
+    """Sub-panels project the joint coordinator state onto their axis.
+
+    These tests verify that _update_from_coordinator and update_status_alarm
+    use _extract_state(coordinator.alarm_state) — NOT _status_map[proto_code].
+    """
+
+    def test_interior_update_from_coordinator_uses_extract_state(self):
+        """Interior panel derives state from joint state, ignoring user mapping."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        # Joint state: interior=NIGHT, perimeter=ON  → proto_code "C" (PARTIAL_NIGHT_PERI)
+        # The combined panel's _status_map might map "C" to any user-chosen HA state,
+        # but the interior sub-panel must read only the interior axis: ARMED_NIGHT.
+        joint = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=joint,
+        )
+        # Feed proto code "C" (PARTIAL_NIGHT_PERI) through the coordinator path
+        data = AlarmStatusData(status=SStatus(status="C"), protom_response="C")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_NIGHT
+
+    def test_interior_update_from_coordinator_disarmed(self):
+        """Interior panel shows DISARMED when joint interior axis is OFF."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=joint,
+        )
+        # Proto code "G" = perimeter-only state
+        data = AlarmStatusData(status=SStatus(status="G"), protom_response="G")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+    def test_interior_update_status_alarm_uses_extract_state(self):
+        """update_status_alarm uses _extract_state after a successful arm operation."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        # After arming interior to DAY+PERI, the API returns proto_code "B"
+        # (PARTIAL_DAY_PERI = AlarmState(DAY, ON)).  The interior axis is DAY
+        # → ARMED_HOME.  The combined-panel's _status_map might map "B" to
+        # something else, but interior sub-panel must read only the interior axis.
+        joint = AlarmState(
+            interior=InteriorMode.DAY,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=joint,
+        )
+        op_status = OperationStatus(
+            operation_status="OK",
+            message="",
+            protom_response="B",
+            protom_response_data="",
+            status="B",
+        )
+        panel.update_status_alarm(op_status)
+
+        assert panel._state == AlarmControlPanelState.ARMED_HOME
+
+    def test_perimeter_update_from_coordinator_uses_extract_state(self):
+        """Perimeter panel derives state from perimeter axis only."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_perimeter_panel(
+            capabilities=frozenset(["PERI"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="C"), protom_response="C")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_AWAY
+
+    def test_perimeter_update_from_coordinator_off(self):
+        """Perimeter panel shows DISARMED when perimeter axis is OFF."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_perimeter_panel(
+            capabilities=frozenset(["PERI"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="F"), protom_response="F")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+    def test_annex_update_from_coordinator_uses_extract_state(self):
+        """Annex panel derives state from annex axis only."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.ON,
+        )
+        panel = _make_annex_panel(
+            capabilities=frozenset(["ARMANNEX", "DARMANNEX"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="T"), protom_response="T")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_AWAY
+
+    def test_annex_update_from_coordinator_off(self):
+        """Annex panel shows DISARMED when annex axis is OFF."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_annex_panel(
+            capabilities=frozenset(["ARMANNEX", "DARMANNEX"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="T"), protom_response="T")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+    def test_combined_panel_unaffected_uses_status_map(self):
+        """Combined panel still uses _status_map lookup (backward compat check)."""
+        alarm = make_alarm()
+        # The combined panel's _status_map maps proto "T" to armed_away by default
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="T"), protom_response="T"
+        )
+        alarm._update_from_coordinator(alarm.coordinator.data)
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+
+# ===========================================================================
 # TestSubPanelSetup — conditional instantiation in async_setup_entry (Task 16)
 # ===========================================================================
 
