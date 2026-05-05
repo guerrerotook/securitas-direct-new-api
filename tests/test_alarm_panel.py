@@ -3758,3 +3758,199 @@ class TestAnnexSubPanel:
         panel = _make_annex_panel()
         assert panel.unique_id is not None
         assert panel.unique_id.endswith("_annex")
+
+
+# ===========================================================================
+# TestSubPanelSetup — conditional instantiation in async_setup_entry (Task 16)
+# ===========================================================================
+
+
+class TestSubPanelSetup:
+    """Tests for conditional sub-panel instantiation in async_setup_entry."""
+
+    def _setup_kwargs(self, *, options: dict, has_peri: bool, has_annex: bool):
+        """Build hass/entry/coordinator suitable for invoking async_setup_entry."""
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas import SecuritasDirectDevice
+
+        installation = Installation(
+            number="123456", alias="Home", panel="SDVFAST",
+            type="PLUS", address="123 St", city="Madrid",
+        )
+        device = MagicMock(spec=SecuritasDirectDevice)
+        device.installation = installation
+
+        client = MagicMock()
+        client.config = {
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": STD_DEFAULTS["map_vacation"],
+            "scan_interval": 120,
+        }
+
+        coordinator = MagicMock(spec=AlarmCoordinator)
+        coordinator.has_peri = has_peri
+        coordinator.has_annex = has_annex
+        coordinator.capabilities = frozenset()
+        coordinator.data = None
+
+        hass = MagicMock()
+        hass.data = {
+            DOMAIN: {
+                "entry-id": {
+                    "hub": client,
+                    "alarm_coordinator": coordinator,
+                    "devices": [device],
+                },
+            },
+        }
+
+        entry = MagicMock()
+        entry.entry_id = "entry-id"
+        entry.options = options
+        return hass, entry
+
+    @pytest.mark.asyncio
+    async def test_only_combined_when_no_toggles(self):
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry, CombinedSecuritasAlarmPanel,
+        )
+        hass, entry = self._setup_kwargs(options={}, has_peri=True, has_annex=True)
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch("custom_components.securitas.alarm_control_panel.async_get_current_platform"):
+            await async_setup_entry(hass, entry, add)
+        assert len(added) == 1
+        assert isinstance(added[0], CombinedSecuritasAlarmPanel)
+
+    @pytest.mark.asyncio
+    async def test_perimeter_panel_requires_capability(self):
+        # toggle on but no PERI cap → no perimeter panel
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry, PerimeterSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import CONF_ENABLE_PERIMETER_PANEL
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_PERIMETER_PANEL: True},
+            has_peri=False, has_annex=False,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch("custom_components.securitas.alarm_control_panel.async_get_current_platform"):
+            await async_setup_entry(hass, entry, add)
+        assert not any(isinstance(p, PerimeterSecuritasAlarmPanel) for p in added)
+
+    @pytest.mark.asyncio
+    async def test_annex_panel_requires_capability(self):
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry, AnnexSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import CONF_ENABLE_ANNEX_PANEL
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_ANNEX_PANEL: True},
+            has_peri=True, has_annex=False,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch("custom_components.securitas.alarm_control_panel.async_get_current_platform"):
+            await async_setup_entry(hass, entry, add)
+        assert not any(isinstance(p, AnnexSecuritasAlarmPanel) for p in added)
+
+    @pytest.mark.asyncio
+    async def test_interior_panel_requires_sibling(self):
+        # interior toggle on, but no sibling toggle/cap → no interior panel
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry, InteriorSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_INTERIOR_PANEL: True},
+            has_peri=True, has_annex=True,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch("custom_components.securitas.alarm_control_panel.async_get_current_platform"):
+            await async_setup_entry(hass, entry, add)
+        assert not any(isinstance(p, InteriorSecuritasAlarmPanel) for p in added)
+
+    @pytest.mark.asyncio
+    async def test_all_three_subpanels_with_full_capabilities(self):
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            CombinedSecuritasAlarmPanel,
+            InteriorSecuritasAlarmPanel,
+            PerimeterSecuritasAlarmPanel,
+            AnnexSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import (
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
+        )
+        hass, entry = self._setup_kwargs(
+            options={
+                CONF_ENABLE_INTERIOR_PANEL: True,
+                CONF_ENABLE_PERIMETER_PANEL: True,
+                CONF_ENABLE_ANNEX_PANEL: True,
+            },
+            has_peri=True, has_annex=True,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch("custom_components.securitas.alarm_control_panel.async_get_current_platform"):
+            await async_setup_entry(hass, entry, add)
+        types = {type(p).__name__ for p in added}
+        assert types == {
+            "CombinedSecuritasAlarmPanel",
+            "InteriorSecuritasAlarmPanel",
+            "PerimeterSecuritasAlarmPanel",
+            "AnnexSecuritasAlarmPanel",
+        }
+
+    @pytest.mark.asyncio
+    async def test_alarm_entities_lookup_only_combined(self):
+        """Combined panel is the one registered in alarm_entities for force_arm services."""
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry, CombinedSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import (
+            DOMAIN,
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
+        )
+        hass, entry = self._setup_kwargs(
+            options={
+                CONF_ENABLE_INTERIOR_PANEL: True,
+                CONF_ENABLE_PERIMETER_PANEL: True,
+                CONF_ENABLE_ANNEX_PANEL: True,
+            },
+            has_peri=True, has_annex=True,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch("custom_components.securitas.alarm_control_panel.async_get_current_platform"):
+            await async_setup_entry(hass, entry, add)
+        lookup = hass.data[DOMAIN]["alarm_entities"]
+        assert set(lookup.keys()) == {"123456"}
+        assert isinstance(lookup["123456"], CombinedSecuritasAlarmPanel)
