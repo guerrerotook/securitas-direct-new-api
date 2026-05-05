@@ -3326,3 +3326,24 @@ class TestHassNoneGuardsAlarm:
 
         assert alarm._state == AlarmControlPanelState.ARMING
         alarm.async_schedule_update_ha_state.assert_not_called()
+
+
+# ===========================================================================
+# Per-panel hook surface tests (Task 12)
+# ===========================================================================
+
+
+class TestPanelHooks:
+    def test_base_resolve_target_state_raises(self):
+        from custom_components.securitas.alarm_control_panel import BaseSecuritasAlarmPanel
+        with pytest.raises(NotImplementedError):
+            BaseSecuritasAlarmPanel._resolve_target_state(None, "armed_home")  # type: ignore[arg-type]
+
+    def test_base_extract_state_raises(self):
+        from custom_components.securitas.alarm_control_panel import BaseSecuritasAlarmPanel
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState, InteriorMode, PerimeterMode,
+        )
+        joint = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        with pytest.raises(NotImplementedError):
+            BaseSecuritasAlarmPanel._extract_state(None, joint)  # type: ignore[arg-type]
