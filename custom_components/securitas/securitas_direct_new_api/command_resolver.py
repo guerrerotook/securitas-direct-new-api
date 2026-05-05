@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from .const import SecuritasState
 from .models import (
     AlarmState,
+    AnnexMode,
     InteriorMode,
     PerimeterMode,
     ProtoCode,
@@ -38,6 +39,24 @@ SECURITAS_STATE_TO_ALARM_STATE: dict[SecuritasState, AlarmState] = {
         ProtoCode.PARTIAL_NIGHT_PERIMETER
     ],
     SecuritasState.TOTAL_PERI: PROTO_TO_STATE[ProtoCode.TOTAL_PERIMETER],
+    # Annex variants — the four known letters reuse PROTO_TO_STATE entries
+    SecuritasState.ANNEX_ONLY: PROTO_TO_STATE[ProtoCode.ANNEX_ONLY],
+    SecuritasState.PARTIAL_DAY_ANNEX: PROTO_TO_STATE[ProtoCode.PARTIAL_DAY_ANNEX],
+    SecuritasState.PARTIAL_NIGHT_ANNEX: PROTO_TO_STATE[ProtoCode.PARTIAL_NIGHT_ANNEX],
+    SecuritasState.TOTAL_ANNEX: PROTO_TO_STATE[ProtoCode.TOTAL_ANNEX],
+    # Perimeter+annex combinations (no proto code yet — discovered via Custom Override)
+    SecuritasState.PERI_ANNEX: AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
+    SecuritasState.PARTIAL_DAY_PERI_ANNEX: AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
+    SecuritasState.PARTIAL_NIGHT_PERI_ANNEX: AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
+    SecuritasState.TOTAL_PERI_ANNEX: AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
 }
 
 
