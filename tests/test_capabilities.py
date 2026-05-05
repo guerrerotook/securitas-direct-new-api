@@ -4,10 +4,7 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
-import pytest
-
 from custom_components.securitas.securitas_direct_new_api.client import SecuritasClient
-from tests.mock_graphql import make_jwt
 
 FIXTURES = Path(__file__).parent / "fixtures" / "capability_jwts"
 
