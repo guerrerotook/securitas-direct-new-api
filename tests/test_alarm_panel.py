@@ -3347,3 +3347,108 @@ class TestPanelHooks:
         joint = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         with pytest.raises(NotImplementedError):
             BaseSecuritasAlarmPanel._extract_state(None, joint)  # type: ignore[arg-type]
+
+
+# ===========================================================================
+# InteriorSecuritasAlarmPanel sub-panel tests (Task 13)
+# ===========================================================================
+
+
+def _make_interior_panel(
+    capabilities: frozenset = frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+    current_state=None,
+):
+    """Build an InteriorSecuritasAlarmPanel with mocked dependencies."""
+    from custom_components.securitas.alarm_control_panel import (
+        InteriorSecuritasAlarmPanel,
+    )
+    from custom_components.securitas.securitas_direct_new_api.models import (
+        AnnexMode, InteriorMode, PerimeterMode,
+    )
+
+    if current_state is None:
+        current_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+    coordinator = MagicMock()
+    coordinator.has_peri = "PERI" in capabilities
+    coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
+    coordinator.capabilities = capabilities
+    coordinator.alarm_state = current_state
+
+    installation = MagicMock()
+    installation.number = "12345"
+    installation.alias = "TestHome"
+    installation.address = "123 Test St"
+
+    client = MagicMock()
+    client.config = {}
+
+    hass = MagicMock()
+
+    with (
+        patch.object(InteriorSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()),
+        patch.object(InteriorSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+    ):
+        return InteriorSecuritasAlarmPanel(installation, client, hass, coordinator)
+
+
+class TestInteriorSubPanel:
+    def test_supported_features_full_caps(self):
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+        panel = _make_interior_panel(capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]))
+        feats = panel.supported_features
+        assert feats & F.ARM_HOME
+        assert feats & F.ARM_NIGHT
+        assert feats & F.ARM_AWAY
+
+    def test_supported_features_italian_partial_only(self):
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+        panel = _make_interior_panel(capabilities=frozenset(["ARM", "ARMNIGHT"]))
+        feats = panel.supported_features
+        assert not (feats & F.ARM_HOME)
+        assert feats & F.ARM_NIGHT
+        assert feats & F.ARM_AWAY
+
+    def test_resolve_target_state_armed_away(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode, InteriorMode, PerimeterMode,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            ),
+        )
+        target = panel._resolve_target_state("armed_away")
+        assert target.interior == InteriorMode.TOTAL
+        # Other axes preserved
+        assert target.perimeter == PerimeterMode.ON
+        assert target.annex == AnnexMode.ON
+
+    def test_extract_state_only_reads_interior(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode, InteriorMode, PerimeterMode,
+        )
+        panel = _make_interior_panel(capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]))
+        s = panel._extract_state(AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        ))
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+        assert s == AlarmControlPanelState.ARMED_NIGHT
+
+    def test_unique_id_suffix(self):
+        panel = _make_interior_panel(capabilities=frozenset(["ARM"]))
+        assert panel.unique_id is not None
+        assert panel.unique_id.endswith("_interior")
