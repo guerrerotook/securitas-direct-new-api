@@ -312,7 +312,7 @@ class TestAnnexResolution:
             ),
         )
         assert len(steps) == 1
-        assert "ARMANNEX" in steps[0].commands
+        assert "ARMANNEX1" in steps[0].commands
 
     def test_disarm_annex_only(self):
         r = CommandResolver(has_peri=False, has_annex=True)
@@ -325,7 +325,7 @@ class TestAnnexResolution:
             ),
         )
         assert len(steps) == 1
-        assert "DARMANNEX" in steps[0].commands
+        assert "DARMANNEX1" in steps[0].commands
 
 
 class TestMultiAxisAnnexTransitions:
@@ -339,10 +339,10 @@ class TestMultiAxisAnnexTransitions:
                 interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
             ),
         )
-        # Two logical steps: ARM1 then ARMANNEX
+        # Two logical steps: ARM1 then ARMANNEX1
         cmds = [c for s in steps for c in s.commands]
         assert "ARM1" in cmds
-        assert "ARMANNEX" in cmds
+        assert "ARMANNEX1" in cmds
 
     def test_disarm_only_annex_keeping_interior(self):
         r = CommandResolver(has_peri=False, has_annex=True)
@@ -355,7 +355,7 @@ class TestMultiAxisAnnexTransitions:
             ),
         )
         cmds = [c for s in steps for c in s.commands]
-        assert "DARMANNEX" in cmds
+        assert "DARMANNEX1" in cmds
         # Interior is unchanged, so no ARM1 or DARM1
         assert "ARM1" not in cmds
         assert "DARM1" not in cmds

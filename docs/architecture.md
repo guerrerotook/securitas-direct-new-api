@@ -130,7 +130,7 @@ Pydantic models for API domain objects. All domain models inherit from `_NullSaf
 - `PerimeterMode` — StrEnum: off, on
 - `AnnexMode` — StrEnum: off, on
 - `ProtoCode` — StrEnum for single-letter protocol response codes (D, E, P, Q, B, C, T, A, X, R, S, O)
-- `ArmCommand` — StrEnum for arm/disarm command strings (DARM1, ARM1, ARMDAY1, ARMANNEX, DARMANNEX, etc.)
+- `ArmCommand` — StrEnum for arm/disarm command strings (DARM1, ARM1, ARMDAY1, ARMANNEX1, DARMANNEX1, etc.)
 - `AlarmState` — Frozen `BaseModel` combining `InteriorMode` + `PerimeterMode` + `AnnexMode`
 - `parse_proto_code()` — Parses raw code to `ProtoCode`, raises `UnexpectedStateError` for unknown codes
 - `PROTO_TO_STATE` — Maps `ProtoCode` to `AlarmState`
@@ -690,6 +690,8 @@ Verisure installations have up to three independent alarm axes:
 `detect_peri()` and `detect_annex()` live in `securitas_direct_new_api/capabilities.py`. Detection runs on every config-entry load — there is no stored `CONF_HAS_PERI`. `detect_peri()` uses four layered signals (JWT capability set, active PERI service, SCH service `PERI` attribute, alarm partition `id="02"`) so it catches both Spanish SDVFAST panels (which advertise `PERI` via JWT cap or service attribute) and Italian SDVECU panels (which expose perimeter only via the alarm-partition list). `detect_annex()` requires both `ARMANNEX` and `DARMANNEX` capabilities.
 
 The Interior sub-panel deliberately does **not** gate `supported_features` on the JWT cap claim: empirically (Italian SDVECU OWNER) the cap can be both incomplete and inverted relative to what the panel actually accepts — claiming `ARMNIGHT` while the panel rejects `ARMNIGHT1`, omitting `ARMDAY` while accepting `ARMDAY1`. The sub-panel surfaces all three interior modes; the resolver's `mark_unsupported` runtime fallback catches genuinely-rejected commands and the user gets a notification naming the failed command. See `tests/fixtures/capability_jwts/italy_owner_partial_only.json` for the regression evidence.
+
+The same phenomenon shows up in perimeter detection: the JWT `cap` claim appears to track contract/role permissions (what the tenant is licensed for), not what the physical panel is configured to do. Italian SDVECU installations with active perimeter sensors (e.g. a `YP` outdoor camera) typically have no `PERI` in the cap, yet the panel still accepts perimeter commands — `alarm_partitions[id=02]` and the SCH service's `PERI` attribute are the introspection signals that reflect physical configuration. This is why `detect_peri()` layers four signals: cap-only detection would miss every Italian install with perimeter.
 
 A single debug log line at startup makes misdetection diagnosable: search the log for `capability detection for <installation>` to see the resolved `has_peri`, `has_annex`, and full sorted capability set for each installation.
 
