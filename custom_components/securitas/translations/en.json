@@ -126,13 +126,6 @@
             "description": "Cancel a pending force-arm and dismiss the arming-exception notification."
         }
     },
-    "entity": {
-        "alarm_control_panel": {
-            "interior_subpanel": { "name": "Interior" },
-            "perimeter_subpanel": { "name": "Perimeter" },
-            "annex_subpanel": { "name": "Annex" }
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Invalid PIN code for {entity_id}"

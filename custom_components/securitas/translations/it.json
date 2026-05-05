@@ -126,13 +126,6 @@
             "description": "Annullare un'attivazione forzata in sospeso e chiudere la notifica di eccezione di attivazione."
         }
     },
-    "entity": {
-        "alarm_control_panel": {
-            "interior_subpanel": { "name": "Interno" },
-            "perimeter_subpanel": { "name": "Perimetrale" },
-            "annex_subpanel": { "name": "Annesso" }
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Codice PIN non valido per {entity_id}"
