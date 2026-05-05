@@ -164,6 +164,30 @@ If your alarm is put into a Securitas state that you have not mapped to any HA b
 
 To see which status code the alarm is reporting, [enable debug logging](#reporting-issues).
 
+## Sub-panels (advanced)
+
+By default the integration creates one `alarm_control_panel` entity per installation — the **combined panel** — that represents the household's overall alarm intent. This is unchanged from previous versions and works for almost everyone.
+
+Installations with multiple alarm axes (interior, perimeter, annex) can optionally enable per-axis sub-panels via the integration's options (**Settings → Devices & Services → Securitas Direct → Configure**):
+
+- **Interior sub-panel** — interior axis only (Home / Away / Night / Disarmed).
+- **Perimeter sub-panel** — perimeter axis only (Armed Away / Disarmed). Visible only if your installation has perimeter sensors.
+- **Annex sub-panel** — annex axis only (Armed Away / Disarmed). Visible only if your installation has an annex zone.
+
+The Interior toggle only appears once at least one of Perimeter or Annex is enabled — without siblings, the combined panel already IS the interior panel.
+
+Sub-panel toggles only appear when the capability is detected for your installation. If you have perimeter or annex but the toggle is missing, [enable debug logging](#reporting-issues) and look for a line like:
+
+```
+capability detection for 123456: has_peri=False has_annex=False caps=['ARM', 'ARMDAY', ...]
+```
+
+Share that line in a bug report.
+
+### Voice assistant note
+
+Enabling sub-panels in HA creates additional `alarm_control_panel` entities, but **whether each is exposed to a voice assistant is configured independently in HA** (Settings → Voice assistants → Expose, or per-integration exposure config for HomeKit/Alexa). A common pattern: enable all sub-panels in HA for dashboards/automations, but expose only the combined panel to voice — keeping voice commands unambiguous.
+
 ## Force Arming
 
 When you arm the alarm and a sensor is in a fault state (e.g. a window is open), Securitas may block the arm and report a non-blocking exception. The integration handles this as follows:
