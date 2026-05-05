@@ -118,8 +118,8 @@ class CommandResolver:
         if current_annex == target_annex:
             return []
         if target_annex == AnnexMode.ON:
-            return [CommandStep(commands=["ARMANNEX"])]
-        return [CommandStep(commands=["DARMANNEX"])]
+            return [CommandStep(commands=["ARMANNEX1"])]
+        return [CommandStep(commands=["DARMANNEX1"])]
 
     def resolve(self, current: AlarmState, target: AlarmState) -> list[CommandStep]:
         """Return ordered command steps to transition from current to target state."""
