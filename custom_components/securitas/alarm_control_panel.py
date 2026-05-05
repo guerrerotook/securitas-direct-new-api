@@ -31,6 +31,11 @@ from . import (
     SecuritasDirectDevice,
     SecuritasHub,
 )
+from .const import (
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+)
 from .coordinators import AlarmCoordinator, AlarmStatusData
 from .entity import securitas_device_info
 from .securitas_direct_new_api import (
@@ -76,18 +81,61 @@ async def async_setup_entry(
     entry_data = hass.data[DOMAIN][entry.entry_id]
     client: SecuritasHub = entry_data["hub"]
     coordinator: AlarmCoordinator = entry_data["alarm_coordinator"]
-    alarms = []
+    options = entry.options
+
+    enable_peri: bool = options.get(CONF_ENABLE_PERIMETER_PANEL, False)
+    enable_annex: bool = options.get(CONF_ENABLE_ANNEX_PANEL, False)
+    enable_interior: bool = options.get(CONF_ENABLE_INTERIOR_PANEL, False)
+
+    alarms: list[CombinedSecuritasAlarmPanel] = []
+    all_entities: list[BaseSecuritasAlarmPanel] = []
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
     for devices in securitas_devices:
-        alarms.append(
-            CombinedSecuritasAlarmPanel(
-                devices.installation,
-                client=client,
-                hass=hass,
-                coordinator=coordinator,
-            )
+        combined = CombinedSecuritasAlarmPanel(
+            devices.installation,
+            client=client,
+            hass=hass,
+            coordinator=coordinator,
         )
-    async_add_entities(alarms, False)
+        alarms.append(combined)
+        all_entities.append(combined)
+
+        peri_added = False
+        annex_added = False
+
+        if enable_peri and coordinator.has_peri:
+            all_entities.append(
+                PerimeterSecuritasAlarmPanel(
+                    devices.installation,
+                    client=client,
+                    hass=hass,
+                    coordinator=coordinator,
+                )
+            )
+            peri_added = True
+
+        if enable_annex and coordinator.has_annex:
+            all_entities.append(
+                AnnexSecuritasAlarmPanel(
+                    devices.installation,
+                    client=client,
+                    hass=hass,
+                    coordinator=coordinator,
+                )
+            )
+            annex_added = True
+
+        if enable_interior and (peri_added or annex_added):
+            all_entities.append(
+                InteriorSecuritasAlarmPanel(
+                    devices.installation,
+                    client=client,
+                    hass=hass,
+                    coordinator=coordinator,
+                )
+            )
+
+    async_add_entities(all_entities, False)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
 
     platform = async_get_current_platform()
