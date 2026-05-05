@@ -80,7 +80,7 @@ async def async_setup_entry(
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
     for devices in securitas_devices:
         alarms.append(
-            SecuritasAlarm(
+            CombinedSecuritasAlarmPanel(
                 devices.installation,
                 client=client,
                 hass=hass,
@@ -103,7 +103,7 @@ async def async_setup_entry(
     )
 
 
-class SecuritasAlarm(  # type: ignore[override]
+class BaseSecuritasAlarmPanel(  # type: ignore[override]
     CoordinatorEntity[AlarmCoordinator], alarm.AlarmControlPanelEntity
 ):
     """Representation of a Securitas alarm status."""
@@ -887,3 +887,15 @@ class SecuritasAlarm(  # type: ignore[override]
         if AlarmControlPanelState.ARMED_VACATION in self._command_map:
             features |= AlarmControlPanelEntityFeature.ARM_VACATION
         return features
+
+
+class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+    """The household-intent panel — drives all three axes via mappings.
+
+    Inherits all behavior from the base. Sub-panels (Interior, Perimeter,
+    Annex) come in subsequent tasks.
+    """
+
+
+# Backwards-compat alias for tests and any external imports.
+SecuritasAlarm = CombinedSecuritasAlarmPanel
