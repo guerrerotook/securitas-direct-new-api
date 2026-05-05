@@ -199,7 +199,7 @@ Two mapping tables in `models.py` connect these:
 
 **Location:** `securitas_direct_new_api/command_resolver.py`
 
-The `CommandResolver` class models the alarm as two independent axes — `InteriorMode` (off, day, night, total) and `PerimeterMode` (off, on) — combined into an `AlarmState`. It replaces the old `_use_multi_step` flag, `_send_arm_command()` / `_send_disarm_command()` methods, `COMPOUND_COMMAND_STEPS` constant, and `PERI_ARMED_PROTO_CODES` set.
+The `CommandResolver` class models the alarm as three independent axes — `InteriorMode` (off, day, night, total), `PerimeterMode` (off, on), and `AnnexMode` (off, on) — combined into an `AlarmState`. It replaces the old `_use_multi_step` flag, `_send_arm_command()` / `_send_disarm_command()` methods, `COMPOUND_COMMAND_STEPS` constant, and `PERI_ARMED_PROTO_CODES` set.
 
 **How it works:**
 
