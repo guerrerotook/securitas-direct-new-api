@@ -1,0 +1,62 @@
+{
+  "description": "Italian SDVECU OWNER login. JWT cap claim is unreliable for arming commands: cap lists ARMNIGHT but the panel rejects ARMNIGHT1 (\"Request ARMNIGHT1 is not valid for Central Unit\"); cap omits ARMDAY but the panel accepts ARMDAY1 and produces protomResponse 'B' (PARTIAL_DAY_PERI). The Italian web app's 'partial' button issues ARMDAY1, confirming this is the canonical command for the Italian SDVECU.",
+  "panel": "SDVECU",
+  "country": "IT",
+  "scenario_notes": [
+    "Same physical installation as italy_partial_only.json, but logged in as the primary OWNER (phone-number user) rather than a RESTRICTED sub-user.",
+    "OWNER cap set adds non-arming features (BILLS, SCH, UNPROTECT, SECONDINSTALLAD, REGDEVICES, CONTMGRFAQ, CONTMGRDOWN, UPDCUENEXTIME) but the arming-relevant subset is identical to RESTRICTED: ARM, DARM, ARMNIGHT, no ARMDAY, no PERI, no annex.",
+    "Empirically verified via HAR + HA log: ARMDAY1 → OK + protom 'B'; ARMNIGHT1 → 400 'not valid for Central Unit'.",
+    "SCH service is present and exposes attributes DARM/ARMDAY/ARMNIGHT/ARM/PERI as schedule grammar — these reflect what the panel can be put into via schedules, not what the user can issue as a command. Do not rely on SCH attrs as a command-acceptance oracle.",
+    "Conclusion: the JWT cap claim is NOT a reliable oracle for which arming commands the panel accepts. The Interior sub-panel must surface all interior modes regardless of cap content; rely on the resolver's mark_unsupported runtime fallback when the panel rejects a command."
+  ],
+  "decoded_jwt_body": {
+    "exp": 1777987256,
+    "iat": 1777986357,
+    "installations": [
+      {
+        "role": "OWNER",
+        "ins": "INST_ITALY",
+        "cap": [
+          "IMG", "EST", "ARM", "DARM", "KEY", "ARMNIGHT", "PLAN", "BILLS",
+          "ESTINV", "SCH", "DIY", "GC", "PAYMENTG", "UNPROTECT",
+          "SECONDINSTALLAD", "CAMERAS", "REGDEVICES", "DYNAMICINFO",
+          "DEACTIVATEZONE", "REFERRALPROGRAM", "SUPPORTHUB", "MYSD",
+          "INSTWORDS", "CONTMGRFAQ", "CONTMGRDOWN", "CONTMGRMYSERV",
+          "WHATSAPP", "TIMELINE", "NOTCONF", "DEVICESCONF", "CONNSTATUS",
+          "REMINDERS", "UPDCUENEXTIME", "ARMMODESDEVCONF", "SMARTNOT",
+          "HOMETIERED", "DOORSCH", "KEYDUPLICATE"
+        ]
+      }
+    ]
+  },
+  "alarm_partitions": [
+    {"id": "01", "enterStates": ["01", "02"], "leaveStates": ["01", "02"]},
+    {"id": "02", "enterStates": ["01"], "leaveStates": ["01"]},
+    {"id": "03", "enterStates": [], "leaveStates": []}
+  ],
+  "services_relevant": [
+    {
+      "request": "SCH",
+      "attributes": [
+        {"name": "DARM", "value": "DESCONECTAR", "active": false},
+        {"name": "ARMDAY", "value": "ARMADO DIA", "active": false},
+        {"name": "ARMNIGHT", "value": "ARMADO NOCHE", "active": false},
+        {"name": "ARM", "value": "CONECTAR", "active": false},
+        {"name": "PERI", "value": "PERIMETRAL", "active": false}
+      ]
+    }
+  ],
+  "expected_detection": {
+    "has_annex_via_jwt": false,
+    "has_peri_via_jwt": false,
+    "has_peri_via_service_attrs": true,
+    "has_peri_via_partitions": true,
+    "interior_modes_via_jwt": ["ARMNIGHT"]
+  },
+  "panel_truth": {
+    "accepts_armday1": true,
+    "accepts_armnight1": false,
+    "armday1_protom_response": "B",
+    "armnight1_error": "Request ARMNIGHT1 is not valid for Central Unit"
+  }
+}

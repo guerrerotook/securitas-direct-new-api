@@ -545,10 +545,12 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
                 last_err = err
 
         if last_err and last_err.http_status == 400:
+            tried = ", ".join(step.commands)
             raise SecuritasDirectError(
-                "This alarm mode is not supported by your panel. "
-                "Check the state mappings in the integration options "
-                "(Settings → Devices & Services → Securitas → Configure).",
+                f"This alarm mode is not supported by your panel "
+                f"(rejected: {tried}). Check the state mappings in the "
+                "integration options (Settings → Devices & Services → "
+                "Securitas → Configure).",
                 http_status=400,
             )
         raise last_err or SecuritasDirectError(
@@ -1028,18 +1030,23 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return supported features gated on JWT capability set."""
-        from .securitas_direct_new_api.capabilities import supported_interior_modes
+        """Return all interior arming features.
 
-        flags = AlarmControlPanelEntityFeature(0)
-        modes = supported_interior_modes(self.coordinator.capabilities)
-        if "ARMDAY" in modes:
-            flags |= AlarmControlPanelEntityFeature.ARM_HOME
-        if "ARMNIGHT" in modes:
-            flags |= AlarmControlPanelEntityFeature.ARM_NIGHT
-        if "ARM" in modes:
-            flags |= AlarmControlPanelEntityFeature.ARM_AWAY
-        return flags
+        We deliberately do NOT gate on the JWT capability set: empirically (Italian
+        SDVECU OWNER) the JWT 'cap' claim can be both incomplete and wrong about
+        which arming commands the panel accepts — e.g. claiming ARMNIGHT while
+        the panel rejects ARMNIGHT1 with "not valid for Central Unit", and
+        omitting ARMDAY while the panel happily accepts ARMDAY1. Gating on the
+        cap set therefore hides modes that work and exposes modes that don't.
+        Instead, surface all three interior modes; the resolver's mark_unsupported
+        runtime-fallback catches genuinely-rejected commands and the user gets a
+        clear notification naming the failed command.
+        """
+        return (
+            AlarmControlPanelEntityFeature.ARM_HOME
+            | AlarmControlPanelEntityFeature.ARM_NIGHT
+            | AlarmControlPanelEntityFeature.ARM_AWAY
+        )
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""
