@@ -339,7 +339,6 @@ class TestMultiAxisAnnexTransitions:
                 interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
             ),
         )
-        # Two logical steps: ARM1 then ARMANNEX1
         cmds = [c for s in steps for c in s.commands]
         assert "ARM1" in cmds
         assert "ARMANNEX1" in cmds
