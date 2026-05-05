@@ -126,28 +126,27 @@ class CommandResolver:
         if current == target:
             return []
 
-        # Pure annex-axis change with interior/perimeter equal
-        if (
-            current.interior == target.interior
-            and current.perimeter == target.perimeter
-            and current.annex != target.annex
-        ):
+        annex_changed = current.annex != target.annex
+        interior_or_peri_changed = (
+            current.interior != target.interior or current.perimeter != target.perimeter
+        )
+
+        # Pure-annex fast-path
+        if annex_changed and not interior_or_peri_changed:
             return self._resolve_annex(current.annex, target.annex)
 
         steps: list[CommandStep] = []
 
         interior_changes = current.interior != target.interior
 
-        # Full disarm (target is off/off)
+        # Full disarm (target is off/off on the 2-axis space)
         if (
             target.interior == InteriorMode.OFF
             and target.perimeter == PerimeterMode.OFF
         ):
             steps.extend(self._resolve_disarm(current))
-            return steps
-
         # Mode change: need to disarm first, then arm new mode
-        if interior_changes and current.interior != InteriorMode.OFF:
+        elif interior_changes and current.interior != InteriorMode.OFF:
             steps.extend(self._resolve_disarm(current))
             steps.extend(
                 self._resolve_arm(
@@ -155,10 +154,14 @@ class CommandResolver:
                     target,
                 )
             )
-            return steps
+        else:
+            # Arming from current state
+            steps.extend(self._resolve_arm(current, target))
 
-        # Arming from current state
-        steps.extend(self._resolve_arm(current, target))
+        # Append annex transition if needed (multi-axis case)
+        if annex_changed:
+            steps.extend(self._resolve_annex(current.annex, target.annex))
+
         return steps
 
     def _resolve_disarm(self, current: AlarmState) -> list[CommandStep]:
