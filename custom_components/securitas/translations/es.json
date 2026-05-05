@@ -88,7 +88,10 @@
                     "code": "Código PIN (dejar vacío si no hay PIN)",
                     "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
                     "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
-                    "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
+                    "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)",
+                    "enable_interior_panel": "Activar panel Interior",
+                    "enable_perimeter_panel": "Activar panel Perimetral",
+                    "enable_annex_panel": "Activar panel Anexo"
                 },
                 "sections": {
                     "advanced": {
@@ -121,6 +124,13 @@
         "force_arm_cancel": {
             "name": "Cancelar armado forzado",
             "description": "Cancelar un armado forzado pendiente y descartar la notificación de excepción de armado."
+        }
+    },
+    "entity": {
+        "alarm_control_panel": {
+            "interior_subpanel": { "name": "Interior" },
+            "perimeter_subpanel": { "name": "Perimetral" },
+            "annex_subpanel": { "name": "Anexo" }
         }
     },
     "exceptions": {

@@ -88,7 +88,10 @@
                     "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
                     "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
                     "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
-                    "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
+                    "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)",
+                    "enable_interior_panel": "Attiva sotto-pannello Interno",
+                    "enable_perimeter_panel": "Attiva sotto-pannello Perimetrale",
+                    "enable_annex_panel": "Attiva sotto-pannello Annesso"
                 },
                 "sections": {
                     "advanced": {
@@ -121,6 +124,13 @@
         "force_arm_cancel": {
             "name": "Annullare attivazione forzata",
             "description": "Annullare un'attivazione forzata in sospeso e chiudere la notifica di eccezione di attivazione."
+        }
+    },
+    "entity": {
+        "alarm_control_panel": {
+            "interior_subpanel": { "name": "Interno" },
+            "perimeter_subpanel": { "name": "Perimetrale" },
+            "annex_subpanel": { "name": "Annesso" }
         }
     },
     "exceptions": {
