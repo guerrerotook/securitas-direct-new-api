@@ -1489,7 +1489,9 @@ def _schema_keys(data_schema) -> set[str]:
     return keys
 
 
-def _make_entry_with_coordinator(hass, *, has_peri: bool, has_annex: bool, options: dict | None = None):
+def _make_entry_with_coordinator(
+    hass, *, has_peri: bool, has_annex: bool, options: dict | None = None
+):
     """Create a MockConfigEntry and inject a mock coordinator into hass.data."""
     entry = MockConfigEntry(
         domain=DOMAIN,

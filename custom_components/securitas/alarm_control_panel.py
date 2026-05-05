@@ -317,9 +317,7 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
                 proto_code,
             )
 
-    def _store_operation_status_metadata(
-        self, status: OperationStatus | None
-    ) -> bool:
+    def _store_operation_status_metadata(self, status: OperationStatus | None) -> bool:
         """Store message + response_data on this entity from an operation status.
 
         Returns True if ``status.protom_response`` is a non-empty string and the
@@ -336,9 +334,7 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
             return False
         self._message = status.message
         self._attr_extra_state_attributes["message"] = status.message
-        self._attr_extra_state_attributes["response_data"] = (
-            status.protom_response_data
-        )
+        self._attr_extra_state_attributes["response_data"] = status.protom_response_data
         if not status.protom_response:
             _LOGGER.debug(
                 "[%s] Received empty protomResponse"
@@ -1061,9 +1057,7 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
             annex=current.annex,
         )
 
-    def _extract_state(
-        self, joint_state: AlarmState
-    ) -> AlarmControlPanelState | None:
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
         """Project the joint state onto the interior axis only."""
         from .securitas_direct_new_api.models import InteriorMode
 
@@ -1116,9 +1110,7 @@ class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
             annex=current.annex,
         )
 
-    def _extract_state(
-        self, joint_state: AlarmState
-    ) -> AlarmControlPanelState | None:
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
         """Project the joint state onto the perimeter axis only."""
         from .securitas_direct_new_api.models import PerimeterMode
 
@@ -1169,9 +1161,7 @@ class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
             annex=annex_target_map[ha_state],
         )
 
-    def _extract_state(
-        self, joint_state: AlarmState
-    ) -> AlarmControlPanelState | None:
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
         """Project the joint state onto the annex axis only."""
         from .securitas_direct_new_api.models import AnnexMode
 

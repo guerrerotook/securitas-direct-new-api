@@ -151,9 +151,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         Used by sub-panels to read the joint state for axis-preserving
         transitions. Falls back to all-OFF if no data is available yet.
         """
-        _default = AlarmState(
-            interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
-        )
+        _default = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         if self.data is None:
             return _default
         proto_code = self.data.status.status if self.data.status else None

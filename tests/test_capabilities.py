@@ -56,6 +56,7 @@ class TestDetectPeri:
         from custom_components.securitas.securitas_direct_new_api.capabilities import (
             detect_peri,
         )
+
         fixture = _load("spain_full_peri.json")
         cap_set = frozenset(fixture["decoded_jwt_body"]["installations"][0]["cap"])
         # No services / partitions data: JWT alone should suffice
@@ -75,7 +76,12 @@ class TestDetectPeri:
             ]
 
         # No JWT cap, no services, but partition data present
-        assert detect_peri(installation=FakeInstallation(), services=[], capabilities=frozenset()) is True
+        assert (
+            detect_peri(
+                installation=FakeInstallation(), services=[], capabilities=frozenset()
+            )
+            is True
+        )
 
     def test_negative_when_no_signals(self):
         """Tetuan (Spanish, no peri) — all signals absent."""
@@ -86,7 +92,14 @@ class TestDetectPeri:
         class FakeInstallation:
             alarm_partitions = []
 
-        assert detect_peri(installation=FakeInstallation(), services=[], capabilities=frozenset(["ARM", "DARM", "ARMDAY"])) is False
+        assert (
+            detect_peri(
+                installation=FakeInstallation(),
+                services=[],
+                capabilities=frozenset(["ARM", "DARM", "ARMDAY"]),
+            )
+            is False
+        )
 
     def test_active_peri_service_signal(self):
         """A service entry with request='PERI' and active=True → has peri."""
@@ -99,11 +112,27 @@ class TestDetectPeri:
             alarm_partitions = []
 
         active_peri = Service(
-            id=33, id_service=33, active=True, visible=True, bde=False, is_premium=False,
-            cod_oper=False, total_device=0, request="PERI", multiple_req=False,
-            num_devices_mr=0, attributes=[],
+            id=33,
+            id_service=33,
+            active=True,
+            visible=True,
+            bde=False,
+            is_premium=False,
+            cod_oper=False,
+            total_device=0,
+            request="PERI",
+            multiple_req=False,
+            num_devices_mr=0,
+            attributes=[],
         )
-        assert detect_peri(installation=FakeInstallation(), services=[active_peri], capabilities=frozenset()) is True
+        assert (
+            detect_peri(
+                installation=FakeInstallation(),
+                services=[active_peri],
+                capabilities=frozenset(),
+            )
+            is True
+        )
 
     def test_inactive_peri_service_does_not_signal(self):
         from custom_components.securitas.securitas_direct_new_api.capabilities import (
@@ -115,39 +144,83 @@ class TestDetectPeri:
             alarm_partitions = []
 
         inactive_peri = Service(
-            id=33, id_service=33, active=False, visible=True, bde=False, is_premium=False,
-            cod_oper=False, total_device=0, request="PERI", multiple_req=False,
-            num_devices_mr=0, attributes=[],
+            id=33,
+            id_service=33,
+            active=False,
+            visible=True,
+            bde=False,
+            is_premium=False,
+            cod_oper=False,
+            total_device=0,
+            request="PERI",
+            multiple_req=False,
+            num_devices_mr=0,
+            attributes=[],
         )
-        assert detect_peri(installation=FakeInstallation(), services=[inactive_peri], capabilities=frozenset()) is False
+        assert (
+            detect_peri(
+                installation=FakeInstallation(),
+                services=[inactive_peri],
+                capabilities=frozenset(),
+            )
+            is False
+        )
 
     def test_sch_attr_signal(self):
         """Existing detection via SCH service attribute named PERI."""
         from custom_components.securitas.securitas_direct_new_api.capabilities import (
             detect_peri,
         )
-        from custom_components.securitas.securitas_direct_new_api.models import Attribute, Service
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            Attribute,
+            Service,
+        )
 
         class FakeInstallation:
             alarm_partitions = []
 
         sch = Service(
-            id=60, id_service=60, active=True, visible=True, bde=False, is_premium=False,
-            cod_oper=False, total_device=0, request="SCH", multiple_req=False,
-            num_devices_mr=0, attributes=[Attribute(name="PERI", value="PERIMETRAL", active=False)],
+            id=60,
+            id_service=60,
+            active=True,
+            visible=True,
+            bde=False,
+            is_premium=False,
+            cod_oper=False,
+            total_device=0,
+            request="SCH",
+            multiple_req=False,
+            num_devices_mr=0,
+            attributes=[Attribute(name="PERI", value="PERIMETRAL", active=False)],
         )
-        assert detect_peri(installation=FakeInstallation(), services=[sch], capabilities=frozenset()) is True
+        assert (
+            detect_peri(
+                installation=FakeInstallation(),
+                services=[sch],
+                capabilities=frozenset(),
+            )
+            is True
+        )
 
 
 class TestDetectAnnex:
     def test_both_present(self):
-        from custom_components.securitas.securitas_direct_new_api.capabilities import detect_annex
+        from custom_components.securitas.securitas_direct_new_api.capabilities import (
+            detect_annex,
+        )
+
         assert detect_annex(frozenset(["ARMANNEX", "DARMANNEX", "ARM"])) is True
 
     def test_only_arm_annex(self):
-        from custom_components.securitas.securitas_direct_new_api.capabilities import detect_annex
+        from custom_components.securitas.securitas_direct_new_api.capabilities import (
+            detect_annex,
+        )
+
         assert detect_annex(frozenset(["ARMANNEX", "ARM"])) is False
 
     def test_neither(self):
-        from custom_components.securitas.securitas_direct_new_api.capabilities import detect_annex
+        from custom_components.securitas.securitas_direct_new_api.capabilities import (
+            detect_annex,
+        )
+
         assert detect_annex(frozenset(["ARM", "ARMDAY"])) is False

@@ -119,7 +119,10 @@ class TestStateToCommand:
             SecuritasState.PARTIAL_NIGHT_PERI_ANNEX,
             SecuritasState.TOTAL_PERI_ANNEX,
         }
-        assert states_with_commands == all_states - {SecuritasState.NOT_USED} - annex_states
+        assert (
+            states_with_commands
+            == all_states - {SecuritasState.NOT_USED} - annex_states
+        )
 
     def test_not_used_is_not_in_map(self):
         assert SecuritasState.NOT_USED not in STATE_TO_COMMAND

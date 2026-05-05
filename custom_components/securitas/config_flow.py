@@ -138,9 +138,7 @@ def _build_settings_schema(
             {
                 vol.Optional(
                     CONF_SCAN_INTERVAL,
-                    default=defaults.get(
-                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                    ),
+                    default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
                 ): int,
                 vol.Optional(
                     CONF_DELAY_CHECK_OPERATION,
@@ -741,7 +739,9 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
         extra_fields: dict[Any, Any] = {}
         if has_peri:
             extra_fields[
-                vol.Optional(CONF_ENABLE_PERIMETER_PANEL, default=peri_currently_enabled)
+                vol.Optional(
+                    CONF_ENABLE_PERIMETER_PANEL, default=peri_currently_enabled
+                )
             ] = bool
         if has_annex:
             extra_fields[

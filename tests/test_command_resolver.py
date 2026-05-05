@@ -305,10 +305,14 @@ class TestAnnexResolution:
         r = CommandResolver(has_peri=False, has_annex=True)
         steps = r.resolve(
             current=AlarmState(
-                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
             ),
             target=AlarmState(
-                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
             ),
         )
         assert len(steps) == 1
@@ -318,10 +322,14 @@ class TestAnnexResolution:
         r = CommandResolver(has_peri=False, has_annex=True)
         steps = r.resolve(
             current=AlarmState(
-                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
             ),
             target=AlarmState(
-                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
             ),
         )
         assert len(steps) == 1
@@ -333,10 +341,14 @@ class TestMultiAxisAnnexTransitions:
         r = CommandResolver(has_peri=False, has_annex=True)
         steps = r.resolve(
             current=AlarmState(
-                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
             ),
             target=AlarmState(
-                interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
             ),
         )
         cmds = [c for s in steps for c in s.commands]
@@ -347,10 +359,14 @@ class TestMultiAxisAnnexTransitions:
         r = CommandResolver(has_peri=False, has_annex=True)
         steps = r.resolve(
             current=AlarmState(
-                interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
             ),
             target=AlarmState(
-                interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
             ),
         )
         cmds = [c for s in steps for c in s.commands]

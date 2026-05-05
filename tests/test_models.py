@@ -217,13 +217,19 @@ class TestAlarmStateAnnex:
 
     def test_three_axis_equality(self):
         a = AlarmState(
-            interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+            interior=InteriorMode.DAY,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.ON,
         )
         b = AlarmState(
-            interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+            interior=InteriorMode.DAY,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.ON,
         )
         c = AlarmState(
-            interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+            interior=InteriorMode.DAY,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
         )
         assert a == b
         assert a != c
