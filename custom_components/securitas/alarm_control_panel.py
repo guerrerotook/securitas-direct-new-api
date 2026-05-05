@@ -999,10 +999,7 @@ class PerimeterSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the perimeter axis."""
-        from .securitas_direct_new_api.models import (
-            InteriorMode,
-            PerimeterMode,
-        )
+        from .securitas_direct_new_api.models import PerimeterMode
 
         perimeter_target_map = {
             "armed_away": PerimeterMode.ON,
