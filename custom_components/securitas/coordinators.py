@@ -178,6 +178,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._has_peri = detect_peri(self._installation, services, capabilities)
         self._has_annex = detect_annex(capabilities)
         self._capabilities_populated = True
+        self._log_capability_detection()
 
     async def _populate_capabilities(self) -> None:
         """Detect peri/annex via API.  Runs once per coordinator lifetime.
@@ -199,6 +200,16 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._has_peri = detect_peri(self._installation, services, self._capabilities)
         self._has_annex = detect_annex(self._capabilities)
         self._capabilities_populated = True
+        self._log_capability_detection()
+
+    def _log_capability_detection(self) -> None:
+        _LOGGER.debug(
+            "capability detection for %s: has_peri=%s has_annex=%s caps=%s",
+            self._installation.number,
+            self._has_peri,
+            self._has_annex,
+            sorted(self._capabilities),
+        )
 
     async def _async_update_data(self) -> AlarmStatusData:
         """Fetch alarm status via the API queue."""
