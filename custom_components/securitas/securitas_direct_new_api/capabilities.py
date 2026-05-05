@@ -62,12 +62,3 @@ def detect_annex(capabilities: frozenset[str]) -> bool:
     has been observed).
     """
     return "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
-
-
-def supported_interior_modes(capabilities: frozenset[str]) -> set[str]:
-    """Return the set of capability strings indicating supported interior modes.
-
-    Result is a subset of {"ARM", "ARMDAY", "ARMNIGHT"}. Used by the
-    Interior sub-panel to derive supported_features.
-    """
-    return {c for c in ("ARM", "ARMDAY", "ARMNIGHT") if c in capabilities}
