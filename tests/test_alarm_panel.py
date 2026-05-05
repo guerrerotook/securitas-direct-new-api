@@ -63,7 +63,6 @@ class TestForceArmNotificationsConfig:
         """force_arm_notifications=False is passed through config."""
         alarm = make_alarm(
             config={
-
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
@@ -3089,7 +3088,6 @@ class TestAsyncAddedToHass:
         """async_added_to_hass registers no listeners when notifications disabled."""
         alarm = make_alarm(
             config={
-
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
