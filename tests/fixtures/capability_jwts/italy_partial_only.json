@@ -1,0 +1,39 @@
+{
+  "description": "Italian SDVECU installation with partial-only interior + perimeter (via alarmPartitions, NOT via JWT)",
+  "panel": "SDVECU",
+  "country": "IT",
+  "scenario_notes": [
+    "Partial-only: ARMNIGHT in caps, ARMDAY absent. The single 'partial' UI button maps to ARMNIGHT1.",
+    "Has perimeter, but JWT does NOT advertise PERI capability — peri must be detected via alarmPartitions[id='02'] with non-empty enterStates.",
+    "This is the case that forces _detect_peri to remain in the codebase: JWT-only peri detection would yield a false negative here."
+  ],
+  "decoded_jwt_body": {
+    "exp": 1777970579,
+    "iat": 1777969679,
+    "installations": [
+      {
+        "role": "RESTRICTED",
+        "ins": "INST_ITALY",
+        "cap": [
+          "IMG", "EST", "ARM", "DARM", "KEY", "ARMNIGHT", "PLAN", "ESTINV",
+          "DIY", "GC", "PAYMENTG", "CAMERAS", "DYNAMICINFO", "DEACTIVATEZONE",
+          "REFERRALPROGRAM", "SUPPORTHUB", "MYSD", "INSTWORDS", "CONTMGRMYSERV",
+          "WHATSAPP", "TIMELINE", "NOTCONF", "DEVICESCONF", "CONNSTATUS",
+          "REMINDERS", "ARMMODESDEVCONF", "SMARTNOT", "HOMETIERED", "DOORSCH",
+          "KEYDUPLICATE"
+        ]
+      }
+    ]
+  },
+  "alarm_partitions": [
+    {"id": "01", "enterStates": ["01", "02"], "leaveStates": ["01", "02"]},
+    {"id": "02", "enterStates": ["01"], "leaveStates": ["01"]},
+    {"id": "03", "enterStates": [], "leaveStates": []}
+  ],
+  "expected_detection": {
+    "has_annex_via_jwt": false,
+    "has_peri_via_jwt": false,
+    "has_peri_via_partitions": true,
+    "interior_modes_via_jwt": ["ARMNIGHT"]
+  }
+}

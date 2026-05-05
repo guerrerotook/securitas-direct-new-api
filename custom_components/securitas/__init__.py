@@ -452,11 +452,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             # Pre-populate capability detection from already-fetched data so
             # the coordinator's first refresh doesn't make a redundant API call.
-            if alarm_coord is not None:
-                capabilities = client.client.get_supported_commands(
-                    first_installation.number
-                )
-                alarm_coord.populate_capabilities_from_data(services, capabilities)
+            capabilities = client.client.get_supported_commands(
+                first_installation.number
+            )
+            alarm_coord.populate_capabilities_from_data(services, capabilities)
 
             # Sentinel coordinator — needs a sentinel service and its zone
             for service in services:

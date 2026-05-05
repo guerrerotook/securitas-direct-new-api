@@ -1,0 +1,50 @@
+{
+  "description": "Spanish SDVFAST installation with full interior feature set, no perimeter",
+  "panel": "SDVFAST",
+  "country": "ES",
+  "scenario_notes": [
+    "Has both interior modes: ARMDAY and ARMNIGHT.",
+    "No perimeter: PERI capability absent from JWT, and the SCH service has no PERI attribute.",
+    "configRepoUser.alarmPartitions is null.",
+    "No annex.",
+    "Has CALLRING capability — observed only on this fixture, unrelated to this work."
+  ],
+  "decoded_jwt_body": {
+    "exp": 1777970691,
+    "iat": 1777969839,
+    "installations": [
+      {
+        "role": "OWNER",
+        "ins": "INST_SPAIN_NO_PERI",
+        "cap": [
+          "IMG", "EST", "CALLRING", "ARM", "DARM", "KEY", "ARMDAY", "ARMNIGHT",
+          "PLAN", "BILLS", "ESTINV", "SCH", "SCHCD", "DIY", "GC", "CONFORT",
+          "WHATNEW", "GDPRPOPUP", "OLS", "ARMINTFPART", "ARMPARTFINT",
+          "SECONDINSTALLAD", "CAMERAS", "REGDEVICES", "HOMEMOVE", "DYNAMICINFO",
+          "SUPPORTHUB", "ANP", "MYSD", "PANELCONF", "INSTWORDS", "CONTMGRFAQ",
+          "CONTMGRDOWN", "TIMELINE", "NOTCONF", "DEVICESCONF", "REMINDERS",
+          "UPDCUENEXTIME", "CONTRACTS", "SMARTNOT", "HOMETIERED", "DOORSCH",
+          "KEYDUPLICATE"
+        ]
+      }
+    ]
+  },
+  "alarm_partitions": null,
+  "services_relevant": [
+    {
+      "request": "SCH",
+      "attributes": [
+        {"name": "DARM", "value": "DESCONECTAR", "active": false},
+        {"name": "ARMDAY", "value": "ARMADO DIA", "active": false},
+        {"name": "ARMNIGHT", "value": "ARMADO NOCHE", "active": false},
+        {"name": "ARM", "value": "CONECTAR", "active": false}
+      ]
+    }
+  ],
+  "expected_detection": {
+    "has_annex_via_jwt": false,
+    "has_peri_via_jwt": false,
+    "has_peri_via_service_attrs": false,
+    "interior_modes_via_jwt": ["ARMDAY", "ARMNIGHT"]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "description": "UK SDVFAST installation with annex (Vatrinus, issue #441)",
+  "panel": "SDVFAST",
+  "country": "GB",
+  "scenario_notes": [
+    "Has annex: ARMANNEX and DARMANNEX present in capability set.",
+    "Has both interior modes: ARMDAY and ARMNIGHT.",
+    "No PERI capability (this installation does not have perimeter).",
+    "configRepoUser.alarmPartitions not captured in source HAR."
+  ],
+  "decoded_jwt_body": {
+    "exp": 1777120392,
+    "iat": 1777119494,
+    "installations": [
+      {
+        "role": "OWNER",
+        "ins": "INST_VATRINUS",
+        "cap": [
+          "IMG", "EST", "ARM", "DARM", "KEY", "ARMANNEX", "ARMDAY", "ARMNIGHT",
+          "DARMANNEX", "PLAN", "BILLS", "ESTINV", "SCH", "DIY", "GC", "PAYMENTG",
+          "ARMINTFPART", "ARMPARTFINT", "SECONDINSTALLAD", "CAMERAS", "REGDEVICES",
+          "HOMEMOVE", "DYNAMICINFO", "SUPPORTHUB", "MYSD", "PANELCONF", "INSTWORDS",
+          "CONTMGRFAQ", "CONTMGRDOWN", "CONTMGRMYSERV", "WHATSAPP", "TIMELINE",
+          "DEVICESCONF", "REMINDERS", "UPDCUENEXTIME", "CONTRACTS", "HOMETIERED"
+        ]
+      }
+    ]
+  },
+  "alarm_partitions": null,
+  "expected_detection": {
+    "has_annex_via_jwt": true,
+    "has_peri_via_jwt": false,
+    "has_peri_via_partitions": null,
+    "interior_modes_via_jwt": ["ARMDAY", "ARMNIGHT"]
+  }
+}
