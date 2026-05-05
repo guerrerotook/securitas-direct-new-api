@@ -317,48 +317,60 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
                 proto_code,
             )
 
+    def _store_operation_status_metadata(
+        self, status: OperationStatus | None
+    ) -> bool:
+        """Store message + response_data on this entity from an operation status.
+
+        Returns True if ``status.protom_response`` is a non-empty string and the
+        caller should derive ``_state`` from it.  Returns False to short-circuit
+        (no status, no message attribute, or empty protom_response).
+
+        Also updates ``_last_proto_code`` when protom_response is a known proto
+        code.  Periodic polling uses xSStatus which returns values like
+        "ARMED_TOTAL" instead of proto codes; those must not overwrite the
+        last proto code or the resolver's state-based command selection will
+        break.
+        """
+        if status is None or not hasattr(status, "message"):
+            return False
+        self._message = status.message
+        self._attr_extra_state_attributes["message"] = status.message
+        self._attr_extra_state_attributes["response_data"] = (
+            status.protom_response_data
+        )
+        if not status.protom_response:
+            _LOGGER.debug(
+                "[%s] Received empty protomResponse"
+                " (operation_status: %s, message: %s, status: %s,"
+                " protomResponseData: %s), ignoring",
+                self.entity_id,
+                status.operation_status,
+                status.message,
+                status.status,
+                status.protom_response_data,
+            )
+            return False
+        if status.protom_response in PROTO_TO_ALARM_STATE:
+            self._last_proto_code = status.protom_response
+        return True
+
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:
         """Update alarm status, from last alarm setting register or EST."""
-        if status is not None and hasattr(status, "message"):
-            self._message = status.message
-            self._attr_extra_state_attributes["message"] = status.message
-            self._attr_extra_state_attributes["response_data"] = (
-                status.protom_response_data
+        if not self._store_operation_status_metadata(status):
+            return
+        assert status is not None  # narrowed by _store_operation_status_metadata
+        if status.protom_response == PROTO_DISARMED:
+            self._state = AlarmControlPanelState.DISARMED
+        elif status.protom_response in self._status_map:
+            self._state = self._status_map[status.protom_response]
+        else:
+            self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+            _LOGGER.info(
+                "Unmapped alarm status code '%s' from Securitas. "
+                "Check your Alarm State Mappings in the integration options",
+                status.protom_response,
             )
-
-            if not status.protom_response:
-                _LOGGER.debug(
-                    "[%s] Received empty protomResponse"
-                    " (operation_status: %s, message: %s, status: %s,"
-                    " protomResponseData: %s), ignoring",
-                    self.entity_id,
-                    status.operation_status,
-                    status.message,
-                    status.status,
-                    status.protom_response_data,
-                )
-                return
-            # Only update _last_proto_code when protomResponse is a known proto
-            # code.  Periodic polling uses xSStatus which returns values like
-            # "ARMED_TOTAL" instead of proto codes; those must not overwrite
-            # the last proto code or the resolver's state-based command
-            # selection will break.
-            if (
-                status.protom_response == PROTO_DISARMED
-                or status.protom_response in PROTO_TO_ALARM_STATE
-            ):
-                self._last_proto_code = status.protom_response
-            if status.protom_response == PROTO_DISARMED:
-                self._state = AlarmControlPanelState.DISARMED
-            elif status.protom_response in self._status_map:
-                self._state = self._status_map[status.protom_response]
-            else:
-                self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-                _LOGGER.info(
-                    "Unmapped alarm status code '%s' from Securitas. "
-                    "Check your Alarm State Mappings in the integration options",
-                    status.protom_response,
-                )
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
         """Check the code only if arming requires a code and a PIN is configured."""
@@ -973,36 +985,17 @@ class _AxisSubPanelMixin:
 
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:  # type: ignore[override]
         """Update state after an arm/disarm operation using the joint-state projection."""
-        if status is not None and hasattr(status, "message"):
-            self._message = status.message  # type: ignore[attr-defined]
-            self._attr_extra_state_attributes["message"] = status.message  # type: ignore[attr-defined]
-            self._attr_extra_state_attributes["response_data"] = (  # type: ignore[attr-defined]
-                status.protom_response_data
-            )
-
-            if not status.protom_response:
-                _LOGGER.debug(
-                    "[%s] Received empty protomResponse"
-                    " (operation_status: %s, message: %s, status: %s,"
-                    " protomResponseData: %s), ignoring",
-                    self.entity_id,  # type: ignore[attr-defined]
-                    status.operation_status,
-                    status.message,
-                    status.status,
-                    status.protom_response_data,
-                )
-                return
-            if (
-                status.protom_response == PROTO_DISARMED
-                or status.protom_response in PROTO_TO_ALARM_STATE
-            ):
-                self._last_proto_code = status.protom_response  # type: ignore[attr-defined]
-            # Derive the joint state from the proto response code, then project
-            # onto this axis.  The coordinator hasn't refreshed yet at this point,
-            # so we reconstruct the AlarmState from the proto code directly.
-            _default = self.coordinator.alarm_state  # type: ignore[attr-defined]
-            joint = PROTO_TO_ALARM_STATE.get(status.protom_response, _default)
-            self._state = self._extract_state(joint)  # type: ignore[attr-defined]
+        if not self._store_operation_status_metadata(status):  # type: ignore[attr-defined]
+            return
+        assert status is not None  # narrowed by _store_operation_status_metadata
+        # The coordinator hasn't refreshed yet at this point, so reconstruct the
+        # AlarmState from the proto code; if unknown, fall back to the (stale)
+        # coordinator joint state to preserve the most recent known projection.
+        joint = PROTO_TO_ALARM_STATE.get(
+            status.protom_response,
+            self.coordinator.alarm_state,  # type: ignore[attr-defined]
+        )
+        self._state = self._extract_state(joint)  # type: ignore[attr-defined]
 
 
 class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
