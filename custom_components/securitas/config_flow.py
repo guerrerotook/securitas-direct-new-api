@@ -778,7 +778,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             },
             notify_options,
             use_suggested=True,
-            extra_fields=extra_fields or None,
+            extra_fields=extra_fields,
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 

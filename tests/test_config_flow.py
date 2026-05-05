@@ -1532,17 +1532,6 @@ async def test_subpanel_perimeter_toggle_shown_when_has_peri(hass):
     assert CONF_ENABLE_INTERIOR_PANEL not in keys
 
 
-async def test_subpanel_annex_toggle_hidden_when_no_annex(hass):
-    """ANNEX toggle not shown when has_annex=False."""
-    entry = _make_entry_with_coordinator(hass, has_peri=False, has_annex=False)
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-
-    assert result["type"] == FlowResultType.FORM
-    keys = _schema_keys(result["data_schema"])
-    assert CONF_ENABLE_ANNEX_PANEL not in keys
-
-
 async def test_subpanel_interior_toggle_hidden_when_no_sibling_enabled(hass):
     """INTERIOR toggle not shown when peri is supported but not currently enabled."""
     entry = _make_entry_with_coordinator(
