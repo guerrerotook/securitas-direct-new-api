@@ -194,7 +194,7 @@ class SecuritasClient:
         self.poll_timeout: float = poll_timeout
 
         # Capabilities tokens per installation (key: installation number)
-        self._capabilities: dict[str, tuple[str, datetime]] = {}
+        self._capabilities: dict[str, tuple[str, datetime, frozenset[str]]] = {}
 
         # Internal state
         self._apollo_operation_id: str = secrets.token_hex(64)
@@ -465,6 +465,17 @@ class SecuritasClient:
         if entry is None or datetime.now() + timedelta(minutes=1) > entry[1]:
             _LOGGER.debug("[auth] Capabilities token expired, refreshing")
             await self.get_services(installation)
+
+    def get_supported_commands(self, installation_number: str) -> frozenset[str]:
+        """Return the capability set for an installation, or empty frozenset if unknown.
+
+        Reads the cap claim from the decoded capability JWT, populated during
+        the most recent _ensure_capabilities call for this installation.
+        """
+        entry = self._capabilities.get(installation_number)
+        if entry is None or len(entry) < 3:
+            return frozenset()
+        return entry[2]
 
     # ── Typed GraphQL execute ────────────────────────────────────────────
 
@@ -1727,7 +1738,15 @@ class SecuritasClient:
         if "exp" in token:
             expiry = datetime.fromtimestamp(token["exp"])
 
-        self._capabilities[installation.number] = (capabilities, expiry)
+        # Extract cap set from the first installation entry (matches the
+        # structure observed in production JWTs)
+        cap_set: frozenset[str] = frozenset()
+        installations = token.get("installations") or []
+        if installations:
+            cap_list = installations[0].get("cap") or []
+            cap_set = frozenset(cap_list)
+
+        self._capabilities[installation.number] = (capabilities, expiry, cap_set)
 
         # Build service list
         result: list[Service] = []
