@@ -20,6 +20,11 @@ from custom_components.securitas import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+from custom_components.securitas.const import (
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+)
 from custom_components.securitas.securitas_direct_new_api import (
     AccountBlockedError,
     Attribute,
@@ -1466,3 +1471,120 @@ async def test_reauth_preserves_username_from_entry(hass):
     # The schema should have the username pre-filled
     schema = result["data_schema"]
     assert schema is not None
+
+
+# ===================================================================
+# TestSubPanelToggleVisibility (~6 tests)
+# ===================================================================
+
+
+def _schema_keys(data_schema) -> set[str]:
+    """Extract the string keys from a voluptuous Schema's top-level dict."""
+    keys = set()
+    for marker in data_schema.schema.keys():
+        if hasattr(marker, "schema"):
+            keys.add(marker.schema)
+        else:
+            keys.add(marker)
+    return keys
+
+
+def _make_entry_with_coordinator(hass, *, has_peri: bool, has_annex: bool, options: dict | None = None):
+    """Create a MockConfigEntry and inject a mock coordinator into hass.data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options=options or {},
+    )
+    entry.add_to_hass(hass)
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = has_peri
+    mock_coordinator.has_annex = has_annex
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
+    return entry
+
+
+async def test_subpanel_perimeter_toggle_hidden_when_no_peri(hass):
+    """No toggles in init schema when has_peri=False and has_annex=False."""
+    entry = _make_entry_with_coordinator(hass, has_peri=False, has_annex=False)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_PERIMETER_PANEL not in keys
+    assert CONF_ENABLE_ANNEX_PANEL not in keys
+    assert CONF_ENABLE_INTERIOR_PANEL not in keys
+
+
+async def test_subpanel_perimeter_toggle_shown_when_has_peri(hass):
+    """Only PERIMETER toggle shown when has_peri=True but no sibling enabled."""
+    entry = _make_entry_with_coordinator(hass, has_peri=True, has_annex=False)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_PERIMETER_PANEL in keys
+    assert CONF_ENABLE_ANNEX_PANEL not in keys
+    assert CONF_ENABLE_INTERIOR_PANEL not in keys
+
+
+async def test_subpanel_annex_toggle_hidden_when_no_annex(hass):
+    """ANNEX toggle not shown when has_annex=False."""
+    entry = _make_entry_with_coordinator(hass, has_peri=False, has_annex=False)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_ANNEX_PANEL not in keys
+
+
+async def test_subpanel_interior_toggle_hidden_when_no_sibling_enabled(hass):
+    """INTERIOR toggle not shown when peri is supported but not currently enabled."""
+    entry = _make_entry_with_coordinator(
+        hass, has_peri=True, has_annex=False, options={}
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_INTERIOR_PANEL not in keys
+
+
+async def test_subpanel_interior_toggle_visible_when_perimeter_currently_enabled(hass):
+    """INTERIOR toggle shown when CONF_ENABLE_PERIMETER_PANEL is True in options."""
+    entry = _make_entry_with_coordinator(
+        hass,
+        has_peri=True,
+        has_annex=False,
+        options={CONF_ENABLE_PERIMETER_PANEL: True},
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_INTERIOR_PANEL in keys
+
+
+async def test_subpanel_all_toggles_visible_with_full_caps_and_sibling_enabled(hass):
+    """All three toggles shown when has_peri=True, has_annex=True, peri currently enabled."""
+    entry = _make_entry_with_coordinator(
+        hass,
+        has_peri=True,
+        has_annex=True,
+        options={CONF_ENABLE_PERIMETER_PANEL: True},
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_PERIMETER_PANEL in keys
+    assert CONF_ENABLE_ANNEX_PANEL in keys
+    assert CONF_ENABLE_INTERIOR_PANEL in keys
