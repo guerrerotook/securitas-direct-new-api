@@ -290,3 +290,39 @@ class TestSecuritasStateAnnexMappings:
             "TOTAL_PERI_ANNEX",
         ):
             assert SecuritasState[name] in SECURITAS_STATE_TO_ALARM_STATE, name
+
+
+class TestAnnexResolution:
+    def test_resolver_accepts_has_annex(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        assert r._has_annex is True
+
+    def test_resolver_has_annex_defaults_false_for_backcompat(self):
+        r = CommandResolver(has_peri=False)  # no has_annex kwarg
+        assert r._has_annex is False
+
+    def test_arm_annex_only(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        steps = r.resolve(
+            current=AlarmState(
+                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+            ),
+            target=AlarmState(
+                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+            ),
+        )
+        assert len(steps) == 1
+        assert "ARMANNEX" in steps[0].commands
+
+    def test_disarm_annex_only(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        steps = r.resolve(
+            current=AlarmState(
+                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON,
+            ),
+            target=AlarmState(
+                interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF,
+            ),
+        )
+        assert len(steps) == 1
+        assert "DARMANNEX" in steps[0].commands

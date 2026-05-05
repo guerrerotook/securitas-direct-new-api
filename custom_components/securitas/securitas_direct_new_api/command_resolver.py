@@ -97,8 +97,9 @@ class CommandResolver:
     resets on HA restart) and skips them in future resolutions.
     """
 
-    def __init__(self, has_peri: bool) -> None:
+    def __init__(self, has_peri: bool, has_annex: bool = False) -> None:
         self._has_peri = has_peri
+        self._has_annex = has_annex
         self._unsupported: set[str] = set()
 
     def mark_unsupported(self, command: str) -> None:
@@ -110,10 +111,28 @@ class CommandResolver:
         """Return the set of unsupported commands."""
         return frozenset(self._unsupported)
 
+    def _resolve_annex(
+        self, current_annex: AnnexMode, target_annex: AnnexMode
+    ) -> list[CommandStep]:
+        """Resolve a pure-annex transition (interior + peri both unchanged)."""
+        if current_annex == target_annex:
+            return []
+        if target_annex == AnnexMode.ON:
+            return [CommandStep(commands=["ARMANNEX"])]
+        return [CommandStep(commands=["DARMANNEX"])]
+
     def resolve(self, current: AlarmState, target: AlarmState) -> list[CommandStep]:
         """Return ordered command steps to transition from current to target state."""
         if current == target:
             return []
+
+        # Pure annex-axis change with interior/perimeter equal
+        if (
+            current.interior == target.interior
+            and current.perimeter == target.perimeter
+            and current.annex != target.annex
+        ):
+            return self._resolve_annex(current.annex, target.annex)
 
         steps: list[CommandStep] = []
 
