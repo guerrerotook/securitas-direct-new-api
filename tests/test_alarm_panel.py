@@ -3891,10 +3891,6 @@ class TestSubPanelSetup:
     async def test_all_three_subpanels_with_full_capabilities(self):
         from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
-            CombinedSecuritasAlarmPanel,
-            InteriorSecuritasAlarmPanel,
-            PerimeterSecuritasAlarmPanel,
-            AnnexSecuritasAlarmPanel,
         )
         from custom_components.securitas.const import (
             CONF_ENABLE_INTERIOR_PANEL,
