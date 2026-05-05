@@ -10,6 +10,7 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
 from custom_components.securitas.securitas_direct_new_api.models import (
     AirQuality,
     AlarmState,
+    AnnexMode,
     ArmCommand,
     Attribute,
     CameraDevice,
@@ -71,13 +72,14 @@ class TestPerimeterMode:
 
 class TestAnnexMode:
     def test_values(self):
-        from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
         assert AnnexMode.OFF == "off"
         assert AnnexMode.ON == "on"
 
     def test_all_members(self):
-        from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
         assert set(AnnexMode) == {AnnexMode.OFF, AnnexMode.ON}
+
+    def test_is_str(self):
+        assert isinstance(AnnexMode.ON, str)
 
 
 class TestProtoCode:
