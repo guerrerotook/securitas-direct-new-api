@@ -9,7 +9,10 @@ from custom_components.securitas.securitas_direct_new_api.command_resolver impor
     PerimeterMode,
     PROTO_TO_ALARM_STATE,
     ALARM_STATE_TO_PROTO,
+    SECURITAS_STATE_TO_ALARM_STATE,
 )
+from custom_components.securitas.securitas_direct_new_api.const import SecuritasState
+from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
 
 
 class TestAlarmState:
@@ -264,43 +267,18 @@ class TestSecuritasStateAnnexMappings:
     """Test SecuritasState enum annex variants and their SECURITAS_STATE_TO_ALARM_STATE mappings."""
 
     def test_annex_only(self):
-        from custom_components.securitas.securitas_direct_new_api.command_resolver import (
-            SECURITAS_STATE_TO_ALARM_STATE,
-        )
-        from custom_components.securitas.securitas_direct_new_api.const import SecuritasState
-        from custom_components.securitas.securitas_direct_new_api.models import (
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
-
         s = SECURITAS_STATE_TO_ALARM_STATE[SecuritasState.ANNEX_ONLY]
         assert s.interior == InteriorMode.OFF
         assert s.perimeter == PerimeterMode.OFF
         assert s.annex == AnnexMode.ON
 
     def test_total_peri_annex(self):
-        from custom_components.securitas.securitas_direct_new_api.command_resolver import (
-            SECURITAS_STATE_TO_ALARM_STATE,
-        )
-        from custom_components.securitas.securitas_direct_new_api.const import SecuritasState
-        from custom_components.securitas.securitas_direct_new_api.models import (
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
-
         s = SECURITAS_STATE_TO_ALARM_STATE[SecuritasState.TOTAL_PERI_ANNEX]
         assert s.interior == InteriorMode.TOTAL
         assert s.perimeter == PerimeterMode.ON
         assert s.annex == AnnexMode.ON
 
     def test_all_eight_annex_variants_mapped(self):
-        from custom_components.securitas.securitas_direct_new_api.command_resolver import (
-            SECURITAS_STATE_TO_ALARM_STATE,
-        )
-        from custom_components.securitas.securitas_direct_new_api.const import SecuritasState
-
         for name in (
             "ANNEX_ONLY",
             "PARTIAL_DAY_ANNEX",
