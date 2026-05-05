@@ -778,7 +778,10 @@ async def _register_card_resource(
                 for item in resources.async_items():
                     url = item.get("url", "")
                     if url == card_url:
-                        return  # Already current version
+                        # Resource already at current version — record its id
+                        # so async_unload_entry can find and remove it.
+                        hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
+                        return
                     if url.startswith(base_url):
                         await resources.async_update_item(item["id"], {"url": card_url})
                         hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]

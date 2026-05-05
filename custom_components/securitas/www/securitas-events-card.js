@@ -392,7 +392,7 @@ class SecuritasEventsCard extends HTMLElement {
       entity: config.entity,
       limit: Math.max(1, Math.min(30, Number(config.limit) || 10)),
       title: config.title || "",
-      // Max card height in CSS units; 0 (or omitted) means unlimited.
+      // Max card height in CSS units; defaults to 400px when omitted.
       // Anything taller than this scrolls inside the card rather than
       // expanding the dashboard column.
       max_height: config.max_height || "400px",

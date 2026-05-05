@@ -1,4 +1,4 @@
-"""Securitas direct sentinel sensor."""
+"""Securitas Direct sensors — sentinel environmental data and activity log."""
 
 import logging
 from collections.abc import Callable
