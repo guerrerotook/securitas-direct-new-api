@@ -1026,6 +1026,104 @@ class TestAsyncUpdateOptions:
             await async_update_options(hass, entry)
             mock_reload.assert_awaited_once_with(entry.entry_id)
 
+    async def test_reload_when_enable_interior_panel_changes(self, hass):
+        """Should reload when enable_interior_panel option changes.
+
+        All other watched keys match between data and options; only the
+        enable_interior_panel key differs (data has False, options has True).
+        """
+        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
+
+        data = make_config_entry_data()
+        # Add the sub-panel keys to data with default False so they match options below
+        data[CONF_ENABLE_INTERIOR_PANEL] = False
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+            # Only this key differs:
+            CONF_ENABLE_INTERIOR_PANEL: True,
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+            mock_reload.assert_awaited_once_with(entry.entry_id)
+
+    async def test_reload_when_enable_perimeter_panel_changes(self, hass):
+        """Should reload when enable_perimeter_panel option changes."""
+        from custom_components.securitas.const import CONF_ENABLE_PERIMETER_PANEL
+
+        data = make_config_entry_data()
+        data[CONF_ENABLE_PERIMETER_PANEL] = False
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+            # Only this key differs:
+            CONF_ENABLE_PERIMETER_PANEL: True,
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+            mock_reload.assert_awaited_once_with(entry.entry_id)
+
+    async def test_reload_when_enable_annex_panel_changes(self, hass):
+        """Should reload when enable_annex_panel option changes."""
+        from custom_components.securitas.const import CONF_ENABLE_ANNEX_PANEL
+
+        data = make_config_entry_data()
+        data[CONF_ENABLE_ANNEX_PANEL] = False
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+            # Only this key differs:
+            CONF_ENABLE_ANNEX_PANEL: True,
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+            mock_reload.assert_awaited_once_with(entry.entry_id)
+
 
 # ===========================================================================
 # 7. TestAsyncUnloadEntry
