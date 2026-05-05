@@ -903,5 +903,78 @@ class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         return None
 
 
+class InteriorSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+    """Sub-panel driving only the interior axis.
+
+    Capabilities (ARMDAY, ARMNIGHT, ARM) gate which HA states are exposed.
+    The perimeter and annex axes are preserved from the coordinator's current
+    joint state when computing target states.
+    """
+
+    _SUFFIX = "_interior"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Override unique_id and friendly name with sub-panel suffix
+        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
+        self._attr_name = f"{self._attr_name} Interior"
+        self._attr_translation_key = "interior_subpanel"
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        """Return supported features gated on JWT capability set."""
+        from .securitas_direct_new_api.capabilities import supported_interior_modes
+
+        flags = AlarmControlPanelEntityFeature(0)
+        modes = supported_interior_modes(self.coordinator.capabilities)
+        if "ARMDAY" in modes:
+            flags |= AlarmControlPanelEntityFeature.ARM_HOME
+        if "ARMNIGHT" in modes:
+            flags |= AlarmControlPanelEntityFeature.ARM_NIGHT
+        if "ARM" in modes:
+            flags |= AlarmControlPanelEntityFeature.ARM_AWAY
+        return flags
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Map an HA state to a target AlarmState that touches only the interior axis."""
+        from .securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        interior_target_map = {
+            "armed_home": InteriorMode.DAY,
+            "armed_night": InteriorMode.NIGHT,
+            "armed_away": InteriorMode.TOTAL,
+            "disarmed": InteriorMode.OFF,
+        }
+        if ha_state not in interior_target_map:
+            raise SecuritasDirectError(
+                f"Unsupported alarm mode for Interior panel: {ha_state}"
+            )
+        # Preserve peri and annex axes from the coordinator's current joint state
+        current = self.coordinator.alarm_state
+        return AlarmState(
+            interior=interior_target_map[ha_state],
+            perimeter=current.perimeter,
+            annex=current.annex,
+        )
+
+    def _extract_state(
+        self, joint_state: AlarmState
+    ) -> AlarmControlPanelState | None:
+        """Project the joint state onto the interior axis only."""
+        from .securitas_direct_new_api.models import InteriorMode
+
+        mapping = {
+            InteriorMode.OFF: AlarmControlPanelState.DISARMED,
+            InteriorMode.DAY: AlarmControlPanelState.ARMED_HOME,
+            InteriorMode.NIGHT: AlarmControlPanelState.ARMED_NIGHT,
+            InteriorMode.TOTAL: AlarmControlPanelState.ARMED_AWAY,
+        }
+        return mapping.get(joint_state.interior)
+
+
 # Backwards-compat alias for tests and any external imports.
 SecuritasAlarm = CombinedSecuritasAlarmPanel

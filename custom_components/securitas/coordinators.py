@@ -21,6 +21,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api_queue import ApiQueue
 from .securitas_direct_new_api.capabilities import detect_annex, detect_peri
 from .securitas_direct_new_api.client import SecuritasClient
+from .securitas_direct_new_api.command_resolver import (
+    PROTO_TO_ALARM_STATE,
+    AlarmState,
+    InteriorMode,
+    PerimeterMode,
+)
 from .securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
     SessionExpiredError,
@@ -137,6 +143,23 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     def capabilities(self) -> frozenset[str]:
         """Return the supported command capability set."""
         return self._capabilities
+
+    @property
+    def alarm_state(self) -> AlarmState:
+        """Return the current AlarmState derived from coordinator data.
+
+        Used by sub-panels to read the joint state for axis-preserving
+        transitions. Falls back to all-OFF if no data is available yet.
+        """
+        _default = AlarmState(
+            interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
+        )
+        if self.data is None:
+            return _default
+        proto_code = self.data.status.status if self.data.status else None
+        if proto_code is None:
+            return _default
+        return PROTO_TO_ALARM_STATE.get(proto_code, _default)
 
     def populate_capabilities_from_data(
         self,
