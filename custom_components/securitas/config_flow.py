@@ -68,6 +68,7 @@ from .securitas_direct_new_api import (
     Service,
     TwoFactorRequiredError,
 )
+from .securitas_direct_new_api.capabilities import detect_peri
 
 VERSION = 3
 
@@ -563,30 +564,14 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             "time": time.monotonic(),
         }
 
-        self._has_peri = self._detect_peri(services, installation)
+        capabilities = self.securitas.client.get_supported_commands(installation.number)
+        self._has_peri = detect_peri(installation, services, capabilities)
         self.config[CONF_HAS_PERI] = self._has_peri
         _LOGGER.debug(
             "Perimeter detected for %s: %s", installation.number, self._has_peri
         )
 
         return await self.async_step_options()
-
-    @staticmethod
-    def _detect_peri(services: list[Service], installation: Installation) -> bool:
-        """Detect perimeter support from service attributes or alarm partitions."""
-        # Check service attributes (e.g. SCH with PERI attribute — Spanish panels)
-        for svc in services:
-            attrs = svc.attributes
-            if isinstance(attrs, list):
-                for attr in attrs:
-                    if isinstance(attr, Attribute) and attr.name == "PERI":
-                        return True
-        # Check alarm partitions (e.g. SDVECU Italian panels)
-        # Partition "02" with non-empty enterStates indicates perimeter support
-        for partition in installation.alarm_partitions:
-            if partition.get("id") == "02" and partition.get("enterStates"):
-                return True
-        return False
 
     async def async_step_select_installation(
         self, user_input: dict[str, Any] | None = None
