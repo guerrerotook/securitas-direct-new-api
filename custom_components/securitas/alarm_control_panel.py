@@ -951,7 +951,61 @@ class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         return None
 
 
-class InteriorSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+class _AxisSubPanelMixin:
+    """Mixin that routes state updates through _extract_state(joint_state).
+
+    Sub-panels override _extract_state() to project the coordinator's joint
+    AlarmState onto a single axis.  The base-class _update_from_coordinator()
+    and update_status_alarm() use _status_map (the combined-panel user-mapping)
+    which is wrong for axis sub-panels.  This mixin replaces both paths.
+    """
+
+    def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
+        """Project the coordinator's joint state onto this panel's axis."""
+        status = data.status
+        if not status.status:
+            return
+        proto_code = status.status
+        if proto_code == PROTO_DISARMED or proto_code in PROTO_TO_STATE:
+            self._last_proto_code = proto_code  # type: ignore[attr-defined]
+        joint = self.coordinator.alarm_state  # type: ignore[attr-defined]
+        self._state = self._extract_state(joint)  # type: ignore[attr-defined]
+
+    def update_status_alarm(self, status: OperationStatus | None = None) -> None:  # type: ignore[override]
+        """Update state after an arm/disarm operation using the joint-state projection."""
+        if status is not None and hasattr(status, "message"):
+            self._message = status.message  # type: ignore[attr-defined]
+            self._attr_extra_state_attributes["message"] = status.message  # type: ignore[attr-defined]
+            self._attr_extra_state_attributes["response_data"] = (  # type: ignore[attr-defined]
+                status.protom_response_data
+            )
+
+            if not status.protom_response:
+                _LOGGER.debug(
+                    "[%s] Received empty protomResponse"
+                    " (operation_status: %s, message: %s, status: %s,"
+                    " protomResponseData: %s), ignoring",
+                    self.entity_id,  # type: ignore[attr-defined]
+                    status.operation_status,
+                    status.message,
+                    status.status,
+                    status.protom_response_data,
+                )
+                return
+            if (
+                status.protom_response == PROTO_DISARMED
+                or status.protom_response in PROTO_TO_ALARM_STATE
+            ):
+                self._last_proto_code = status.protom_response  # type: ignore[attr-defined]
+            # Derive the joint state from the proto response code, then project
+            # onto this axis.  The coordinator hasn't refreshed yet at this point,
+            # so we reconstruct the AlarmState from the proto code directly.
+            _default = self.coordinator.alarm_state  # type: ignore[attr-defined]
+            joint = PROTO_TO_ALARM_STATE.get(status.protom_response, _default)
+            self._state = self._extract_state(joint)  # type: ignore[attr-defined]
+
+
+class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
     """Sub-panel driving only the interior axis.
 
     Capabilities (ARMDAY, ARMNIGHT, ARM) gate which HA states are exposed.
@@ -966,7 +1020,6 @@ class InteriorSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"{self._attr_name} Interior"
-        self._attr_translation_key = "interior_subpanel"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
@@ -1022,7 +1075,7 @@ class InteriorSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         return mapping.get(joint_state.interior)
 
 
-class PerimeterSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
     """Sub-panel driving only the perimeter axis.
 
     Perimeter is binary (ON/OFF). The interior and annex axes are preserved
@@ -1036,7 +1089,6 @@ class PerimeterSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"{self._attr_name} Perimeter"
-        self._attr_translation_key = "perimeter_subpanel"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
@@ -1076,7 +1128,7 @@ class PerimeterSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         return mapping.get(joint_state.perimeter)
 
 
-class AnnexSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
     """Sub-panel driving only the annex axis.
 
     Annex is binary (ON/OFF). The interior and perimeter axes are preserved
@@ -1090,7 +1142,6 @@ class AnnexSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"{self._attr_name} Annex"
-        self._attr_translation_key = "annex_subpanel"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
