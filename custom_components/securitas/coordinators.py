@@ -19,6 +19,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
+from .securitas_direct_new_api.capabilities import detect_annex, detect_peri
 from .securitas_direct_new_api.client import SecuritasClient
 from .securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
@@ -116,9 +117,69 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._client = client
         self._queue = queue
         self._installation = installation
+        # Capability-detection state — populated lazily on first refresh
+        self._capabilities: frozenset[str] = frozenset()
+        self._has_peri: bool = False
+        self._has_annex: bool = False
+        self._capabilities_populated: bool = False
+
+    @property
+    def has_peri(self) -> bool:
+        """Return True if perimeter mode is supported."""
+        return self._has_peri
+
+    @property
+    def has_annex(self) -> bool:
+        """Return True if annex mode is supported."""
+        return self._has_annex
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        """Return the supported command capability set."""
+        return self._capabilities
+
+    def populate_capabilities_from_data(
+        self,
+        services: list,
+        capabilities: frozenset[str],
+    ) -> None:
+        """Populate capability fields from already-fetched data.
+
+        Called from async_setup_entry where services and capabilities are
+        already in hand, avoiding a redundant API call during first refresh.
+        Marks the coordinator as populated so _populate_capabilities is a no-op.
+        """
+        if self._capabilities_populated:
+            return
+        self._capabilities = capabilities
+        self._has_peri = detect_peri(self._installation, services, capabilities)
+        self._has_annex = detect_annex(capabilities)
+        self._capabilities_populated = True
+
+    async def _populate_capabilities(self) -> None:
+        """Detect peri/annex via API.  Runs once per coordinator lifetime.
+
+        This is a fallback path for cases where populate_capabilities_from_data
+        was not called (e.g. unit tests that construct the coordinator directly).
+        In normal operation, async_setup_entry calls populate_capabilities_from_data
+        before any refresh, so this method is a no-op.
+        """
+        if self._capabilities_populated:
+            return
+        try:
+            services = await self._client.get_services(self._installation)
+        except SecuritasDirectError:
+            services = []
+        self._capabilities = self._client.get_supported_commands(
+            self._installation.number
+        )
+        self._has_peri = detect_peri(self._installation, services, self._capabilities)
+        self._has_annex = detect_annex(self._capabilities)
+        self._capabilities_populated = True
 
     async def _async_update_data(self) -> AlarmStatusData:
         """Fetch alarm status via the API queue."""
+        await self._populate_capabilities()
         try:
             status = await self._queue.submit(
                 self._client.get_general_status,

@@ -29,7 +29,6 @@ from custom_components.securitas import (
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
-    CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     CONF_FORCE_ARM_NOTIFICATIONS,
     DOMAIN,
@@ -270,7 +269,6 @@ class TestSecuritasHub:
                 CONF_DELAY_CHECK_OPERATION: 2,
                 CONF_SCAN_INTERVAL: 120,
                 CONF_CODE: "",
-                CONF_HAS_PERI: False,
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
@@ -837,7 +835,6 @@ class TestValidateAndStoreImage:
                 CONF_DELAY_CHECK_OPERATION: 2,
                 CONF_SCAN_INTERVAL: 120,
                 CONF_CODE: "",
-                CONF_HAS_PERI: False,
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
@@ -930,7 +927,6 @@ class TestAsyncUpdateOptions:
                 CONF_CODE: data[CONF_CODE],
                 CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
                 CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
-                CONF_HAS_PERI: data.get(CONF_HAS_PERI, False),
                 CONF_MAP_HOME: data[CONF_MAP_HOME],
                 CONF_MAP_AWAY: data[CONF_MAP_AWAY],
                 CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],

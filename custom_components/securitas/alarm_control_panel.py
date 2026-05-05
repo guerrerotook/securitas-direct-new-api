@@ -25,7 +25,6 @@ from homeassistant.exceptions import ServiceValidationError
 from . import (
     CONF_CODE_ARM_REQUIRED,
     CONF_FORCE_ARM_NOTIFICATIONS,
-    CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -134,9 +133,13 @@ class SecuritasAlarm(  # type: ignore[override]
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}
         self.hass: HomeAssistant = hass
-        self._has_peri = self._client.config.get(CONF_HAS_PERI, False)
+        self._has_peri = coordinator.has_peri
+        self._has_annex = coordinator.has_annex
         self._last_proto_code: str | None = None
-        self._resolver = CommandResolver(has_peri=self._has_peri)
+        self._resolver = CommandResolver(
+            has_peri=self._has_peri,
+            has_annex=self._has_annex,
+        )
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state

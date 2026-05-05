@@ -33,7 +33,6 @@ from . import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
-    CONF_HAS_PERI,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -566,7 +565,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         capabilities = self.securitas.client.get_supported_commands(installation.number)
         self._has_peri = detect_peri(installation, services, capabilities)
-        self.config[CONF_HAS_PERI] = self._has_peri
         _LOGGER.debug(
             "Perimeter detected for %s: %s", installation.number, self._has_peri
         )
@@ -749,7 +747,13 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             data = {**self._general_data, **user_input}
             return self.async_create_entry(title="", data=data)
 
-        has_peri = self.config_entry.data.get(CONF_HAS_PERI, False)
+        # Read has_peri from the running coordinator (live detection).
+        # Falls back to False if the coordinator is unavailable.
+        coordinator_data = self.hass.data.get(DOMAIN, {}).get(
+            self.config_entry.entry_id, {}
+        )
+        coordinator = coordinator_data.get("alarm_coordinator")
+        has_peri = coordinator.has_peri if coordinator is not None else False
 
         # Determine defaults for mapping dropdowns
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS

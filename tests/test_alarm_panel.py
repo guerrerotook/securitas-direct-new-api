@@ -63,7 +63,7 @@ class TestForceArmNotificationsConfig:
         """force_arm_notifications=False is passed through config."""
         alarm = make_alarm(
             config={
-                "has_peri": False,
+
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
@@ -260,7 +260,6 @@ def make_alarm(
     if config is None:
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
         config = {
-            "has_peri": has_peri,
             "map_home": defaults["map_home"],
             "map_away": defaults["map_away"],
             "map_night": defaults["map_night"],
@@ -285,6 +284,8 @@ def make_alarm(
     coordinator = MagicMock(spec=AlarmCoordinator)
     coordinator.data = None
     coordinator.async_request_refresh = AsyncMock()
+    coordinator.has_peri = has_peri
+    coordinator.has_annex = False
 
     if initial_status is None:
         initial_status = OperationStatus(
@@ -3088,7 +3089,7 @@ class TestAsyncAddedToHass:
         """async_added_to_hass registers no listeners when notifications disabled."""
         alarm = make_alarm(
             config={
-                "has_peri": False,
+
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],

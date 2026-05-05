@@ -569,3 +569,141 @@ class TestCameraCoordinator:
         coord = self._make_coordinator(hass, client, queue, installation, cameras)
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
+
+
+# ── TestCoordinatorCapabilities ──────────────────────────────────────────────
+
+
+class TestCoordinatorCapabilities:
+    """AlarmCoordinator exposes has_peri / has_annex / capabilities to entities."""
+
+    def _make_coordinator(
+        self,
+        hass: MagicMock,
+        client: AsyncMock,
+        queue: AsyncMock,
+        installation: Installation,
+    ) -> AlarmCoordinator:
+        return AlarmCoordinator(
+            hass,
+            client,
+            queue,
+            installation,
+            update_interval=timedelta(seconds=30),
+        )
+
+    def test_has_peri_starts_false(self):
+        """has_peri property defaults to False before first refresh."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        assert coord.has_peri is False
+
+    def test_has_annex_starts_false(self):
+        """has_annex property defaults to False before first refresh."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        assert coord.has_annex is False
+
+    def test_capabilities_starts_empty(self):
+        """capabilities property defaults to empty frozenset before first refresh."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        assert coord.capabilities == frozenset()
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_sets_has_peri_from_service_attribute(self):
+        """_populate_capabilities sets has_peri=True when services include PERI attr."""
+        from unittest.mock import MagicMock as _MM
+
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            Attribute,
+        )
+
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        installation.alarm_partitions = []
+
+        peri_svc = _MM()
+        peri_svc.attributes = [Attribute(name="PERI", value="PERIMETRAL")]
+        peri_svc.request = "SCH"
+        peri_svc.active = False
+
+        client.get_services = AsyncMock(return_value=[peri_svc])
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+
+        assert coord.has_peri is True
+        assert coord.has_annex is False
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_sets_has_annex_from_capabilities(self):
+        """_populate_capabilities sets has_annex=True when ARMANNEX+DARMANNEX present."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(
+            return_value=frozenset({"ARMANNEX", "DARMANNEX"})
+        )
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+
+        assert coord.has_annex is True
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_only_runs_once(self):
+        """_populate_capabilities is idempotent — second call is a no-op."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+        await coord._populate_capabilities()
+
+        # get_services should have been called exactly once
+        client.get_services.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_survives_api_error(self):
+        """_populate_capabilities does not raise when get_services fails."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_services = AsyncMock(
+            side_effect=SecuritasDirectError("service fetch failed")
+        )
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        # Should not raise
+        await coord._populate_capabilities()
+
+        assert coord.has_peri is False
+        assert coord.has_annex is False
+        assert coord._capabilities_populated is True
