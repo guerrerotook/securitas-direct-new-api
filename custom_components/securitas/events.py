@@ -69,12 +69,15 @@ async def resolve_ha_user(hass: HomeAssistant, context: Context | None) -> str:
     person clicked a button or called a service).  For automation/script-driven
     calls or missing context, returns ``_HA_USER``.
     """
-    if context is None or not getattr(context, "user_id", None):
+    if context is None:
         return _HA_USER
-    user = await hass.auth.async_get_user(context.user_id)
+    user_id = context.user_id
+    if not user_id:
+        return _HA_USER
+    user = await hass.auth.async_get_user(user_id)
     if user is None:
         return _HA_USER
-    return user.name
+    return user.name or _HA_USER
 
 
 def make_synthetic_event(

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from collections.abc import Callable
 from datetime import timedelta
 import logging
 from pathlib import Path
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
