@@ -335,3 +335,21 @@ class TestPeriDefaults:
     def test_night_mapping_is_same_as_std(self):
         """map_night uses partial_night in both STD and PERI defaults."""
         assert PERI_DEFAULTS["map_night"] == STD_DEFAULTS["map_night"]
+
+
+# ── SubPanel Configuration Constants ─────────────────────────────────────────
+
+
+class TestSubPanelConstants:
+    """Tests for sub-panel toggle configuration constants."""
+
+    def test_constants_present(self):
+        from custom_components.securitas.const import (
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
+        )
+
+        assert CONF_ENABLE_INTERIOR_PANEL == "enable_interior_panel"
+        assert CONF_ENABLE_PERIMETER_PANEL == "enable_perimeter_panel"
+        assert CONF_ENABLE_ANNEX_PANEL == "enable_annex_panel"
