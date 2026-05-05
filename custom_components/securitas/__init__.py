@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from collections.abc import Callable
 from datetime import timedelta
 import logging
 from pathlib import Path
@@ -72,7 +71,6 @@ from .coordinators import (
     LockCoordinator,
     SentinelCoordinator,
 )
-from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     SecuritasDirectDevice,
     SecuritasHub,
@@ -441,7 +439,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sentinel_coord: SentinelCoordinator | None = None
         lock_coord: LockCoordinator | None = None
         activity_coord: ActivityCoordinator | None = None
-        activity_listener_unsub: Callable[[], None] | None = None
 
         # Use the first installation for shared coordinators.
         # (Each config entry is scoped to one installation via CONF_INSTALLATION.)
@@ -462,9 +459,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 client.api_queue,
                 first_installation,
                 config_entry=entry,
-            )
-            activity_listener_unsub = attach_activity_listener(
-                hass, activity_coord, first_installation.number
             )
 
             # Discover sentinel and lock services from cached service list
@@ -508,13 +502,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "sentinel_coordinator": sentinel_coord,
             "lock_coordinator": lock_coord,
             "activity_coordinator": activity_coord,
-            "activity_listener_unsub": activity_listener_unsub,
         }
 
-        # Schedule non-blocking first refresh for each coordinator
-        for coord in filter(
-            None, [alarm_coord, sentinel_coord, lock_coord, activity_coord]
-        ):
+        # Schedule non-blocking first refresh for each coordinator.
+        # ActivityCoordinator is intentionally excluded — its first refresh
+        # is triggered by ActivityLogSensor.async_added_to_hass, which also
+        # attaches the bus-firing listener.  This keeps the periodic refresh
+        # timer tied to the sensor's lifetime rather than the integration's.
+        for coord in filter(None, [alarm_coord, sentinel_coord, lock_coord]):
             entry.async_create_background_task(
                 hass,
                 coord.async_refresh(),
@@ -832,11 +827,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS
     )
-
-    entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
-    activity_unsub = entry_data.get("activity_listener_unsub")
-    if callable(activity_unsub):
-        activity_unsub()
 
     # Decrement shared session ref count (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
