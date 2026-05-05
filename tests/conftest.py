@@ -247,6 +247,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     """Create a MagicMock mimicking SecuritasHub."""
     hub = MagicMock(spec=SecuritasHub)
     hub.client = AsyncMock()
+    hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
     hub.lang = "es"
     hub.config = {}
