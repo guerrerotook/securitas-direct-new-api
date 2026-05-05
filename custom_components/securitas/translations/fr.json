@@ -88,7 +88,10 @@
                     "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
                     "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
                     "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
+                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
+                    "enable_interior_panel": "Activer le sous-panneau Intérieur",
+                    "enable_perimeter_panel": "Activer le sous-panneau Périmètre",
+                    "enable_annex_panel": "Activer le sous-panneau Annexe"
                 },
                 "sections": {
                     "advanced": {
@@ -121,6 +124,13 @@
         "force_arm_cancel": {
             "name": "Annuler l'armement forcé",
             "description": "Annuler un armement forcé en attente et fermer la notification d'exception d'armement."
+        }
+    },
+    "entity": {
+        "alarm_control_panel": {
+            "interior_subpanel": { "name": "Intérieur" },
+            "perimeter_subpanel": { "name": "Périmètre" },
+            "annex_subpanel": { "name": "Annexe" }
         }
     },
     "exceptions": {

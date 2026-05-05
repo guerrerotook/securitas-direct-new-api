@@ -88,7 +88,10 @@
                     "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
                     "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
                     "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)"
+                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
+                    "enable_interior_panel": "Activar el subpanell Interior",
+                    "enable_perimeter_panel": "Activar el subpanell Perímetre",
+                    "enable_annex_panel": "Activar el subpanell Annex"
                 },
                 "sections": {
                     "advanced": {
@@ -121,6 +124,13 @@
         "force_arm_cancel": {
             "name": "Cancel·la l'armat forçat",
             "description": "Cancel·la un armat forçat pendent i descarta la notificació d'excepció d'armat."
+        }
+    },
+    "entity": {
+        "alarm_control_panel": {
+            "interior_subpanel": { "name": "Interior" },
+            "perimeter_subpanel": { "name": "Perímetre" },
+            "annex_subpanel": { "name": "Annex" }
         }
     },
     "exceptions": {
