@@ -93,11 +93,37 @@ class TestProtoCode:
         assert ProtoCode.TOTAL == "T"
         assert ProtoCode.TOTAL_PERIMETER == "A"
 
-    def test_eight_members(self):
-        assert len(ProtoCode) == 8
+    def test_twelve_members(self):
+        assert len(ProtoCode) == 12
 
     def test_is_str(self):
         assert isinstance(ProtoCode.DISARMED, str)
+
+
+class TestProtoCodeAnnex:
+    def test_new_codes_present(self):
+        assert ProtoCode("X") == ProtoCode.ANNEX_ONLY
+        assert ProtoCode("R") == ProtoCode.PARTIAL_DAY_ANNEX
+        assert ProtoCode("S") == ProtoCode.PARTIAL_NIGHT_ANNEX
+        assert ProtoCode("O") == ProtoCode.TOTAL_ANNEX
+
+    def test_proto_to_state_maps_annex_codes(self):
+        s = PROTO_TO_STATE[ProtoCode.ANNEX_ONLY]
+        assert s.annex == AnnexMode.ON
+        assert s.interior == InteriorMode.OFF
+        assert s.perimeter == PerimeterMode.OFF
+
+        s = PROTO_TO_STATE[ProtoCode.PARTIAL_DAY_ANNEX]
+        assert s.interior == InteriorMode.DAY
+        assert s.annex == AnnexMode.ON
+
+        s = PROTO_TO_STATE[ProtoCode.PARTIAL_NIGHT_ANNEX]
+        assert s.interior == InteriorMode.NIGHT
+        assert s.annex == AnnexMode.ON
+
+        s = PROTO_TO_STATE[ProtoCode.TOTAL_ANNEX]
+        assert s.interior == InteriorMode.TOTAL
+        assert s.annex == AnnexMode.ON
 
 
 class TestArmCommand:
@@ -209,8 +235,8 @@ class TestAlarmStateAnnex:
 
 
 class TestProtoToState:
-    def test_has_eight_entries(self):
-        assert len(PROTO_TO_STATE) == 8
+    def test_has_twelve_entries(self):
+        assert len(PROTO_TO_STATE) == 12
 
     def test_all_proto_codes_mapped(self):
         for code in ProtoCode:
@@ -258,8 +284,8 @@ class TestProtoToState:
 
 
 class TestStateToProto:
-    def test_has_eight_entries(self):
-        assert len(STATE_TO_PROTO) == 8
+    def test_has_twelve_entries(self):
+        assert len(STATE_TO_PROTO) == 12
 
     def test_is_reverse_of_proto_to_state(self):
         for code, state in PROTO_TO_STATE.items():
@@ -272,8 +298,24 @@ class TestStateToProto:
 
 
 class TestStateToCommand:
-    def test_every_state_has_command(self):
-        for state in PROTO_TO_STATE.values():
+    def test_non_annex_states_have_commands(self):
+        """The original 8 states (without annex) must have commands.
+
+        The 4 annex states (X/R/S/O) do not have command entries because
+        annex commands are handled separately by the resolver in later tasks.
+        """
+        non_annex_codes = {
+            ProtoCode.DISARMED,
+            ProtoCode.PERIMETER_ONLY,
+            ProtoCode.PARTIAL_DAY,
+            ProtoCode.PARTIAL_NIGHT,
+            ProtoCode.PARTIAL_DAY_PERIMETER,
+            ProtoCode.PARTIAL_NIGHT_PERIMETER,
+            ProtoCode.TOTAL,
+            ProtoCode.TOTAL_PERIMETER,
+        }
+        for code in non_annex_codes:
+            state = PROTO_TO_STATE[code]
             assert state in STATE_TO_COMMAND, f"{state} not in STATE_TO_COMMAND"
 
     def test_disarmed_state_maps_to_disarm(self):
@@ -331,8 +373,8 @@ class TestParseProtoCode:
 
     def test_invalid_code_raises_unexpected_state_error(self):
         with pytest.raises(UnexpectedStateError) as exc_info:
-            parse_proto_code("X")
-        assert exc_info.value.proto_code == "X"
+            parse_proto_code("Z")
+        assert exc_info.value.proto_code == "Z"
 
     def test_empty_string_raises_unexpected_state_error(self):
         with pytest.raises(UnexpectedStateError):
