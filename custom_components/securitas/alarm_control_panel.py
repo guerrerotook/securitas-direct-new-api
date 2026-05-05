@@ -523,12 +523,13 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
                     )
                 )
 
-    def _mode_to_alarm_state(self, mode: str) -> AlarmState:
-        """Convert an HA alarm mode to an AlarmState using the securitas state map."""
-        securitas_state = self._securitas_state_map.get(mode)
-        if securitas_state is None:
-            raise SecuritasDirectError(f"Unsupported alarm mode: {mode}")
-        return SECURITAS_STATE_TO_ALARM_STATE[securitas_state]
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Override in each subclass: map an HA state name to a target AlarmState."""
+        raise NotImplementedError
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """Override in each subclass: pick the HA state to display for this axis."""
+        raise NotImplementedError
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
@@ -577,7 +578,7 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
             force_params["suid"] = suid
 
         try:
-            target = self._mode_to_alarm_state(mode)
+            target = self._resolve_target_state(mode)
             result = await self._execute_transition(target, **force_params)
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
@@ -883,6 +884,23 @@ class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
     Inherits all behavior from the base. Sub-panels (Interior, Perimeter,
     Annex) come in subsequent tasks.
     """
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Convert an HA alarm mode to an AlarmState using the securitas state map."""
+        securitas_state = self._securitas_state_map.get(ha_state)
+        if securitas_state is None:
+            raise SecuritasDirectError(f"Unsupported alarm mode: {ha_state}")
+        return SECURITAS_STATE_TO_ALARM_STATE[securitas_state]
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """For the combined panel, map joint state back to HA via user mappings."""
+        for ha_state, sec_state in self._securitas_state_map.items():
+            if SECURITAS_STATE_TO_ALARM_STATE.get(sec_state) == joint_state:
+                try:
+                    return AlarmControlPanelState(ha_state)
+                except ValueError:
+                    return None
+        return None
 
 
 # Backwards-compat alias for tests and any external imports.
