@@ -10,7 +10,6 @@ from custom_components.securitas import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
-    CONF_HAS_PERI,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -754,13 +753,21 @@ async def test_options_mappings_std_options_when_peri_false(hass):
 
 
 async def test_options_mappings_peri_options_when_peri_true(hass):
-    """Mappings step shows PERI options when has_peri is True."""
+    """Mappings step shows PERI options when coordinator has_peri is True."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=make_config_entry_data(has_peri=True),
         options={},
     )
     entry.add_to_hass(hass)
+
+    # Inject a mock coordinator reporting has_peri=True into hass.data so the
+    # options flow can read capability detection results at runtime.
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
 
     flow_id = await _advance_to_mappings(hass, entry)
     result = await hass.config_entries.options.async_configure(
@@ -1225,7 +1232,7 @@ async def test_existing_session_wrong_password_does_fresh_login(hass):
 
 
 async def test_peri_detected_from_service_attributes(hass):
-    """When a service has a PERI attribute, CONF_HAS_PERI should be True."""
+    """When a service has a PERI attribute, PERI mappings are offered (not stored in entry data)."""
     mock_hub = _hub_factory()
 
     async def _get_services_with_peri_attr(installation, **kwargs):
@@ -1242,17 +1249,19 @@ async def test_peri_detected_from_service_attributes(hass):
     result = await _complete_full_flow(hass, mock_hub)
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_HAS_PERI] is True
+    # CONF_HAS_PERI is no longer stored in entry data — capability detection is runtime-only.
+    assert "has_peri" not in result["data"]
 
 
 async def test_no_peri_when_no_peri_service_attribute(hass):
-    """When no service has a PERI attribute, CONF_HAS_PERI should be False."""
+    """When no service has a PERI attribute, STD mappings are offered (not stored in entry data)."""
     mock_hub = _hub_factory()
 
     result = await _complete_full_flow(hass, mock_hub)
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_HAS_PERI] is False
+    # CONF_HAS_PERI is no longer stored in entry data — capability detection is runtime-only.
+    assert "has_peri" not in result["data"]
 
 
 # ===================================================================

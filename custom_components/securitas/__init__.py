@@ -41,7 +41,6 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
-    CONF_HAS_PERI,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -177,7 +176,6 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
     config[CONF_CODE] = _opt(CONF_CODE, DEFAULT_CODE)
-    config[CONF_HAS_PERI] = entry.data.get(CONF_HAS_PERI, False)
     config[CONF_CODE_ARM_REQUIRED] = _opt(
         CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
     )
@@ -451,6 +449,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 services = await client.get_services(first_installation)
             except SecuritasDirectError:
                 services = []
+
+            # Pre-populate capability detection from already-fetched data so
+            # the coordinator's first refresh doesn't make a redundant API call.
+            if alarm_coord is not None:
+                capabilities = client.client.get_supported_commands(
+                    first_installation.number
+                )
+                alarm_coord.populate_capabilities_from_data(services, capabilities)
 
             # Sentinel coordinator — needs a sentinel service and its zone
             for service in services:
