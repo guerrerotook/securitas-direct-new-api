@@ -1,8 +1,8 @@
 """Command resolver for Securitas alarm state transitions.
 
-Models alarm state as two independent axes (interior mode + perimeter)
-and resolves transitions into command sequences with runtime fallback
-discovery.
+Models alarm state as three independent axes (interior mode + perimeter
++ annex) and resolves transitions into command sequences with runtime
+fallback discovery.
 """
 
 from __future__ import annotations
