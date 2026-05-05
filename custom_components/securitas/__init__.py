@@ -49,6 +49,9 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
     CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+    CONF_ENABLE_ANNEX_PANEL,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
@@ -136,6 +139,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_MAP_VACATION,
             CONF_NOTIFY_GROUP,
             CONF_FORCE_ARM_NOTIFICATIONS,
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
         )
     ):
         # update entry replacing data with new options
