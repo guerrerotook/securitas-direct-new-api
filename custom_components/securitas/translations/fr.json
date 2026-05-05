@@ -126,13 +126,6 @@
             "description": "Annuler un armement forcé en attente et fermer la notification d'exception d'armement."
         }
     },
-    "entity": {
-        "alarm_control_panel": {
-            "interior_subpanel": { "name": "Intérieur" },
-            "perimeter_subpanel": { "name": "Périmètre" },
-            "annex_subpanel": { "name": "Annexe" }
-        }
-    },
     "exceptions": {
         "invalid_pin_code": {
             "message": "Code PIN non valide pour {entity_id}"
