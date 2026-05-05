@@ -1,11 +1,12 @@
 {
-  "description": "Italian SDVECU installation with partial-only interior + perimeter (via alarmPartitions, NOT via JWT)",
+  "description": "Italian SDVECU RESTRICTED login (sub-user with no SCH/BILLS/etc). JWT cap claim is unreliable for arming: lists ARMNIGHT but panel rejects ARMNIGHT1; omits ARMDAY but panel accepts ARMDAY1. See italy_owner_partial_only.json for the OWNER-login counterpart and panel_truth section.",
   "panel": "SDVECU",
   "country": "IT",
   "scenario_notes": [
-    "Partial-only: ARMNIGHT in caps, ARMDAY absent. The single 'partial' UI button maps to ARMNIGHT1.",
-    "Has perimeter, but JWT does NOT advertise PERI capability — peri must be detected via alarmPartitions[id='02'] with non-empty enterStates.",
-    "This is the case that forces _detect_peri to remain in the codebase: JWT-only peri detection would yield a false negative here."
+    "RESTRICTED-role login (sub-user); arming-relevant cap subset is identical to OWNER for this panel.",
+    "Has perimeter, but JWT does NOT advertise PERI capability — peri must be detected via alarmPartitions[id='02'] with non-empty enterStates (RESTRICTED users don't see the SCH service).",
+    "This is the case that forces _detect_peri to retain the alarmPartitions branch: JWT-only peri detection yields a false negative here.",
+    "The single 'partial' UI button on the Italian web app issues ARMDAY1 — even though ARMDAY is absent from cap. The cap claim is NOT an authoritative oracle for command acceptance; the Interior sub-panel must therefore expose all interior modes."
   ],
   "decoded_jwt_body": {
     "exp": 1777970579,

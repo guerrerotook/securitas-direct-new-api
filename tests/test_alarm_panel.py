@@ -3573,25 +3573,27 @@ def _make_perimeter_panel(
 
 
 class TestInteriorSubPanel:
-    def test_supported_features_full_caps(self):
-        from homeassistant.components.alarm_control_panel import (
-            AlarmControlPanelEntityFeature as F,
-        )
-        panel = _make_interior_panel(capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]))
-        feats = panel.supported_features
-        assert feats & F.ARM_HOME
-        assert feats & F.ARM_NIGHT
-        assert feats & F.ARM_AWAY
+    def test_supported_features_always_all_three(self):
+        """Interior sub-panel always exposes ARM_HOME + ARM_NIGHT + ARM_AWAY.
 
-    def test_supported_features_italian_partial_only(self):
+        We deliberately do not gate on JWT capabilities: the cap set is
+        empirically unreliable (e.g. Italian SDVECU advertises ARMNIGHT but
+        the panel rejects ARMNIGHT1 and accepts the un-advertised ARMDAY1).
+        """
         from homeassistant.components.alarm_control_panel import (
             AlarmControlPanelEntityFeature as F,
         )
-        panel = _make_interior_panel(capabilities=frozenset(["ARM", "ARMNIGHT"]))
-        feats = panel.supported_features
-        assert not (feats & F.ARM_HOME)
-        assert feats & F.ARM_NIGHT
-        assert feats & F.ARM_AWAY
+        for caps in (
+            frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            frozenset(["ARM", "ARMNIGHT"]),
+            frozenset(["ARM"]),
+            frozenset(),
+        ):
+            panel = _make_interior_panel(capabilities=caps)
+            feats = panel.supported_features
+            assert feats & F.ARM_HOME, f"ARM_HOME missing for caps={caps}"
+            assert feats & F.ARM_NIGHT, f"ARM_NIGHT missing for caps={caps}"
+            assert feats & F.ARM_AWAY, f"ARM_AWAY missing for caps={caps}"
 
     def test_resolve_target_state_armed_away(self):
         from custom_components.securitas.securitas_direct_new_api.models import (
