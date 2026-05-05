@@ -998,9 +998,7 @@ class InteriorSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""
         from .securitas_direct_new_api.models import (
-            AnnexMode,
             InteriorMode,
-            PerimeterMode,
         )
 
         interior_target_map = {

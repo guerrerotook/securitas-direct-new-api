@@ -64,12 +64,10 @@ from .securitas_direct_new_api import (
     STD_DEFAULTS,
     STD_OPTIONS,
     AccountBlockedError,
-    Attribute,
     AuthenticationError,
     Installation,
     OtpPhone,
     SecuritasDirectError,
-    Service,
     TwoFactorRequiredError,
 )
 from .securitas_direct_new_api.capabilities import detect_peri
