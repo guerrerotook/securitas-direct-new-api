@@ -49,6 +49,12 @@ class ProtoCode(StrEnum):
     PARTIAL_NIGHT_PERIMETER = "C"
     TOTAL = "T"
     TOTAL_PERIMETER = "A"
+    # Annex variants (interior + annex, no peri). The 8 perimeter+annex
+    # combinations are not yet known and fall through to Custom Override.
+    ANNEX_ONLY = "X"
+    PARTIAL_DAY_ANNEX = "R"
+    PARTIAL_NIGHT_ANNEX = "S"
+    TOTAL_ANNEX = "O"
 
 
 class ArmCommand(StrEnum):
@@ -130,6 +136,18 @@ PROTO_TO_STATE: dict[ProtoCode, AlarmState] = {
     ),
     ProtoCode.TOTAL_PERIMETER: AlarmState(
         interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON
+    ),
+    ProtoCode.ANNEX_ONLY: AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
+    ),
+    ProtoCode.PARTIAL_DAY_ANNEX: AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
+    ),
+    ProtoCode.PARTIAL_NIGHT_ANNEX: AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
+    ),
+    ProtoCode.TOTAL_ANNEX: AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
     ),
 }
 

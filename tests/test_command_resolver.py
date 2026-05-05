@@ -17,7 +17,7 @@ class TestAlarmState:
 
     def test_all_proto_codes_mapped(self):
         """Every known proto code maps to an AlarmState."""
-        expected_protos = {"D", "P", "Q", "T", "E", "B", "C", "A"}
+        expected_protos = {"D", "P", "Q", "T", "E", "B", "C", "A", "X", "R", "S", "O"}
         assert set(PROTO_TO_ALARM_STATE.keys()) == expected_protos
 
     def test_bidirectional_mapping(self):
