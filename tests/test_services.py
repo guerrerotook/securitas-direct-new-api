@@ -309,6 +309,80 @@ class TestGetAllServices:
 
         assert result == []
 
+    async def test_cap_lookup_uses_installation_number_not_first_entry(
+        self, authed_api, mock_execute
+    ):
+        """JWT cap extraction uses the matching 'ins' field, not installations[0].
+
+        When a JWT contains multiple installation entries, get_services must pick
+        the entry whose 'ins' field matches installation.number.  Previously the
+        code always read installations[0], which would return the wrong cap set
+        for the second (or later) installation.
+        """
+        # Build an installation whose number is "222222"
+        installation_b = Installation(
+            number="222222", alias="Office", panel="SDVFAST", type="PLUS"
+        )
+
+        caps_for_home = ["ARM", "ARMDAY", "ARMNIGHT", "PERI"]
+        caps_for_office = ["ARM", "ARMANNEX", "DARMANNEX"]
+
+        multi_install_jwt = make_jwt(
+            exp_minutes=60,
+            installations=[
+                {"ins": "111111", "cap": caps_for_home},
+                {"ins": "222222", "cap": caps_for_office},
+            ],
+        )
+        mock_execute.return_value = {
+            "data": {
+                "xSSrv": {
+                    "installation": {
+                        "services": [],
+                        "capabilities": multi_install_jwt,
+                    }
+                }
+            }
+        }
+
+        await authed_api.get_services(installation_b)
+
+        cap_entry = authed_api._capabilities.get(installation_b.number)
+        assert cap_entry is not None
+        # Must be the cap set for "222222", not "111111"
+        assert cap_entry[2] == frozenset(caps_for_office)
+
+    async def test_cap_lookup_falls_back_to_empty_when_no_match(
+        self, authed_api, mock_execute
+    ):
+        """When no JWT installation entry matches, cap_set falls back to empty frozenset."""
+        installation_x = Installation(
+            number="999999", alias="Unknown", panel="SDVFAST", type="PLUS"
+        )
+
+        no_match_jwt = make_jwt(
+            exp_minutes=60,
+            installations=[
+                {"ins": "111111", "cap": ["ARM", "PERI"]},
+            ],
+        )
+        mock_execute.return_value = {
+            "data": {
+                "xSSrv": {
+                    "installation": {
+                        "services": [],
+                        "capabilities": no_match_jwt,
+                    }
+                }
+            }
+        }
+
+        await authed_api.get_services(installation_x)
+
+        cap_entry = authed_api._capabilities.get(installation_x.number)
+        assert cap_entry is not None
+        assert cap_entry[2] == frozenset()
+
 
 # ── get_sentinel_data() ───────────────────────────────────────────────────────
 

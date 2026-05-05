@@ -1738,13 +1738,28 @@ class SecuritasClient:
         if "exp" in token:
             expiry = datetime.fromtimestamp(token["exp"])
 
-        # Extract cap set from the first installation entry (matches the
-        # structure observed in production JWTs)
+        # Find the installation entry whose 'ins' field matches the requested
+        # installation number.  Multi-installation accounts receive a JWT with
+        # one entry per installation; always pick by 'ins', not by index.
         cap_set: frozenset[str] = frozenset()
-        installations = token.get("installations") or []
-        if installations:
-            cap_list = installations[0].get("cap") or []
-            cap_set = frozenset(cap_list)
+        jwt_installations = token.get("installations") or []
+        matched = next(
+            (
+                entry
+                for entry in jwt_installations
+                if str(entry.get("ins", "")) == str(installation.number)
+            ),
+            None,
+        )
+        if matched is not None:
+            cap_set = frozenset(matched.get("cap") or [])
+        elif jwt_installations:
+            _LOGGER.warning(
+                "JWT capabilities token contains no entry for installation %s;"
+                " capability set will be empty. Entries present: %s",
+                installation.number,
+                [entry.get("ins") for entry in jwt_installations],
+            )
 
         self._capabilities[installation.number] = (capabilities, expiry, cap_set)
 
