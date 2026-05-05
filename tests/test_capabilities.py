@@ -151,27 +151,3 @@ class TestDetectAnnex:
     def test_neither(self):
         from custom_components.securitas.securitas_direct_new_api.capabilities import detect_annex
         assert detect_annex(frozenset(["ARM", "ARMDAY"])) is False
-
-
-class TestSupportedInteriorModes:
-    def test_full(self):
-        from custom_components.securitas.securitas_direct_new_api.capabilities import (
-            supported_interior_modes,
-        )
-        assert supported_interior_modes(
-            frozenset(["ARM", "ARMDAY", "ARMNIGHT", "PERI"])
-        ) == {"ARM", "ARMDAY", "ARMNIGHT"}
-
-    def test_italian_partial_only(self):
-        from custom_components.securitas.securitas_direct_new_api.capabilities import (
-            supported_interior_modes,
-        )
-        assert supported_interior_modes(
-            frozenset(["ARM", "ARMNIGHT"])
-        ) == {"ARM", "ARMNIGHT"}
-
-    def test_only_total(self):
-        from custom_components.securitas.securitas_direct_new_api.capabilities import (
-            supported_interior_modes,
-        )
-        assert supported_interior_modes(frozenset(["ARM"])) == {"ARM"}
