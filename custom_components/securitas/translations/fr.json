@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Associer chaque action d'alarme Home Assistant à un mode d'alarme Securitas. Sélectionner « Non utilisé » pour désactiver un bouton.",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Securitas ; sélectionnez « Non utilisé » pour désactiver un bouton. Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement contrôlent chacun un seul axe directement et n'utilisent pas ces associations.",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",
@@ -88,7 +88,10 @@
                     "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
                     "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
                     "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
+                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
+                    "enable_interior_panel": "Activer le panneau de contrôle Intérieur uniquement",
+                    "enable_perimeter_panel": "Activer le panneau de contrôle Périmètre uniquement",
+                    "enable_annex_panel": "Activer le panneau de contrôle Annexe uniquement"
                 },
                 "sections": {
                     "advanced": {
@@ -102,7 +105,7 @@
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Associer chaque action d'alarme Home Assistant à un mode d'alarme Securitas. Sélectionner « Non utilisé » pour désactiver un bouton.",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Securitas ; sélectionnez « Non utilisé » pour désactiver un bouton. Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement contrôlent chacun un seul axe directement et n'utilisent pas ces associations.",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",
@@ -128,7 +131,7 @@
             "message": "Code PIN non valide pour {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "Ce mode d'alarme n'est pas pris en charge par votre panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."
+            "message": "Ce mode d'alarme n'est pas pris en charge par votre panneau (rejeté : {tried}). Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."
         },
         "no_supported_command": {
             "message": "Aucune commande compatible trouvée pour ce panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Securitas → Configurer)."

@@ -19,7 +19,14 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
+from .securitas_direct_new_api.capabilities import detect_annex, detect_peri
 from .securitas_direct_new_api.client import SecuritasClient
+from .securitas_direct_new_api.command_resolver import (
+    PROTO_TO_ALARM_STATE,
+    AlarmState,
+    InteriorMode,
+    PerimeterMode,
+)
 from .securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
     SessionExpiredError,
@@ -116,9 +123,98 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._client = client
         self._queue = queue
         self._installation = installation
+        # Capability-detection state — populated lazily on first refresh
+        self._capabilities: frozenset[str] = frozenset()
+        self._has_peri: bool = False
+        self._has_annex: bool = False
+        self._capabilities_populated: bool = False
+
+    @property
+    def has_peri(self) -> bool:
+        """Return True if perimeter mode is supported."""
+        return self._has_peri
+
+    @property
+    def has_annex(self) -> bool:
+        """Return True if annex mode is supported."""
+        return self._has_annex
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        """Return the supported command capability set."""
+        return self._capabilities
+
+    @property
+    def alarm_state(self) -> AlarmState:
+        """Return the current AlarmState derived from coordinator data.
+
+        Used by sub-panels to read the joint state for axis-preserving
+        transitions. Falls back to all-OFF if no data is available yet.
+        """
+        _default = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        if self.data is None:
+            return _default
+        proto_code = self.data.status.status if self.data.status else None
+        if proto_code is None:
+            return _default
+        return PROTO_TO_ALARM_STATE.get(proto_code, _default)
+
+    def populate_capabilities_from_data(
+        self,
+        services: list,
+        capabilities: frozenset[str],
+    ) -> None:
+        """Populate capability fields from already-fetched data.
+
+        Called from async_setup_entry where services and capabilities are
+        already in hand, avoiding a redundant API call during first refresh.
+        Marks the coordinator as populated so _populate_capabilities is a no-op.
+        """
+        if self._capabilities_populated:
+            return
+        self._capabilities = capabilities
+        self._has_peri = detect_peri(self._installation, services, capabilities)
+        self._has_annex = detect_annex(capabilities)
+        self._capabilities_populated = True
+        self._log_capability_detection()
+
+    async def _populate_capabilities(self) -> None:
+        """Detect peri/annex via API.  Runs once per coordinator lifetime.
+
+        This is a fallback path for cases where populate_capabilities_from_data
+        was not called (e.g. unit tests that construct the coordinator directly,
+        or async_setup_entry's get_services failed). On a transient failure here
+        we leave _capabilities_populated=False so the next refresh retries —
+        otherwise a one-off network error would freeze has_peri/has_annex to
+        False for the coordinator lifetime, hiding capability-gated sub-panels
+        until the integration is reloaded.
+        """
+        if self._capabilities_populated:
+            return
+        try:
+            services = await self._client.get_services(self._installation)
+        except SecuritasDirectError:
+            return
+        self._capabilities = self._client.get_supported_commands(
+            self._installation.number
+        )
+        self._has_peri = detect_peri(self._installation, services, self._capabilities)
+        self._has_annex = detect_annex(self._capabilities)
+        self._capabilities_populated = True
+        self._log_capability_detection()
+
+    def _log_capability_detection(self) -> None:
+        _LOGGER.debug(
+            "capability detection for %s: has_peri=%s has_annex=%s caps=%s",
+            self._installation.number,
+            self._has_peri,
+            self._has_annex,
+            sorted(self._capabilities),
+        )
 
     async def _async_update_data(self) -> AlarmStatusData:
         """Fetch alarm status via the API queue."""
+        await self._populate_capabilities()
         try:
             status = await self._queue.submit(
                 self._client.get_general_status,

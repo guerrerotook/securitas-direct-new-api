@@ -1,8 +1,8 @@
 """Command resolver for Securitas alarm state transitions.
 
-Models alarm state as two independent axes (interior mode + perimeter)
-and resolves transitions into command sequences with runtime fallback
-discovery.
+Models alarm state as three independent axes (interior mode + perimeter
++ annex) and resolves transitions into command sequences with runtime
+fallback discovery.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from .const import SecuritasState
 from .models import (
     AlarmState,
+    AnnexMode,
     InteriorMode,
     PerimeterMode,
     ProtoCode,
@@ -38,6 +39,24 @@ SECURITAS_STATE_TO_ALARM_STATE: dict[SecuritasState, AlarmState] = {
         ProtoCode.PARTIAL_NIGHT_PERIMETER
     ],
     SecuritasState.TOTAL_PERI: PROTO_TO_STATE[ProtoCode.TOTAL_PERIMETER],
+    # Annex variants — the four known letters reuse PROTO_TO_STATE entries
+    SecuritasState.ANNEX_ONLY: PROTO_TO_STATE[ProtoCode.ANNEX_ONLY],
+    SecuritasState.PARTIAL_DAY_ANNEX: PROTO_TO_STATE[ProtoCode.PARTIAL_DAY_ANNEX],
+    SecuritasState.PARTIAL_NIGHT_ANNEX: PROTO_TO_STATE[ProtoCode.PARTIAL_NIGHT_ANNEX],
+    SecuritasState.TOTAL_ANNEX: PROTO_TO_STATE[ProtoCode.TOTAL_ANNEX],
+    # Perimeter+annex combinations (no proto code yet — discovered via Custom Override)
+    SecuritasState.PERI_ANNEX: AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
+    SecuritasState.PARTIAL_DAY_PERI_ANNEX: AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
+    SecuritasState.PARTIAL_NIGHT_PERI_ANNEX: AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
+    SecuritasState.TOTAL_PERI_ANNEX: AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON, annex=AnnexMode.ON
+    ),
 }
 
 
@@ -78,8 +97,9 @@ class CommandResolver:
     resets on HA restart) and skips them in future resolutions.
     """
 
-    def __init__(self, has_peri: bool) -> None:
+    def __init__(self, has_peri: bool, has_annex: bool = False) -> None:
         self._has_peri = has_peri
+        self._has_annex = has_annex
         self._unsupported: set[str] = set()
 
     def mark_unsupported(self, command: str) -> None:
@@ -91,25 +111,42 @@ class CommandResolver:
         """Return the set of unsupported commands."""
         return frozenset(self._unsupported)
 
+    def _resolve_annex(
+        self, current_annex: AnnexMode, target_annex: AnnexMode
+    ) -> list[CommandStep]:
+        """Resolve a pure-annex transition (interior + peri both unchanged)."""
+        if current_annex == target_annex:
+            return []
+        if target_annex == AnnexMode.ON:
+            return [CommandStep(commands=["ARMANNEX1"])]
+        return [CommandStep(commands=["DARMANNEX1"])]
+
     def resolve(self, current: AlarmState, target: AlarmState) -> list[CommandStep]:
         """Return ordered command steps to transition from current to target state."""
         if current == target:
             return []
 
+        annex_changed = current.annex != target.annex
+        interior_or_peri_changed = (
+            current.interior != target.interior or current.perimeter != target.perimeter
+        )
+
+        # Pure-annex fast-path
+        if annex_changed and not interior_or_peri_changed:
+            return self._resolve_annex(current.annex, target.annex)
+
         steps: list[CommandStep] = []
 
         interior_changes = current.interior != target.interior
 
-        # Full disarm (target is off/off)
+        # Full disarm (target is off/off on the 2-axis space)
         if (
             target.interior == InteriorMode.OFF
             and target.perimeter == PerimeterMode.OFF
         ):
             steps.extend(self._resolve_disarm(current))
-            return steps
-
         # Mode change: need to disarm first, then arm new mode
-        if interior_changes and current.interior != InteriorMode.OFF:
+        elif interior_changes and current.interior != InteriorMode.OFF:
             steps.extend(self._resolve_disarm(current))
             steps.extend(
                 self._resolve_arm(
@@ -117,10 +154,14 @@ class CommandResolver:
                     target,
                 )
             )
-            return steps
+        else:
+            # Arming from current state
+            steps.extend(self._resolve_arm(current, target))
 
-        # Arming from current state
-        steps.extend(self._resolve_arm(current, target))
+        # Append annex transition if needed (multi-axis case)
+        if annex_changed:
+            steps.extend(self._resolve_annex(current.annex, target.annex))
+
         return steps
 
     def _resolve_disarm(self, current: AlarmState) -> list[CommandStep]:

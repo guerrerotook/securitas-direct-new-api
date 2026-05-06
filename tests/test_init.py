@@ -29,7 +29,6 @@ from custom_components.securitas import (
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
-    CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     CONF_FORCE_ARM_NOTIFICATIONS,
     DOMAIN,
@@ -293,7 +292,6 @@ class TestSecuritasHub:
                 CONF_DELAY_CHECK_OPERATION: 2,
                 CONF_SCAN_INTERVAL: 120,
                 CONF_CODE: "",
-                CONF_HAS_PERI: False,
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
@@ -866,7 +864,6 @@ class TestValidateAndStoreImage:
                 CONF_DELAY_CHECK_OPERATION: 2,
                 CONF_SCAN_INTERVAL: 120,
                 CONF_CODE: "",
-                CONF_HAS_PERI: False,
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
@@ -959,7 +956,6 @@ class TestAsyncUpdateOptions:
                 CONF_CODE: data[CONF_CODE],
                 CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
                 CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
-                CONF_HAS_PERI: data.get(CONF_HAS_PERI, False),
                 CONF_MAP_HOME: data[CONF_MAP_HOME],
                 CONF_MAP_AWAY: data[CONF_MAP_AWAY],
                 CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
@@ -1020,6 +1016,42 @@ class TestAsyncUpdateOptions:
             data=make_config_entry_data(code=""),
             options={CONF_CODE: "1234"},
         )
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+            mock_reload.assert_awaited_once_with(entry.entry_id)
+
+    @pytest.mark.parametrize(
+        "toggle_key",
+        [
+            "enable_interior_panel",
+            "enable_perimeter_panel",
+            "enable_annex_panel",
+        ],
+    )
+    async def test_reload_when_subpanel_toggle_changes(self, hass, toggle_key):
+        """Toggling any sub-panel option triggers a config-entry reload."""
+        data = make_config_entry_data()
+        data[toggle_key] = False
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+            toggle_key: True,
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
         entry.add_to_hass(hass)
 
         with patch.object(

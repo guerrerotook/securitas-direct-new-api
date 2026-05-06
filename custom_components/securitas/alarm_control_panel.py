@@ -25,13 +25,17 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from . import (
     CONF_CODE_ARM_REQUIRED,
     CONF_FORCE_ARM_NOTIFICATIONS,
-    CONF_HAS_PERI,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SecuritasDirectDevice,
     SecuritasHub,
     _notify,
+)
+from .const import (
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
 )
 from .coordinators import AlarmCoordinator, AlarmStatusData
 from .entity import securitas_device_info
@@ -48,6 +52,7 @@ from .securitas_direct_new_api import (
 )
 from .securitas_direct_new_api.command_resolver import (
     AlarmState,
+    AnnexMode,
     CommandResolver,
     CommandStep,
     InteriorMode,
@@ -65,6 +70,10 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
     AlarmControlPanelState.ARMED_VACATION: "map_vacation",
 }
 
+_DISARMED_STATE = AlarmState(
+    interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -79,18 +88,61 @@ async def async_setup_entry(
     entry_data = hass.data[DOMAIN][entry.entry_id]
     client: SecuritasHub = entry_data["hub"]
     coordinator: AlarmCoordinator = entry_data["alarm_coordinator"]
-    alarms = []
+    options = entry.options
+
+    enable_peri: bool = options.get(CONF_ENABLE_PERIMETER_PANEL, False)
+    enable_annex: bool = options.get(CONF_ENABLE_ANNEX_PANEL, False)
+    enable_interior: bool = options.get(CONF_ENABLE_INTERIOR_PANEL, False)
+
+    alarms: list[CombinedSecuritasAlarmPanel] = []
+    all_entities: list[BaseSecuritasAlarmPanel] = []
     securitas_devices: list[SecuritasDirectDevice] = entry_data["devices"]
     for devices in securitas_devices:
-        alarms.append(
-            SecuritasAlarm(
-                devices.installation,
-                client=client,
-                hass=hass,
-                coordinator=coordinator,
-            )
+        combined = CombinedSecuritasAlarmPanel(
+            devices.installation,
+            client=client,
+            hass=hass,
+            coordinator=coordinator,
         )
-    async_add_entities(alarms, False)
+        alarms.append(combined)
+        all_entities.append(combined)
+
+        peri_added = False
+        annex_added = False
+
+        if enable_peri and coordinator.has_peri:
+            all_entities.append(
+                PerimeterSecuritasAlarmPanel(
+                    devices.installation,
+                    client=client,
+                    hass=hass,
+                    coordinator=coordinator,
+                )
+            )
+            peri_added = True
+
+        if enable_annex and coordinator.has_annex:
+            all_entities.append(
+                AnnexSecuritasAlarmPanel(
+                    devices.installation,
+                    client=client,
+                    hass=hass,
+                    coordinator=coordinator,
+                )
+            )
+            annex_added = True
+
+        if enable_interior and (peri_added or annex_added):
+            all_entities.append(
+                InteriorSecuritasAlarmPanel(
+                    devices.installation,
+                    client=client,
+                    hass=hass,
+                    coordinator=coordinator,
+                )
+            )
+
+    async_add_entities(all_entities, False)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
 
     platform = async_get_current_platform()
@@ -106,7 +158,7 @@ async def async_setup_entry(
     )
 
 
-class SecuritasAlarm(  # type: ignore[override]
+class BaseSecuritasAlarmPanel(  # type: ignore[override]
     CoordinatorEntity[AlarmCoordinator], alarm.AlarmControlPanelEntity
 ):
     """Representation of a Securitas alarm status."""
@@ -136,9 +188,13 @@ class SecuritasAlarm(  # type: ignore[override]
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}
         self.hass: HomeAssistant = hass
-        self._has_peri = self._client.config.get(CONF_HAS_PERI, False)
+        self._has_peri = coordinator.has_peri
+        self._has_annex = coordinator.has_annex
         self._last_proto_code: str | None = None
-        self._resolver = CommandResolver(has_peri=self._has_peri)
+        self._resolver = CommandResolver(
+            has_peri=self._has_peri,
+            has_annex=self._has_annex,
+        )
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
@@ -251,8 +307,10 @@ class SecuritasAlarm(  # type: ignore[override]
             return
         # status.status is the proto code like "D", "T", etc.
         proto_code = status.status
-        # Only update _last_proto_code when it is a known proto code
-        if proto_code == PROTO_DISARMED or proto_code in PROTO_TO_STATE:
+        # Only update _last_proto_code when it is a known proto code.
+        # Use PROTO_TO_ALARM_STATE (12 entries — includes annex codes X/R/S/O)
+        # not const.PROTO_TO_STATE (8 entries — pre-annex).
+        if proto_code in PROTO_TO_ALARM_STATE:
             self._last_proto_code = proto_code
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
@@ -266,48 +324,56 @@ class SecuritasAlarm(  # type: ignore[override]
                 proto_code,
             )
 
+    def _store_operation_status_metadata(self, status: OperationStatus | None) -> bool:
+        """Store message + response_data on this entity from an operation status.
+
+        Returns True if ``status.protom_response`` is a non-empty string and the
+        caller should derive ``_state`` from it.  Returns False to short-circuit
+        (no status, no message attribute, or empty protom_response).
+
+        Also updates ``_last_proto_code`` when protom_response is a known proto
+        code.  Periodic polling uses xSStatus which returns values like
+        "ARMED_TOTAL" instead of proto codes; those must not overwrite the
+        last proto code or the resolver's state-based command selection will
+        break.
+        """
+        if status is None or not hasattr(status, "message"):
+            return False
+        self._message = status.message
+        self._attr_extra_state_attributes["message"] = status.message
+        self._attr_extra_state_attributes["response_data"] = status.protom_response_data
+        if not status.protom_response:
+            _LOGGER.debug(
+                "[%s] Received empty protomResponse"
+                " (operation_status: %s, message: %s, status: %s,"
+                " protomResponseData: %s), ignoring",
+                self.entity_id,
+                status.operation_status,
+                status.message,
+                status.status,
+                status.protom_response_data,
+            )
+            return False
+        if status.protom_response in PROTO_TO_ALARM_STATE:
+            self._last_proto_code = status.protom_response
+        return True
+
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:
         """Update alarm status, from last alarm setting register or EST."""
-        if status is not None and hasattr(status, "message"):
-            self._message = status.message
-            self._attr_extra_state_attributes["message"] = status.message
-            self._attr_extra_state_attributes["response_data"] = (
-                status.protom_response_data
+        if not self._store_operation_status_metadata(status):
+            return
+        assert status is not None  # narrowed by _store_operation_status_metadata
+        if status.protom_response == PROTO_DISARMED:
+            self._state = AlarmControlPanelState.DISARMED
+        elif status.protom_response in self._status_map:
+            self._state = self._status_map[status.protom_response]
+        else:
+            self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+            _LOGGER.info(
+                "Unmapped alarm status code '%s' from Securitas. "
+                "Check your Alarm State Mappings in the integration options",
+                status.protom_response,
             )
-
-            if not status.protom_response:
-                _LOGGER.debug(
-                    "[%s] Received empty protomResponse"
-                    " (operation_status: %s, message: %s, status: %s,"
-                    " protomResponseData: %s), ignoring",
-                    self.entity_id,
-                    status.operation_status,
-                    status.message,
-                    status.status,
-                    status.protom_response_data,
-                )
-                return
-            # Only update _last_proto_code when protomResponse is a known proto
-            # code.  Periodic polling uses xSStatus which returns values like
-            # "ARMED_TOTAL" instead of proto codes; those must not overwrite
-            # the last proto code or the resolver's state-based command
-            # selection will break.
-            if (
-                status.protom_response == PROTO_DISARMED
-                or status.protom_response in PROTO_TO_ALARM_STATE
-            ):
-                self._last_proto_code = status.protom_response
-            if status.protom_response == PROTO_DISARMED:
-                self._state = AlarmControlPanelState.DISARMED
-            elif status.protom_response in self._status_map:
-                self._state = self._status_map[status.protom_response]
-            else:
-                self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-                _LOGGER.info(
-                    "Unmapped alarm status code '%s' from Securitas. "
-                    "Check your Alarm State Mappings in the integration options",
-                    status.protom_response,
-                )
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
         """Check the code only if arming requires a code and a PIN is configured."""
@@ -475,6 +541,7 @@ class SecuritasAlarm(  # type: ignore[override]
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="unsupported_alarm_mode",
+                translation_placeholders={"tried": ", ".join(step.commands)},
             ) from last_err
         if last_err:
             raise last_err
@@ -520,12 +587,13 @@ class SecuritasAlarm(  # type: ignore[override]
                     )
                 )
 
-    def _mode_to_alarm_state(self, mode: str) -> AlarmState:
-        """Convert an HA alarm mode to an AlarmState using the securitas state map."""
-        securitas_state = self._securitas_state_map.get(mode)
-        if securitas_state is None:
-            raise SecuritasDirectError(f"Unsupported alarm mode: {mode}")
-        return SECURITAS_STATE_TO_ALARM_STATE[securitas_state]
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Override in each subclass: map an HA state name to a target AlarmState."""
+        raise NotImplementedError
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """Override in each subclass: pick the HA state to display for this axis."""
+        raise NotImplementedError
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
@@ -535,7 +603,7 @@ class SecuritasAlarm(  # type: ignore[override]
         self._operation_in_progress = True
         self._operation_epoch += 1
         try:
-            target = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+            target = self._resolve_target_state("disarmed")
             result = await self._execute_transition(target)
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
@@ -574,7 +642,7 @@ class SecuritasAlarm(  # type: ignore[override]
             force_params["suid"] = suid
 
         try:
-            target = self._mode_to_alarm_state(mode)
+            target = self._resolve_target_state(mode)
             result = await self._execute_transition(target, **force_params)
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
@@ -872,3 +940,239 @@ class SecuritasAlarm(  # type: ignore[override]
         if AlarmControlPanelState.ARMED_VACATION in self._command_map:
             features |= AlarmControlPanelEntityFeature.ARM_VACATION
         return features
+
+
+class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
+    """The household-intent panel — drives all three axes via mappings.
+
+    Inherits all behavior from the base. Sub-panels (Interior, Perimeter,
+    Annex) come in subsequent tasks.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._attr_name = f"Main - {self._installation.alias}"
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Convert an HA alarm mode to an AlarmState using the securitas state map."""
+        if ha_state == AlarmControlPanelState.DISARMED:
+            return _DISARMED_STATE
+        securitas_state = self._securitas_state_map.get(ha_state)
+        if securitas_state is None:
+            raise SecuritasDirectError(f"Unsupported alarm mode: {ha_state}")
+        return SECURITAS_STATE_TO_ALARM_STATE[securitas_state]
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """For the combined panel, map joint state back to HA via user mappings."""
+        for ha_state, sec_state in self._securitas_state_map.items():
+            if SECURITAS_STATE_TO_ALARM_STATE.get(sec_state) == joint_state:
+                try:
+                    return AlarmControlPanelState(ha_state)
+                except ValueError:
+                    return None
+        return None
+
+
+class _AxisSubPanelMixin:
+    """Mixin that routes state updates through _extract_state(joint_state).
+
+    Sub-panels override _extract_state() to project the coordinator's joint
+    AlarmState onto a single axis.  The base-class _update_from_coordinator()
+    and update_status_alarm() use _status_map (the combined-panel user-mapping)
+    which is wrong for axis sub-panels.  This mixin replaces both paths.
+    """
+
+    def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
+        """Project the coordinator's joint state onto this panel's axis.
+
+        Unknown proto codes preserve the previous _state. coordinator.alarm_state
+        defaults to all-OFF for unrecognised codes, which would otherwise make
+        the sub-panel silently report DISARMED while the system is actually armed.
+
+        Uses PROTO_TO_ALARM_STATE (12 entries — includes annex codes X/R/S/O)
+        not const.PROTO_TO_STATE (8 entries — pre-annex).
+        """
+        status = data.status
+        if not status.status:
+            return
+        proto_code = status.status
+        if proto_code not in PROTO_TO_ALARM_STATE:
+            return
+        self._last_proto_code = proto_code  # type: ignore[attr-defined]
+        joint = self.coordinator.alarm_state  # type: ignore[attr-defined]
+        self._state = self._extract_state(joint)  # type: ignore[attr-defined]
+
+    def update_status_alarm(  # type: ignore[override]
+        self, status: OperationStatus | None = None
+    ) -> None:
+        """Update state after an arm/disarm operation using the joint-state projection."""
+        if not self._store_operation_status_metadata(status):  # type: ignore[attr-defined]
+            return
+        assert status is not None  # narrowed by _store_operation_status_metadata
+        # The coordinator hasn't refreshed yet at this point, so reconstruct the
+        # AlarmState from the proto code; if unknown, fall back to the (stale)
+        # coordinator joint state to preserve the most recent known projection.
+        joint = PROTO_TO_ALARM_STATE.get(
+            status.protom_response,
+            self.coordinator.alarm_state,  # type: ignore[attr-defined]
+        )
+        self._state = self._extract_state(joint)  # type: ignore[attr-defined]
+
+
+class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
+    """Sub-panel driving only the interior axis.
+
+    Capabilities (ARMDAY, ARMNIGHT, ARM) gate which HA states are exposed.
+    The perimeter and annex axes are preserved from the coordinator's current
+    joint state when computing target states.
+    """
+
+    _SUFFIX = "_interior"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
+        self._attr_name = f"Interior - {self._installation.alias}"
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        """Return all interior arming features.
+
+        We deliberately do NOT gate on the JWT capability set: empirically (Italian
+        SDVECU OWNER) the JWT 'cap' claim can be both incomplete and wrong about
+        which arming commands the panel accepts — e.g. claiming ARMNIGHT while
+        the panel rejects ARMNIGHT1 with "not valid for Central Unit", and
+        omitting ARMDAY while the panel happily accepts ARMDAY1. Gating on the
+        cap set therefore hides modes that work and exposes modes that don't.
+        Instead, surface all three interior modes; the resolver's mark_unsupported
+        runtime-fallback catches genuinely-rejected commands and the user gets a
+        clear notification naming the failed command.
+        """
+        return (
+            AlarmControlPanelEntityFeature.ARM_HOME
+            | AlarmControlPanelEntityFeature.ARM_NIGHT
+            | AlarmControlPanelEntityFeature.ARM_AWAY
+        )
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Map an HA state to a target AlarmState that touches only the interior axis."""
+        interior_target_map: dict[str, InteriorMode] = {
+            AlarmControlPanelState.ARMED_HOME: InteriorMode.DAY,
+            AlarmControlPanelState.ARMED_NIGHT: InteriorMode.NIGHT,
+            AlarmControlPanelState.ARMED_AWAY: InteriorMode.TOTAL,
+            AlarmControlPanelState.DISARMED: InteriorMode.OFF,
+        }
+        if ha_state not in interior_target_map:
+            raise SecuritasDirectError(
+                f"Unsupported alarm mode for Interior panel: {ha_state}"
+            )
+        current = self.coordinator.alarm_state
+        return AlarmState(
+            interior=interior_target_map[ha_state],
+            perimeter=current.perimeter,
+            annex=current.annex,
+        )
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """Project the joint state onto the interior axis only."""
+        mapping = {
+            InteriorMode.OFF: AlarmControlPanelState.DISARMED,
+            InteriorMode.DAY: AlarmControlPanelState.ARMED_HOME,
+            InteriorMode.NIGHT: AlarmControlPanelState.ARMED_NIGHT,
+            InteriorMode.TOTAL: AlarmControlPanelState.ARMED_AWAY,
+        }
+        return mapping.get(joint_state.interior)
+
+
+class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
+    """Sub-panel driving only the perimeter axis.
+
+    Perimeter is binary (ON/OFF). The interior and annex axes are preserved
+    from the coordinator's current joint state when computing target states.
+    """
+
+    _SUFFIX = "_perimeter"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
+        self._attr_name = f"Perimeter - {self._installation.alias}"
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        """Return supported features for perimeter (binary axis, ARM_AWAY only)."""
+        return AlarmControlPanelEntityFeature.ARM_AWAY
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Map an HA state to a target AlarmState that touches only the perimeter axis."""
+        perimeter_target_map: dict[str, PerimeterMode] = {
+            AlarmControlPanelState.ARMED_AWAY: PerimeterMode.ON,
+            AlarmControlPanelState.DISARMED: PerimeterMode.OFF,
+        }
+        if ha_state not in perimeter_target_map:
+            raise SecuritasDirectError(
+                f"Unsupported alarm mode for Perimeter panel: {ha_state}"
+            )
+        current = self.coordinator.alarm_state
+        return AlarmState(
+            interior=current.interior,
+            perimeter=perimeter_target_map[ha_state],
+            annex=current.annex,
+        )
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """Project the joint state onto the perimeter axis only."""
+        mapping = {
+            PerimeterMode.OFF: AlarmControlPanelState.DISARMED,
+            PerimeterMode.ON: AlarmControlPanelState.ARMED_AWAY,
+        }
+        return mapping.get(joint_state.perimeter)
+
+
+class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
+    """Sub-panel driving only the annex axis.
+
+    Annex is binary (ON/OFF). The interior and perimeter axes are preserved
+    from the coordinator's current joint state when computing target states.
+    """
+
+    _SUFFIX = "_annex"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
+        self._attr_name = f"Annex - {self._installation.alias}"
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        """Return supported features for annex (binary axis, ARM_AWAY only)."""
+        return AlarmControlPanelEntityFeature.ARM_AWAY
+
+    def _resolve_target_state(self, ha_state: str) -> AlarmState:
+        """Map an HA state to a target AlarmState that touches only the annex axis."""
+        annex_target_map: dict[str, AnnexMode] = {
+            AlarmControlPanelState.ARMED_AWAY: AnnexMode.ON,
+            AlarmControlPanelState.DISARMED: AnnexMode.OFF,
+        }
+        if ha_state not in annex_target_map:
+            raise SecuritasDirectError(
+                f"Unsupported alarm mode for Annex panel: {ha_state}"
+            )
+        current = self.coordinator.alarm_state
+        return AlarmState(
+            interior=current.interior,
+            perimeter=current.perimeter,
+            annex=annex_target_map[ha_state],
+        )
+
+    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
+        """Project the joint state onto the annex axis only."""
+        mapping = {
+            AnnexMode.OFF: AlarmControlPanelState.DISARMED,
+            AnnexMode.ON: AlarmControlPanelState.ARMED_AWAY,
+        }
+        return mapping.get(joint_state.annex)
+
+
+# Backwards-compat alias for tests and any external imports.
+SecuritasAlarm = CombinedSecuritasAlarmPanel

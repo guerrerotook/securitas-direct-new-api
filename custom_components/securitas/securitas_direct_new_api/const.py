@@ -23,6 +23,15 @@ class SecuritasState(StrEnum):
     PARTIAL_DAY_PERI = "partial_day_peri"
     PARTIAL_NIGHT_PERI = "partial_night_peri"
     TOTAL_PERI = "total_peri"
+    # Annex-bearing variants (combined-panel mappings for installations with annex)
+    ANNEX_ONLY = "annex_only"
+    PARTIAL_DAY_ANNEX = "partial_day_annex"
+    PARTIAL_NIGHT_ANNEX = "partial_night_annex"
+    TOTAL_ANNEX = "total_annex"
+    PERI_ANNEX = "peri_annex"
+    PARTIAL_DAY_PERI_ANNEX = "partial_day_peri_annex"
+    PARTIAL_NIGHT_PERI_ANNEX = "partial_night_peri_annex"
+    TOTAL_PERI_ANNEX = "total_peri_annex"
 
 
 # Map SecuritasState -> API arm command string
@@ -67,6 +76,15 @@ STATE_LABELS: dict[SecuritasState, str] = {
     SecuritasState.PARTIAL_DAY_PERI: "Partial Day + Perimeter",
     SecuritasState.PARTIAL_NIGHT_PERI: "Partial Night + Perimeter",
     SecuritasState.TOTAL_PERI: "Total + Perimeter",
+    # Annex variants
+    SecuritasState.ANNEX_ONLY: "Annex only",
+    SecuritasState.PARTIAL_DAY_ANNEX: "Partial Day + Annex",
+    SecuritasState.PARTIAL_NIGHT_ANNEX: "Partial Night + Annex",
+    SecuritasState.TOTAL_ANNEX: "Total + Annex",
+    SecuritasState.PERI_ANNEX: "Perimeter + Annex",
+    SecuritasState.PARTIAL_DAY_PERI_ANNEX: "Partial Day + Perimeter + Annex",
+    SecuritasState.PARTIAL_NIGHT_PERI_ANNEX: "Partial Night + Perimeter + Annex",
+    SecuritasState.TOTAL_PERI_ANNEX: "Total + Perimeter + Annex",
 }
 
 # Options available when perimeter is NOT configured

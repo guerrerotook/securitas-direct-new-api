@@ -9,7 +9,10 @@ from custom_components.securitas.securitas_direct_new_api.command_resolver impor
     PerimeterMode,
     PROTO_TO_ALARM_STATE,
     ALARM_STATE_TO_PROTO,
+    SECURITAS_STATE_TO_ALARM_STATE,
 )
+from custom_components.securitas.securitas_direct_new_api.const import SecuritasState
+from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
 
 
 class TestAlarmState:
@@ -17,7 +20,7 @@ class TestAlarmState:
 
     def test_all_proto_codes_mapped(self):
         """Every known proto code maps to an AlarmState."""
-        expected_protos = {"D", "P", "Q", "T", "E", "B", "C", "A"}
+        expected_protos = {"D", "P", "Q", "T", "E", "B", "C", "A", "X", "R", "S", "O"}
         assert set(PROTO_TO_ALARM_STATE.keys()) == expected_protos
 
     def test_bidirectional_mapping(self):
@@ -258,3 +261,116 @@ class TestCommandResolverModeChange:
         steps = resolver.resolve(current, target)
         assert len(steps) == 1
         assert steps[0].commands == ["ARM1"]
+
+
+class TestSecuritasStateAnnexMappings:
+    """Test SecuritasState enum annex variants and their SECURITAS_STATE_TO_ALARM_STATE mappings."""
+
+    def test_annex_only(self):
+        s = SECURITAS_STATE_TO_ALARM_STATE[SecuritasState.ANNEX_ONLY]
+        assert s.interior == InteriorMode.OFF
+        assert s.perimeter == PerimeterMode.OFF
+        assert s.annex == AnnexMode.ON
+
+    def test_total_peri_annex(self):
+        s = SECURITAS_STATE_TO_ALARM_STATE[SecuritasState.TOTAL_PERI_ANNEX]
+        assert s.interior == InteriorMode.TOTAL
+        assert s.perimeter == PerimeterMode.ON
+        assert s.annex == AnnexMode.ON
+
+    def test_all_eight_annex_variants_mapped(self):
+        for name in (
+            "ANNEX_ONLY",
+            "PARTIAL_DAY_ANNEX",
+            "PARTIAL_NIGHT_ANNEX",
+            "TOTAL_ANNEX",
+            "PERI_ANNEX",
+            "PARTIAL_DAY_PERI_ANNEX",
+            "PARTIAL_NIGHT_PERI_ANNEX",
+            "TOTAL_PERI_ANNEX",
+        ):
+            assert SecuritasState[name] in SECURITAS_STATE_TO_ALARM_STATE, name
+
+
+class TestAnnexResolution:
+    def test_resolver_accepts_has_annex(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        assert r._has_annex is True
+
+    def test_resolver_has_annex_defaults_false_for_backcompat(self):
+        r = CommandResolver(has_peri=False)  # no has_annex kwarg
+        assert r._has_annex is False
+
+    def test_arm_annex_only(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        steps = r.resolve(
+            current=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            ),
+            target=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
+            ),
+        )
+        assert len(steps) == 1
+        assert "ARMANNEX1" in steps[0].commands
+
+    def test_disarm_annex_only(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        steps = r.resolve(
+            current=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
+            ),
+            target=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            ),
+        )
+        assert len(steps) == 1
+        assert "DARMANNEX1" in steps[0].commands
+
+
+class TestMultiAxisAnnexTransitions:
+    def test_arm_interior_total_and_annex_from_off(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        steps = r.resolve(
+            current=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            ),
+            target=AlarmState(
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
+            ),
+        )
+        cmds = [c for s in steps for c in s.commands]
+        assert "ARM1" in cmds
+        assert "ARMANNEX1" in cmds
+
+    def test_disarm_only_annex_keeping_interior(self):
+        r = CommandResolver(has_peri=False, has_annex=True)
+        steps = r.resolve(
+            current=AlarmState(
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
+            ),
+            target=AlarmState(
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            ),
+        )
+        cmds = [c for s in steps for c in s.commands]
+        assert "DARMANNEX1" in cmds
+        # Interior is unchanged, so no ARM1 or DARM1
+        assert "ARM1" not in cmds
+        assert "DARM1" not in cmds

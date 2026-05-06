@@ -10,7 +10,6 @@ from custom_components.securitas import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
-    CONF_HAS_PERI,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -20,6 +19,11 @@ from custom_components.securitas import (
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+)
+from custom_components.securitas.const import (
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
 )
 from custom_components.securitas.securitas_direct_new_api import (
     AccountBlockedError,
@@ -754,13 +758,21 @@ async def test_options_mappings_std_options_when_peri_false(hass):
 
 
 async def test_options_mappings_peri_options_when_peri_true(hass):
-    """Mappings step shows PERI options when has_peri is True."""
+    """Mappings step shows PERI options when coordinator has_peri is True."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=make_config_entry_data(has_peri=True),
         options={},
     )
     entry.add_to_hass(hass)
+
+    # Inject a mock coordinator reporting has_peri=True into hass.data so the
+    # options flow can read capability detection results at runtime.
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
 
     flow_id = await _advance_to_mappings(hass, entry)
     result = await hass.config_entries.options.async_configure(
@@ -1225,7 +1237,7 @@ async def test_existing_session_wrong_password_does_fresh_login(hass):
 
 
 async def test_peri_detected_from_service_attributes(hass):
-    """When a service has a PERI attribute, CONF_HAS_PERI should be True."""
+    """When a service has a PERI attribute, PERI mappings are offered (not stored in entry data)."""
     mock_hub = _hub_factory()
 
     async def _get_services_with_peri_attr(installation, **kwargs):
@@ -1242,17 +1254,19 @@ async def test_peri_detected_from_service_attributes(hass):
     result = await _complete_full_flow(hass, mock_hub)
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_HAS_PERI] is True
+    # CONF_HAS_PERI is no longer stored in entry data — capability detection is runtime-only.
+    assert "has_peri" not in result["data"]
 
 
 async def test_no_peri_when_no_peri_service_attribute(hass):
-    """When no service has a PERI attribute, CONF_HAS_PERI should be False."""
+    """When no service has a PERI attribute, STD mappings are offered (not stored in entry data)."""
     mock_hub = _hub_factory()
 
     result = await _complete_full_flow(hass, mock_hub)
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert result["data"][CONF_HAS_PERI] is False
+    # CONF_HAS_PERI is no longer stored in entry data — capability detection is runtime-only.
+    assert "has_peri" not in result["data"]
 
 
 # ===================================================================
@@ -1457,3 +1471,95 @@ async def test_reauth_preserves_username_from_entry(hass):
     # The schema should have the username pre-filled
     schema = result["data_schema"]
     assert schema is not None
+
+
+# ===================================================================
+# TestSubPanelToggleVisibility (~6 tests)
+# ===================================================================
+
+
+def _schema_keys(data_schema) -> set[str]:
+    """Extract the string keys from a voluptuous Schema's top-level dict."""
+    keys = set()
+    for marker in data_schema.schema.keys():
+        if hasattr(marker, "schema"):
+            keys.add(marker.schema)
+        else:
+            keys.add(marker)
+    return keys
+
+
+def _make_entry_with_coordinator(
+    hass, *, has_peri: bool, has_annex: bool, options: dict | None = None
+):
+    """Create a MockConfigEntry and inject a mock coordinator into hass.data."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options=options or {},
+    )
+    entry.add_to_hass(hass)
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = has_peri
+    mock_coordinator.has_annex = has_annex
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
+    return entry
+
+
+async def test_subpanel_perimeter_toggle_hidden_when_no_peri(hass):
+    """No toggles in init schema when has_peri=False and has_annex=False."""
+    entry = _make_entry_with_coordinator(hass, has_peri=False, has_annex=False)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_PERIMETER_PANEL not in keys
+    assert CONF_ENABLE_ANNEX_PANEL not in keys
+    assert CONF_ENABLE_INTERIOR_PANEL not in keys
+
+
+async def test_subpanel_perimeter_toggle_shown_when_has_peri(hass):
+    """PERIMETER + INTERIOR toggles shown when has_peri=True regardless of toggle state."""
+    entry = _make_entry_with_coordinator(hass, has_peri=True, has_annex=False)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_PERIMETER_PANEL in keys
+    assert CONF_ENABLE_ANNEX_PANEL not in keys
+    assert CONF_ENABLE_INTERIOR_PANEL in keys
+
+
+async def test_subpanel_interior_toggle_visible_when_has_annex_only(hass):
+    """INTERIOR toggle shown when has_annex=True (sibling capability present)."""
+    entry = _make_entry_with_coordinator(
+        hass, has_peri=False, has_annex=True, options={}
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_INTERIOR_PANEL in keys
+
+
+async def test_subpanel_all_toggles_visible_with_full_caps(hass):
+    """All three toggles shown when has_peri=True and has_annex=True, regardless of toggle state."""
+    entry = _make_entry_with_coordinator(
+        hass,
+        has_peri=True,
+        has_annex=True,
+        options={},
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    keys = _schema_keys(result["data_schema"])
+    assert CONF_ENABLE_PERIMETER_PANEL in keys
+    assert CONF_ENABLE_ANNEX_PANEL in keys
+    assert CONF_ENABLE_INTERIOR_PANEL in keys

@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Mapeamento dos estados do alarme",
-                "description": "Associe cada ação de alarme do Home Assistant a um modo de alarme Securitas. Selecione « Não utilizado » para desativar um botão.",
+                "description": "Estas associações se aplicam apenas ao painel principal. Associe cada ação de alarme do Home Assistant a um modo de alarme Securitas; selecione « Não utilizado » para desativar um botão. Os painéis opcionais apenas Interior, apenas Perímetro e apenas Anexo controlam cada um um único eixo diretamente e não usam estas associações.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Ausente",
@@ -88,7 +88,10 @@
                     "code": "Código PIN (deixar vazio para não usar PIN)",
                     "code_arm_required": "Exigir também o código PIN (se houver) para armar o alarme",
                     "notify_group": "Serviço de notificação para exceções de armar (ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar suas próprias automatizações)"
+                    "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar suas próprias automatizações)",
+                    "enable_interior_panel": "Ativar painel de controle apenas Interior",
+                    "enable_perimeter_panel": "Ativar painel de controle apenas Perímetro",
+                    "enable_annex_panel": "Ativar painel de controle apenas Anexo"
                 },
                 "sections": {
                     "advanced": {
@@ -102,7 +105,7 @@
             },
             "mappings": {
                 "title": "Mapeamento dos estados do alarme",
-                "description": "Associe cada ação de alarme do Home Assistant a um modo de alarme Securitas. Selecione « Não utilizado » para desativar um botão.",
+                "description": "Estas associações se aplicam apenas ao painel principal. Associe cada ação de alarme do Home Assistant a um modo de alarme Securitas; selecione « Não utilizado » para desativar um botão. Os painéis opcionais apenas Interior, apenas Perímetro e apenas Anexo controlam cada um um único eixo diretamente e não usam estas associações.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Ausente",
@@ -128,7 +131,7 @@
             "message": "Código PIN inválido para {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "Este modo de alarme não é suportado pelo seu painel. Verifique os mapeamentos de estado nas opções da integração (Configurações → Dispositivos e Serviços → Securitas → Configurar)."
+            "message": "Este modo de alarme não é suportado pelo seu painel (rejeitado: {tried}). Verifique os mapeamentos de estado nas opções da integração (Configurações → Dispositivos e Serviços → Securitas → Configurar)."
         },
         "no_supported_command": {
             "message": "Nenhum comando compatível encontrado para este painel. Verifique os mapeamentos de estado nas opções da integração (Configurações → Dispositivos e Serviços → Securitas → Configurar)."

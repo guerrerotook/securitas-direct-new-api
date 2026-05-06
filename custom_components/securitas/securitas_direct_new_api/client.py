@@ -194,7 +194,7 @@ class SecuritasClient:
         self.poll_timeout: float = poll_timeout
 
         # Capabilities tokens per installation (key: installation number)
-        self._capabilities: dict[str, tuple[str, datetime]] = {}
+        self._capabilities: dict[str, tuple[str, datetime, frozenset[str]]] = {}
 
         # Internal state
         self._apollo_operation_id: str = secrets.token_hex(64)
@@ -465,6 +465,17 @@ class SecuritasClient:
         if entry is None or datetime.now() + timedelta(minutes=1) > entry[1]:
             _LOGGER.debug("[auth] Capabilities token expired, refreshing")
             await self.get_services(installation)
+
+    def get_supported_commands(self, installation_number: str) -> frozenset[str]:
+        """Return the capability set for an installation, or empty frozenset if unknown.
+
+        Reads the cap claim from the decoded capability JWT, populated during
+        the most recent _ensure_capabilities call for this installation.
+        """
+        entry = self._capabilities.get(installation_number)
+        if entry is None or len(entry) < 3:
+            return frozenset()
+        return entry[2]
 
     # ── Typed GraphQL execute ────────────────────────────────────────────
 
@@ -1727,7 +1738,30 @@ class SecuritasClient:
         if "exp" in token:
             expiry = datetime.fromtimestamp(token["exp"])
 
-        self._capabilities[installation.number] = (capabilities, expiry)
+        # Find the installation entry whose 'ins' field matches the requested
+        # installation number.  Multi-installation accounts receive a JWT with
+        # one entry per installation; always pick by 'ins', not by index.
+        cap_set: frozenset[str] = frozenset()
+        jwt_installations = token.get("installations") or []
+        matched = next(
+            (
+                entry
+                for entry in jwt_installations
+                if str(entry.get("ins", "")) == str(installation.number)
+            ),
+            None,
+        )
+        if matched is not None:
+            cap_set = frozenset(matched.get("cap") or [])
+        elif jwt_installations:
+            _LOGGER.warning(
+                "JWT capabilities token contains no entry for installation %s;"
+                " capability set will be empty. Entries present: %s",
+                installation.number,
+                [entry.get("ins") for entry in jwt_installations],
+            )
+
+        self._capabilities[installation.number] = (capabilities, expiry, cap_set)
 
         # Build service list
         result: list[Service] = []

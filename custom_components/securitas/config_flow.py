@@ -33,7 +33,6 @@ from . import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
-    CONF_HAS_PERI,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -52,6 +51,11 @@ from . import (
     SecuritasHub,
     generate_uuid,
 )
+from .const import (
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+)
 from .api_queue import ApiQueue
 from .securitas_direct_new_api import (
     PERI_DEFAULTS,
@@ -60,14 +64,13 @@ from .securitas_direct_new_api import (
     STD_DEFAULTS,
     STD_OPTIONS,
     AccountBlockedError,
-    Attribute,
     AuthenticationError,
     Installation,
     OtpPhone,
     SecuritasDirectError,
-    Service,
     TwoFactorRequiredError,
 )
+from .securitas_direct_new_api.capabilities import detect_peri
 
 VERSION = 3
 
@@ -93,6 +96,7 @@ def _build_settings_schema(
     notify_options: list[dict[str, str]],
     *,
     use_suggested: bool = False,
+    extra_fields: dict[Any, Any] | None = None,
 ) -> vol.Schema:
     """Build the shared settings schema for config and options flows."""
     code_val = defaults.get(CONF_CODE, DEFAULT_CODE)
@@ -102,53 +106,52 @@ def _build_settings_schema(
         else vol.Optional(CONF_CODE, default=code_val)
     )
 
-    return vol.Schema(
-        {
-            code_field: str,
-            vol.Optional(
-                CONF_CODE_ARM_REQUIRED,
-                default=defaults.get(CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED),
-            ): bool,
-            vol.Optional(
-                CONF_NOTIFY_GROUP,
-                default=defaults.get(CONF_NOTIFY_GROUP, ""),
-            ): selector(
-                {
-                    "select": {
-                        "options": notify_options,
-                        "custom_value": True,
-                        "mode": "dropdown",
-                    }
+    schema_dict: dict[Any, Any] = {
+        code_field: str,
+        vol.Optional(
+            CONF_CODE_ARM_REQUIRED,
+            default=defaults.get(CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED),
+        ): bool,
+        vol.Optional(
+            CONF_NOTIFY_GROUP,
+            default=defaults.get(CONF_NOTIFY_GROUP, ""),
+        ): selector(
+            {
+                "select": {
+                    "options": notify_options,
+                    "custom_value": True,
+                    "mode": "dropdown",
                 }
+            }
+        ),
+        vol.Optional(
+            CONF_FORCE_ARM_NOTIFICATIONS,
+            default=defaults.get(
+                CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
             ),
-            vol.Optional(
-                CONF_FORCE_ARM_NOTIFICATIONS,
-                default=defaults.get(
-                    CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
-                ),
-            ): bool,
-            vol.Optional(CONF_ADVANCED): section(
-                vol.Schema(
-                    {
-                        vol.Optional(
-                            CONF_SCAN_INTERVAL,
-                            default=defaults.get(
-                                CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-                            ),
-                        ): int,
-                        vol.Optional(
-                            CONF_DELAY_CHECK_OPERATION,
-                            default=defaults.get(
-                                CONF_DELAY_CHECK_OPERATION,
-                                DEFAULT_DELAY_CHECK_OPERATION,
-                            ),
-                        ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
-                    }
-                ),
-                {"collapsed": True},
-            ),
-        }
+        ): bool,
+    }
+    if extra_fields:
+        schema_dict.update(extra_fields)
+    schema_dict[vol.Optional(CONF_ADVANCED)] = section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_SCAN_INTERVAL,
+                    default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                ): int,
+                vol.Optional(
+                    CONF_DELAY_CHECK_OPERATION,
+                    default=defaults.get(
+                        CONF_DELAY_CHECK_OPERATION,
+                        DEFAULT_DELAY_CHECK_OPERATION,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
+            }
+        ),
+        {"collapsed": True},
     )
+    return vol.Schema(schema_dict)
 
 
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -563,30 +566,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             "time": time.monotonic(),
         }
 
-        self._has_peri = self._detect_peri(services, installation)
-        self.config[CONF_HAS_PERI] = self._has_peri
+        capabilities = self.securitas.client.get_supported_commands(installation.number)
+        self._has_peri = detect_peri(installation, services, capabilities)
         _LOGGER.debug(
             "Perimeter detected for %s: %s", installation.number, self._has_peri
         )
 
         return await self.async_step_options()
-
-    @staticmethod
-    def _detect_peri(services: list[Service], installation: Installation) -> bool:
-        """Detect perimeter support from service attributes or alarm partitions."""
-        # Check service attributes (e.g. SCH with PERI attribute — Spanish panels)
-        for svc in services:
-            attrs = svc.attributes
-            if isinstance(attrs, list):
-                for attr in attrs:
-                    if isinstance(attr, Attribute) and attr.name == "PERI":
-                        return True
-        # Check alarm partitions (e.g. SDVECU Italian panels)
-        # Partition "02" with non-empty enterStates indicates perimeter support
-        for partition in installation.alarm_partitions:
-            if partition.get("id") == "02" and partition.get("enterStates"):
-                return True
-        return False
 
     async def async_step_select_installation(
         self, user_input: dict[str, Any] | None = None
@@ -734,6 +720,43 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             return await self.async_step_mappings()
 
         notify_options = _get_notify_options(self.hass)
+
+        # Capability-gated sub-panel toggles — read from the running coordinator.
+        coordinator = (
+            self.hass.data.get(DOMAIN, {})
+            .get(self.config_entry.entry_id, {})
+            .get("alarm_coordinator")
+        )
+        has_peri = bool(coordinator and coordinator.has_peri)
+        has_annex = bool(coordinator and coordinator.has_annex)
+        peri_currently_enabled = self.config_entry.options.get(
+            CONF_ENABLE_PERIMETER_PANEL, False
+        )
+        annex_currently_enabled = self.config_entry.options.get(
+            CONF_ENABLE_ANNEX_PANEL, False
+        )
+
+        extra_fields: dict[Any, Any] = {}
+        if has_peri:
+            extra_fields[
+                vol.Optional(
+                    CONF_ENABLE_PERIMETER_PANEL, default=peri_currently_enabled
+                )
+            ] = bool
+        if has_annex:
+            extra_fields[
+                vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=annex_currently_enabled)
+            ] = bool
+        if has_peri or has_annex:
+            extra_fields[
+                vol.Optional(
+                    CONF_ENABLE_INTERIOR_PANEL,
+                    default=self.config_entry.options.get(
+                        CONF_ENABLE_INTERIOR_PANEL, False
+                    ),
+                )
+            ] = bool
+
         schema = _build_settings_schema(
             {
                 CONF_CODE: self._get(CONF_CODE, DEFAULT_CODE),
@@ -753,6 +776,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             },
             notify_options,
             use_suggested=True,
+            extra_fields=extra_fields,
         )
         return self.async_show_form(step_id="init", data_schema=schema)
 
@@ -764,7 +788,13 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             data = {**self._general_data, **user_input}
             return self.async_create_entry(title="", data=data)
 
-        has_peri = self.config_entry.data.get(CONF_HAS_PERI, False)
+        # Read has_peri from the running coordinator (live detection).
+        # Falls back to False if the coordinator is unavailable.
+        coordinator_data = self.hass.data.get(DOMAIN, {}).get(
+            self.config_entry.entry_id, {}
+        )
+        coordinator = coordinator_data.get("alarm_coordinator")
+        has_peri = coordinator.has_peri if coordinator is not None else False
 
         # Determine defaults for mapping dropdowns
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS

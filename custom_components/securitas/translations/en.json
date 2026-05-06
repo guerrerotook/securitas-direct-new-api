@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "Map each Home Assistant alarm action to a Securitas alarm mode. Set to 'Not used' to disable a button.",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Securitas alarm mode; set to 'Not used' to disable a button. The optional Interior-only, Perimeter-only and Annex-only panels each drive a single axis directly and do not use these mappings.",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",
@@ -88,7 +88,10 @@
                     "code": "PIN Code (leave empty for no PIN)",
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
                     "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
-                    "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
+                    "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)",
+                    "enable_interior_panel": "Enable Interior-only control panel",
+                    "enable_perimeter_panel": "Enable Perimeter-only control panel",
+                    "enable_annex_panel": "Enable Annex-only control panel"
                 },
                 "sections": {
                     "advanced": {
@@ -102,7 +105,7 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "Map each Home Assistant alarm action to a Securitas alarm mode. Set to 'Not used' to disable a button.",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Securitas alarm mode; set to 'Not used' to disable a button. The optional Interior-only, Perimeter-only and Annex-only panels each drive a single axis directly and do not use these mappings.",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",
@@ -128,7 +131,7 @@
             "message": "Invalid PIN code for {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "This alarm mode is not supported by your panel. Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."
+            "message": "This alarm mode is not supported by your panel (rejected: {tried}). Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."
         },
         "no_supported_command": {
             "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."

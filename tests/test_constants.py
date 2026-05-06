@@ -68,10 +68,18 @@ class TestSecuritasState:
         "PARTIAL_DAY_PERI": "partial_day_peri",
         "PARTIAL_NIGHT_PERI": "partial_night_peri",
         "TOTAL_PERI": "total_peri",
+        "ANNEX_ONLY": "annex_only",
+        "PARTIAL_DAY_ANNEX": "partial_day_annex",
+        "PARTIAL_NIGHT_ANNEX": "partial_night_annex",
+        "TOTAL_ANNEX": "total_annex",
+        "PERI_ANNEX": "peri_annex",
+        "PARTIAL_DAY_PERI_ANNEX": "partial_day_peri_annex",
+        "PARTIAL_NIGHT_PERI_ANNEX": "partial_night_peri_annex",
+        "TOTAL_PERI_ANNEX": "total_peri_annex",
     }
 
-    def test_has_all_ten_states(self):
-        assert len(SecuritasState) == 10
+    def test_has_all_eighteen_states(self):
+        assert len(SecuritasState) == 18
 
     @pytest.mark.parametrize(
         ("member_name", "expected_value"),
@@ -93,10 +101,28 @@ class TestSecuritasState:
 class TestStateToCommand:
     """Tests for STATE_TO_COMMAND mapping."""
 
-    def test_maps_every_state_except_not_used(self):
+    def test_maps_every_state_except_not_used_and_annex_variants(self):
+        """STATE_TO_COMMAND maps all states except NOT_USED and annex variants.
+
+        Annex variants are handled via SECURITAS_STATE_TO_ALARM_STATE mapping
+        in command_resolver.py rather than direct API commands.
+        """
         states_with_commands = set(STATE_TO_COMMAND.keys())
         all_states = set(SecuritasState)
-        assert states_with_commands == all_states - {SecuritasState.NOT_USED}
+        annex_states = {
+            SecuritasState.ANNEX_ONLY,
+            SecuritasState.PARTIAL_DAY_ANNEX,
+            SecuritasState.PARTIAL_NIGHT_ANNEX,
+            SecuritasState.TOTAL_ANNEX,
+            SecuritasState.PERI_ANNEX,
+            SecuritasState.PARTIAL_DAY_PERI_ANNEX,
+            SecuritasState.PARTIAL_NIGHT_PERI_ANNEX,
+            SecuritasState.TOTAL_PERI_ANNEX,
+        }
+        assert (
+            states_with_commands
+            == all_states - {SecuritasState.NOT_USED} - annex_states
+        )
 
     def test_not_used_is_not_in_map(self):
         assert SecuritasState.NOT_USED not in STATE_TO_COMMAND
@@ -169,6 +195,7 @@ class TestStateLabels:
     """Tests for STATE_LABELS mapping."""
 
     def test_has_label_for_every_securitas_state(self):
+        """Every SecuritasState member should have a human-readable label."""
         assert set(STATE_LABELS.keys()) == set(SecuritasState)
 
     def test_all_labels_are_non_empty_strings(self):
@@ -311,3 +338,21 @@ class TestPeriDefaults:
     def test_night_mapping_is_same_as_std(self):
         """map_night uses partial_night in both STD and PERI defaults."""
         assert PERI_DEFAULTS["map_night"] == STD_DEFAULTS["map_night"]
+
+
+# ── SubPanel Configuration Constants ─────────────────────────────────────────
+
+
+class TestSubPanelConstants:
+    """Tests for sub-panel toggle configuration constants."""
+
+    def test_constants_present(self):
+        from custom_components.securitas.const import (
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
+        )
+
+        assert CONF_ENABLE_INTERIOR_PANEL == "enable_interior_panel"
+        assert CONF_ENABLE_PERIMETER_PANEL == "enable_perimeter_panel"
+        assert CONF_ENABLE_ANNEX_PANEL == "enable_annex_panel"

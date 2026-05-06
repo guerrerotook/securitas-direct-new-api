@@ -569,3 +569,225 @@ class TestCameraCoordinator:
         coord = self._make_coordinator(hass, client, queue, installation, cameras)
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
+
+
+# ── TestCoordinatorCapabilities ──────────────────────────────────────────────
+
+
+class TestCoordinatorCapabilities:
+    """AlarmCoordinator exposes has_peri / has_annex / capabilities to entities."""
+
+    def _make_coordinator(
+        self,
+        hass: MagicMock,
+        client: AsyncMock,
+        queue: AsyncMock,
+        installation: Installation,
+    ) -> AlarmCoordinator:
+        return AlarmCoordinator(
+            hass,
+            client,
+            queue,
+            installation,
+            update_interval=timedelta(seconds=30),
+        )
+
+    def test_has_peri_starts_false(self):
+        """has_peri property defaults to False before first refresh."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        assert coord.has_peri is False
+
+    def test_has_annex_starts_false(self):
+        """has_annex property defaults to False before first refresh."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        assert coord.has_annex is False
+
+    def test_capabilities_starts_empty(self):
+        """capabilities property defaults to empty frozenset before first refresh."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        assert coord.capabilities == frozenset()
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_sets_has_peri_from_service_attribute(self):
+        """_populate_capabilities sets has_peri=True when services include PERI attr."""
+        from unittest.mock import MagicMock as _MM
+
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            Attribute,
+        )
+
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        installation.alarm_partitions = []
+
+        peri_svc = _MM()
+        peri_svc.attributes = [Attribute(name="PERI", value="PERIMETRAL")]
+        peri_svc.request = "SCH"
+        peri_svc.active = False
+
+        client.get_services = AsyncMock(return_value=[peri_svc])
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+
+        assert coord.has_peri is True
+        assert coord.has_annex is False
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_sets_has_annex_from_capabilities(self):
+        """_populate_capabilities sets has_annex=True when ARMANNEX+DARMANNEX present."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(
+            return_value=frozenset({"ARMANNEX", "DARMANNEX"})
+        )
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+
+        assert coord.has_annex is True
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_only_runs_once(self):
+        """_populate_capabilities is idempotent — second call is a no-op."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+        await coord._populate_capabilities()
+
+        # get_services should have been called exactly once
+        client.get_services.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_populate_capabilities_survives_api_error_and_retries(self):
+        """get_services failure must NOT permanently lock _capabilities_populated.
+
+        Otherwise a one-off network error at startup would freeze
+        has_peri/has_annex to False for the coordinator lifetime, hiding
+        capability-gated sub-panels until the integration is reloaded.
+        The next refresh should retry, succeed, and populate properly.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_services = AsyncMock(
+            side_effect=SecuritasDirectError("service fetch failed")
+        )
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._populate_capabilities()
+
+        # First attempt failed: stayed unpopulated so we can retry next refresh
+        assert coord.has_peri is False
+        assert coord.has_annex is False
+        assert coord._capabilities_populated is False
+
+        # Simulate the API recovering on next refresh
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(
+            return_value=frozenset(["ARM", "PERI", "ARMANNEX", "DARMANNEX"])
+        )
+        await coord._populate_capabilities()
+
+        assert coord.has_peri is True
+        assert coord.has_annex is True
+        assert coord._capabilities_populated is True
+
+    def test_populate_capabilities_from_data_sets_values(self):
+        """The sync path used by async_setup_entry populates from given data."""
+        from unittest.mock import MagicMock as _MM
+
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            Attribute,
+        )
+
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        # Create a coordinator without setup, then call populate_capabilities_from_data
+        coord = self._make_coordinator(hass, client, queue, installation)
+
+        # Build test data: a PERI service and annex capabilities
+        peri_svc = _MM()
+        peri_svc.attributes = [Attribute(name="PERI", value="PERIMETRAL")]
+        peri_svc.request = "SCH"
+        peri_svc.active = False
+        services = [peri_svc]
+
+        capabilities = frozenset({"ARMANNEX", "DARMANNEX"})
+
+        # Call the sync path directly
+        coord.populate_capabilities_from_data(services, capabilities)
+
+        # Assert: capabilities are set from the provided data
+        assert coord.has_peri is True
+        assert coord.has_annex is True
+        assert coord.capabilities == capabilities
+        assert coord._capabilities_populated is True
+
+    @pytest.mark.asyncio
+    async def test_async_update_data_skips_api_call_when_pre_populated(self):
+        """If populate_capabilities_from_data ran first, _populate_capabilities is a no-op."""
+        from unittest.mock import MagicMock as _MM
+
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            Attribute,
+        )
+
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        # Client should NOT be called
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(return_value=frozenset())
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+
+        # Pre-populate with fixed values
+        peri_svc = _MM()
+        peri_svc.attributes = [Attribute(name="PERI", value="PERIMETRAL")]
+        services = [peri_svc]
+        capabilities = frozenset({"ARMANNEX"})
+        coord.populate_capabilities_from_data(services, capabilities)
+
+        # Now trigger _populate_capabilities via _async_update_data
+        await coord._async_update_data()
+
+        # Assert: client.get_services was NOT called (no redundant API hit)
+        client.get_services.assert_not_awaited()

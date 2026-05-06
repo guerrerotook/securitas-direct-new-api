@@ -482,10 +482,11 @@ class TestGetServices:
 
         # Check capabilities stored in client._capabilities, NOT on installation
         assert "123456" in client_no_caps._capabilities
-        token, expiry = client_no_caps._capabilities["123456"]
+        token, expiry, cap_set = client_no_caps._capabilities["123456"]
         assert token == FAKE_CAPABILITIES_JWT
         assert isinstance(expiry, datetime)
         assert expiry > datetime.now()
+        assert isinstance(cap_set, frozenset)
 
     async def test_returns_empty_list_when_no_installation_data(
         self, client_no_caps, transport

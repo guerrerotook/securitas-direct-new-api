@@ -63,7 +63,6 @@ class TestForceArmNotificationsConfig:
         """force_arm_notifications=False is passed through config."""
         alarm = make_alarm(
             config={
-                "has_peri": False,
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
@@ -264,7 +263,6 @@ def make_alarm(
     if config is None:
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
         config = {
-            "has_peri": has_peri,
             "map_home": defaults["map_home"],
             "map_away": defaults["map_away"],
             "map_night": defaults["map_night"],
@@ -289,6 +287,8 @@ def make_alarm(
     coordinator = MagicMock(spec=AlarmCoordinator)
     coordinator.data = None
     coordinator.async_request_refresh = AsyncMock()
+    coordinator.has_peri = has_peri
+    coordinator.has_annex = False
 
     if initial_status is None:
         initial_status = OperationStatus(
@@ -857,10 +857,10 @@ class TestSetArmState:
 class TestProperties:
     """Tests for simple property accessors."""
 
-    def test_name_returns_installation_alias(self):
-        """name returns installation.alias."""
+    def test_name_returns_main_prefixed_alias(self):
+        """Combined (main) panel name is 'Main - <installation alias>'."""
         alarm = make_alarm()
-        assert alarm.name == "Home"
+        assert alarm.name == "Main - Home"
 
     def test_code_format_none_when_no_code(self):
         """code_format is None when no code is configured."""
@@ -3226,7 +3226,6 @@ class TestAsyncAddedToHass:
         """async_added_to_hass registers no listeners when notifications disabled."""
         alarm = make_alarm(
             config={
-                "has_peri": False,
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
@@ -3461,3 +3460,960 @@ class TestHassNoneGuardsAlarm:
 
         assert alarm._state == AlarmControlPanelState.ARMING
         alarm.async_schedule_update_ha_state.assert_not_called()
+
+
+# ===========================================================================
+# Per-panel hook surface tests (Task 12)
+# ===========================================================================
+
+
+class TestPanelHooks:
+    def test_base_resolve_target_state_raises(self):
+        from custom_components.securitas.alarm_control_panel import (
+            BaseSecuritasAlarmPanel,
+        )
+
+        with pytest.raises(NotImplementedError):
+            BaseSecuritasAlarmPanel._resolve_target_state(None, "armed_home")  # type: ignore[arg-type]
+
+    def test_base_extract_state_raises(self):
+        from custom_components.securitas.alarm_control_panel import (
+            BaseSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        with pytest.raises(NotImplementedError):
+            BaseSecuritasAlarmPanel._extract_state(None, joint)  # type: ignore[arg-type]
+
+
+# ===========================================================================
+# InteriorSecuritasAlarmPanel sub-panel tests (Task 13)
+# ===========================================================================
+
+
+def _make_interior_panel(
+    capabilities: frozenset = frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+    current_state=None,
+):
+    """Build an InteriorSecuritasAlarmPanel with mocked dependencies."""
+    from custom_components.securitas.alarm_control_panel import (
+        InteriorSecuritasAlarmPanel,
+    )
+    from custom_components.securitas.securitas_direct_new_api.models import (
+        AnnexMode,
+        InteriorMode,
+        PerimeterMode,
+    )
+
+    if current_state is None:
+        current_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+    coordinator = MagicMock()
+    coordinator.has_peri = "PERI" in capabilities
+    coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
+    coordinator.capabilities = capabilities
+    coordinator.alarm_state = current_state
+
+    installation = MagicMock()
+    installation.number = "12345"
+    installation.alias = "TestHome"
+    installation.address = "123 Test St"
+
+    client = MagicMock()
+    client.config = {}
+
+    hass = MagicMock()
+
+    with (
+        patch.object(
+            InteriorSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+        ),
+        patch.object(InteriorSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+    ):
+        return InteriorSecuritasAlarmPanel(installation, client, hass, coordinator)
+
+
+def _make_perimeter_panel(
+    capabilities: frozenset = frozenset(["PERI"]),
+    current_state=None,
+):
+    """Build a PerimeterSecuritasAlarmPanel with mocked dependencies."""
+    from custom_components.securitas.alarm_control_panel import (
+        PerimeterSecuritasAlarmPanel,
+    )
+    from custom_components.securitas.securitas_direct_new_api.models import (
+        AnnexMode,
+        InteriorMode,
+        PerimeterMode,
+    )
+
+    if current_state is None:
+        current_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+    coordinator = MagicMock()
+    coordinator.has_peri = "PERI" in capabilities
+    coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
+    coordinator.capabilities = capabilities
+    coordinator.alarm_state = current_state
+
+    installation = MagicMock()
+    installation.number = "12345"
+    installation.alias = "TestHome"
+    installation.address = "123 Test St"
+
+    client = MagicMock()
+    client.config = {}
+
+    hass = MagicMock()
+
+    with (
+        patch.object(
+            PerimeterSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+        ),
+        patch.object(PerimeterSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+    ):
+        return PerimeterSecuritasAlarmPanel(installation, client, hass, coordinator)
+
+
+class TestInteriorSubPanel:
+    def test_supported_features_always_all_three(self):
+        """Interior sub-panel always exposes ARM_HOME + ARM_NIGHT + ARM_AWAY.
+
+        We deliberately do not gate on JWT capabilities: the cap set is
+        empirically unreliable (e.g. Italian SDVECU advertises ARMNIGHT but
+        the panel rejects ARMNIGHT1 and accepts the un-advertised ARMDAY1).
+        """
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        for caps in (
+            frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            frozenset(["ARM", "ARMNIGHT"]),
+            frozenset(["ARM"]),
+            frozenset(),
+        ):
+            panel = _make_interior_panel(capabilities=caps)
+            feats = panel.supported_features
+            assert feats & F.ARM_HOME, f"ARM_HOME missing for caps={caps}"
+            assert feats & F.ARM_NIGHT, f"ARM_NIGHT missing for caps={caps}"
+            assert feats & F.ARM_AWAY, f"ARM_AWAY missing for caps={caps}"
+
+    def test_resolve_target_state_armed_away(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            ),
+        )
+        target = panel._resolve_target_state("armed_away")
+        assert target.interior == InteriorMode.TOTAL
+        # Other axes preserved
+        assert target.perimeter == PerimeterMode.ON
+        assert target.annex == AnnexMode.ON
+
+    def test_resolve_target_disarmed_preserves_perimeter_and_annex(self):
+        """Disarming the interior sub-panel must NOT touch perimeter or annex."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            ),
+        )
+        target = panel._resolve_target_state("disarmed")
+        assert target.interior == InteriorMode.OFF
+        assert target.perimeter == PerimeterMode.ON  # preserved
+        assert target.annex == AnnexMode.ON  # preserved
+
+    def test_extract_state_only_reads_interior(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"])
+        )
+        s = panel._extract_state(
+            AlarmState(
+                interior=InteriorMode.NIGHT,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.OFF,
+            )
+        )
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
+        assert s == AlarmControlPanelState.ARMED_NIGHT
+
+    def test_unique_id_suffix(self):
+        panel = _make_interior_panel(capabilities=frozenset(["ARM"]))
+        assert panel.unique_id is not None
+        assert panel.unique_id.endswith("_interior")
+
+
+class TestPerimeterSubPanel:
+    def test_supported_features_only_arm_away(self):
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_perimeter_panel()
+        feats = panel.supported_features
+        assert feats & F.ARM_AWAY
+        assert not (feats & F.ARM_HOME)
+        assert not (feats & F.ARM_NIGHT)
+
+    def test_resolve_target_armed_away(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_perimeter_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
+            )
+        )
+        s = panel._resolve_target_state("armed_away")
+        assert s.perimeter == PerimeterMode.ON
+        assert s.interior == InteriorMode.TOTAL  # preserved
+        assert s.annex == AnnexMode.ON  # preserved
+
+    def test_resolve_target_disarmed_preserves_interior_and_annex(self):
+        """Disarming the perimeter sub-panel must NOT touch interior or annex."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_perimeter_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            )
+        )
+        s = panel._resolve_target_state("disarmed")
+        assert s.perimeter == PerimeterMode.OFF
+        assert s.interior == InteriorMode.DAY  # preserved
+        assert s.annex == AnnexMode.ON  # preserved
+
+    async def test_async_alarm_disarm_uses_axis_projection_not_full_disarm(self):
+        """Regression: async_alarm_disarm must call _resolve_target_state, not hardcode full-disarm.
+
+        The bug: pressing Disarm on the Perimeter sub-panel sent DARM1DARMPERI
+        (full disarm) and on fallback DARM1, which on SDVFAST disarms everything
+        — wiping interior even though the user only meant to disarm perimeter.
+        """
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_perimeter_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.OFF,
+            )
+        )
+        panel._check_code = MagicMock(return_value=True)
+        panel._execute_transition = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                numinst="123456",
+                protom_response="P",  # PARTIAL_DAY (interior=DAY preserved, peri off)
+                protom_response_data="",
+            )
+        )
+        panel.coordinator.async_request_refresh = AsyncMock()
+        panel.async_write_ha_state = MagicMock()
+
+        await panel.async_alarm_disarm()
+
+        panel._execute_transition.assert_called_once()
+        target = panel._execute_transition.call_args[0][0]
+        assert target.perimeter == PerimeterMode.OFF
+        assert target.interior == InteriorMode.DAY  # preserved
+        assert target.annex == AnnexMode.OFF  # preserved
+
+    def test_extract_state(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
+        panel = _make_perimeter_panel()
+        on = panel._extract_state(
+            AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.OFF,
+            )
+        )
+        off = panel._extract_state(
+            AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            )
+        )
+        assert on == AlarmControlPanelState.ARMED_AWAY
+        assert off == AlarmControlPanelState.DISARMED
+
+    def test_unique_id_suffix(self):
+        panel = _make_perimeter_panel()
+        assert panel.unique_id is not None
+        assert panel.unique_id.endswith("_perimeter")
+
+
+def _make_annex_panel(
+    capabilities: frozenset = frozenset(["ARMANNEX", "DARMANNEX"]),
+    current_state=None,
+):
+    """Build an AnnexSecuritasAlarmPanel with mocked dependencies."""
+    from custom_components.securitas.alarm_control_panel import (
+        AnnexSecuritasAlarmPanel,
+    )
+    from custom_components.securitas.securitas_direct_new_api.models import (
+        AnnexMode,
+        InteriorMode,
+        PerimeterMode,
+    )
+
+    if current_state is None:
+        current_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+    coordinator = MagicMock()
+    coordinator.has_peri = "PERI" in capabilities
+    coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
+    coordinator.capabilities = capabilities
+    coordinator.alarm_state = current_state
+
+    installation = MagicMock()
+    installation.number = "12345"
+    installation.alias = "TestHome"
+    installation.address = "123 Test St"
+
+    client = MagicMock()
+    client.config = {}
+
+    hass = MagicMock()
+
+    with (
+        patch.object(
+            AnnexSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+        ),
+        patch.object(AnnexSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+    ):
+        return AnnexSecuritasAlarmPanel(installation, client, hass, coordinator)
+
+
+class TestAnnexSubPanel:
+    def test_supported_features_only_arm_away(self):
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_annex_panel()
+        feats = panel.supported_features
+        assert feats & F.ARM_AWAY
+        assert not (feats & F.ARM_HOME)
+        assert not (feats & F.ARM_NIGHT)
+
+    def test_resolve_armed_away_preserves_other_axes(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_annex_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.OFF,
+            )
+        )
+        s = panel._resolve_target_state("armed_away")
+        assert s.annex == AnnexMode.ON
+        assert s.interior == InteriorMode.DAY
+        assert s.perimeter == PerimeterMode.ON
+
+    def test_resolve_target_disarmed_preserves_interior_and_perimeter(self):
+        """Disarming the annex sub-panel must NOT touch interior or perimeter."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_annex_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            )
+        )
+        s = panel._resolve_target_state("disarmed")
+        assert s.annex == AnnexMode.OFF
+        assert s.interior == InteriorMode.DAY  # preserved
+        assert s.perimeter == PerimeterMode.ON  # preserved
+
+    def test_extract_state(self):
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
+        panel = _make_annex_panel()
+        on = panel._extract_state(
+            AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.ON,
+            )
+        )
+        off = panel._extract_state(
+            AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            )
+        )
+        assert on == AlarmControlPanelState.ARMED_AWAY
+        assert off == AlarmControlPanelState.DISARMED
+
+    def test_unique_id_suffix(self):
+        panel = _make_annex_panel()
+        assert panel.unique_id is not None
+        assert panel.unique_id.endswith("_annex")
+
+
+# ===========================================================================
+# TestSubPanelStateExtraction — Issue 1: sub-panels must use _extract_state
+# ===========================================================================
+
+
+class TestSubPanelStateExtraction:
+    """Sub-panels project the joint coordinator state onto their axis.
+
+    These tests verify that _update_from_coordinator and update_status_alarm
+    use _extract_state(coordinator.alarm_state) — NOT _status_map[proto_code].
+    """
+
+    def test_interior_update_from_coordinator_uses_extract_state(self):
+        """Interior panel derives state from joint state, ignoring user mapping."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        # Joint state: interior=NIGHT, perimeter=ON  → proto_code "C" (PARTIAL_NIGHT_PERI)
+        # The combined panel's _status_map might map "C" to any user-chosen HA state,
+        # but the interior sub-panel must read only the interior axis: ARMED_NIGHT.
+        joint = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=joint,
+        )
+        # Feed proto code "C" (PARTIAL_NIGHT_PERI) through the coordinator path
+        data = AlarmStatusData(status=SStatus(status="C"), protom_response="C")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_NIGHT
+
+    def test_interior_update_from_coordinator_disarmed(self):
+        """Interior panel shows DISARMED when joint interior axis is OFF."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=joint,
+        )
+        # Proto code "E" = PERIMETER_ONLY (interior=OFF, perimeter=ON)
+        data = AlarmStatusData(status=SStatus(status="E"), protom_response="E")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+    def test_interior_update_status_alarm_uses_extract_state(self):
+        """update_status_alarm uses _extract_state after a successful arm operation."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        # After arming interior to DAY+PERI, the API returns proto_code "B"
+        # (PARTIAL_DAY_PERI = AlarmState(DAY, ON)).  The interior axis is DAY
+        # → ARMED_HOME.  The combined-panel's _status_map might map "B" to
+        # something else, but interior sub-panel must read only the interior axis.
+        joint = AlarmState(
+            interior=InteriorMode.DAY,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=joint,
+        )
+        op_status = OperationStatus(
+            operation_status="OK",
+            message="",
+            protom_response="B",
+            protom_response_data="",
+            status="B",
+        )
+        panel.update_status_alarm(op_status)
+
+        assert panel._state == AlarmControlPanelState.ARMED_HOME
+
+    def test_perimeter_update_from_coordinator_uses_extract_state(self):
+        """Perimeter panel derives state from perimeter axis only."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_perimeter_panel(
+            capabilities=frozenset(["PERI"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="C"), protom_response="C")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_AWAY
+
+    def test_perimeter_update_from_coordinator_off(self):
+        """Perimeter panel shows DISARMED when perimeter axis is OFF."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_perimeter_panel(
+            capabilities=frozenset(["PERI"]),
+            current_state=joint,
+        )
+        # Proto code "Q" = PARTIAL_NIGHT (interior=NIGHT, perimeter=OFF)
+        data = AlarmStatusData(status=SStatus(status="Q"), protom_response="Q")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+    def test_annex_update_from_coordinator_uses_extract_state(self):
+        """Annex panel derives state from annex axis only."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.ON,
+        )
+        panel = _make_annex_panel(
+            capabilities=frozenset(["ARMANNEX", "DARMANNEX"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="T"), protom_response="T")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_AWAY
+
+    def test_annex_update_from_coordinator_off(self):
+        """Annex panel shows DISARMED when annex axis is OFF."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_annex_panel(
+            capabilities=frozenset(["ARMANNEX", "DARMANNEX"]),
+            current_state=joint,
+        )
+        data = AlarmStatusData(status=SStatus(status="T"), protom_response="T")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+    def test_combined_panel_unaffected_uses_status_map(self):
+        """Combined panel still uses _status_map lookup (backward compat check)."""
+        alarm = make_alarm()
+        # The combined panel's _status_map maps proto "T" to armed_away by default
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="T"), protom_response="T"
+        )
+        alarm._update_from_coordinator(alarm.coordinator.data)
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+    def test_annex_proto_codes_are_recognised(self):
+        """Annex proto codes (X/R/S/O) must trigger state updates.
+
+        Regression: an earlier check used const.PROTO_TO_STATE (8 entries,
+        no annex) instead of PROTO_TO_ALARM_STATE (12 entries, includes
+        annex codes). Without this fix, an annex-bearing state report
+        ('X' = ANNEX_ONLY) would be treated as unknown — _last_proto_code
+        wouldn't update and the resolver could compute transitions from
+        a stale state.
+        """
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.ON,
+        )
+        panel = _make_annex_panel(
+            capabilities=frozenset(["ARMANNEX", "DARMANNEX"]),
+            current_state=joint,
+        )
+        # Proto code "X" = ANNEX_ONLY
+        data = AlarmStatusData(status=SStatus(status="X"), protom_response="X")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_AWAY
+        assert panel._last_proto_code == "X"
+
+    def test_subpanel_preserves_state_on_unknown_proto_code(self):
+        """Unknown proto code must NOT silently flip the sub-panel to DISARMED.
+
+        Regression: coordinator.alarm_state defaults to all-OFF when the proto
+        code isn't recognised. Without guarding, _extract_state would then
+        report DISARMED — wrong if the system is actually armed.
+        """
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_perimeter_panel(current_state=joint)
+        panel._state = AlarmControlPanelState.DISARMED  # last known
+        # Feed an unknown status string (not a proto code letter)
+        data = AlarmStatusData(
+            status=SStatus(status="UNKNOWN_STATUS"), protom_response=""
+        )
+        panel._update_from_coordinator(data)
+        # State preserved; not flipped via fallback all-OFF joint
+        assert panel._state == AlarmControlPanelState.DISARMED
+
+
+# ===========================================================================
+# TestSubPanelSetup — conditional instantiation in async_setup_entry (Task 16)
+# ===========================================================================
+
+
+class TestSubPanelSetup:
+    """Tests for conditional sub-panel instantiation in async_setup_entry."""
+
+    def _setup_kwargs(self, *, options: dict, has_peri: bool, has_annex: bool):
+        """Build hass/entry/coordinator suitable for invoking async_setup_entry."""
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas import SecuritasDirectDevice
+
+        installation = Installation(
+            number="123456",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="123 St",
+            city="Madrid",
+        )
+        device = MagicMock(spec=SecuritasDirectDevice)
+        device.installation = installation
+
+        client = MagicMock()
+        client.config = {
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": STD_DEFAULTS["map_vacation"],
+            "scan_interval": 120,
+        }
+
+        coordinator = MagicMock(spec=AlarmCoordinator)
+        coordinator.has_peri = has_peri
+        coordinator.has_annex = has_annex
+        coordinator.capabilities = frozenset()
+        coordinator.data = None
+
+        hass = MagicMock()
+        hass.data = {
+            DOMAIN: {
+                "entry-id": {
+                    "hub": client,
+                    "alarm_coordinator": coordinator,
+                    "devices": [device],
+                },
+            },
+        }
+
+        entry = MagicMock()
+        entry.entry_id = "entry-id"
+        entry.options = options
+        return hass, entry
+
+    @pytest.mark.asyncio
+    async def test_only_combined_when_no_toggles(self):
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            CombinedSecuritasAlarmPanel,
+        )
+
+        hass, entry = self._setup_kwargs(options={}, has_peri=True, has_annex=True)
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+        assert len(added) == 1
+        assert isinstance(added[0], CombinedSecuritasAlarmPanel)
+
+    @pytest.mark.asyncio
+    async def test_perimeter_panel_requires_capability(self):
+        # toggle on but no PERI cap → no perimeter panel
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            PerimeterSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import CONF_ENABLE_PERIMETER_PANEL
+
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_PERIMETER_PANEL: True},
+            has_peri=False,
+            has_annex=False,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+        assert not any(isinstance(p, PerimeterSecuritasAlarmPanel) for p in added)
+
+    @pytest.mark.asyncio
+    async def test_annex_panel_requires_capability(self):
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            AnnexSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import CONF_ENABLE_ANNEX_PANEL
+
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_ANNEX_PANEL: True},
+            has_peri=True,
+            has_annex=False,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+        assert not any(isinstance(p, AnnexSecuritasAlarmPanel) for p in added)
+
+    @pytest.mark.asyncio
+    async def test_interior_panel_requires_sibling(self):
+        # interior toggle on, but no sibling toggle/cap → no interior panel
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            InteriorSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
+
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_INTERIOR_PANEL: True},
+            has_peri=True,
+            has_annex=True,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+        assert not any(isinstance(p, InteriorSecuritasAlarmPanel) for p in added)
+
+    @pytest.mark.asyncio
+    async def test_all_three_subpanels_with_full_capabilities(self):
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+        )
+        from custom_components.securitas.const import (
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
+        )
+
+        hass, entry = self._setup_kwargs(
+            options={
+                CONF_ENABLE_INTERIOR_PANEL: True,
+                CONF_ENABLE_PERIMETER_PANEL: True,
+                CONF_ENABLE_ANNEX_PANEL: True,
+            },
+            has_peri=True,
+            has_annex=True,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+        types = {type(p).__name__ for p in added}
+        assert types == {
+            "CombinedSecuritasAlarmPanel",
+            "InteriorSecuritasAlarmPanel",
+            "PerimeterSecuritasAlarmPanel",
+            "AnnexSecuritasAlarmPanel",
+        }
+
+    @pytest.mark.asyncio
+    async def test_alarm_entities_lookup_only_combined(self):
+        """Combined panel is the one registered in alarm_entities for force_arm services."""
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            CombinedSecuritasAlarmPanel,
+        )
+        from custom_components.securitas.const import (
+            DOMAIN,
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
+        )
+
+        hass, entry = self._setup_kwargs(
+            options={
+                CONF_ENABLE_INTERIOR_PANEL: True,
+                CONF_ENABLE_PERIMETER_PANEL: True,
+                CONF_ENABLE_ANNEX_PANEL: True,
+            },
+            has_peri=True,
+            has_annex=True,
+        )
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+        lookup = hass.data[DOMAIN]["alarm_entities"]
+        assert set(lookup.keys()) == {"123456"}
+        assert isinstance(lookup["123456"], CombinedSecuritasAlarmPanel)

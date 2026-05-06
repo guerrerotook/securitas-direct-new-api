@@ -128,9 +128,10 @@ Pydantic models for API domain objects. All domain models inherit from `_NullSaf
 
 - `InteriorMode` — StrEnum: off, day, night, total
 - `PerimeterMode` — StrEnum: off, on
-- `ProtoCode` — StrEnum for single-letter protocol response codes (D, E, P, Q, B, C, T, A)
-- `ArmCommand` — StrEnum for arm/disarm command strings (DARM1, ARM1, ARMDAY1, etc.)
-- `AlarmState` — Frozen `BaseModel` combining `InteriorMode` + `PerimeterMode`
+- `AnnexMode` — StrEnum: off, on
+- `ProtoCode` — StrEnum for single-letter protocol response codes (D, E, P, Q, B, C, T, A, X, R, S, O)
+- `ArmCommand` — StrEnum for arm/disarm command strings (DARM1, ARM1, ARMDAY1, ARMANNEX1, DARMANNEX1, etc.)
+- `AlarmState` — Frozen `BaseModel` combining `InteriorMode` + `PerimeterMode` + `AnnexMode`
 - `parse_proto_code()` — Parses raw code to `ProtoCode`, raises `UnexpectedStateError` for unknown codes
 - `PROTO_TO_STATE` — Maps `ProtoCode` to `AlarmState`
 - `STATE_TO_PROTO` — Reverse mapping
@@ -173,7 +174,7 @@ All debug log messages use context prefixes for easy filtering:
 
 ### Alarm states and commands (`const.py`, `models.py`)
 
-Securitas alarms have two independent axes: **interior mode** (disarmed, partial day, partial night, total) and **perimeter** (on or off). The combination produces 8 states:
+Securitas alarms have up to three independent axes: **interior mode** (disarmed, partial day, partial night, total), **perimeter** (on or off), and **annex** (on or off). Most installations only use the interior axis ± perimeter; the annex axis is used by some UK Vatrinus installations. The combination of interior × perimeter alone produces these 8 states:
 
 | State | Interior | Perimeter | API Command | Proto Code |
 |-------|----------|-----------|-------------|------------|
@@ -198,7 +199,7 @@ Two mapping tables in `models.py` connect these:
 
 **Location:** `securitas_direct_new_api/command_resolver.py`
 
-The `CommandResolver` class models the alarm as two independent axes — `InteriorMode` (off, day, night, total) and `PerimeterMode` (off, on) — combined into an `AlarmState`. It replaces the old `_use_multi_step` flag, `_send_arm_command()` / `_send_disarm_command()` methods, `COMPOUND_COMMAND_STEPS` constant, and `PERI_ARMED_PROTO_CODES` set.
+The `CommandResolver` class models the alarm as three independent axes — `InteriorMode` (off, day, night, total), `PerimeterMode` (off, on), and `AnnexMode` (off, on) — combined into an `AlarmState`. It replaces the old `_use_multi_step` flag, `_send_arm_command()` / `_send_disarm_command()` methods, `COMPOUND_COMMAND_STEPS` constant, and `PERI_ARMED_PROTO_CODES` set.
 
 **How it works:**
 
@@ -673,6 +674,42 @@ Both entities are grouped under a per-camera child device (via `camera_device_in
 - On 403: creates "Rate limited" persistent notification and sets `waf_blocked` on the alarm entity
 
 **`SecuritasCaptureButton`** — Requests a new image capture from a Securitas camera. One per camera device, discovered alongside cameras in the background task. Calls `hub.capture_image()` which requests the capture, polls for completion, and stores the resulting image. Grouped under the per-camera child device.
+
+## Three-axis alarm model
+
+Verisure installations have up to three independent alarm axes:
+
+- **Interior** — `OFF` / `DAY` / `NIGHT` / `TOTAL` (`InteriorMode`)
+- **Perimeter** — `OFF` / `ON` (`PerimeterMode`)
+- **Annex** — `OFF` / `ON` (`AnnexMode`)
+
+`AlarmState` is the joint state across all three axes. The status code returned by the API maps to a specific tuple via `PROTO_TO_STATE`. `CommandResolver` plans transitions between any two `AlarmState` values, emitting one or more API command steps; multi-axis transitions append per-axis steps in a deterministic order.
+
+## Capability detection
+
+`detect_peri()` and `detect_annex()` live in `securitas_direct_new_api/capabilities.py`. Detection runs on every config-entry load — there is no stored `CONF_HAS_PERI`. `detect_peri()` uses four layered signals (JWT capability set, active PERI service, SCH service `PERI` attribute, alarm partition `id="02"`) so it catches both Spanish SDVFAST panels (which advertise `PERI` via JWT cap or service attribute) and Italian SDVECU panels (which expose perimeter only via the alarm-partition list). `detect_annex()` requires both `ARMANNEX` and `DARMANNEX` capabilities.
+
+**Why four signals, not just the JWT cap?** The cap claim appears to track contract/role permissions (what the tenant is licensed for), not what the physical panel is configured to do — and on Italian SDVECU it can be both incomplete and inverted. Two witnesses from the same OWNER login:
+
+- *Perimeter*: an installation with an active `YP` outdoor camera has no `PERI` in the cap, yet the panel accepts perimeter commands. `alarm_partitions[id=02]` and the SCH service's `PERI` attribute reflect physical configuration; the cap does not.
+- *Arming modes*: the cap lists `ARMNIGHT` while the panel rejects `ARMNIGHT1` (`"Request ARMNIGHT1 is not valid for Central Unit"`), and omits `ARMDAY` while the panel accepts `ARMDAY1`.
+
+This is why the Interior sub-panel deliberately surfaces all three interior modes regardless of cap content; the resolver's `mark_unsupported` runtime fallback catches genuinely-rejected commands and the user gets a notification naming the failed command. See `tests/fixtures/capability_jwts/italy_owner_partial_only.json` for the regression evidence.
+
+A single debug log line at startup makes misdetection diagnosable: search the log for `capability detection for <installation>` to see the resolved `has_peri`, `has_annex`, and full sorted capability set for each installation.
+
+## Entity layout
+
+Per installation:
+
+- One **main panel** (always present) — friendly name `Main - <installation alias>`. Drives all three axes through the user-configurable `map_home`/`map_away`/`map_night`/`map_custom`/`map_vacation` mappings. Implementation class is `CombinedSecuritasAlarmPanel`; the user-facing term is "main panel" (contrasts with "Interior-only / Perimeter-only / Annex-only control panel"). Backwards compatible with all existing setups.
+- Up to three opt-in **sub-panels** (Interior, Perimeter, Annex) — friendly names `<Axis> - <installation alias>` (e.g. `Interior - <alias>`). Each drives a single axis. Visibility is gated on (a) capability detection, AND (b) the per-axis toggle in the options flow. The Perimeter and Annex toggles are hidden when their respective capability is absent. The Interior toggle is hidden only when the installation has neither perimeter nor annex capability — with no other axis available, the main panel already drives the interior axis and a separate Interior tile would just be noise. Once any second axis is supported, the Interior toggle is offered immediately (it does not depend on whether the sibling toggle is currently enabled).
+
+All four entities subscribe to the same `AlarmCoordinator`; commands from any entity update the joint `AlarmState`, and the coordinator update broadcasts new state to every entity. Sub-panel classes (`InteriorSecuritasAlarmPanel`, `PerimeterSecuritasAlarmPanel`, `AnnexSecuritasAlarmPanel`) inherit from `BaseSecuritasAlarmPanel` and override two hooks: `_resolve_target_state(ha_state)` projects an HA state onto the panel's axis (preserving the others), and `_extract_state(joint)` reads only the panel's axis from the joint state.
+
+## Force-arm with sub-panels
+
+The event-driven force-arm architecture generalizes naturally: each panel owns its own force context, fires `securitas_arming_exception` with its own `entity_id`, and the built-in handler filters by entity_id so notifications mention the specific panel that triggered the exception.
 
 ## Configuration
 

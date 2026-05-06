@@ -25,7 +25,6 @@ CAMERA_CARD_URL = (
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
-CONF_HAS_PERI = "has_peri"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
@@ -37,6 +36,9 @@ CONF_MAP_VACATION = "map_vacation"
 CONF_NOTIFY_GROUP = "notify_group"
 CONF_FORCE_ARM_NOTIFICATIONS = "force_arm_notifications"
 CONF_INSTALLATION = "installation"
+CONF_ENABLE_INTERIOR_PANEL = "enable_interior_panel"
+CONF_ENABLE_PERIMETER_PANEL = "enable_perimeter_panel"
+CONF_ENABLE_ANNEX_PANEL = "enable_annex_panel"
 
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CODE_ARM_REQUIRED = False

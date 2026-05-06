@@ -14,7 +14,6 @@ from custom_components.securitas import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
-    CONF_HAS_PERI,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
@@ -213,14 +212,17 @@ def make_config_entry_data(
     notify_group: str = "",
     force_arm_notifications: bool = True,
 ) -> dict:
-    """Build config entry data dict with sensible defaults."""
+    """Build config entry data dict with sensible defaults.
+
+    ``has_peri`` controls which default mappings are used but is no longer
+    stored in entry data — capability detection is now runtime-only.
+    """
     defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
     return {
         CONF_USERNAME: username,
         CONF_PASSWORD: password,
         CONF_COUNTRY: country,
         CONF_CODE: code,
-        CONF_HAS_PERI: has_peri,
         CONF_CODE_ARM_REQUIRED: code_arm_required,
         CONF_SCAN_INTERVAL: scan_interval,
         CONF_DELAY_CHECK_OPERATION: delay_check_operation,
@@ -247,6 +249,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     """Create a MagicMock mimicking SecuritasHub."""
     hub = MagicMock(spec=SecuritasHub)
     hub.client = AsyncMock()
+    hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
     hub.lang = "es"
     hub.config = {}

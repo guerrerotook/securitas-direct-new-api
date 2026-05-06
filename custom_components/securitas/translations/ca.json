@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure. Seleccioneu 'No utilitzat' per desactivar un botó.",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó. Els panells opcionals només Interior, només Perímetre i només Annex controlen cadascun un únic eix directament i no fan servir aquestes assignacions.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",
@@ -88,7 +88,10 @@
                     "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
                     "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
                     "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)"
+                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
+                    "enable_interior_panel": "Activar el panell de control només Interior",
+                    "enable_perimeter_panel": "Activar el panell de control només Perímetre",
+                    "enable_annex_panel": "Activar el panell de control només Annex"
                 },
                 "sections": {
                     "advanced": {
@@ -102,7 +105,7 @@
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure. Seleccioneu 'No utilitzat' per desactivar un botó.",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó. Els panells opcionals només Interior, només Perímetre i només Annex controlen cadascun un únic eix directament i no fan servir aquestes assignacions.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",
@@ -128,7 +131,7 @@
             "message": "Codi PIN no vàlid per a {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "Aquest mode d'alarma no és compatible amb el teu panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
+            "message": "Aquest mode d'alarma no és compatible amb el teu panell (rebutjat: {tried}). Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
         },
         "no_supported_command": {
             "message": "No s'ha trobat cap ordre compatible per a aquest panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."

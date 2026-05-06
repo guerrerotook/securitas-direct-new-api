@@ -41,7 +41,6 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
-    CONF_HAS_PERI,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -50,6 +49,9 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
     CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+    CONF_ENABLE_ANNEX_PANEL,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
@@ -138,6 +140,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_MAP_VACATION,
             CONF_NOTIFY_GROUP,
             CONF_FORCE_ARM_NOTIFICATIONS,
+            CONF_ENABLE_INTERIOR_PANEL,
+            CONF_ENABLE_PERIMETER_PANEL,
+            CONF_ENABLE_ANNEX_PANEL,
         )
     ):
         # update entry replacing data with new options
@@ -177,7 +182,6 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
     config[CONF_CODE] = _opt(CONF_CODE, DEFAULT_CODE)
-    config[CONF_HAS_PERI] = entry.data.get(CONF_HAS_PERI, False)
     config[CONF_CODE_ARM_REQUIRED] = _opt(
         CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
     )
@@ -446,11 +450,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 config_entry=entry,
             )
 
-            # Discover sentinel and lock services from cached service list
+            # Discover sentinel and lock services from cached service list.
+            # On failure, skip pre-population so the coordinator's
+            # _populate_capabilities can retry on the first refresh — otherwise
+            # a transient network error would lock has_peri/has_annex to False
+            # for the coordinator lifetime.
             try:
                 services = await client.get_services(first_installation)
             except SecuritasDirectError:
                 services = []
+            else:
+                capabilities = client.client.get_supported_commands(
+                    first_installation.number
+                )
+                alarm_coord.populate_capabilities_from_data(services, capabilities)
 
             # Sentinel coordinator — needs a sentinel service and its zone
             for service in services:

@@ -31,6 +31,13 @@ class PerimeterMode(StrEnum):
     ON = "on"
 
 
+class AnnexMode(StrEnum):
+    """Annex alarm mode."""
+
+    OFF = "off"
+    ON = "on"
+
+
 class ProtoCode(StrEnum):
     """Protocol response codes from the Securitas Direct API."""
 
@@ -42,6 +49,12 @@ class ProtoCode(StrEnum):
     PARTIAL_NIGHT_PERIMETER = "C"
     TOTAL = "T"
     TOTAL_PERIMETER = "A"
+    # Annex variants (interior + annex, no peri). The 8 perimeter+annex
+    # combinations are not yet known and fall through to Custom Override.
+    ANNEX_ONLY = "X"
+    PARTIAL_DAY_ANNEX = "R"
+    PARTIAL_NIGHT_ANNEX = "S"
+    TOTAL_ANNEX = "O"
 
 
 class ArmCommand(StrEnum):
@@ -62,20 +75,25 @@ class ArmCommand(StrEnum):
 
 
 class AlarmState(BaseModel):
-    """Two-axis alarm state: interior mode + perimeter on/off."""
+    """Three-axis alarm state: interior + perimeter + annex."""
 
     model_config = ConfigDict(frozen=True)
 
     interior: InteriorMode
     perimeter: PerimeterMode
+    annex: AnnexMode = AnnexMode.OFF
 
     def __hash__(self) -> int:
-        return hash((self.interior, self.perimeter))
+        return hash((self.interior, self.perimeter, self.annex))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, AlarmState):
             return NotImplemented
-        return self.interior == other.interior and self.perimeter == other.perimeter
+        return (
+            self.interior == other.interior
+            and self.perimeter == other.perimeter
+            and self.annex == other.annex
+        )
 
 
 # ── parse_proto_code ──────────────────────────────────────────────────────────
@@ -118,6 +136,18 @@ PROTO_TO_STATE: dict[ProtoCode, AlarmState] = {
     ),
     ProtoCode.TOTAL_PERIMETER: AlarmState(
         interior=InteriorMode.TOTAL, perimeter=PerimeterMode.ON
+    ),
+    ProtoCode.ANNEX_ONLY: AlarmState(
+        interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
+    ),
+    ProtoCode.PARTIAL_DAY_ANNEX: AlarmState(
+        interior=InteriorMode.DAY, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
+    ),
+    ProtoCode.PARTIAL_NIGHT_ANNEX: AlarmState(
+        interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
+    ),
+    ProtoCode.TOTAL_ANNEX: AlarmState(
+        interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF, annex=AnnexMode.ON
     ),
 }
 
