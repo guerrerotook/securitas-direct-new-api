@@ -137,7 +137,9 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
         # `self._context` ~1 s after async_set_context.
         user_context = self._context
         try:
-            await self._client.capture_image(self._installation, self._camera_device)
+            _, thumbnail = await self._client.capture_image(
+                self._installation, self._camera_device
+            )
         except SecuritasDirectError as err:
             _LOGGER.warning(
                 "Failed to capture image from %s: %s",
@@ -145,6 +147,10 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
                 err,
             )
             return
+        # Use the real server-side ids (when available) so the card's
+        # follow-up xSGetPhotoImages fetch resolves to this capture.
+        id_signal = thumbnail.id_signal if thumbnail else None
+        signal_type = thumbnail.signal_type if thumbnail else None
         await inject_ha_event(
             self.hass,
             self._installation,
@@ -153,4 +159,6 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
             device=self._camera_device.zone_id,
             device_name=self._camera_device.name,
             context=user_context,
+            id_signal=id_signal,
+            signal_type=signal_type,
         )

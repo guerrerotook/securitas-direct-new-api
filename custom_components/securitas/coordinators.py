@@ -559,8 +559,17 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
     def _merge(
         injected: list[ActivityEvent], polled: list[ActivityEvent]
     ) -> list[ActivityEvent]:
-        """Merge injected + polled events, newest first, capped at the window size."""
-        return (injected + polled)[:_ACTIVITY_TIMELINE_WINDOW]
+        """Merge injected + polled events, newest first, capped at the window size.
+
+        When an injected event carries a real server id (e.g. an image
+        request injected from the capture button uses the captured frame's
+        ``id_signal``), the polled timeline returns the same id at the next
+        poll.  Drop the polled duplicate so the user sees one row, with the
+        injected entry's HA-side context preserved.
+        """
+        injected_ids = {e.id_signal for e in injected}
+        deduped = [e for e in polled if e.id_signal not in injected_ids]
+        return (injected + deduped)[:_ACTIVITY_TIMELINE_WINDOW]
 
     def inject_event(self, event: ActivityEvent) -> None:
         """Add a HA-side synthetic event to the front of the timeline.

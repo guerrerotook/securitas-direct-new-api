@@ -314,7 +314,7 @@ class TestSecuritasCaptureButton:
     async def test_press_calls_capture(self, mock_hub, installation, camera_device):
         from custom_components.securitas.button import SecuritasCaptureButton
 
-        mock_hub.capture_image = AsyncMock(return_value=b"\xff\xd8")
+        mock_hub.capture_image = AsyncMock(return_value=(b"\xff\xd8", None))
         btn = SecuritasCaptureButton(mock_hub, installation, camera_device)
         await btn.async_press()
         mock_hub.capture_image.assert_called_once_with(installation, camera_device)

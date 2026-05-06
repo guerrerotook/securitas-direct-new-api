@@ -242,12 +242,16 @@ class SecuritasHub:
 
     async def capture_image(
         self, installation: Installation, camera_device: CameraDevice
-    ) -> bytes | None:
+    ) -> tuple[bytes | None, ThumbnailResponse | None]:
         """Request a new image capture and fetch the result.
 
         The client handles all capture polling internally.  The hub keeps
         HA-specific dispatcher signals, image validation/storage, and the
         background full-image fetch.
+
+        Returns the validated JPEG bytes (or None) AND the ThumbnailResponse
+        (so callers can read the real ``id_signal`` / ``signal_type`` of the
+        captured frame).
         """
         device = camera_device
         capture_key = f"{installation.number}_{device.zone_id}"
@@ -290,7 +294,7 @@ class SecuritasHub:
                     self._fetch_and_store_full_image(installation, device, thumbnail)
                 )
 
-            return image_bytes
+            return image_bytes, thumbnail
         finally:
             self._camera_capturing.discard(capture_key)
 

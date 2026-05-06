@@ -67,21 +67,36 @@ def make_synthetic_event(
     device: str | None = None,
     device_name: str | None = None,
     exceptions: list[ActivityException] | None = None,
+    id_signal: str | None = None,
+    signal_type: str | int | None = None,
 ) -> ActivityEvent:
     """Build a HA-side ActivityEvent for injection into the coordinator.
 
-    Sets ``category`` explicitly (no panel-equivalent type code is borrowed —
-    `type` stays at 0 for HA-issued events).  Synthesises a unique
-    ``id_signal`` (prefixed ``ha-``) so it never collides with the panel's
-    numeric ids; sets ``source`` to ``"Home Assistant"`` so automations can
-    distinguish HA-issued events from panel/app/website ones.
+    Sets ``category`` explicitly (no panel-equivalent type code is borrowed
+    when ids are synthetic).  Sets ``source`` to ``"Home Assistant"`` so
+    automations can distinguish HA-issued events from panel/app/website ones.
+
+    When ``id_signal`` is provided (e.g. captured from a server response
+    after a real camera capture), use it verbatim — that lets follow-up
+    server-side queries like ``xSGetPhotoImages`` resolve.  Otherwise a
+    synthetic id prefixed ``ha-`` is generated so it can't collide with
+    panel numeric ids.
     """
+    if id_signal:
+        real_id = id_signal
+        try:
+            sig_type = int(signal_type) if signal_type is not None else 0
+        except (TypeError, ValueError):
+            sig_type = 0
+    else:
+        real_id = f"ha-{uuid.uuid4().hex}"
+        sig_type = 0
     return ActivityEvent(
         alias=alias,
-        type=0,
-        signal_type=0,
+        type=sig_type,
+        signal_type=sig_type,
         category=category,
-        id_signal=f"ha-{uuid.uuid4().hex}",
+        id_signal=real_id,
         time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         source=_HA_USER,
         verisure_user=verisure_user,
@@ -120,12 +135,18 @@ async def inject_ha_event(
     device: str | None = None,
     device_name: str | None = None,
     exceptions: list[ActivityException] | None = None,
+    id_signal: str | None = None,
+    signal_type: str | int | None = None,
 ) -> None:
     """Inject a HA-side event into the activity timeline for `installation`.
 
     Resolves the HA user from `context`, builds a synthetic ActivityEvent, and
     pushes it onto the matching ActivityCoordinator.  Silently no-ops if no
     coordinator exists for the installation (integration not loaded).
+
+    Pass ``id_signal``/``signal_type`` when the action's server-side ids are
+    known (e.g. after a successful camera capture); follow-up image fetches
+    will then succeed.  Otherwise a synthetic ``ha-...`` id is generated.
     """
     coord = _find_activity_coordinator(hass, installation)
     if coord is None:
@@ -138,6 +159,8 @@ async def inject_ha_event(
         device=device,
         device_name=device_name,
         exceptions=exceptions,
+        id_signal=id_signal,
+        signal_type=signal_type,
     )
     coord.inject_event(event)
 

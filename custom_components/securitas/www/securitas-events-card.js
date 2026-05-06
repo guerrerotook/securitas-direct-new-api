@@ -608,16 +608,18 @@ class SecuritasEventsCard extends HTMLElement {
           this._expanded.add(id);
           row.classList.add("expanded");
           if (details) details.classList.add("expanded");
-          // Lazy-fetch the historical image for image-request events —
-          // but only for polled entries.  HA-injected events use a
-          // synthetic `ha-<uuid>` id that the server can't resolve.
+          // Lazy-fetch the historical image for image-request events.
+          // Skip synthetic ids (prefix `ha-`) — those are HA-side
+          // placeholders the Verisure server can't resolve.  Injected
+          // events from the capture button use the real server id, so
+          // the fetch works for them too.
           const event = this._latestEvents.find(
             (e) => String(e.id_signal || "") === id
           );
           if (
             event &&
             event.category === "image_request" &&
-            !event.injected &&
+            !id.startsWith("ha-") &&
             !this._imageCache.has(id)
           ) {
             this._fetchEventImage(event);
@@ -711,12 +713,10 @@ class SecuritasEventsCard extends HTMLElement {
   }
 
   _renderImageBlock(event) {
-    // Injected events use synthetic `ha-<uuid>` ids that the server can't
-    // resolve.  The polled equivalent (arriving at the next poll) carries
-    // the real id_signal — that's the row to expand for the image.
-    if (event.injected === true) return "";
     const lang = _hassLang(this._hass);
     const id = String(event.id_signal || "");
+    // Synthetic ids (prefix `ha-`) can't resolve to a server-side image.
+    if (id.startsWith("ha-")) return "";
     const cached = this._imageCache.get(id);
     const alt = _escHtml(event.device_name || "");
     if (cached?.state === "loaded" && cached.dataUrl) {
