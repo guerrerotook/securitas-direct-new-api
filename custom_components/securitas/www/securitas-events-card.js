@@ -456,7 +456,9 @@ class SecuritasEventsCard extends HTMLElement {
       }
     }, 8000);
     try {
-      await this._hass.callService("homeassistant", "update_entity", {
+      // Routes through the integration's API queue at FOREGROUND priority,
+      // ahead of the next scheduled 60s poll.
+      await this._hass.callService("securitas", "refresh_activity_log", {
         entity_id: this._config.entity,
       });
     } catch (e) {

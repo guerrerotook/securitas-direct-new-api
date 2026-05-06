@@ -9,7 +9,10 @@ from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+    async_get_current_platform,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN
@@ -51,6 +54,13 @@ async def async_setup_entry(
     activity_coord: ActivityCoordinator | None = entry_data.get("activity_coordinator")
     if activity_coord is not None:
         sensors.append(ActivityLogSensor(activity_coord, activity_coord.installation))
+        # Per-entity service: card refresh button calls this with FOREGROUND
+        # priority via the API queue, ahead of the next scheduled poll.
+        async_get_current_platform().async_register_entity_service(
+            "refresh_activity_log",
+            {},
+            "async_manual_refresh",
+        )
 
     if sensors:
         async_add_entities(sensors, False)
@@ -252,6 +262,10 @@ class ActivityLogSensor(  # type: ignore[override]
             self._bus_listener_unsub()
             self._bus_listener_unsub = None
         await super().async_will_remove_from_hass()
+
+    async def async_manual_refresh(self) -> None:
+        """Service entrypoint for the card's refresh button."""
+        await self.coordinator.async_manual_refresh()
 
     @property
     def native_value(self) -> str | None:  # type: ignore[override]

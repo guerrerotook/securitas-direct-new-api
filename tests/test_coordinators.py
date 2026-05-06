@@ -818,6 +818,43 @@ class TestActivityCoordinator:
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
 
+    # ── async_manual_refresh ─────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_scheduled_refresh_uses_background_priority(self):
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        client.get_activity.return_value = []
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()
+
+        priority = queue.submit.call_args.kwargs["priority"]
+        assert priority == ApiQueue.BACKGROUND
+
+    @pytest.mark.asyncio
+    async def test_manual_refresh_uses_foreground_priority_then_resets(self):
+        """Card-driven refresh runs at FOREGROUND; subsequent scheduled poll
+        falls back to BACKGROUND."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        client.get_activity.return_value = []
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord.async_manual_refresh()
+
+        manual_priority = queue.submit.call_args_list[0].kwargs["priority"]
+        assert manual_priority == ApiQueue.FOREGROUND
+
+        # The override is one-shot — the next scheduled refresh is BACKGROUND
+        await coord._async_update_data()
+        next_priority = queue.submit.call_args_list[-1].kwargs["priority"]
+        assert next_priority == ApiQueue.BACKGROUND
+
     # ── inject_event ─────────────────────────────────────────────────────────
 
     @pytest.mark.asyncio

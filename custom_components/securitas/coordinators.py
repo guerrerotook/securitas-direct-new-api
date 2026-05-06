@@ -478,13 +478,28 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self._previous_ids: set[str] | None = None
         # HA-synthesized events; merged with polled at the front of the timeline.
         self._injected: list[ActivityEvent] = []
+        # One-shot priority for the next _fetch — set by async_manual_refresh,
+        # reset to BACKGROUND after each fetch.
+        self._next_fetch_priority: int = ApiQueue.BACKGROUND
 
     async def _fetch(self) -> list[ActivityEvent]:
+        priority = self._next_fetch_priority
+        self._next_fetch_priority = ApiQueue.BACKGROUND
         return await self._queue.submit(
             self._client.get_activity,
             self.installation,
-            priority=ApiQueue.BACKGROUND,
+            priority=priority,
         )
+
+    async def async_manual_refresh(self) -> None:
+        """Trigger an immediate refresh at FOREGROUND priority.
+
+        For interactive UI requests (e.g. card refresh button) where the
+        user expects responsiveness ahead of the next scheduled poll.
+        Still goes through the API queue — rate limiting is preserved.
+        """
+        self._next_fetch_priority = ApiQueue.FOREGROUND
+        await self.async_refresh()
 
     async def _async_update_data(self) -> ActivityData:
         try:
