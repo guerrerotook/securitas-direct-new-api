@@ -915,8 +915,14 @@ class SecuritasEventsCard extends HTMLElement {
       </ha-card>
     `;
     if (prevScroll) {
-      const newScroll = this.shadowRoot.querySelector(".scroll");
-      if (newScroll) newScroll.scrollTop = prevScroll;
+      // Defer until after the next paint so scrollHeight reflects the
+      // re-rendered content; otherwise the browser clamps scrollTop to
+      // an outdated (often 0) scrollHeight and the user is teleported
+      // back to the top of the list.
+      requestAnimationFrame(() => {
+        const newScroll = this.shadowRoot.querySelector(".scroll");
+        if (newScroll) newScroll.scrollTop = prevScroll;
+      });
     }
   }
 }
