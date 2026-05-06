@@ -949,6 +949,54 @@ class TestActivityCoordinator:
             cm.Store = original_store
 
     @pytest.mark.asyncio
+    async def test_first_poll_after_restore_does_not_refire_polled_history(self):
+        """After restoring persisted injected events, the first poll must
+        still establish the polled-event baseline silently — otherwise up
+        to 30 historical polled rows would fire as `securitas_activity`
+        bus events on every HA restart.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        from custom_components.securitas.coordinators import ActivityCoordinator
+
+        # Persisted store contains one injected event from a prior run
+        persisted_event = _make_event("ha-1", alias="Armed by Clinton")
+
+        class _StubStore:
+            def __init__(self, *_a, **_k):
+                pass
+
+            async def async_load(self):
+                return {"events": [persisted_event.model_dump()]}
+
+            async def async_save(self, _data):
+                pass
+
+        import custom_components.securitas.coordinators as cm
+
+        original_store = cm.Store
+        cm.Store = _StubStore  # type: ignore[assignment]
+        try:
+            # First poll returns historical polled events the user has
+            # already seen in the previous HA session (or via the panel).
+            client.get_activity.return_value = [
+                _make_event(f"polled-{i}") for i in range(5)
+            ]
+            coord = ActivityCoordinator(hass, client, queue, installation)
+            await coord.async_load_persisted()
+
+            result = await coord._async_update_data()
+
+            # Polled events are baselined silently — no new_events on first
+            # poll, even though the persisted injected event seeded state.
+            assert result.new_events == []
+        finally:
+            cm.Store = original_store
+
+    @pytest.mark.asyncio
     async def test_async_load_persisted_is_idempotent(self):
         """Calling load twice doesn't double-load."""
         hass = _make_hass()

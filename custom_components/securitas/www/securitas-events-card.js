@@ -1044,6 +1044,6 @@ if (!window.customCards.find((c) => c.type === "securitas-events-card")) {
     description: "Shows recent alarm-panel events from a Securitas activity log entity.",
     preview: false,
     documentationURL:
-      "https://github.com/Cebeerre/securitas-direct-new-api",
+      "https://github.com/guerrerotook/securitas-direct-new-api",
   });
 }

@@ -595,8 +595,12 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
             else []
         )
         merged = self._merge(self._injected, prior_polled)
-        # Mark as already-seen so the next poll doesn't re-fire it as new
-        self._previous_ids = (self._previous_ids or set()) | {event.id_signal}
+        # Mark as already-seen so the next poll doesn't re-fire it as new.
+        # Only do so when the baseline is established — otherwise we'd
+        # promote None ("first poll = baseline silently") into a real set
+        # and the first poll would treat its polled rows as new.
+        if self._previous_ids is not None:
+            self._previous_ids = self._previous_ids | {event.id_signal}
         new_data = ActivityData(events=merged, new_events=[event])
         self.async_set_updated_data(new_data)
         # Schedule the persistence write asynchronously — don't block the
@@ -635,10 +639,10 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
             except Exception:  # pylint: disable=broad-exception-caught
                 continue
         self._injected = events[:_ACTIVITY_TIMELINE_WINDOW]
-        # Seed previous_ids so a freshly-loaded restored event doesn't fire
-        # again on the next poll as a "new" event.
-        if self._injected:
-            self._previous_ids = {e.id_signal for e in self._injected}
+        # Leave _previous_ids as None: the first poll's "baseline" branch
+        # (new_events=[] when _previous_ids is None) is what stops both the
+        # restored injected events and the polled history from firing as
+        # bus events on the first post-restart update.
 
     async def _async_save_persisted(self) -> None:
         """Write the current injected list to disk."""
