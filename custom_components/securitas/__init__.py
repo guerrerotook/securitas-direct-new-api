@@ -504,12 +504,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "activity_coordinator": activity_coord,
         }
 
-        # Schedule non-blocking first refresh for each coordinator.
-        # ActivityCoordinator is intentionally excluded — its first refresh
-        # is triggered by ActivityLogSensor.async_added_to_hass, which also
-        # attaches the bus-firing listener.  This keeps the periodic refresh
-        # timer tied to the sensor's lifetime rather than the integration's.
-        for coord in filter(None, [alarm_coord, sentinel_coord, lock_coord]):
+        # Schedule non-blocking first refresh for each coordinator.  The
+        # eager refresh just populates `data` once; the periodic timer is
+        # only started when something subscribes (e.g. the sensor entity
+        # in async_added_to_hass), so this doesn't leak a timer in test
+        # setups that mock platform forwarding.
+        for coord in filter(
+            None, [alarm_coord, sentinel_coord, lock_coord, activity_coord]
+        ):
             entry.async_create_background_task(
                 hass,
                 coord.async_refresh(),
