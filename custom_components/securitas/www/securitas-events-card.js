@@ -492,6 +492,38 @@ class SecuritasEventsCard extends HTMLElement {
     }
   }
 
+  async _callServiceWithResponse(domain, service, data) {
+    // Try the modern positional signature first (returnResponse as 6th arg);
+    // fall back to callWS for older HA frontends that don't support it.
+    try {
+      const resp = await this._hass.callService(
+        domain,
+        service,
+        data,
+        undefined,
+        false,
+        true,
+      );
+      if (resp && (resp.response || resp.service_response)) {
+        return resp.response || resp.service_response;
+      }
+    } catch (e) {
+      // fall through to callWS
+    }
+    try {
+      const resp = await this._hass.callWS({
+        type: "call_service",
+        domain,
+        service,
+        service_data: data,
+        return_response: true,
+      });
+      return resp?.response || resp?.service_response || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   connectedCallback() {
     // Re-render every minute so relative times ("3 minutes ago") stay current.
     if (!this._tickTimer) {
@@ -603,7 +635,7 @@ class SecuritasEventsCard extends HTMLElement {
     this._lastRenderedState = null;
     this._render();
     try {
-      const resp = await this._hass.callService(
+      const result = await this._callServiceWithResponse(
         "securitas",
         "fetch_activity_image",
         {
@@ -611,12 +643,16 @@ class SecuritasEventsCard extends HTMLElement {
           id_signal: id,
           signal_type: String(event.signal_type ?? event.type ?? ""),
         },
-        undefined,
-        false,
-        true,
       );
-      const b64 = resp?.response?.image_b64;
-      const mime = resp?.response?.mime_type || "image/jpeg";
+      const b64 = result?.image_b64;
+      const mime = result?.mime_type || "image/jpeg";
+      if (!b64) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[securitas-events-card] fetch_activity_image returned no image_b64; result:",
+          result,
+        );
+      }
       if (b64) {
         this._imageCache.set(id, {
           state: "loaded",
@@ -626,6 +662,8 @@ class SecuritasEventsCard extends HTMLElement {
         this._imageCache.set(id, { state: "error" });
       }
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[securitas-events-card] fetch_activity_image threw:", e);
       this._imageCache.set(id, { state: "error" });
     }
     this._lastRenderedState = null;
@@ -698,6 +736,11 @@ class SecuritasEventsCard extends HTMLElement {
 
 
   _writeShell(bodyHtml) {
+    // Preserve scroll position across re-renders — replacing innerHTML
+    // resets it, so capture scrollTop before the replace and restore
+    // after.  Without this, expanding a row that triggers a render
+    // (e.g. lazy image fetch) jumps the user back to the top.
+    const prevScroll = this.shadowRoot.querySelector(".scroll")?.scrollTop || 0;
     const lang = _hassLang(this._hass);
     const titleHtml = this._config.title
       ? `<div class="card-header">${_escHtml(this._config.title)}</div>`
@@ -871,6 +914,10 @@ class SecuritasEventsCard extends HTMLElement {
         <div class="scroll">${bodyHtml}</div>
       </ha-card>
     `;
+    if (prevScroll) {
+      const newScroll = this.shadowRoot.querySelector(".scroll");
+      if (newScroll) newScroll.scrollTop = prevScroll;
+    }
   }
 }
 
