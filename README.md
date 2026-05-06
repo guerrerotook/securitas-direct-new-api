@@ -166,15 +166,15 @@ To see which status code the alarm is reporting, [enable debug logging](#reporti
 
 ## Sub-panels (advanced)
 
-By default the integration creates one `alarm_control_panel` entity per installation — the **combined panel** — that represents the household's overall alarm intent. This is unchanged from previous versions and works for almost everyone.
+By default the integration creates one `alarm_control_panel` entity per installation — the **main panel**, named `Main - <installation alias>`. It represents the household's overall alarm intent and is driven by the user-configurable Home / Away / Night / Vacation / Custom mappings (Alarm State Mappings screen). This is unchanged from previous versions and works for almost everyone.
 
 Installations with multiple alarm axes (interior, perimeter, annex) can optionally enable per-axis sub-panels via the integration's options (**Settings → Devices & Services → Securitas Direct → Configure**):
 
-- **Interior sub-panel** — interior axis only (Home / Away / Night / Disarmed).
-- **Perimeter sub-panel** — perimeter axis only (Armed Away / Disarmed). Visible only if your installation has perimeter sensors.
-- **Annex sub-panel** — annex axis only (Armed Away / Disarmed). Visible only if your installation has an annex zone.
+- **Interior-only control panel** — interior axis only (Home / Away / Night / Disarmed). Named `Interior-only - <installation alias>`.
+- **Perimeter-only control panel** — perimeter axis only (Armed Away / Disarmed). Named `Perimeter-only - <installation alias>`. Visible only if your installation has perimeter sensors.
+- **Annex-only control panel** — annex axis only (Armed Away / Disarmed). Named `Annex-only - <installation alias>`. Visible only if your installation has an annex zone.
 
-The Interior toggle only appears once at least one of Perimeter or Annex is enabled — without siblings, the combined panel already IS the interior panel.
+The Interior toggle is offered as soon as Perimeter or Annex is supported (it does not depend on whether the sibling toggle is currently enabled). It is hidden only when neither perimeter nor annex is supported — in that case the main panel already drives the interior axis directly and a separate Interior tile would just be noise.
 
 Sub-panel toggles only appear when the capability is detected for your installation. If you have perimeter or annex but the toggle is missing, [enable debug logging](#reporting-issues) and look for a line like:
 
@@ -186,7 +186,7 @@ Share that line in a bug report.
 
 ### Voice assistant note
 
-Enabling sub-panels in HA creates additional `alarm_control_panel` entities, but **whether each is exposed to a voice assistant is configured independently in HA** (Settings → Voice assistants → Expose, or per-integration exposure config for HomeKit/Alexa). A common pattern: enable all sub-panels in HA for dashboards/automations, but expose only the combined panel to voice — keeping voice commands unambiguous.
+Enabling sub-panels in HA creates additional `alarm_control_panel` entities, but **whether each is exposed to a voice assistant is configured independently in HA** (Settings → Voice assistants → Expose, or per-integration exposure config for HomeKit/Alexa). A common pattern: enable all sub-panels in HA for dashboards/automations, but expose only the main panel to voice — keeping voice commands unambiguous.
 
 ## Force Arming
 

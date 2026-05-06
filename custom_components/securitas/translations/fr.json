@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Associer chaque action d'alarme Home Assistant à un mode d'alarme Securitas. Sélectionner « Non utilisé » pour désactiver un bouton.",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Securitas ; sélectionnez « Non utilisé » pour désactiver un bouton. Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement contrôlent chacun un seul axe directement et n'utilisent pas ces associations.",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",
@@ -105,7 +105,7 @@
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Associer chaque action d'alarme Home Assistant à un mode d'alarme Securitas. Sélectionner « Non utilisé » pour désactiver un bouton.",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Securitas ; sélectionnez « Non utilisé » pour désactiver un bouton. Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement contrôlent chacun un seul axe directement et n'utilisent pas ces associations.",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",

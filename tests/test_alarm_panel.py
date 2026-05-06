@@ -857,10 +857,10 @@ class TestSetArmState:
 class TestProperties:
     """Tests for simple property accessors."""
 
-    def test_name_returns_installation_alias(self):
-        """name returns installation.alias."""
+    def test_name_returns_main_prefixed_alias(self):
+        """Combined (main) panel name is 'Main - <installation alias>'."""
         alarm = make_alarm()
-        assert alarm.name == "Home"
+        assert alarm.name == "Main - Home"
 
     def test_code_format_none_when_no_code(self):
         """code_format is None when no code is configured."""

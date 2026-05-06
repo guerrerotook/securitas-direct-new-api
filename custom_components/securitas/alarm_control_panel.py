@@ -945,6 +945,10 @@ class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
     Annex) come in subsequent tasks.
     """
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._attr_name = f"Main - {self._installation.alias}"
+
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the securitas state map."""
         securitas_state = self._securitas_state_map.get(ha_state)
@@ -1014,7 +1018,7 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
         super().__init__(*args, **kwargs)
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"{self._attr_name} Interior"
+        self._attr_name = f"Interior-only - {self._installation.alias}"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
@@ -1080,7 +1084,7 @@ class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
         super().__init__(*args, **kwargs)
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"{self._attr_name} Perimeter"
+        self._attr_name = f"Perimeter-only - {self._installation.alias}"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
@@ -1127,7 +1131,7 @@ class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
         super().__init__(*args, **kwargs)
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"{self._attr_name} Annex"
+        self._attr_name = f"Annex-only - {self._installation.alias}"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]

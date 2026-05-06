@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Mappatura degli stati di allarme",
-                "description": "Associa ogni azione di allarme di Home Assistant a una modalità di allarme Securitas. Imposta su « Non utilizzato » per disattivare un pulsante.",
+                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Securitas; imposta su « Non utilizzato » per disattivare un pulsante. I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso controllano ciascuno un singolo asse direttamente e non usano queste associazioni.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuori casa",
@@ -105,7 +105,7 @@
             },
             "mappings": {
                 "title": "Mappatura degli stati di allarme",
-                "description": "Associa ogni azione di allarme di Home Assistant a una modalità di allarme Securitas. Imposta su « Non utilizzato » per disattivare un pulsante.",
+                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Securitas; imposta su « Non utilizzato » per disattivare un pulsante. I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso controllano ciascuno un singolo asse direttamente e non usano queste associazioni.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuori casa",

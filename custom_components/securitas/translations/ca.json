@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure. Seleccioneu 'No utilitzat' per desactivar un botó.",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó. Els panells opcionals només Interior, només Perímetre i només Annex controlen cadascun un únic eix directament i no fan servir aquestes assignacions.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",
@@ -105,7 +105,7 @@
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure. Seleccioneu 'No utilitzat' per desactivar un botó.",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó. Els panells opcionals només Interior, només Perímetre i només Annex controlen cadascun un únic eix directament i no fan servir aquestes assignacions.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",

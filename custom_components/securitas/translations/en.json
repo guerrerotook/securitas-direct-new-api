@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "Map each Home Assistant alarm action to a Securitas alarm mode. Set to 'Not used' to disable a button.",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Securitas alarm mode; set to 'Not used' to disable a button. The optional Interior-only, Perimeter-only and Annex-only panels each drive a single axis directly and do not use these mappings.",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",
@@ -105,7 +105,7 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "Map each Home Assistant alarm action to a Securitas alarm mode. Set to 'Not used' to disable a button.",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Securitas alarm mode; set to 'Not used' to disable a button. The optional Interior-only, Perimeter-only and Annex-only panels each drive a single axis directly and do not use these mappings.",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",

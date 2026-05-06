@@ -70,7 +70,7 @@
             },
             "mappings": {
                 "title": "Asignación de estados de alarma",
-                "description": "Asigna cada acción de alarma de Home Assistant a un modo de alarma Securitas. Selecciona 'No usado' para desactivar un botón.",
+                "description": "Estas asignaciones se aplican solo al panel principal. Asigna cada acción de alarma de Home Assistant a un modo de alarma Securitas; selecciona 'No usado' para desactivar un botón. Los paneles opcionales solo Interior, solo Perimetral y solo Anexo controlan cada uno un único eje directamente y no usan estas asignaciones.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuera",
@@ -105,7 +105,7 @@
             },
             "mappings": {
                 "title": "Asignación de estados de alarma",
-                "description": "Asigna cada acción de alarma de Home Assistant a un modo de alarma Securitas. Selecciona 'No usado' para desactivar un botón.",
+                "description": "Estas asignaciones se aplican solo al panel principal. Asigna cada acción de alarma de Home Assistant a un modo de alarma Securitas; selecciona 'No usado' para desactivar un botón. Los paneles opcionales solo Interior, solo Perimetral y solo Anexo controlan cada uno un único eje directamente y no usan estas asignaciones.",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuera",
