@@ -70,6 +70,10 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
     AlarmControlPanelState.ARMED_VACATION: "map_vacation",
 }
 
+_DISARMED_STATE = AlarmState(
+    interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -951,12 +955,8 @@ class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the securitas state map."""
-        if ha_state == "disarmed":
-            return AlarmState(
-                interior=InteriorMode.OFF,
-                perimeter=PerimeterMode.OFF,
-                annex=AnnexMode.OFF,
-            )
+        if ha_state == AlarmControlPanelState.DISARMED:
+            return _DISARMED_STATE
         securitas_state = self._securitas_state_map.get(ha_state)
         if securitas_state is None:
             raise SecuritasDirectError(f"Unsupported alarm mode: {ha_state}")
@@ -1022,7 +1022,6 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Interior - {self._installation.alias}"
 
@@ -1049,16 +1048,15 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""
         interior_target_map = {
-            "armed_home": InteriorMode.DAY,
-            "armed_night": InteriorMode.NIGHT,
-            "armed_away": InteriorMode.TOTAL,
-            "disarmed": InteriorMode.OFF,
+            AlarmControlPanelState.ARMED_HOME: InteriorMode.DAY,
+            AlarmControlPanelState.ARMED_NIGHT: InteriorMode.NIGHT,
+            AlarmControlPanelState.ARMED_AWAY: InteriorMode.TOTAL,
+            AlarmControlPanelState.DISARMED: InteriorMode.OFF,
         }
         if ha_state not in interior_target_map:
             raise SecuritasDirectError(
                 f"Unsupported alarm mode for Interior panel: {ha_state}"
             )
-        # Preserve peri and annex axes from the coordinator's current joint state
         current = self.coordinator.alarm_state
         return AlarmState(
             interior=interior_target_map[ha_state],
@@ -1088,7 +1086,6 @@ class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Perimeter - {self._installation.alias}"
 
@@ -1100,14 +1097,13 @@ class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the perimeter axis."""
         perimeter_target_map = {
-            "armed_away": PerimeterMode.ON,
-            "disarmed": PerimeterMode.OFF,
+            AlarmControlPanelState.ARMED_AWAY: PerimeterMode.ON,
+            AlarmControlPanelState.DISARMED: PerimeterMode.OFF,
         }
         if ha_state not in perimeter_target_map:
             raise SecuritasDirectError(
                 f"Unsupported alarm mode for Perimeter panel: {ha_state}"
             )
-        # Preserve interior and annex axes from the coordinator's current joint state
         current = self.coordinator.alarm_state
         return AlarmState(
             interior=current.interior,
@@ -1135,7 +1131,6 @@ class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Annex - {self._installation.alias}"
 
@@ -1147,14 +1142,13 @@ class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the annex axis."""
         annex_target_map = {
-            "armed_away": AnnexMode.ON,
-            "disarmed": AnnexMode.OFF,
+            AlarmControlPanelState.ARMED_AWAY: AnnexMode.ON,
+            AlarmControlPanelState.DISARMED: AnnexMode.OFF,
         }
         if ha_state not in annex_target_map:
             raise SecuritasDirectError(
                 f"Unsupported alarm mode for Annex panel: {ha_state}"
             )
-        # Preserve interior and perimeter axes from the coordinator's current joint state
         current = self.coordinator.alarm_state
         return AlarmState(
             interior=current.interior,
