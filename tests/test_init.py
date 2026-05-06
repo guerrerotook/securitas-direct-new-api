@@ -634,14 +634,18 @@ class TestAsyncSetupEntry:
         assert isinstance(call_args[0], StaticPathConfig)
         assert call_args[0].url_path == "/securitas_panel"
 
-        # Verify both card JS URLs are registered (alarm card + camera card)
-        assert mock_add_js.call_count == 2
+        # Verify all three card JS URLs are registered (alarm + camera + events)
+        assert mock_add_js.call_count == 3
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/securitas_panel/securitas-alarm-card.js?v=") for u in js_urls
         )
         assert any(
             u.startswith("/securitas_panel/securitas-camera-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/securitas_panel/securitas-events-card.js?v=")
             for u in js_urls
         )
 
@@ -698,14 +702,19 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        # Both cards registered exactly once despite two setup calls (guarded by card_registered flag)
-        assert mock_add_js.call_count == 2
+        # All three cards registered exactly once despite two setup calls
+        # (guarded by card_registered flag)
+        assert mock_add_js.call_count == 3
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/securitas_panel/securitas-alarm-card.js?v=") for u in js_urls
         )
         assert any(
             u.startswith("/securitas_panel/securitas-camera-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/securitas_panel/securitas-events-card.js?v=")
             for u in js_urls
         )
 

@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.securitas_direct_new_api.models import (
+    ActivityEvent,
     AirQuality,
     Attribute,
     Installation,
@@ -19,12 +20,17 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
 )
 from custom_components.securitas.sensor import (
+    ActivityLogSensor,
     SentinelAirQuality,
     SentinelAirQualityStatus,
     SentinelHumidity,
     SentinelTemperature,
 )
-from custom_components.securitas.coordinators import LockData, SentinelData
+from custom_components.securitas.coordinators import (
+    ActivityData,
+    LockData,
+    SentinelData,
+)
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.lock import SecuritasLock
 
@@ -397,6 +403,197 @@ class TestSentinelAirQualityStatus:
 
         assert numeric.native_value == 92
         assert status.native_value == "Good"
+
+
+# ===========================================================================
+# ActivityLogSensor tests
+# ===========================================================================
+
+
+def _make_activity_event(
+    id_signal: str, alias: str = "Armed", **overrides
+) -> ActivityEvent:
+    base = {
+        "alias": alias,
+        "type": 701,
+        "signal_type": 701,
+        "id_signal": id_signal,
+        "time": "2026-05-05 15:00:00",
+        "img": 0,
+        "source": "Web",
+        "device": "VV",
+        "device_name": "Ingresso",
+        "verisure_user": "Test User",
+    }
+    base.update(overrides)
+    return ActivityEvent.model_validate(base)
+
+
+def _make_activity_coordinator(data: ActivityData | None = None):
+    coordinator = MagicMock()
+    coordinator.data = data
+    return coordinator
+
+
+class TestActivityLogSensor:
+    """Tests for ActivityLogSensor — surfaces the alarm-panel timeline as a sensor."""
+
+    def test_state_is_none_when_coordinator_has_no_data(self):
+        coordinator = _make_activity_coordinator(data=None)
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value is None
+
+    def test_state_is_none_when_no_events(self):
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value is None
+
+    def test_state_format_with_user_and_time(self):
+        """Newest event determines state — alias + user + HH:MM."""
+        latest = _make_activity_event(
+            "999",
+            alias="Armed",
+            verisure_user="Luci",
+            time="2026-05-05 15:00:00",
+        )
+        older = _make_activity_event("998", alias="Disarmed")
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest, older], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value == "Armed by Luci at 15:00"
+
+    def test_state_format_with_device_name_when_no_user(self):
+        """Sensor-triggered events (no user) include the device name instead."""
+        latest = _make_activity_event(
+            "999",
+            alias="Image request",
+            verisure_user=None,
+            device_name="Cucina",
+            time="2026-04-09 14:20:42",
+        )
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value == "Image request (Cucina) at 14:20"
+
+    def test_state_format_no_user_no_device_name(self):
+        """Bare events show just alias + time."""
+        latest = _make_activity_event(
+            "999",
+            alias="Alarm addressed and solved",
+            verisure_user=None,
+            device_name=None,
+            time="2026-05-01 11:00:43",
+        )
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value == "Alarm addressed and solved at 11:00"
+
+    def test_state_format_user_takes_precedence_over_device_name(self):
+        """When both user and device_name are present, user wins."""
+        latest = _make_activity_event(
+            "999",
+            alias="Armed",
+            verisure_user="Luci",
+            device_name="Ingresso",
+            time="2026-05-05 15:00:00",
+        )
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value == "Armed by Luci at 15:00"
+
+    def test_state_omits_time_when_malformed(self):
+        """Falls back to alias-only if the time field is unparseable."""
+        latest = _make_activity_event(
+            "999", alias="Armed", verisure_user=None, device_name=None, time=""
+        )
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.native_value == "Armed"
+
+    def test_attributes_empty_when_no_data(self):
+        coordinator = _make_activity_coordinator(data=None)
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        assert sensor.extra_state_attributes == {"events": []}
+
+    def test_attributes_contain_latest_event_fields(self):
+        latest = _make_activity_event(
+            "16215212397",
+            alias="Armed",
+            type=701,
+            time="2026-05-05 15:00:00",
+            device="VV",
+            device_name="Ingresso",
+        )
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        attrs = sensor.extra_state_attributes
+        assert attrs["latest"]["id_signal"] == "16215212397"
+        assert attrs["latest"]["type"] == 701
+        assert attrs["latest"]["alias"] == "Armed"
+        assert attrs["latest"]["time"] == "2026-05-05 15:00:00"
+        assert attrs["latest"]["device"] == "VV"
+        assert attrs["latest"]["device_name"] == "Ingresso"
+
+    def test_attributes_contain_event_log_list(self):
+        events = [_make_activity_event(str(i)) for i in range(5, 0, -1)]
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=events, new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        attrs = sensor.extra_state_attributes
+        assert "events" in attrs
+        assert len(attrs["events"]) == 5
+        assert [e["id_signal"] for e in attrs["events"]] == ["5", "4", "3", "2", "1"]
+
+    def test_attribute_events_carry_category(self):
+        """Each row in the `events` attribute carries its category."""
+        latest = _make_activity_event("999", type=13, alias="Alarm")
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=[latest], new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        attrs = sensor.extra_state_attributes
+        assert attrs["events"][0]["category"] == "alarm"
+        assert attrs["latest"]["category"] == "alarm"
+
+    def test_attribute_log_capped_at_recent_window(self):
+        """Long histories are capped — we don't dump 1000 entries into HA state."""
+        events = [_make_activity_event(str(i)) for i in range(100, 0, -1)]
+        coordinator = _make_activity_coordinator(
+            data=ActivityData(events=events, new_events=[])
+        )
+        sensor = ActivityLogSensor(coordinator, make_installation())
+        attrs = sensor.extra_state_attributes
+        # Cap is 30 — matches the default coordinator page size
+        assert len(attrs["events"]) == 30
+        # The cap keeps the most-recent (top of list)
+        assert attrs["events"][0]["id_signal"] == "100"
+
+    def test_unique_id_contains_installation_number(self):
+        installation = make_installation()
+        coordinator = _make_activity_coordinator()
+        sensor = ActivityLogSensor(coordinator, installation)
+        assert installation.number in sensor._attr_unique_id  # type: ignore[operator]
+        assert "activity" in sensor._attr_unique_id  # type: ignore[operator]
+
+    def test_name_contains_installation_alias(self):
+        installation = make_installation()
+        coordinator = _make_activity_coordinator()
+        sensor = ActivityLogSensor(coordinator, installation)
+        assert installation.alias in sensor._attr_name  # type: ignore[operator]
 
 
 # ===========================================================================

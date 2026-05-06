@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 from custom_components.securitas.securitas_direct_new_api.responses import (
+    ActivityEnvelope,
     ArmStatusEnvelope,
     CheckAlarmEnvelope,
     ErrorResponse,
@@ -459,3 +460,35 @@ class TestErrorResponse:
         assert data.auth_phones is not None
         assert data.auth_phones[0]["id"] == 2
         assert data.need_device_authorization is False
+
+
+# ── ActivityEnvelope ──────────────────────────────────────────────────────────
+
+
+class TestActivityEnvelope:
+    """Wraps the xSActV2 alarm panel timeline response."""
+
+    def test_parses_real_fixture(self):
+        import json
+        from pathlib import Path
+
+        payload = json.loads(
+            Path(__file__)
+            .parent.joinpath("fixtures/activity_log_response.json")
+            .read_text()
+        )
+        env = ActivityEnvelope.model_validate(payload)
+        assert env.data.xSActV2.reg is not None
+        assert len(env.data.xSActV2.reg) == 11
+        assert env.data.xSActV2.reg[0].id_signal == "824172340"
+
+    def test_empty_reg_list(self):
+        payload = {"data": {"xSActV2": {"reg": [], "__typename": "XSActV2"}}}
+        env = ActivityEnvelope.model_validate(payload)
+        assert env.data.xSActV2.reg == []
+
+    def test_null_reg_returns_none(self):
+        """API returns reg: null when there are no events — coerces to None."""
+        payload = {"data": {"xSActV2": {"reg": None, "__typename": "XSActV2"}}}
+        env = ActivityEnvelope.model_validate(payload)
+        assert env.data.xSActV2.reg is None

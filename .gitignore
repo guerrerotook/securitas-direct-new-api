@@ -136,3 +136,7 @@ tmp_cache
 docs/handoffs/
 docs/plans/
 docs/superpowers/
+
+# Raw HAR captures (contain auth tokens — only sanitised fixtures committed)
+tests/fixtures/*-events.json
+tests/fixtures/*.har

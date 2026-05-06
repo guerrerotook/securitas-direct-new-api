@@ -451,6 +451,92 @@ name: Sala                       # optional — overrides the entity friendly na
 | `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
 | `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
+## Activity Log
+
+The Activity Log shows the same history of events as the Verisure app: when the alarm was armed or disarmed, who did it, intrusions, image requests, power cuts, and more. The integration brings that history into Home Assistant in three places.
+
+### Where to find it
+
+- **A Lovelace card.** When editing your dashboard, click **Add Card** and pick **Securitas Events Card**. The card shows the most recent events; click any row to see details, including images for image-request events. There's a refresh button in the top-right corner.
+- **A sensor.** `sensor.<alias>_activity_log` shows the most recent event as its state. Its `events` attribute holds the last 30 entries — useful for templates, custom cards, or anything that needs to read the history programmatically.
+- **The event bus.** Each new entry fires a `securitas_activity` event you can use as an automation trigger (see below).
+
+Each entry carries a **category** — a stable label for the type of event. The full list:
+
+`armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `alarm`, `alarm_resolved`, `tampering`, `sabotage`, `image_request`, `power_cut`, `power_restored`, `status_check`, `unknown`.
+
+### Activity events vs the alarm panel entity
+
+There are two natural ways to react to alarm activity in Home Assistant. Pick whichever matches what you're trying to do:
+
+- **Use the alarm panel entity (`alarm_control_panel.<alias>`)** when you only care about the *current* armed/disarmed state. Its state changes between `armed_away`, `armed_home`, `disarmed`, `triggered`, etc., so it's the right fit for things like:
+  - "Turn off the lights *when* the alarm becomes armed."
+  - "Only run this automation *if* the alarm is currently armed."
+  - "Notify me *when* the alarm is triggered."
+- **Use Activity Log events (`securitas_activity`)** when you need richer detail than just the on/off state — who did it, from where, or things the panel state doesn't reflect at all:
+  - "Notify me when someone disarms the alarm and tell me **who** did it."
+  - "Send me a message if a **tampering** or **sabotage** event is detected" (these never change the panel's state).
+  - "Log every **image request** to a notification channel."
+  - "Tell me when the panel **lost power** or **came back online**."
+
+If both would work, the alarm panel entity is usually simpler. Reach for activity events when you need the extra context.
+
+### Triggering automations on activity events
+
+Trigger on a category and you'll catch every event of that kind:
+
+```yaml
+trigger:
+  - platform: event
+    event_type: securitas_activity
+    event_data:
+      category: disarmed
+```
+
+Useful fields on `trigger.event.data`:
+
+| Field | What it tells you |
+| ----- | ----------------- |
+| `category` | The stable label above (always present). |
+| `alias` | The panel's own description, in your panel's language. |
+| `verisure_user` | The Verisure account name that performed the action, if any. |
+| `injected` | `true` if this event came from a Home Assistant action (see below). |
+
+#### "Who armed it?" example
+
+```yaml
+trigger:
+  - platform: event
+    event_type: securitas_activity
+    event_data:
+      category: disarmed
+action:
+  - service: notify.mobile_app
+    data:
+      message: "Alarm disarmed by {{ trigger.event.data.verisure_user or 'someone at the panel' }}"
+```
+
+#### Home Assistant actions and the `injected` flag
+
+When you arm, disarm, or request an image **from Home Assistant** (the card, an automation, the alarm panel entity, a service call), the integration writes an enriched event into the log immediately — tagged with the actual HA user, any arming exceptions, and the captured image where applicable. These entries show a small Home Assistant badge in the card and have `injected: true`.
+
+The matching event polled back from the panel ~60 seconds later is suppressed: it doesn't appear in the log and it doesn't fire on the event bus, so your automations only run once per action.
+
+If you specifically want to react **only** to actions taken outside Home Assistant (at the panel, in the Verisure app, etc.), exclude the injected entries:
+
+```yaml
+condition:
+  - "{{ not trigger.event.data.injected }}"
+```
+
+### Unknown events — please report them
+
+If a row appears in the card as **Unknown event**, the panel sent a code we haven't catalogued yet. Click to expand and you'll see a prompt asking for a screenshot. **Please take that screenshot** and open an issue at https://github.com/guerrerotook/securitas-direct-new-api/issues so we can add it. A short note about what triggered it (a manual disarm at the panel, an alarm test, a power cut, etc.) helps a lot.
+
+### Missing Home Assistant action coverage
+
+Home Assistant-issued arms, disarms, arming failures, and image requests are enriched and de-duplicated as described above. If you do one of those things from HA and instead see a *plain* row in the log (no Home Assistant badge, no user name, no extra detail), that means the resulting category isn't one we cover yet. Open an issue at https://github.com/guerrerotook/securitas-direct-new-api/issues describing what you did and what showed up — that's enough for us to add it.
+
 ## Automations & Scripts
 
 You can arm, disarm, and control the alarm from automations and scripts using the standard Home Assistant alarm actions:

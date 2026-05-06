@@ -12,20 +12,24 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
 from .securitas_direct_new_api.client import SecuritasClient
+from .events import HA_ECHO_SOURCE, HA_INJECTABLE_CATEGORIES
 from .securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
     SessionExpiredError,
     WAFBlockedError,
 )
 from .securitas_direct_new_api.models import (
+    ActivityEvent,
     AirQuality,
     CameraDevice,
     Installation,
@@ -40,6 +44,10 @@ _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_SENTINEL_INTERVAL = timedelta(minutes=30)
 _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
+_DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
+_ACTIVITY_TIMELINE_WINDOW = 30
+_ACTIVITY_STORE_VERSION = 1
+_ACTIVITY_STORE_KEY_PREFIX = "securitas_activity_log"
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -74,6 +82,19 @@ class CameraData:
 
     thumbnails: dict[str, ThumbnailResponse] = field(default_factory=dict)
     full_images: dict[str, bytes] = field(default_factory=dict)
+
+
+@dataclass
+class ActivityData:
+    """Data returned by ActivityCoordinator.
+
+    `events` is the most recent fetch from the panel timeline.
+    `new_events` is the subset whose idSignal was not in the previous poll —
+    empty on the first poll so listeners don't get a flood of historical entries.
+    """
+
+    events: list[ActivityEvent] = field(default_factory=list)
+    new_events: list[ActivityEvent] = field(default_factory=list)
 
 
 # ── Error handling ───────────────────────────────────────────────────────────
@@ -427,3 +448,211 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
                     full_images[zone_id] = full_bytes
 
         return CameraData(thumbnails=thumbnails, full_images=full_images)
+
+
+# ── ActivityCoordinator ──────────────────────────────────────────────────────
+
+
+class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
+    """Coordinator for the alarm panel activity timeline (xSActV2).
+
+    Tracks idSignals seen in the previous poll so each refresh exposes a
+    `new_events` list of just-arrived entries.  The first poll establishes
+    the baseline silently — historical events are not flagged as new.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: SecuritasClient,
+        queue: ApiQueue,
+        installation: Installation,
+        *,
+        config_entry: ConfigEntry | None = None,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=config_entry,
+            name="securitas_activity",
+            update_interval=_DEFAULT_ACTIVITY_INTERVAL,
+        )
+        self._client = client
+        self._queue = queue
+        self.installation = installation
+        self._previous_ids: set[str] | None = None
+        # HA-synthesized events; merged with polled at the front of the timeline.
+        # Persisted to disk so they survive HA restarts (load via
+        # async_load_persisted, save automatically on inject_event).
+        self._injected: list[ActivityEvent] = []
+        # Store is lazy — the constructor accesses hass.config.config_dir
+        # which test mocks may not provide.
+        self._store: Store[dict[str, Any]] | None = None
+        self._persisted_loaded = False
+        # One-shot priority for the next _fetch — set by async_manual_refresh,
+        # reset to BACKGROUND after each fetch.
+        self._next_fetch_priority: int = ApiQueue.BACKGROUND
+
+    async def _fetch(self) -> list[ActivityEvent]:
+        priority = self._next_fetch_priority
+        self._next_fetch_priority = ApiQueue.BACKGROUND
+        return await self._queue.submit(
+            self._client.get_activity,
+            self.installation,
+            priority=priority,
+        )
+
+    async def async_manual_refresh(self) -> None:
+        """Trigger an immediate refresh at FOREGROUND priority.
+
+        For interactive UI requests (e.g. card refresh button) where the
+        user expects responsiveness ahead of the next scheduled poll.
+        Still goes through the API queue — rate limiting is preserved.
+        """
+        self._next_fetch_priority = ApiQueue.FOREGROUND
+        await self.async_refresh()
+
+    async def async_fetch_event_image(
+        self, id_signal: str, signal_type: str
+    ) -> bytes | None:
+        """Fetch the JPEG bytes for a specific image-request event.
+
+        Routes through the API queue at BACKGROUND priority so simultaneous
+        clicks across many rows don't starve the alarm/foreground traffic.
+        Returns None if no valid image is available.
+        """
+        return await self._queue.submit(
+            self._client.get_full_image,
+            self.installation,
+            id_signal,
+            signal_type,
+            priority=ApiQueue.BACKGROUND,
+        )
+
+    async def _async_update_data(self) -> ActivityData:
+        try:
+            events = await self._fetch()
+        except SessionExpiredError:
+            await _handle_session_expired(self._client)
+            try:
+                events = await self._fetch()
+            except SecuritasDirectError as err:
+                raise UpdateFailed(f"Activity update failed: {err}") from err
+        except WAFBlockedError as err:
+            raise UpdateFailed(f"WAF blocked activity request: {err}") from err
+        except SecuritasDirectError as err:
+            raise UpdateFailed(f"Activity update failed: {err}") from err
+
+        polled = [
+            ev
+            for ev in events
+            if not (
+                ev.source == HA_ECHO_SOURCE
+                and ev.verisure_user is None
+                and ev.category in HA_INJECTABLE_CATEGORIES
+            )
+        ]
+        merged = self._merge(self._injected, polled)
+
+        current_ids = {ev.id_signal for ev in merged}
+        if self._previous_ids is None:
+            new_events: list[ActivityEvent] = []
+        else:
+            new_events = [ev for ev in merged if ev.id_signal not in self._previous_ids]
+        self._previous_ids = current_ids
+
+        return ActivityData(events=merged, new_events=new_events)
+
+    @staticmethod
+    def _merge(
+        injected: list[ActivityEvent], polled: list[ActivityEvent]
+    ) -> list[ActivityEvent]:
+        """Merge injected + polled events, newest first, capped at the window size.
+
+        When an injected event carries a real server id (e.g. an image
+        request injected from the capture button uses the captured frame's
+        ``id_signal``), the polled timeline returns the same id at the next
+        poll.  Drop the polled duplicate so the user sees one row, with the
+        injected entry's HA-side context preserved.
+        """
+        injected_ids = {e.id_signal for e in injected}
+        deduped = [e for e in polled if e.id_signal not in injected_ids]
+        return (injected + deduped)[:_ACTIVITY_TIMELINE_WINDOW]
+
+    def inject_event(self, event: ActivityEvent) -> None:
+        """Add a HA-side synthetic event to the front of the timeline.
+
+        Bypasses the polled-side filter, persists across polls until pushed
+        out of the visible window, and is saved to disk so it survives
+        HA restarts.
+        """
+        self._injected = [event, *self._injected][:_ACTIVITY_TIMELINE_WINDOW]
+        injected_ids = {e.id_signal for e in self._injected}
+        current = self.data
+        prior_polled = (
+            [e for e in current.events if e.id_signal not in injected_ids]
+            if current
+            else []
+        )
+        merged = self._merge(self._injected, prior_polled)
+        # Mark as already-seen so the next poll doesn't re-fire it as new.
+        # Only do so when the baseline is established — otherwise we'd
+        # promote None ("first poll = baseline silently") into a real set
+        # and the first poll would treat its polled rows as new.
+        if self._previous_ids is not None:
+            self._previous_ids = self._previous_ids | {event.id_signal}
+        new_data = ActivityData(events=merged, new_events=[event])
+        self.async_set_updated_data(new_data)
+        # Schedule the persistence write asynchronously — don't block the
+        # caller (typically a service handler responding to a UI click).
+        self.hass.async_create_task(self._async_save_persisted())
+
+    def _get_store(self) -> Store[dict[str, Any]]:
+        if self._store is None:
+            self._store = Store(
+                self.hass,
+                _ACTIVITY_STORE_VERSION,
+                f"{_ACTIVITY_STORE_KEY_PREFIX}_{self.installation.number}",
+            )
+        return self._store
+
+    async def async_load_persisted(self) -> None:
+        """Load injected events from disk.  Idempotent; call once per setup."""
+        if self._persisted_loaded:
+            return
+        self._persisted_loaded = True
+        try:
+            stored = await self._get_store().async_load()
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "Failed to load persisted activity log for %s",
+                self.installation.number,
+                exc_info=True,
+            )
+            return
+        if not stored or not isinstance(stored.get("events"), list):
+            return
+        events: list[ActivityEvent] = []
+        for raw in stored["events"]:
+            try:
+                events.append(ActivityEvent.model_validate(raw))
+            except Exception:  # pylint: disable=broad-exception-caught
+                continue
+        self._injected = events[:_ACTIVITY_TIMELINE_WINDOW]
+        # Leave _previous_ids as None: the first poll's "baseline" branch
+        # (new_events=[] when _previous_ids is None) is what stops both the
+        # restored injected events and the polled history from firing as
+        # bus events on the first post-restart update.
+
+    async def _async_save_persisted(self) -> None:
+        """Write the current injected list to disk."""
+        try:
+            await self._get_store().async_save(
+                {"events": [ev.model_dump() for ev in self._injected]}
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "Failed to persist activity log for %s",
+                self.installation.number,
+                exc_info=True,
+            )

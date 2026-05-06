@@ -8,6 +8,9 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     UnexpectedStateError,
 )
 from custom_components.securitas.securitas_direct_new_api.models import (
+    ActivityCategory,
+    ActivityEvent,
+    ActivityException,
     AirQuality,
     AlarmState,
     ArmCommand,
@@ -774,3 +777,289 @@ class TestService:
         svc = Service(installation=inst)
         assert svc.installation is not None
         assert svc.installation.number == "123"
+
+
+# ── ActivityEvent ─────────────────────────────────────────────────────────────
+
+
+class TestActivityEvent:
+    """Parses entries from the xSActV2 alarm panel timeline."""
+
+    def _minimal(self) -> dict:
+        # Mirrors a real "Alarm Status Request" entry — most fields null.
+        return {
+            "alias": "Alarm Status Request",
+            "type": 27,
+            "device": None,
+            "source": "Web",
+            "idSignal": "824172340",
+            "schedulerType": None,
+            "myVerisureUser": "Test User",
+            "time": "2026-05-05 15:37:04",
+            "img": 0,
+            "incidenceId": None,
+            "signalType": 27,
+            "interface": None,
+            "deviceName": None,
+            "keyname": None,
+            "tagId": None,
+            "userAuth": None,
+            "exceptions": None,
+            "mediaPlatform": None,
+            "__typename": "XSActV2Reg",
+        }
+
+    def test_round_trip_minimal_entry(self):
+        ev = ActivityEvent.model_validate(self._minimal())
+        assert ev.alias == "Alarm Status Request"
+        assert ev.type == 27
+        assert ev.signal_type == 27
+        assert ev.id_signal == "824172340"
+        assert ev.time == "2026-05-05 15:37:04"
+        assert ev.source == "Web"
+        assert ev.verisure_user == "Test User"
+        assert ev.img == 0
+
+    def test_optional_fields_default_to_none(self):
+        ev = ActivityEvent.model_validate(self._minimal())
+        assert ev.device is None
+        assert ev.scheduler_type is None
+        assert ev.incidence_id is None
+        assert ev.interface is None
+        assert ev.device_name is None
+        assert ev.keyname is None
+        assert ev.tag_id is None
+        assert ev.user_auth is None
+        assert ev.exceptions is None
+        assert ev.media_platform is None
+
+    def test_camelcase_aliases_mapped(self):
+        """idSignal → id_signal, signalType → signal_type, etc."""
+        data = self._minimal()
+        data["idSignal"] = "999"
+        data["signalType"] = 13
+        data["incidenceId"] = "286203029"
+        data["deviceName"] = "Cucina"
+        data["myVerisureUser"] = "Luci"
+        data["schedulerType"] = "WEEKLY"
+        data["tagId"] = "TAG-1"
+        data["userAuth"] = "PIN"
+        ev = ActivityEvent.model_validate(data)
+        assert ev.id_signal == "999"
+        assert ev.signal_type == 13
+        assert ev.incidence_id == "286203029"
+        assert ev.device_name == "Cucina"
+        assert ev.verisure_user == "Luci"
+        assert ev.scheduler_type == "WEEKLY"
+        assert ev.tag_id == "TAG-1"
+        assert ev.user_auth == "PIN"
+
+    def test_alarm_with_exceptions_nested(self):
+        """type=850 entries carry an `exceptions` list of sensor states."""
+        data = self._minimal()
+        data["alias"] = "Alarm with exceptions"
+        data["type"] = 850
+        data["signalType"] = 850
+        data["device"] = "CE"
+        data["exceptions"] = [
+            {
+                "status": "2",
+                "deviceType": "MG",
+                "alias": "Pfincameret",
+                "__typename": "XSExceptions",
+            },
+            {
+                "status": "0",
+                "deviceType": "MG",
+                "alias": "Porta1cucin",
+                "__typename": "XSExceptions",
+            },
+        ]
+        ev = ActivityEvent.model_validate(data)
+        assert ev.device == "CE"
+        assert ev.exceptions is not None
+        assert len(ev.exceptions) == 2
+        assert isinstance(ev.exceptions[0], ActivityException)
+        assert ev.exceptions[0].status == "2"
+        assert ev.exceptions[0].device_type == "MG"
+        assert ev.exceptions[0].alias == "Pfincameret"
+        assert ev.exceptions[1].alias == "Porta1cucin"
+
+    def test_image_request_flag(self):
+        """img is a 0/1 flag — non-zero on type=16 ("Image request")."""
+        data = self._minimal()
+        data["type"] = 16
+        data["signalType"] = 16
+        data["img"] = 1
+        data["deviceName"] = "Cucina"
+        ev = ActivityEvent.model_validate(data)
+        assert ev.img == 1
+
+    def test_injected_defaults_to_false_for_polled_events(self):
+        """Polled events default to injected=False — distinguishes them from HA-side."""
+        ev = ActivityEvent.model_validate(self._minimal())
+        assert ev.injected is False
+
+    def test_category_is_derived_from_type_for_polled_events(self):
+        """Polled events get their category derived from the panel's `type` code."""
+        for type_code, expected in (
+            (32, ActivityCategory.DISARMED),
+            (720, ActivityCategory.DISARMED),
+            (701, ActivityCategory.ARMED),
+            (823, ActivityCategory.ARMED),
+            (13, ActivityCategory.ALARM),
+            (850, ActivityCategory.ARMED_WITH_EXCEPTIONS),
+        ):
+            data = self._minimal()
+            data["type"] = type_code
+            ev = ActivityEvent.model_validate(data)
+            assert ev.category == expected, type_code
+
+    def test_explicit_category_wins_over_type_derivation(self):
+        """HA-injected events set category explicitly; the derivation is skipped."""
+        ev = ActivityEvent(
+            type=0,
+            signal_type=0,
+            category=ActivityCategory.DISARMED,
+            id_signal="ha-abc",
+            time="2026-05-05 15:00:00",
+            alias="Disarmed",
+        )
+        # Despite type=0 (which would default to UNKNOWN if derived), the
+        # explicit category survives.
+        assert ev.category == ActivityCategory.DISARMED
+        assert ev.type == 0
+
+    def test_injected_round_trips_when_explicitly_true(self):
+        """Synthetic events round-trip injected=True through model_dump/validate."""
+        data = self._minimal()
+        data["injected"] = True
+        ev = ActivityEvent.model_validate(data)
+        assert ev.injected is True
+        assert ev.model_dump()["injected"] is True
+
+    def test_real_fixture_round_trips_all_entries(self):
+        """Every entry in the curated fixture parses without error."""
+        import json
+        from pathlib import Path
+
+        fixture = json.loads(
+            Path(__file__)
+            .parent.joinpath("fixtures/activity_log_response.json")
+            .read_text()
+        )
+        reg = fixture["data"]["xSActV2"]["reg"]
+        assert len(reg) == 11
+        events = [ActivityEvent.model_validate(e) for e in reg]
+        assert all(ev.id_signal for ev in events)
+        # The exception case is preserved as a nested list, not a string
+        alarm_with_exc = next(ev for ev in events if ev.type == 850)
+        assert alarm_with_exc.exceptions is not None
+        assert len(alarm_with_exc.exceptions) == 2
+
+
+class TestActivityEventCategory:
+    """type → ActivityCategory mapping for UI grouping / i18n."""
+
+    @staticmethod
+    def _ev(type_code: int) -> ActivityEvent:
+        return ActivityEvent(type=type_code, signal_type=type_code)
+
+    def test_armed_codes(self):
+        # Includes panel-emitted arm signals (802, 821, 823, 824) — the
+        # "Connection ..." aliases are alarm-armed events, not network state.
+        for code in (2, 37, 40, 46, 701, 721, 802, 821, 823, 824):
+            assert self._ev(code).category == ActivityCategory.ARMED, code
+
+    def test_disarmed_codes(self):
+        # 822 is the panel's disarm signal ("Disconnection Exterior + Main").
+        for code in (1, 32, 107, 700, 720, 822):
+            assert self._ev(code).category == ActivityCategory.DISARMED, code
+
+    def test_alarm_zone_trigger(self):
+        """type=13 is a zone-level alarm (specific sensor went off)."""
+        assert self._ev(13).category == ActivityCategory.ALARM
+
+    def test_tampering(self):
+        """type=24 is tampering (someone interfering with equipment)."""
+        assert self._ev(24).category == ActivityCategory.TAMPERING
+
+    def test_sabotage(self):
+        """type=241 is sabotage (more severe than tampering)."""
+        assert self._ev(241).category == ActivityCategory.SABOTAGE
+
+    def test_armed_with_exceptions(self):
+        """type=850 is a successful force-arm with sensor exceptions bypassed.
+
+        NOT an alarm — the panel armed despite open zones / dead batteries,
+        with the bypassed sensors listed in `exceptions[]`.
+        """
+        assert self._ev(850).category == ActivityCategory.ARMED_WITH_EXCEPTIONS
+
+    def test_arming_failed(self):
+        """5xxx codes are arm attempts the panel rejected because of exceptions.
+
+        The 5xxx range mirrors the 8xx connection-success codes: 5802 maps to
+        802 (Main partial), 5824 maps to 824 (Exterior + Main partial), etc.
+        """
+        assert self._ev(5802).category == ActivityCategory.ARMING_FAILED
+        assert self._ev(5824).category == ActivityCategory.ARMING_FAILED
+
+    def test_alarm_resolved(self):
+        assert self._ev(331).category == ActivityCategory.ALARM_RESOLVED
+
+    def test_image_request(self):
+        assert self._ev(16).category == ActivityCategory.IMAGE_REQUEST
+
+    def test_power_events(self):
+        assert self._ev(25).category == ActivityCategory.POWER_CUT
+        assert self._ev(26).category == ActivityCategory.POWER_RESTORED
+
+    def test_status_check(self):
+        assert self._ev(27).category == ActivityCategory.STATUS_CHECK
+
+    def test_unknown_codes(self):
+        """Codes we haven't seen fall through to UNKNOWN — future-proofing."""
+        assert self._ev(99999).category == ActivityCategory.UNKNOWN
+        assert self._ev(0).category == ActivityCategory.UNKNOWN
+
+    def test_category_is_string_value(self):
+        """Enum values are lowercase identifiers for HA / card use."""
+        assert ActivityCategory.ARMED == "armed"
+        assert ActivityCategory.ARMED_WITH_EXCEPTIONS == "armed_with_exceptions"
+
+
+class TestActivityException:
+    """Sensor exception attached to an armed-with-exceptions / arming-failed event."""
+
+    def test_round_trip(self):
+        exc = ActivityException.model_validate(
+            {
+                "status": "2",
+                "deviceType": "MG",
+                "alias": "Pfincameret",
+                "__typename": "XSExceptions",
+            }
+        )
+        assert exc.status == "2"
+        assert exc.device_type == "MG"
+        assert exc.alias == "Pfincameret"
+
+    def test_status_key_open(self):
+        """status=0 means the zone is currently activated (door open)."""
+        exc = ActivityException.model_validate({"status": "0"})
+        assert exc.status_key == "open"
+
+    def test_status_key_battery_low(self):
+        """status=2 means the device's battery is dead."""
+        exc = ActivityException.model_validate({"status": "2"})
+        assert exc.status_key == "battery_low"
+
+    def test_status_key_unknown_for_unmapped(self):
+        """Codes we haven't confirmed fall through to 'unknown'."""
+        exc = ActivityException.model_validate({"status": "99"})
+        assert exc.status_key == "unknown"
+
+    def test_status_key_unknown_for_empty(self):
+        exc = ActivityException()
+        assert exc.status_key == "unknown"

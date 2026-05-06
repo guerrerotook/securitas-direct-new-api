@@ -21,7 +21,7 @@ from .exceptions import SecuritasDirectError, WAFBlockedError
 _LOGGER = logging.getLogger(__name__)
 
 # Keys whose values should be replaced with a placeholder in debug logs
-_LOG_TRUNCATE_KEYS = {"hours", "image"}
+_LOG_TRUNCATE_KEYS = {"hours", "image", "reg"}
 
 # Standard headers added to every request
 _DEFAULT_HEADERS: dict[str, str] = {

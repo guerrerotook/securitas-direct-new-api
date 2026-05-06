@@ -138,6 +138,24 @@ GET_EXCEPTIONS_QUERY = (
     "  }\n}\n"
 )
 
+ACTIVITY_QUERY = (
+    "query ActV2Timeline($numinst: String!, $panel: String,"
+    " $numRows: Int, $offset: Int, $timeFilter: TimeFilter!) {\n"
+    "  xSActV2(numinst: $numinst, input: {\n"
+    "    timeFilter: $timeFilter, numRows: $numRows, offset: $offset,\n"
+    "    panel: $panel, hasLocksmithRequested: false,"
+    " singleActivityFilter: [0]\n"
+    "  }) {\n"
+    "    reg {\n"
+    "      alias type device source idSignal schedulerType myVerisureUser\n"
+    "      time img incidenceId signalType interface deviceName keyname\n"
+    "      tagId userAuth\n"
+    "      exceptions { status deviceType alias }\n"
+    "      mediaPlatform { serialNumber mediaId }\n"
+    "    }\n"
+    "  }\n}\n"
+)
+
 DISARM_STATUS_QUERY = (
     "query DisarmStatus($numinst: String!, $panel: String!, $referenceId: "
     "String!, $counter: Int!, $request: DisarmCodeRequest) {\n"

@@ -35,6 +35,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CAMERA_CARD_URL,
     CARD_BASE_URL,
     CARD_URL,
+    EVENTS_CARD_BASE_URL,
+    EVENTS_CARD_URL,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
@@ -63,6 +65,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     SIGNAL_CAMERA_STATE,
 )
 from .coordinators import (
+    ActivityCoordinator,
     AlarmCoordinator,
     CameraCoordinator,
     LockCoordinator,
@@ -390,6 +393,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _register_card_resource(
             hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
         )
+        await _register_card_resource(
+            hass, EVENTS_CARD_BASE_URL, EVENTS_CARD_URL, "events_card_resource_id"
+        )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
     hass.data.setdefault(DOMAIN, {})
@@ -432,6 +438,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         alarm_coord: AlarmCoordinator | None = None
         sentinel_coord: SentinelCoordinator | None = None
         lock_coord: LockCoordinator | None = None
+        activity_coord: ActivityCoordinator | None = None
 
         # Use the first installation for shared coordinators.
         # (Each config entry is scoped to one installation via CONF_INSTALLATION.)
@@ -443,6 +450,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 client.api_queue,
                 first_installation,
                 update_interval=scan_interval,
+                config_entry=entry,
+            )
+
+            activity_coord = ActivityCoordinator(
+                hass,
+                client.client,
+                client.api_queue,
+                first_installation,
                 config_entry=entry,
             )
 
@@ -486,10 +501,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "alarm_coordinator": alarm_coord,
             "sentinel_coordinator": sentinel_coord,
             "lock_coordinator": lock_coord,
+            "activity_coordinator": activity_coord,
         }
 
-        # Schedule non-blocking first refresh for each coordinator
-        for coord in filter(None, [alarm_coord, sentinel_coord, lock_coord]):
+        # Schedule non-blocking first refresh for each coordinator.  The
+        # eager refresh just populates `data` once; the periodic timer is
+        # only started when something subscribes (e.g. the sensor entity
+        # in async_added_to_hass), so this doesn't leak a timer in test
+        # setups that mock platform forwarding.
+        for coord in filter(
+            None, [alarm_coord, sentinel_coord, lock_coord, activity_coord]
+        ):
             entry.async_create_background_task(
                 hass,
                 coord.async_refresh(),
@@ -758,7 +780,10 @@ async def _register_card_resource(
                 for item in resources.async_items():
                     url = item.get("url", "")
                     if url == card_url:
-                        return  # Already current version
+                        # Resource already at current version — record its id
+                        # so async_unload_entry can find and remove it.
+                        hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
+                        return
                     if url.startswith(base_url):
                         await resources.async_update_item(item["id"], {"url": card_url})
                         hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
@@ -839,6 +864,9 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
         await _unregister_card_resource(
             hass, CAMERA_CARD_URL, "camera_card_resource_id"
+        )
+        await _unregister_card_resource(
+            hass, EVENTS_CARD_URL, "events_card_resource_id"
         )
         hass.data.pop(DOMAIN, None)
 

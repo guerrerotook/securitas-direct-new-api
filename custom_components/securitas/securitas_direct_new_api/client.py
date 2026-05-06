@@ -30,6 +30,7 @@ from .exceptions import (
     TwoFactorRequiredError,
 )
 from .graphql_queries import (
+    ACTIVITY_QUERY,
     AIR_QUALITY_QUERY,
     ARM_PANEL_MUTATION,
     ARM_STATUS_QUERY,
@@ -60,6 +61,7 @@ from .graphql_queries import (
 )
 from .http_transport import HttpTransport
 from .models import (
+    ActivityEvent,
     AirQuality,
     Attribute,
     CameraDevice,
@@ -76,6 +78,7 @@ from .models import (
     ThumbnailResponse,
 )
 from .responses import (
+    ActivityEnvelope,
     AirQualityEnvelope,
     ArmPanelEnvelope,
     ChangeLockModeEnvelope,
@@ -1096,6 +1099,34 @@ class SecuritasClient:
         raw = await self._poll_operation(_check)
         return raw.get("exceptions") or []
 
+    async def get_activity(
+        self,
+        installation: Installation,
+        *,
+        num_rows: int = 30,
+        offset: int = 0,
+        time_filter: str = "LASTMONTH",
+    ) -> list[ActivityEvent]:
+        """Fetch entries from the alarm panel's activity timeline (xSActV2)."""
+        content = {
+            "operationName": "ActV2Timeline",
+            "variables": {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "numRows": num_rows,
+                "offset": offset,
+                "timeFilter": time_filter,
+            },
+            "query": ACTIVITY_QUERY,
+        }
+        envelope = await self._execute_graphql(
+            content,
+            "ActV2Timeline",
+            ActivityEnvelope,
+            installation=installation,
+        )
+        return envelope.data.xSActV2.reg or []
+
     # ── Lock operations ────────────────────────────────────────────────────
 
     async def get_lock_modes(self, installation: Installation) -> list[SmartLockMode]:
@@ -1504,8 +1535,9 @@ class SecuritasClient:
     ) -> bytes | None:
         """Fetch full-resolution images for a completed capture.
 
-        Selects the largest BINARY image, base64-decodes it, and validates
-        JPEG magic bytes.
+        Selects the largest BINARY image and base64-decodes it.  Format
+        validation (e.g. JPEG magic bytes) is left to callers — the camera
+        path requires JPEG, but the activity-card path accepts any image.
 
         Args:
             installation: The installation to query.
@@ -1513,7 +1545,7 @@ class SecuritasClient:
             signal_type: The signalType from a ThumbnailResponse.
 
         Returns:
-            Decoded JPEG bytes, or None if no valid image found.
+            Decoded image bytes, or None if no BINARY image was returned.
         """
         content = {
             "operationName": "mkGetPhotoImages",
@@ -1545,10 +1577,14 @@ class SecuritasClient:
             decoded = base64.b64decode(best["image"])
         except (ValueError, TypeError):
             return None
-        # Validate JPEG magic bytes
-        if not decoded[:2] == b"\xff\xd8":
-            return None
-        return decoded
+        if decoded:
+            _LOGGER.debug(
+                "get_full_image idSignal=%s: %d bytes, magic=%s",
+                id_signal,
+                len(decoded),
+                decoded[:8].hex(),
+            )
+        return decoded or None
 
     # ── Sensor operations ────────────────────────────────────────────────────
 
