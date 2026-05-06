@@ -170,9 +170,9 @@ By default the integration creates one `alarm_control_panel` entity per installa
 
 Installations with multiple alarm axes (interior, perimeter, annex) can optionally enable per-axis sub-panels via the integration's options (**Settings → Devices & Services → Securitas Direct → Configure**):
 
-- **Interior-only control panel** — interior axis only (Home / Away / Night / Disarmed). Named `Interior-only - <installation alias>`.
-- **Perimeter-only control panel** — perimeter axis only (Armed Away / Disarmed). Named `Perimeter-only - <installation alias>`. Visible only if your installation has perimeter sensors.
-- **Annex-only control panel** — annex axis only (Armed Away / Disarmed). Named `Annex-only - <installation alias>`. Visible only if your installation has an annex zone.
+- **Interior-only control panel** — interior axis only (Home / Away / Night / Disarmed). Named `Interior - <installation alias>`.
+- **Perimeter-only control panel** — perimeter axis only (Armed Away / Disarmed). Named `Perimeter - <installation alias>`. Visible only if your installation has perimeter sensors.
+- **Annex-only control panel** — annex axis only (Armed Away / Disarmed). Named `Annex - <installation alias>`. Visible only if your installation has an annex zone.
 
 The Interior toggle is offered as soon as Perimeter or Annex is supported (it does not depend on whether the sibling toggle is currently enabled). It is hidden only when neither perimeter nor annex is supported — in that case the main panel already drives the interior axis directly and a separate Interior tile would just be noise.
 

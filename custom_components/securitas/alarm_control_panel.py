@@ -1018,7 +1018,7 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
         super().__init__(*args, **kwargs)
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Interior-only - {self._installation.alias}"
+        self._attr_name = f"Interior - {self._installation.alias}"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
@@ -1084,7 +1084,7 @@ class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
         super().__init__(*args, **kwargs)
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Perimeter-only - {self._installation.alias}"
+        self._attr_name = f"Perimeter - {self._installation.alias}"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
@@ -1131,7 +1131,7 @@ class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
         super().__init__(*args, **kwargs)
         # Override unique_id and friendly name with sub-panel suffix
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Annex-only - {self._installation.alias}"
+        self._attr_name = f"Annex - {self._installation.alias}"
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
