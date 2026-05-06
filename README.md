@@ -451,6 +451,47 @@ name: Sala                       # optional — overrides the entity friendly na
 | `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
 | `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
+## Activity Log
+
+The integration polls the alarm panel's activity timeline and surfaces it three ways:
+
+- **HA event bus** — every new entry fires a `securitas_activity` event, suitable as an automation trigger
+- **`sensor.<alias>_activity_log`** — a single sensor whose state is the most recent event and whose `events` attribute lists the last 30
+- **Lovelace card** — `custom:securitas-events-card`, discoverable in **Add Card → Securitas Events Card**, with translations, click-to-expand details, and a manual refresh button
+
+For HA-issued actions (arm, disarm, capture image), the integration injects a synthetic event at the moment of the action with the actual HA user attributed (or `"Home Assistant"` for automation/script-driven calls). The polled panel record arrives ~60s later as a separate entry — the two are distinguishable via the `injected: bool` field on each event.
+
+### Automation triggers
+
+```yaml
+trigger:
+  - platform: event
+    event_type: securitas_activity
+    event_data:
+      category: alarm     # filter by category (semantic)
+```
+
+`category` is the canonical filter — it groups the panel's many raw type codes (e.g. disarm = `1`, `32`, `700`, `720`, `822` depending on installation) into stable buckets. The full set:
+
+`armed, armed_with_exceptions, arming_failed, disarmed, alarm, alarm_resolved, tampering, sabotage, image_request, power_cut, power_restored, status_check, unknown`
+
+To skip HA-injected entries (avoid the duplicate from injected vs polled):
+
+```yaml
+condition:
+  - "{{ not trigger.event.data.injected }}"
+```
+
+### Unknown event types
+
+If you see a row in the card marked **Unknown event** and it expands with a "please report" prompt, the panel emitted a numeric type code we haven't catalogued yet. Open an issue at https://github.com/clintongormley/securitas-direct-new-api/issues with:
+
+- The event's `type` and `signal_type` numbers (visible in the expanded details)
+- The original `alias` text from the panel (in your installation's language)
+- Roughly what action triggered it (a manual disarm via the app, an alarm test, a power cut, etc.)
+
+We'll add it to the type→category map.
+
 ## Automations & Scripts
 
 You can arm, disarm, and control the alarm from automations and scripts using the standard Home Assistant alarm actions:

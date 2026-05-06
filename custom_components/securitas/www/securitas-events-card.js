@@ -49,6 +49,7 @@ const TRANSLATIONS = {
     details: "Details",
     from_home_assistant: "Issued by Home Assistant",
     refresh: "Refresh",
+    unknown_event_prompt: "Unknown event type — please report at https://github.com/clintongormley/securitas-direct-new-api/issues so we can add it.",
   },
   es: {
     category: {
@@ -78,6 +79,7 @@ const TRANSLATIONS = {
     details: "Detalles",
     from_home_assistant: "Emitido por Home Assistant",
     refresh: "Actualizar",
+    unknown_event_prompt: "Tipo de evento desconocido — por favor, repórtalo en https://github.com/clintongormley/securitas-direct-new-api/issues para que podamos añadirlo.",
   },
   it: {
     category: {
@@ -107,6 +109,7 @@ const TRANSLATIONS = {
     details: "Dettagli",
     from_home_assistant: "Emesso da Home Assistant",
     refresh: "Aggiorna",
+    unknown_event_prompt: "Tipo di evento sconosciuto — segnalalo su https://github.com/clintongormley/securitas-direct-new-api/issues così possiamo aggiungerlo.",
   },
   fr: {
     category: {
@@ -136,6 +139,7 @@ const TRANSLATIONS = {
     details: "Détails",
     from_home_assistant: "Émis par Home Assistant",
     refresh: "Actualiser",
+    unknown_event_prompt: "Type d'événement inconnu — merci de le signaler sur https://github.com/clintongormley/securitas-direct-new-api/issues afin que nous puissions l'ajouter.",
   },
   pt: {
     category: {
@@ -165,6 +169,7 @@ const TRANSLATIONS = {
     details: "Detalhes",
     from_home_assistant: "Emitido pelo Home Assistant",
     refresh: "Atualizar",
+    unknown_event_prompt: "Tipo de evento desconhecido — por favor reporte em https://github.com/clintongormley/securitas-direct-new-api/issues para o podermos adicionar.",
   },
   "pt-BR": {
     category: {
@@ -194,6 +199,7 @@ const TRANSLATIONS = {
     details: "Detalhes",
     from_home_assistant: "Emitido pelo Home Assistant",
     refresh: "Atualizar",
+    unknown_event_prompt: "Tipo de evento desconhecido — por favor reporte em https://github.com/clintongormley/securitas-direct-new-api/issues para podermos adicioná-lo.",
   },
   ca: {
     category: {
@@ -223,6 +229,7 @@ const TRANSLATIONS = {
     details: "Detalls",
     from_home_assistant: "Emès per Home Assistant",
     refresh: "Actualitza",
+    unknown_event_prompt: "Tipus d'esdeveniment desconegut — informeu-ho a https://github.com/clintongormley/securitas-direct-new-api/issues perquè el puguem afegir.",
   },
 };
 
@@ -377,7 +384,11 @@ function _renderDetails(event, lang) {
     }
     rows.push(`<tr><th>${_escHtml(key)}</th><td>${display}</td></tr>`);
   }
-  return `<table class="details">${rows.join("")}</table>`;
+  const prompt =
+    event.category === "unknown"
+      ? `<div class="unknown-prompt">${_escHtml(_t(lang, "unknown_event_prompt"))}</div>`
+      : "";
+  return `${prompt}<table class="details">${rows.join("")}</table>`;
 }
 
 // ── Card ─────────────────────────────────────────────────────────────────────
@@ -718,6 +729,16 @@ class SecuritasEventsCard extends HTMLElement {
           color: var(--secondary-text-color);
           font-size: 0.85em;
         }
+        .unknown-prompt {
+          margin-bottom: 8px;
+          padding: 6px 8px;
+          font-size: 0.85em;
+          color: var(--primary-text-color);
+          background: var(--warning-color, #ff9800);
+          border-radius: 4px;
+          opacity: 0.85;
+        }
+        .unknown-prompt a { color: inherit; text-decoration: underline; }
       </style>
       <ha-card>
         ${refreshBtn}
