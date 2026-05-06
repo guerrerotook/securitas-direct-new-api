@@ -6,7 +6,14 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from .exceptions import UnexpectedStateError
 from .pydantic_utils import NullSafeBase as _NullSafeBase
@@ -427,12 +434,32 @@ class ActivityEvent(_NullSafeBase):
     # arm/disarm injected at the moment HA issued the command).  Polled
     # entries from the panel default to False.
     injected: bool = False
+    # Semantic grouping — explicit on HA-injected events, derived from `type`
+    # for polled events via the model validator below.  Keep `category` rather
+    # than `type` as the canonical filter for automations: the `type` field
+    # holds the panel's raw code, which varies across installations for the
+    # same logical event (e.g. disarm = 1 / 32 / 700 / 720 depending on panel).
+    category: ActivityCategory = ActivityCategory.UNKNOWN
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def category(self) -> ActivityCategory:
-        """High-level UI grouping derived from the numeric type code."""
-        return _ACTIVITY_TYPE_TO_CATEGORY.get(self.type, ActivityCategory.UNKNOWN)
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_category_from_type(cls, data: Any) -> Any:
+        """Default `category` from the numeric `type` for polled inputs.
+
+        Skipped when the caller (e.g. ``make_synthetic_event``) sets
+        ``category`` explicitly.
+        """
+        if not isinstance(data, dict) or "category" in data:
+            return data
+        type_val = data.get("type", data.get("signalType", 0))
+        try:
+            cat = _ACTIVITY_TYPE_TO_CATEGORY.get(int(type_val))
+        except (TypeError, ValueError):
+            cat = None
+        if cat is not None:
+            data = dict(data)
+            data["category"] = cat.value
+        return data
 
 
 class Sentinel(BaseModel):

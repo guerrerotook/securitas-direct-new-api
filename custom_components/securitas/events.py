@@ -23,30 +23,9 @@ if TYPE_CHECKING:
 
 ACTIVITY_EVENT_TYPE = "securitas_activity"
 
-# Pseudo-username the panel-side filter uses to identify this integration's
-# polled entries, and the fallback we attribute synthetic events to when the
-# triggering HA call carries no user_id (automation/script-driven actions).
+# Display name attributed to synthetic events when the triggering HA call
+# carries no user_id (automation/script-driven actions).
 _HA_USER = "Home Assistant"
-
-# A representative type code per category — used when synthesising HA-side
-# events.  The card renders by category so the precise number isn't seen by
-# users, but it must be a code that maps back to the same category for
-# automations that filter on raw type codes.
-_CATEGORY_DEFAULT_TYPE: dict[ActivityCategory, int] = {
-    ActivityCategory.ARMED: 701,
-    ActivityCategory.ARMED_WITH_EXCEPTIONS: 850,
-    ActivityCategory.ARMING_FAILED: 5802,
-    ActivityCategory.DISARMED: 720,
-    ActivityCategory.ALARM: 13,
-    ActivityCategory.ALARM_RESOLVED: 331,
-    ActivityCategory.TAMPERING: 24,
-    ActivityCategory.SABOTAGE: 241,
-    ActivityCategory.IMAGE_REQUEST: 16,
-    ActivityCategory.POWER_CUT: 25,
-    ActivityCategory.POWER_RESTORED: 26,
-    ActivityCategory.STATUS_CHECK: 27,
-    ActivityCategory.UNKNOWN: 0,
-}
 
 
 def fire_activity_events(
@@ -91,16 +70,17 @@ def make_synthetic_event(
 ) -> ActivityEvent:
     """Build a HA-side ActivityEvent for injection into the coordinator.
 
-    Synthesises a unique ``id_signal`` (prefixed ``ha-``) so it never collides
-    with the panel's numeric ids; sets ``source`` to ``"Home Assistant"`` so
-    automations can distinguish HA-issued events from panel/app/website ones;
-    and picks a representative ``type`` code matching the requested category.
+    Sets ``category`` explicitly (no panel-equivalent type code is borrowed —
+    `type` stays at 0 for HA-issued events).  Synthesises a unique
+    ``id_signal`` (prefixed ``ha-``) so it never collides with the panel's
+    numeric ids; sets ``source`` to ``"Home Assistant"`` so automations can
+    distinguish HA-issued events from panel/app/website ones.
     """
-    type_code = _CATEGORY_DEFAULT_TYPE.get(category, 0)
     return ActivityEvent(
         alias=alias,
-        type=type_code,
-        signal_type=type_code,
+        type=0,
+        signal_type=0,
+        category=category,
         id_signal=f"ha-{uuid.uuid4().hex}",
         time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         source=_HA_USER,

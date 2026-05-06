@@ -900,6 +900,36 @@ class TestActivityEvent:
         ev = ActivityEvent.model_validate(self._minimal())
         assert ev.injected is False
 
+    def test_category_is_derived_from_type_for_polled_events(self):
+        """Polled events get their category derived from the panel's `type` code."""
+        for type_code, expected in (
+            (32, ActivityCategory.DISARMED),
+            (720, ActivityCategory.DISARMED),
+            (701, ActivityCategory.ARMED),
+            (823, ActivityCategory.ARMED),
+            (13, ActivityCategory.ALARM),
+            (850, ActivityCategory.ARMED_WITH_EXCEPTIONS),
+        ):
+            data = self._minimal()
+            data["type"] = type_code
+            ev = ActivityEvent.model_validate(data)
+            assert ev.category == expected, type_code
+
+    def test_explicit_category_wins_over_type_derivation(self):
+        """HA-injected events set category explicitly; the derivation is skipped."""
+        ev = ActivityEvent(
+            type=0,
+            signal_type=0,
+            category=ActivityCategory.DISARMED,
+            id_signal="ha-abc",
+            time="2026-05-05 15:00:00",
+            alias="Disarmed",
+        )
+        # Despite type=0 (which would default to UNKNOWN if derived), the
+        # explicit category survives.
+        assert ev.category == ActivityCategory.DISARMED
+        assert ev.type == 0
+
     def test_injected_round_trips_when_explicitly_true(self):
         """Synthetic events round-trip injected=True through model_dump/validate."""
         data = self._minimal()
