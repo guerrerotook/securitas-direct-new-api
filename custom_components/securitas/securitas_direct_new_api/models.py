@@ -423,6 +423,10 @@ class ActivityEvent(_NullSafeBase):
     media_platform: dict[str, Any] | None = Field(
         default=None, validation_alias="mediaPlatform"
     )
+    # True when the event was synthesized by this integration (e.g. an
+    # arm/disarm injected at the moment HA issued the command).  Polled
+    # entries from the panel default to False.
+    injected: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property

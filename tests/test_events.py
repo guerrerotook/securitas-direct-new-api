@@ -291,6 +291,14 @@ class TestMakeSyntheticEvent:
         )
         assert ev.device_name == "Cucina"
 
+    def test_synthetic_events_carry_injected_true(self):
+        """Synthetic events are flagged so consumers can distinguish them."""
+        ev = make_synthetic_event(
+            category=ActivityCategory.ARMED, alias="Armed", verisure_user="x"
+        )
+        assert ev.injected is True
+        assert ev.model_dump()["injected"] is True
+
 
 # ── inject_ha_event ──────────────────────────────────────────────────────────
 

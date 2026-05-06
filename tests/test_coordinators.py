@@ -623,26 +623,20 @@ class TestActivityCoordinator:
         assert result.new_events == []
 
     @pytest.mark.asyncio
-    async def test_filters_integration_polled_entries(self):
-        """Polled entries from this integration's own commands are dropped.
+    async def test_polled_entries_pass_through_unchanged(self):
+        """All polled entries are surfaced — no filter on source/verisure_user.
 
-        The integration sends Android-like headers, so the panel records
-        HA-issued actions with source="Android" and no verisure_user.
-        That tuple is what we drop — HA already injected these entries
-        with proper HA-side context, so the polled copy would double-count.
+        Each entry's `injected` flag stays at its default of False, letting
+        consumers distinguish polled entries from HA-synthesized ones.
         """
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
-        # The integration's own command, as the panel logged it
         ha_polled = _make_event("999", source="Android", verisure_user=None)
-        # A real action from the user's mobile app — has a user name
         mobile_event = _make_event("998", source="Android", verisure_user="Luci")
-        # A system event (e.g. alarm trigger) — no user, no source
         system_event = _make_event("997", source=None, verisure_user=None)
-        # A web action — kept regardless of user
         web_event = _make_event("996", source="Web", verisure_user="Clinton")
 
         client.get_activity.return_value = [
@@ -656,55 +650,8 @@ class TestActivityCoordinator:
         result = await coord._async_update_data()
 
         ids = [e.id_signal for e in result.events]
-        # ha_polled is gone; everything else survives
-        assert "999" not in ids
-        assert "998" in ids
-        assert "997" in ids
-        assert "996" in ids
-
-    @pytest.mark.asyncio
-    async def test_does_not_filter_mobile_app_action_with_home_assistant_account(self):
-        """A user who named their Verisure account 'Home Assistant' still sees mobile-app actions.
-
-        Discriminator is the absence of verisure_user, not the user name itself.
-        """
-        hass = _make_hass()
-        client = _make_client()
-        queue = _make_queue()
-        installation = _make_installation()
-
-        mobile_event = _make_event(
-            "999", source="Android", verisure_user="Home Assistant"
-        )
-        client.get_activity.return_value = [mobile_event]
-
-        coord = self._make_coordinator(hass, client, queue, installation)
-        result = await coord._async_update_data()
-
-        assert mobile_event in result.events
-
-    @pytest.mark.asyncio
-    async def test_filtered_entries_dont_count_as_new(self):
-        """A second-poll HA-issued entry is filtered AND not flagged as new."""
-        hass = _make_hass()
-        client = _make_client()
-        queue = _make_queue()
-        installation = _make_installation()
-
-        first = [_make_event("100", source="Web", verisure_user="Luci")]
-        second = [
-            # HA-issued: filtered
-            _make_event("200", source="Android", verisure_user=None),
-            _make_event("100", source="Web", verisure_user="Luci"),
-        ]
-        client.get_activity.side_effect = [first, second]
-
-        coord = self._make_coordinator(hass, client, queue, installation)
-        await coord._async_update_data()  # baseline
-        result = await coord._async_update_data()
-
-        assert all(e.id_signal != "200" for e in result.events)
-        assert all(e.id_signal != "200" for e in result.new_events)
+        assert ids == ["999", "998", "997", "996"]
+        assert all(not e.injected for e in result.events)
 
     @pytest.mark.asyncio
     async def test_empty_result(self):
@@ -917,13 +864,8 @@ class TestActivityCoordinator:
         assert ids == {"ha-abc", "100"}
 
     @pytest.mark.asyncio
-    async def test_injected_event_is_not_filtered_by_polled_rule(self):
-        """The polled-side filter does not apply to injected events.
-
-        Injected events live in `_injected` and are merged in directly;
-        they bypass `_async_update_data`'s filter regardless of their
-        source/verisure_user values.
-        """
+    async def test_injected_events_persist_across_polls(self):
+        """Injected events stay in the merged list across subsequent polls."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
@@ -933,12 +875,7 @@ class TestActivityCoordinator:
         coord = self._make_coordinator(hass, client, queue, installation)
         await coord._async_update_data()
 
-        # An injected event whose shape MATCHES the polled-side filter rule
-        # (source=Android, verisure_user=None) — would be dropped if it had
-        # come through the polled path.
-        injected = _make_event(
-            "ha-auto", alias="Armed", source="Android", verisure_user=None
-        )
+        injected = _make_event("ha-auto", alias="Armed")
         coord.inject_event(injected)
 
         assert injected in coord.data.events

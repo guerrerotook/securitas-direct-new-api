@@ -895,6 +895,19 @@ class TestActivityEvent:
         ev = ActivityEvent.model_validate(data)
         assert ev.img == 1
 
+    def test_injected_defaults_to_false_for_polled_events(self):
+        """Polled events default to injected=False — distinguishes them from HA-side."""
+        ev = ActivityEvent.model_validate(self._minimal())
+        assert ev.injected is False
+
+    def test_injected_round_trips_when_explicitly_true(self):
+        """Synthetic events round-trip injected=True through model_dump/validate."""
+        data = self._minimal()
+        data["injected"] = True
+        ev = ActivityEvent.model_validate(data)
+        assert ev.injected is True
+        assert ev.model_dump()["injected"] is True
+
     def test_real_fixture_round_trips_all_entries(self):
         """Every entry in the curated fixture parses without error."""
         import json

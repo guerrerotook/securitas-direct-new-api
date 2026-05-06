@@ -108,6 +108,7 @@ def make_synthetic_event(
         device=device,
         device_name=device_name,
         exceptions=exceptions,
+        injected=True,
     )
 
 

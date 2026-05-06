@@ -500,13 +500,9 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         except SecuritasDirectError as err:
             raise UpdateFailed(f"Activity update failed: {err}") from err
 
-        # Drop polled entries this integration produced.  We send Android-like
-        # headers but pass no user; the panel records HA-issued actions with
-        # source="Android" and no verisure_user.  Real mobile-app actions
-        # always carry a verisure_user, so this discriminator preserves them.
-        polled = [ev for ev in events if not _is_ha_originated_polled(ev)]
-
-        merged = self._merge(self._injected, polled)
+        # All polled entries pass through.  Consumers can distinguish polled
+        # events from HA-synthesized ones via the `injected` field.
+        merged = self._merge(self._injected, events)
 
         current_ids = {ev.id_signal for ev in merged}
         if self._previous_ids is None:
@@ -543,12 +539,3 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self._previous_ids = (self._previous_ids or set()) | {event.id_signal}
         new_data = ActivityData(events=merged, new_events=[event])
         self.async_set_updated_data(new_data)
-
-
-def _is_ha_originated_polled(event: ActivityEvent) -> bool:
-    """Whether a polled event was produced by this integration.
-
-    The integration sends Android-like headers and passes no user, so the
-    panel records HA-issued actions with source="Android" and no verisure_user.
-    """
-    return event.source == "Android" and event.verisure_user is None
