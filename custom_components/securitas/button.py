@@ -133,6 +133,9 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Request a new image capture."""
+        # Capture the calling user's context up-front — HA expires
+        # `self._context` ~1 s after async_set_context.
+        user_context = self._context
         try:
             await self._client.capture_image(self._installation, self._camera_device)
         except SecuritasDirectError as err:
@@ -149,5 +152,5 @@ class SecuritasCaptureButton(SecuritasEntity, ButtonEntity):
             alias="Image request",
             device=self._camera_device.zone_id,
             device_name=self._camera_device.name,
-            context=self._context,
+            context=user_context,
         )

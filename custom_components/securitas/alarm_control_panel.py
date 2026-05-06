@@ -533,6 +533,10 @@ class SecuritasAlarm(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
+        # Capture the calling user's context up-front — HA expires
+        # `self._context` ~1 s after async_set_context, and the disarm
+        # transition + state writes below take longer than that.
+        user_context = self._context
         self._force_state(AlarmControlPanelState.DISARMING)
         self._operation_in_progress = True
         self._operation_epoch += 1
@@ -548,7 +552,7 @@ class SecuritasAlarm(  # type: ignore[override]
                 self._installation,
                 category=ActivityCategory.DISARMED,
                 alias="Disarmed",
-                context=self._context,
+                context=user_context,
             )
         except SecuritasDirectError as err:
             self._state = self._last_state
@@ -572,6 +576,10 @@ class SecuritasAlarm(  # type: ignore[override]
         suid: str | None = None,
     ) -> None:
         """Set the arm state using the command resolver."""
+        # Capture the calling user's context up-front — HA expires
+        # `self._context` ~1 s after async_set_context, and the arm
+        # transition + state writes below take longer than that.
+        user_context = self._context
         self._operation_in_progress = True
         self._operation_epoch += 1
         self._last_arm_result = OperationStatus()
@@ -601,7 +609,7 @@ class SecuritasAlarm(  # type: ignore[override]
                     else ActivityCategory.ARMED
                 ),
                 alias=("Armed with exceptions" if armed_with_exceptions else "Armed"),
-                context=self._context,
+                context=user_context,
             )
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
