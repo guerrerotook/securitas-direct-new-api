@@ -511,6 +511,23 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self._next_fetch_priority = ApiQueue.FOREGROUND
         await self.async_refresh()
 
+    async def async_fetch_event_image(
+        self, id_signal: str, signal_type: str
+    ) -> bytes | None:
+        """Fetch the JPEG bytes for a specific image-request event.
+
+        Routes through the API queue at BACKGROUND priority so simultaneous
+        clicks across many rows don't starve the alarm/foreground traffic.
+        Returns None if no valid image is available.
+        """
+        return await self._queue.submit(
+            self._client.get_full_image,
+            self.installation,
+            id_signal,
+            signal_type,
+            priority=ApiQueue.BACKGROUND,
+        )
+
     async def _async_update_data(self) -> ActivityData:
         try:
             events = await self._fetch()

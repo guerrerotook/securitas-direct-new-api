@@ -50,6 +50,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Issued by Home Assistant",
     refresh: "Refresh",
     unknown_event_prompt: "Unknown event type — please report at https://github.com/clintongormley/securitas-direct-new-api/issues so we can add it.",
+    image_loading: "Loading image…",
+    image_unavailable: "Image not available",
   },
   es: {
     category: {
@@ -80,6 +82,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Emitido por Home Assistant",
     refresh: "Actualizar",
     unknown_event_prompt: "Tipo de evento desconocido — por favor, repórtalo en https://github.com/clintongormley/securitas-direct-new-api/issues para que podamos añadirlo.",
+    image_loading: "Cargando imagen…",
+    image_unavailable: "Imagen no disponible",
   },
   it: {
     category: {
@@ -110,6 +114,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Emesso da Home Assistant",
     refresh: "Aggiorna",
     unknown_event_prompt: "Tipo di evento sconosciuto — segnalalo su https://github.com/clintongormley/securitas-direct-new-api/issues così possiamo aggiungerlo.",
+    image_loading: "Caricamento immagine…",
+    image_unavailable: "Immagine non disponibile",
   },
   fr: {
     category: {
@@ -140,6 +146,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Émis par Home Assistant",
     refresh: "Actualiser",
     unknown_event_prompt: "Type d'événement inconnu — merci de le signaler sur https://github.com/clintongormley/securitas-direct-new-api/issues afin que nous puissions l'ajouter.",
+    image_loading: "Chargement de l'image…",
+    image_unavailable: "Image indisponible",
   },
   pt: {
     category: {
@@ -170,6 +178,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Emitido pelo Home Assistant",
     refresh: "Atualizar",
     unknown_event_prompt: "Tipo de evento desconhecido — por favor reporte em https://github.com/clintongormley/securitas-direct-new-api/issues para o podermos adicionar.",
+    image_loading: "A carregar imagem…",
+    image_unavailable: "Imagem não disponível",
   },
   "pt-BR": {
     category: {
@@ -200,6 +210,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Emitido pelo Home Assistant",
     refresh: "Atualizar",
     unknown_event_prompt: "Tipo de evento desconhecido — por favor reporte em https://github.com/clintongormley/securitas-direct-new-api/issues para podermos adicioná-lo.",
+    image_loading: "Carregando imagem…",
+    image_unavailable: "Imagem indisponível",
   },
   ca: {
     category: {
@@ -230,6 +242,8 @@ const TRANSLATIONS = {
     from_home_assistant: "Emès per Home Assistant",
     refresh: "Actualitza",
     unknown_event_prompt: "Tipus d'esdeveniment desconegut — informeu-ho a https://github.com/clintongormley/securitas-direct-new-api/issues perquè el puguem afegir.",
+    image_loading: "Carregant imatge…",
+    image_unavailable: "Imatge no disponible",
   },
 };
 
@@ -405,6 +419,11 @@ class SecuritasEventsCard extends HTMLElement {
     this._lastRenderedState = null;
     this._refreshing = false;
     this._refreshFallbackTimer = null;
+    // Lazy-fetch cache for image-request events.
+    // Map<id_signal, { state: 'loading' | 'loaded' | 'error', dataUrl?: string }>
+    this._imageCache = new Map();
+    // Latest events list, kept so click handlers can resolve the event by id.
+    this._latestEvents = [];
   }
 
   setConfig(config) {
@@ -529,6 +548,7 @@ class SecuritasEventsCard extends HTMLElement {
     const hidden = new Set(this._config.hide_categories || []);
     const visible = events.filter((ev) => !hidden.has(ev.category || "unknown"));
     const limited = visible.slice(0, this._config.limit);
+    this._latestEvents = limited;
     const body = limited.length
       ? limited.map((ev) => this._renderRow(ev, lang)).join("")
       : `<div class="empty">${_escHtml(_t(lang, "no_events"))}</div>`;
@@ -556,9 +576,56 @@ class SecuritasEventsCard extends HTMLElement {
           this._expanded.add(id);
           row.classList.add("expanded");
           if (details) details.classList.add("expanded");
+          // Lazy-fetch the historical image for image-request events.
+          const event = this._latestEvents.find(
+            (e) => String(e.id_signal || "") === id
+          );
+          if (
+            event &&
+            event.category === "image_request" &&
+            !this._imageCache.has(id)
+          ) {
+            this._fetchEventImage(event);
+          }
         }
       });
     });
+  }
+
+  async _fetchEventImage(event) {
+    const id = String(event.id_signal || "");
+    if (!id || this._imageCache.has(id)) return;
+    this._imageCache.set(id, { state: "loading" });
+    // Trigger a re-render so the spinner appears in the just-expanded details
+    this._lastRenderedState = null;
+    this._render();
+    try {
+      const resp = await this._hass.callService(
+        "securitas",
+        "fetch_activity_image",
+        {
+          entity_id: this._config.entity,
+          id_signal: id,
+          signal_type: String(event.signal_type ?? event.type ?? ""),
+        },
+        undefined,
+        false,
+        true,
+      );
+      const b64 = resp?.response?.image_b64;
+      if (b64) {
+        this._imageCache.set(id, {
+          state: "loaded",
+          dataUrl: `data:image/jpeg;base64,${b64}`,
+        });
+      } else {
+        this._imageCache.set(id, { state: "error" });
+      }
+    } catch (e) {
+      this._imageCache.set(id, { state: "error" });
+    }
+    this._lastRenderedState = null;
+    this._render();
   }
 
   _renderRow(event, lang) {
@@ -602,40 +669,25 @@ class SecuritasEventsCard extends HTMLElement {
   }
 
   _renderImageBlock(event) {
-    const cameraEntityId = this._findCameraForEvent(event);
-    if (!cameraEntityId) return "";
-    const stateObj = this._hass?.states?.[cameraEntityId];
-    const imgUrl = stateObj?.attributes?.entity_picture;
-    if (!imgUrl) return "";
-    const alt = _escHtml(
-      event.device_name || stateObj.attributes?.friendly_name || "",
-    );
-    return `<img class="event-image" src="${_escHtml(imgUrl)}" alt="${alt}" />`;
+    const lang = _hassLang(this._hass);
+    const id = String(event.id_signal || "");
+    const cached = this._imageCache.get(id);
+    const alt = _escHtml(event.device_name || "");
+    if (cached?.state === "loaded" && cached.dataUrl) {
+      return `<img class="event-image" src="${cached.dataUrl}" alt="${alt}" />`;
+    }
+    if (cached?.state === "error") {
+      return `<div class="event-image-error">${_escHtml(_t(lang, "image_unavailable"))}</div>`;
+    }
+    // Loading or not-yet-fetched (the row's expand handler kicks off the
+    // fetch on first click; both states render the same placeholder).
+    return `
+      <div class="event-image-loading">
+        <ha-icon icon="mdi:loading" class="spin"></ha-icon>
+        <span>${_escHtml(_t(lang, "image_loading"))}</span>
+      </div>`;
   }
 
-  /** Match an image-request event to its camera entity via the integration's
-   *  unique-id pattern (`v4_<numinst>_camera_<zone>` / `..._full_image`).
-   *  Falls back to null if the entity registry isn't accessible. */
-  _findCameraForEvent(event) {
-    const entities = this._hass?.entities;
-    if (!entities) return null;
-    const sensorEntity = entities[this._config?.entity];
-    const sensorUid = sensorEntity?.unique_id || "";
-    const m = sensorUid.match(/^v4_(\d+)_activity_log$/);
-    if (!m) return null;
-    const numinst = m[1];
-    const zone = event.device;
-    if (!zone) return null;
-    const fullUid = `v4_${numinst}_camera_${zone}_full_image`;
-    const thumbUid = `v4_${numinst}_camera_${zone}`;
-    let thumb = null;
-    for (const [eid, entry] of Object.entries(entities)) {
-      if (!eid.startsWith("camera.")) continue;
-      if (entry.unique_id === fullUid) return eid;
-      if (entry.unique_id === thumbUid) thumb = eid;
-    }
-    return thumb;
-  }
 
   _writeShell(bodyHtml) {
     const lang = _hassLang(this._hass);
@@ -787,6 +839,22 @@ class SecuritasEventsCard extends HTMLElement {
           margin: 0 auto 8px auto;
           border-radius: 4px;
           background: var(--secondary-background-color);
+        }
+        .event-image-loading, .event-image-error {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 24px 8px;
+          margin-bottom: 8px;
+          color: var(--secondary-text-color);
+          font-size: 0.9em;
+          background: var(--secondary-background-color, rgba(0,0,0,.04));
+          border-radius: 4px;
+        }
+        .event-image-loading .spin {
+          animation: spin 1s linear infinite;
+          --mdc-icon-size: 18px;
         }
       </style>
       <ha-card>

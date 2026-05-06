@@ -1,14 +1,17 @@
 """Securitas Direct sensors — sentinel environmental data and activity log."""
 
+import base64
 import logging
 from collections.abc import Callable
 from typing import Any
+
+import voluptuous as vol
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     async_get_current_platform,
@@ -54,12 +57,23 @@ async def async_setup_entry(
     activity_coord: ActivityCoordinator | None = entry_data.get("activity_coordinator")
     if activity_coord is not None:
         sensors.append(ActivityLogSensor(activity_coord, activity_coord.installation))
-        # Per-entity service: card refresh button calls this with FOREGROUND
-        # priority via the API queue, ahead of the next scheduled poll.
-        async_get_current_platform().async_register_entity_service(
+        platform = async_get_current_platform()
+        # Refresh button — FOREGROUND-priority refresh of the timeline.
+        platform.async_register_entity_service(
             "refresh_activity_log",
             {},
             "async_manual_refresh",
+        )
+        # On-demand historical image fetch for image-request events.
+        # Returns base64 JPEG via the response so the card can render inline.
+        platform.async_register_entity_service(
+            "fetch_activity_image",
+            {
+                vol.Required("id_signal"): str,
+                vol.Required("signal_type"): vol.All(vol.Coerce(str)),
+            },
+            "async_fetch_image",
+            supports_response=SupportsResponse.ONLY,
         )
 
     if sensors:
@@ -270,6 +284,29 @@ class ActivityLogSensor(  # type: ignore[override]
     async def async_manual_refresh(self) -> None:
         """Service entrypoint for the card's refresh button."""
         await self.coordinator.async_manual_refresh()
+
+    async def async_fetch_image(
+        self, id_signal: str, signal_type: str
+    ) -> dict[str, str]:
+        """Service entrypoint: fetch the JPEG for one image-request event.
+
+        Returns a dict with ``image_b64`` (base64-encoded JPEG, empty string
+        if unavailable).
+        """
+        try:
+            image_bytes = await self.coordinator.async_fetch_event_image(
+                id_signal, signal_type
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "Failed to fetch activity image for id_signal=%s",
+                id_signal,
+                exc_info=True,
+            )
+            return {"image_b64": ""}
+        if not image_bytes:
+            return {"image_b64": ""}
+        return {"image_b64": base64.b64encode(image_bytes).decode("ascii")}
 
     @property
     def native_value(self) -> str | None:  # type: ignore[override]
