@@ -47,6 +47,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entity not found: {entity}",
     not_an_activity_log: "Entity is not an activity log: {entity}",
     details: "Details",
+    from_home_assistant: "Issued by Home Assistant",
   },
   es: {
     category: {
@@ -74,6 +75,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entidad no encontrada: {entity}",
     not_an_activity_log: "La entidad no es un registro de actividad: {entity}",
     details: "Detalles",
+    from_home_assistant: "Emitido por Home Assistant",
   },
   it: {
     category: {
@@ -101,6 +103,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entità non trovata: {entity}",
     not_an_activity_log: "L'entità non è un registro attività: {entity}",
     details: "Dettagli",
+    from_home_assistant: "Emesso da Home Assistant",
   },
   fr: {
     category: {
@@ -128,6 +131,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entité introuvable : {entity}",
     not_an_activity_log: "L'entité n'est pas un journal d'activité : {entity}",
     details: "Détails",
+    from_home_assistant: "Émis par Home Assistant",
   },
   pt: {
     category: {
@@ -155,6 +159,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entidade não encontrada: {entity}",
     not_an_activity_log: "A entidade não é um registo de atividade: {entity}",
     details: "Detalhes",
+    from_home_assistant: "Emitido pelo Home Assistant",
   },
   "pt-BR": {
     category: {
@@ -182,6 +187,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entidade não encontrada: {entity}",
     not_an_activity_log: "A entidade não é um registro de atividade: {entity}",
     details: "Detalhes",
+    from_home_assistant: "Emitido pelo Home Assistant",
   },
   ca: {
     category: {
@@ -209,6 +215,7 @@ const TRANSLATIONS = {
     entity_not_found: "Entitat no trobada: {entity}",
     not_an_activity_log: "L'entitat no és un registre d'activitat: {entity}",
     details: "Detalls",
+    from_home_assistant: "Emès per Home Assistant",
   },
 };
 
@@ -501,12 +508,16 @@ class SecuritasEventsCard extends HTMLElement {
     const rel = _relativeTime(event.time, lang);
     const id = String(event.id_signal || "");
     const isExpanded = this._expanded.has(id);
+    const isInjected = event.injected === true;
+    const injectedBadge = isInjected
+      ? `<ha-icon class="injected-badge" icon="mdi:home-assistant" title="${_escHtml(_t(lang, "from_home_assistant"))}"></ha-icon>`
+      : "";
     return `
-      <div class="event ${isExpanded ? "expanded" : ""}" data-id="${_escHtml(id)}">
+      <div class="event${isExpanded ? " expanded" : ""}${isInjected ? " injected" : ""}" data-id="${_escHtml(id)}">
         <ha-icon icon="${_escHtml(icon)}" style="color:${color}"></ha-icon>
         <div class="meta">
           <div class="line1">
-            <span class="category" style="color:${color}">${_escHtml(label)}</span>${actor ? ` <span class="actor">${actor}</span>` : ""}
+            <span class="category" style="color:${color}">${_escHtml(label)}</span>${actor ? ` <span class="actor">${actor}</span>` : ""}${injectedBadge}
           </div>
           <div class="line2">${_escHtml(event.alias || "")}</div>
         </div>
@@ -560,6 +571,14 @@ class SecuritasEventsCard extends HTMLElement {
           text-overflow: ellipsis;
         }
         .actor { color: var(--secondary-text-color); font-weight: 400; }
+        .event.injected { box-shadow: inset 3px 0 0 var(--info-color, #039be5); }
+        .injected-badge {
+          --mdc-icon-size: 14px;
+          color: var(--info-color, #039be5);
+          margin-left: 6px;
+          vertical-align: middle;
+          opacity: 0.75;
+        }
         .line2 {
           color: var(--secondary-text-color);
           font-size: 0.9em;
