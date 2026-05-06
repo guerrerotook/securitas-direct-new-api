@@ -484,13 +484,7 @@ condition:
 
 ### Unknown event types
 
-If you see a row in the card marked **Unknown event** and it expands with a "please report" prompt, the panel emitted a numeric type code we haven't catalogued yet. Open an issue at https://github.com/clintongormley/securitas-direct-new-api/issues with:
-
-- The event's `type` and `signal_type` numbers (visible in the expanded details)
-- The original `alias` text from the panel (in your installation's language)
-- Roughly what action triggered it (a manual disarm via the app, an alarm test, a power cut, etc.)
-
-We'll add it to the type→category map.
+If you see a row in the card marked **Unknown event** and it expands with a "please screenshot" prompt, the panel emitted a numeric type code we haven't catalogued yet. **Take a screenshot of the expanded row** and open an issue at https://github.com/clintongormley/securitas-direct-new-api/issues — the screenshot includes the `type`, `signal_type`, and `alias` we need to add it to the type→category map. A note on what action triggered the event (a manual disarm via the app, an alarm test, a power cut, etc.) is helpful too.
 
 ## Automations & Scripts
 
