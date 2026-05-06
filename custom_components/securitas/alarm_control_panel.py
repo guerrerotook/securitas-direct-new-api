@@ -1047,7 +1047,7 @@ class InteriorSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""
-        interior_target_map = {
+        interior_target_map: dict[str, InteriorMode] = {
             AlarmControlPanelState.ARMED_HOME: InteriorMode.DAY,
             AlarmControlPanelState.ARMED_NIGHT: InteriorMode.NIGHT,
             AlarmControlPanelState.ARMED_AWAY: InteriorMode.TOTAL,
@@ -1096,7 +1096,7 @@ class PerimeterSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the perimeter axis."""
-        perimeter_target_map = {
+        perimeter_target_map: dict[str, PerimeterMode] = {
             AlarmControlPanelState.ARMED_AWAY: PerimeterMode.ON,
             AlarmControlPanelState.DISARMED: PerimeterMode.OFF,
         }
@@ -1141,7 +1141,7 @@ class AnnexSecuritasAlarmPanel(_AxisSubPanelMixin, BaseSecuritasAlarmPanel):
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the annex axis."""
-        annex_target_map = {
+        annex_target_map: dict[str, AnnexMode] = {
             AlarmControlPanelState.ARMED_AWAY: AnnexMode.ON,
             AlarmControlPanelState.DISARMED: AnnexMode.OFF,
         }
