@@ -3633,6 +3633,27 @@ class TestInteriorSubPanel:
         assert target.perimeter == PerimeterMode.ON
         assert target.annex == AnnexMode.ON
 
+    def test_resolve_target_disarmed_preserves_perimeter_and_annex(self):
+        """Disarming the interior sub-panel must NOT touch perimeter or annex."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_interior_panel(
+            capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            ),
+        )
+        target = panel._resolve_target_state("disarmed")
+        assert target.interior == InteriorMode.OFF
+        assert target.perimeter == PerimeterMode.ON  # preserved
+        assert target.annex == AnnexMode.ON  # preserved
+
     def test_extract_state_only_reads_interior(self):
         from custom_components.securitas.securitas_direct_new_api.models import (
             AnnexMode,
@@ -3691,6 +3712,70 @@ class TestPerimeterSubPanel:
         assert s.perimeter == PerimeterMode.ON
         assert s.interior == InteriorMode.TOTAL  # preserved
         assert s.annex == AnnexMode.ON  # preserved
+
+    def test_resolve_target_disarmed_preserves_interior_and_annex(self):
+        """Disarming the perimeter sub-panel must NOT touch interior or annex."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_perimeter_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            )
+        )
+        s = panel._resolve_target_state("disarmed")
+        assert s.perimeter == PerimeterMode.OFF
+        assert s.interior == InteriorMode.DAY  # preserved
+        assert s.annex == AnnexMode.ON  # preserved
+
+    async def test_async_alarm_disarm_uses_axis_projection_not_full_disarm(self):
+        """Regression: async_alarm_disarm must call _resolve_target_state, not hardcode full-disarm.
+
+        The bug: pressing Disarm on the Perimeter sub-panel sent DARM1DARMPERI
+        (full disarm) and on fallback DARM1, which on SDVFAST disarms everything
+        — wiping interior even though the user only meant to disarm perimeter.
+        """
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_perimeter_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.OFF,
+            )
+        )
+        panel._check_code = MagicMock(return_value=True)
+        panel._execute_transition = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                numinst="123456",
+                protom_response="P",  # PARTIAL_DAY (interior=DAY preserved, peri off)
+                protom_response_data="",
+            )
+        )
+        panel.coordinator.async_request_refresh = AsyncMock()
+        panel.async_write_ha_state = MagicMock()
+
+        await panel.async_alarm_disarm()
+
+        panel._execute_transition.assert_called_once()
+        target = panel._execute_transition.call_args[0][0]
+        assert target.perimeter == PerimeterMode.OFF
+        assert target.interior == InteriorMode.DAY  # preserved
+        assert target.annex == AnnexMode.OFF  # preserved
 
     def test_extract_state(self):
         from custom_components.securitas.securitas_direct_new_api.models import (
@@ -3802,6 +3887,27 @@ class TestAnnexSubPanel:
         assert s.annex == AnnexMode.ON
         assert s.interior == InteriorMode.DAY
         assert s.perimeter == PerimeterMode.ON
+
+    def test_resolve_target_disarmed_preserves_interior_and_perimeter(self):
+        """Disarming the annex sub-panel must NOT touch interior or perimeter."""
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        panel = _make_annex_panel(
+            current_state=AlarmState(
+                interior=InteriorMode.DAY,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            )
+        )
+        s = panel._resolve_target_state("disarmed")
+        assert s.annex == AnnexMode.OFF
+        assert s.interior == InteriorMode.DAY  # preserved
+        assert s.perimeter == PerimeterMode.ON  # preserved
 
     def test_extract_state(self):
         from custom_components.securitas.securitas_direct_new_api.models import (

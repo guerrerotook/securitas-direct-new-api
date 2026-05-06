@@ -599,7 +599,7 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
         self._operation_in_progress = True
         self._operation_epoch += 1
         try:
-            target = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+            target = self._resolve_target_state("disarmed")
             result = await self._execute_transition(target)
             self._set_waf_blocked(False)
             self.update_status_alarm(self._build_operation_status(result))
@@ -951,6 +951,12 @@ class CombinedSecuritasAlarmPanel(BaseSecuritasAlarmPanel):
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the securitas state map."""
+        if ha_state == "disarmed":
+            return AlarmState(
+                interior=InteriorMode.OFF,
+                perimeter=PerimeterMode.OFF,
+                annex=AnnexMode.OFF,
+            )
         securitas_state = self._securitas_state_map.get(ha_state)
         if securitas_state is None:
             raise SecuritasDirectError(f"Unsupported alarm mode: {ha_state}")
