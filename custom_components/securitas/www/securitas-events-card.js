@@ -48,6 +48,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "Entity is not an activity log: {entity}",
     details: "Details",
     from_home_assistant: "Issued by Home Assistant",
+    refresh: "Refresh",
   },
   es: {
     category: {
@@ -76,6 +77,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "La entidad no es un registro de actividad: {entity}",
     details: "Detalles",
     from_home_assistant: "Emitido por Home Assistant",
+    refresh: "Actualizar",
   },
   it: {
     category: {
@@ -104,6 +106,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "L'entità non è un registro attività: {entity}",
     details: "Dettagli",
     from_home_assistant: "Emesso da Home Assistant",
+    refresh: "Aggiorna",
   },
   fr: {
     category: {
@@ -132,6 +135,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "L'entité n'est pas un journal d'activité : {entity}",
     details: "Détails",
     from_home_assistant: "Émis par Home Assistant",
+    refresh: "Actualiser",
   },
   pt: {
     category: {
@@ -160,6 +164,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "A entidade não é um registo de atividade: {entity}",
     details: "Detalhes",
     from_home_assistant: "Emitido pelo Home Assistant",
+    refresh: "Atualizar",
   },
   "pt-BR": {
     category: {
@@ -188,6 +193,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "A entidade não é um registro de atividade: {entity}",
     details: "Detalhes",
     from_home_assistant: "Emitido pelo Home Assistant",
+    refresh: "Atualizar",
   },
   ca: {
     category: {
@@ -216,6 +222,7 @@ const TRANSLATIONS = {
     not_an_activity_log: "L'entitat no és un registre d'activitat: {entity}",
     details: "Detalls",
     from_home_assistant: "Emès per Home Assistant",
+    refresh: "Actualitza",
   },
 };
 
@@ -389,6 +396,8 @@ class SecuritasEventsCard extends HTMLElement {
     // the state object whenever a state changes, so identity-equality is
     // enough to skip rebuilds when nothing relevant has changed.
     this._lastRenderedState = null;
+    this._refreshing = false;
+    this._refreshFallbackTimer = null;
   }
 
   setConfig(config) {
@@ -418,7 +427,40 @@ class SecuritasEventsCard extends HTMLElement {
     // is sufficient.
     const stateObj = hass?.states?.[this._config?.entity];
     if (stateObj !== this._lastRenderedState) {
+      // A state change after a manual refresh request — clear spin.
+      if (this._refreshing) this._clearRefreshing();
       this._render();
+    }
+  }
+
+  _clearRefreshing() {
+    this._refreshing = false;
+    if (this._refreshFallbackTimer) {
+      clearTimeout(this._refreshFallbackTimer);
+      this._refreshFallbackTimer = null;
+    }
+  }
+
+  async _handleRefresh() {
+    if (this._refreshing || !this._hass || !this._config?.entity) return;
+    this._refreshing = true;
+    this._lastRenderedState = null;
+    this._render();
+    // Fallback — clear spin even if no state update arrives (e.g. service
+    // call rejected, or coordinator's data was unchanged).
+    this._refreshFallbackTimer = setTimeout(() => {
+      if (this._refreshing) {
+        this._clearRefreshing();
+        this._lastRenderedState = null;
+        this._render();
+      }
+    }, 8000);
+    try {
+      await this._hass.callService("homeassistant", "update_entity", {
+        entity_id: this._config.entity,
+      });
+    } catch (e) {
+      // Ignore — fallback timer will clear the spinner.
     }
   }
 
@@ -483,6 +525,14 @@ class SecuritasEventsCard extends HTMLElement {
       : `<div class="empty">${_escHtml(_t(lang, "no_events"))}</div>`;
 
     this._writeShell(body);
+    // Wire refresh button
+    const refreshBtn = this.shadowRoot.getElementById("refresh-btn");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._handleRefresh();
+      });
+    }
     // Wire row clicks
     this.shadowRoot.querySelectorAll(".event").forEach((row) => {
       row.addEventListener("click", () => {
@@ -533,19 +583,47 @@ class SecuritasEventsCard extends HTMLElement {
   }
 
   _writeShell(bodyHtml) {
+    const lang = _hassLang(this._hass);
     const titleHtml = this._config.title
       ? `<div class="card-header">${_escHtml(this._config.title)}</div>`
       : "";
+    const refreshLabel = _escHtml(_t(lang, "refresh"));
+    const refreshBtn = `
+      <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn"
+              type="button" title="${refreshLabel}" aria-label="${refreshLabel}">
+        <ha-icon icon="mdi:refresh"></ha-icon>
+      </button>`;
     const maxHeight = this._config.max_height || "400px";
     this.shadowRoot.innerHTML = `
       <style>
-        ha-card { padding: 8px 0; }
+        ha-card { padding: 8px 0; position: relative; }
         .scroll {
           max-height: ${maxHeight};
           overflow-y: auto;
         }
+        .refresh-btn {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          width: 32px;
+          height: 32px;
+          padding: 0;
+          border: 1px solid var(--divider-color, rgba(0,0,0,0.12));
+          border-radius: 50%;
+          background: var(--card-background-color, #fff);
+          color: var(--secondary-text-color);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
+          --mdc-icon-size: 18px;
+        }
+        .refresh-btn:hover { background: var(--secondary-background-color, rgba(0,0,0,.04)); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .refresh-btn.spinning ha-icon { animation: spin 1s linear infinite; }
         .card-header {
-          padding: 8px 16px 4px 16px;
+          padding: 8px 48px 4px 16px;
           font-weight: 500;
           font-size: 1.1em;
         }
@@ -640,6 +718,7 @@ class SecuritasEventsCard extends HTMLElement {
         }
       </style>
       <ha-card>
+        ${refreshBtn}
         ${titleHtml}
         <div class="scroll">${bodyHtml}</div>
       </ha-card>
