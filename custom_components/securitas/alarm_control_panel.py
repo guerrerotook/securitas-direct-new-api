@@ -37,7 +37,7 @@ from .coordinators import AlarmCoordinator, AlarmStatusData
 from .entity import securitas_device_info
 from .events import inject_ha_event
 from .notification_translations import get_notification_strings
-from .securitas_direct_new_api.models import ActivityCategory
+from .securitas_direct_new_api.models import ActivityCategory, ActivityException
 from .securitas_direct_new_api import (
     ArmingExceptionError,
     Installation,
@@ -574,6 +574,7 @@ class SecuritasAlarm(  # type: ignore[override]
         *,
         force_arming_remote_id: str | None = None,
         suid: str | None = None,
+        bypassed_exceptions: list[dict[str, Any]] | None = None,
     ) -> None:
         """Set the arm state using the command resolver."""
         # Capture the calling user's context up-front — HA expires
@@ -600,6 +601,11 @@ class SecuritasAlarm(  # type: ignore[override]
             # Force-arm (after exceptions) keeps a different category so the
             # bypassed-zones state is visible in the timeline.
             armed_with_exceptions = bool(force_arming_remote_id)
+            forced_excs: list[ActivityException] | None = None
+            if armed_with_exceptions and bypassed_exceptions:
+                forced_excs = [
+                    ActivityException.model_validate(e) for e in bypassed_exceptions
+                ]
             await inject_ha_event(
                 self.hass,
                 self._installation,
@@ -610,12 +616,26 @@ class SecuritasAlarm(  # type: ignore[override]
                 ),
                 alias=("Armed with exceptions" if armed_with_exceptions else "Armed"),
                 context=user_context,
+                exceptions=forced_excs,
             )
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state
             self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
+            # Surface the rejection in the activity timeline as well — the
+            # polled record (~60 s later) will be a 5802; this gives the
+            # user immediate feedback with the offending zones.
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.ARMING_FAILED,
+                alias="Arming failed",
+                context=user_context,
+                exceptions=[
+                    ActivityException.model_validate(e) for e in exc.exceptions
+                ],
+            )
         except SecuritasDirectError as err:
             if self._last_arm_result.protom_response:
                 self.update_status_alarm(
@@ -845,15 +865,24 @@ class SecuritasAlarm(  # type: ignore[override]
         mode = self._force_context["mode"]
         ref_id = self._force_context["reference_id"]
         suid = self._force_context["suid"]
+        # Capture exceptions before _clear_force_context wipes the context —
+        # set_arm_state's success path uses these to populate the injected
+        # `armed_with_exceptions` event with the bypassed-zone list.
+        bypassed = list(self._force_context.get("exceptions", []))
         _LOGGER.info(
             "Force-arming: overriding previous exceptions %s",
-            [e.get("alias") for e in self._force_context.get("exceptions", [])],
+            [e.get("alias") for e in bypassed],
         )
         self._clear_force_context(force=True)
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)
-        await self.set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
+        await self.set_arm_state(
+            mode,
+            force_arming_remote_id=ref_id,
+            suid=suid,
+            bypassed_exceptions=bypassed,
+        )
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
         """Send arm home command."""
