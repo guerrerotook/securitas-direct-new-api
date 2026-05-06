@@ -182,16 +182,19 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         """Detect peri/annex via API.  Runs once per coordinator lifetime.
 
         This is a fallback path for cases where populate_capabilities_from_data
-        was not called (e.g. unit tests that construct the coordinator directly).
-        In normal operation, async_setup_entry calls populate_capabilities_from_data
-        before any refresh, so this method is a no-op.
+        was not called (e.g. unit tests that construct the coordinator directly,
+        or async_setup_entry's get_services failed). On a transient failure here
+        we leave _capabilities_populated=False so the next refresh retries —
+        otherwise a one-off network error would freeze has_peri/has_annex to
+        False for the coordinator lifetime, hiding capability-gated sub-panels
+        until the integration is reloaded.
         """
         if self._capabilities_populated:
             return
         try:
             services = await self._client.get_services(self._installation)
         except SecuritasDirectError:
-            services = []
+            return
         self._capabilities = self._client.get_supported_commands(
             self._installation.number
         )

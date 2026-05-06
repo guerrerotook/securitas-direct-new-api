@@ -307,8 +307,10 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
             return
         # status.status is the proto code like "D", "T", etc.
         proto_code = status.status
-        # Only update _last_proto_code when it is a known proto code
-        if proto_code == PROTO_DISARMED or proto_code in PROTO_TO_STATE:
+        # Only update _last_proto_code when it is a known proto code.
+        # Use PROTO_TO_ALARM_STATE (12 entries — includes annex codes X/R/S/O)
+        # not const.PROTO_TO_STATE (8 entries — pre-annex).
+        if proto_code in PROTO_TO_ALARM_STATE:
             self._last_proto_code = proto_code
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
@@ -988,12 +990,15 @@ class _AxisSubPanelMixin:
         Unknown proto codes preserve the previous _state. coordinator.alarm_state
         defaults to all-OFF for unrecognised codes, which would otherwise make
         the sub-panel silently report DISARMED while the system is actually armed.
+
+        Uses PROTO_TO_ALARM_STATE (12 entries — includes annex codes X/R/S/O)
+        not const.PROTO_TO_STATE (8 entries — pre-annex).
         """
         status = data.status
         if not status.status:
             return
         proto_code = status.status
-        if proto_code != PROTO_DISARMED and proto_code not in PROTO_TO_STATE:
+        if proto_code not in PROTO_TO_ALARM_STATE:
             return
         self._last_proto_code = proto_code  # type: ignore[attr-defined]
         joint = self.coordinator.alarm_state  # type: ignore[attr-defined]

@@ -688,8 +688,14 @@ class TestCoordinatorCapabilities:
         client.get_services.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_populate_capabilities_survives_api_error(self):
-        """_populate_capabilities does not raise when get_services fails."""
+    async def test_populate_capabilities_survives_api_error_and_retries(self):
+        """get_services failure must NOT permanently lock _capabilities_populated.
+
+        Otherwise a one-off network error at startup would freeze
+        has_peri/has_annex to False for the coordinator lifetime, hiding
+        capability-gated sub-panels until the integration is reloaded.
+        The next refresh should retry, succeed, and populate properly.
+        """
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
@@ -701,11 +707,22 @@ class TestCoordinatorCapabilities:
         client.get_supported_commands = MagicMock(return_value=frozenset())
 
         coord = self._make_coordinator(hass, client, queue, installation)
-        # Should not raise
         await coord._populate_capabilities()
 
+        # First attempt failed: stayed unpopulated so we can retry next refresh
         assert coord.has_peri is False
         assert coord.has_annex is False
+        assert coord._capabilities_populated is False
+
+        # Simulate the API recovering on next refresh
+        client.get_services = AsyncMock(return_value=[])
+        client.get_supported_commands = MagicMock(
+            return_value=frozenset(["ARM", "PERI", "ARMANNEX", "DARMANNEX"])
+        )
+        await coord._populate_capabilities()
+
+        assert coord.has_peri is True
+        assert coord.has_annex is True
         assert coord._capabilities_populated is True
 
     def test_populate_capabilities_from_data_sets_values(self):

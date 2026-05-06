@@ -4134,6 +4134,38 @@ class TestSubPanelStateExtraction:
         alarm._update_from_coordinator(alarm.coordinator.data)
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
+    def test_annex_proto_codes_are_recognised(self):
+        """Annex proto codes (X/R/S/O) must trigger state updates.
+
+        Regression: an earlier check used const.PROTO_TO_STATE (8 entries,
+        no annex) instead of PROTO_TO_ALARM_STATE (12 entries, includes
+        annex codes). Without this fix, an annex-bearing state report
+        ('X' = ANNEX_ONLY) would be treated as unknown — _last_proto_code
+        wouldn't update and the resolver could compute transitions from
+        a stale state.
+        """
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.ON,
+        )
+        panel = _make_annex_panel(
+            capabilities=frozenset(["ARMANNEX", "DARMANNEX"]),
+            current_state=joint,
+        )
+        # Proto code "X" = ANNEX_ONLY
+        data = AlarmStatusData(status=SStatus(status="X"), protom_response="X")
+        panel._update_from_coordinator(data)
+
+        assert panel._state == AlarmControlPanelState.ARMED_AWAY
+        assert panel._last_proto_code == "X"
+
     def test_subpanel_preserves_state_on_unknown_proto_code(self):
         """Unknown proto code must NOT silently flip the sub-panel to DISARMED.
 

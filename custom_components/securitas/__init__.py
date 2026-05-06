@@ -450,18 +450,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 config_entry=entry,
             )
 
-            # Discover sentinel and lock services from cached service list
+            # Discover sentinel and lock services from cached service list.
+            # On failure, skip pre-population so the coordinator's
+            # _populate_capabilities can retry on the first refresh — otherwise
+            # a transient network error would lock has_peri/has_annex to False
+            # for the coordinator lifetime.
             try:
                 services = await client.get_services(first_installation)
             except SecuritasDirectError:
                 services = []
-
-            # Pre-populate capability detection from already-fetched data so
-            # the coordinator's first refresh doesn't make a redundant API call.
-            capabilities = client.client.get_supported_commands(
-                first_installation.number
-            )
-            alarm_coord.populate_capabilities_from_data(services, capabilities)
+            else:
+                capabilities = client.client.get_supported_commands(
+                    first_installation.number
+                )
+                alarm_coord.populate_capabilities_from_data(services, capabilities)
 
             # Sentinel coordinator — needs a sentinel service and its zone
             for service in services:
