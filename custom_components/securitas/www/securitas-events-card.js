@@ -644,21 +644,21 @@ class SecuritasEventsCard extends HTMLElement {
           signal_type: String(event.signal_type ?? event.type ?? ""),
         },
       );
-      const b64 = result?.image_b64;
-      const mime = result?.mime_type || "image/jpeg";
-      if (!b64) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          "[securitas-events-card] fetch_activity_image returned no image_b64; result:",
-          result,
-        );
-      }
+      // Entity services return a dict keyed by entity_id; unwrap.
+      const payload = result?.[this._config.entity] ?? result;
+      const b64 = payload?.image_b64;
+      const mime = payload?.mime_type || "image/jpeg";
       if (b64) {
         this._imageCache.set(id, {
           state: "loaded",
           dataUrl: `data:${mime};base64,${b64}`,
         });
       } else {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[securitas-events-card] fetch_activity_image returned no image_b64; result:",
+          result,
+        );
         this._imageCache.set(id, { state: "error" });
       }
     } catch (e) {
