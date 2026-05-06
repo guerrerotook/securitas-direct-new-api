@@ -400,9 +400,13 @@ class TestGetFullImage:
 
         assert result is None
 
-    async def test_returns_none_for_invalid_jpeg(self, client, transport):
-        """Returns None when decoded data is not valid JPEG."""
-        non_jpeg_data = b"\x89PNG" + b"\x00" * 100  # PNG header instead of JPEG
+    async def test_returns_decoded_bytes_for_non_jpeg(self, client, transport):
+        """Format validation moved to callers; raw decoded bytes pass through.
+
+        The camera coordinator re-checks JPEG magic before storing a
+        thumbnail; the activity-card path accepts any image format.
+        """
+        non_jpeg_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
         encoded = base64.b64encode(non_jpeg_data).decode()
 
         transport.execute.return_value = photo_images_response(
@@ -423,7 +427,7 @@ class TestGetFullImage:
         inst = _make_installation()
         result = await client.get_full_image(inst, "sig-100", "IMG")
 
-        assert result is None
+        assert result == non_jpeg_data
 
     async def test_returns_none_for_none_devices(self, client, transport):
         """Returns None when devices list is None."""

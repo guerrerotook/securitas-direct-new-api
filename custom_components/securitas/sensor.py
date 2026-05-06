@@ -225,6 +225,20 @@ class SentinelAirQualityStatus(  # type: ignore[override]
 _ACTIVITY_LOG_LIMIT = 30
 
 
+def _sniff_image_mime(data: bytes) -> str:
+    """Return the image MIME type derived from magic bytes; default jpeg."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data[:4] == b"GIF8":
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    # Fall back — browsers tend to MIME-sniff data URLs anyway.
+    return "image/jpeg"
+
+
 class ActivityLogSensor(  # type: ignore[override]
     CoordinatorEntity[ActivityCoordinator],
     SensorEntity,
@@ -288,10 +302,10 @@ class ActivityLogSensor(  # type: ignore[override]
     async def async_fetch_image(
         self, id_signal: str, signal_type: str
     ) -> dict[str, str]:
-        """Service entrypoint: fetch the JPEG for one image-request event.
+        """Service entrypoint: fetch the image for one image-request event.
 
-        Returns a dict with ``image_b64`` (base64-encoded JPEG, empty string
-        if unavailable).
+        Returns a dict with ``image_b64`` (base64-encoded image bytes, empty
+        if unavailable) and ``mime_type`` (sniffed from the bytes' magic).
         """
         try:
             image_bytes = await self.coordinator.async_fetch_event_image(
@@ -303,10 +317,14 @@ class ActivityLogSensor(  # type: ignore[override]
                 id_signal,
                 exc_info=True,
             )
-            return {"image_b64": ""}
+            return {"image_b64": "", "mime_type": ""}
         if not image_bytes:
-            return {"image_b64": ""}
-        return {"image_b64": base64.b64encode(image_bytes).decode("ascii")}
+            return {"image_b64": "", "mime_type": ""}
+        return {
+            "image_b64": base64.b64encode(image_bytes).decode("ascii"),
+            "mime_type": _sniff_image_mime(image_bytes),
+        }
+
 
     @property
     def native_value(self) -> str | None:  # type: ignore[override]

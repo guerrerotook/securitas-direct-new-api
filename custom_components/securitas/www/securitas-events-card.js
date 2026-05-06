@@ -616,10 +616,11 @@ class SecuritasEventsCard extends HTMLElement {
         true,
       );
       const b64 = resp?.response?.image_b64;
+      const mime = resp?.response?.mime_type || "image/jpeg";
       if (b64) {
         this._imageCache.set(id, {
           state: "loaded",
-          dataUrl: `data:image/jpeg;base64,${b64}`,
+          dataUrl: `data:${mime};base64,${b64}`,
         });
       } else {
         this._imageCache.set(id, { state: "error" });
