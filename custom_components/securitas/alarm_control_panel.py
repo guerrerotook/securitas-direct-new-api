@@ -983,13 +983,19 @@ class _AxisSubPanelMixin:
     """
 
     def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
-        """Project the coordinator's joint state onto this panel's axis."""
+        """Project the coordinator's joint state onto this panel's axis.
+
+        Unknown proto codes preserve the previous _state. coordinator.alarm_state
+        defaults to all-OFF for unrecognised codes, which would otherwise make
+        the sub-panel silently report DISARMED while the system is actually armed.
+        """
         status = data.status
         if not status.status:
             return
         proto_code = status.status
-        if proto_code == PROTO_DISARMED or proto_code in PROTO_TO_STATE:
-            self._last_proto_code = proto_code  # type: ignore[attr-defined]
+        if proto_code != PROTO_DISARMED and proto_code not in PROTO_TO_STATE:
+            return
+        self._last_proto_code = proto_code  # type: ignore[attr-defined]
         joint = self.coordinator.alarm_state  # type: ignore[attr-defined]
         self._state = self._extract_state(joint)  # type: ignore[attr-defined]
 

@@ -3997,8 +3997,8 @@ class TestSubPanelStateExtraction:
             capabilities=frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
             current_state=joint,
         )
-        # Proto code "G" = perimeter-only state
-        data = AlarmStatusData(status=SStatus(status="G"), protom_response="G")
+        # Proto code "E" = PERIMETER_ONLY (interior=OFF, perimeter=ON)
+        data = AlarmStatusData(status=SStatus(status="E"), protom_response="E")
         panel._update_from_coordinator(data)
 
         assert panel._state == AlarmControlPanelState.DISARMED
@@ -4074,7 +4074,8 @@ class TestSubPanelStateExtraction:
             capabilities=frozenset(["PERI"]),
             current_state=joint,
         )
-        data = AlarmStatusData(status=SStatus(status="F"), protom_response="F")
+        # Proto code "Q" = PARTIAL_NIGHT (interior=NIGHT, perimeter=OFF)
+        data = AlarmStatusData(status=SStatus(status="Q"), protom_response="Q")
         panel._update_from_coordinator(data)
 
         assert panel._state == AlarmControlPanelState.DISARMED
@@ -4132,6 +4133,34 @@ class TestSubPanelStateExtraction:
         )
         alarm._update_from_coordinator(alarm.coordinator.data)
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+    def test_subpanel_preserves_state_on_unknown_proto_code(self):
+        """Unknown proto code must NOT silently flip the sub-panel to DISARMED.
+
+        Regression: coordinator.alarm_state defaults to all-OFF when the proto
+        code isn't recognised. Without guarding, _extract_state would then
+        report DISARMED — wrong if the system is actually armed.
+        """
+        from custom_components.securitas.securitas_direct_new_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        joint = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        panel = _make_perimeter_panel(current_state=joint)
+        panel._state = AlarmControlPanelState.DISARMED  # last known
+        # Feed an unknown status string (not a proto code letter)
+        data = AlarmStatusData(
+            status=SStatus(status="UNKNOWN_STATUS"), protom_response=""
+        )
+        panel._update_from_coordinator(data)
+        # State preserved; not flipped via fallback all-OFF joint
+        assert panel._state == AlarmControlPanelState.DISARMED
 
 
 # ===========================================================================
