@@ -538,18 +538,16 @@ class BaseSecuritasAlarmPanel(  # type: ignore[override]
                 last_err = err
 
         if last_err and last_err.http_status == 400:
-            tried = ", ".join(step.commands)
-            raise SecuritasDirectError(
-                f"This alarm mode is not supported by your panel "
-                f"(rejected: {tried}). Check the state mappings in the "
-                "integration options (Settings → Devices & Services → "
-                "Securitas → Configure).",
-                http_status=400,
-            )
-        raise last_err or SecuritasDirectError(
-            "No supported command found for this panel. "
-            "Check the state mappings in the integration options "
-            "(Settings → Devices & Services → Securitas → Configure).",
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="unsupported_alarm_mode",
+                translation_placeholders={"tried": ", ".join(step.commands)},
+            ) from last_err
+        if last_err:
+            raise last_err
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="no_supported_command",
         )
 
     async def _send_single_command(

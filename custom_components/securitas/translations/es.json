@@ -131,7 +131,7 @@
             "message": "Código PIN no válido para {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "Este modo de alarma no es compatible con tu panel. Revisa las asignaciones de estado en las opciones de la integración (Configuración → Dispositivos y servicios → Securitas → Configurar)."
+            "message": "Este modo de alarma no es compatible con tu panel (rechazado: {tried}). Revisa las asignaciones de estado en las opciones de la integración (Configuración → Dispositivos y servicios → Securitas → Configurar)."
         },
         "no_supported_command": {
             "message": "No se encontró un comando compatible para este panel. Revisa las asignaciones de estado en las opciones de la integración (Configuración → Dispositivos y servicios → Securitas → Configurar)."

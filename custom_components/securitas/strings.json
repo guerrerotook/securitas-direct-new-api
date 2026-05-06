@@ -131,7 +131,7 @@
             "message": "Invalid PIN code for {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "This alarm mode is not supported by your panel. Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."
+            "message": "This alarm mode is not supported by your panel (rejected: {tried}). Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."
         },
         "no_supported_command": {
             "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Securitas → Configure)."

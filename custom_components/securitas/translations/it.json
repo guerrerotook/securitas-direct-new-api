@@ -131,7 +131,7 @@
             "message": "Codice PIN non valido per {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "Questa modalità di allarme non è supportata dal tuo pannello. Controlla le mappature degli stati nelle opzioni dell'integrazione (Impostazioni → Dispositivi e servizi → Securitas → Configura)."
+            "message": "Questa modalità di allarme non è supportata dal tuo pannello (rifiutato: {tried}). Controlla le mappature degli stati nelle opzioni dell'integrazione (Impostazioni → Dispositivi e servizi → Securitas → Configura)."
         },
         "no_supported_command": {
             "message": "Nessun comando compatibile trovato per questo pannello. Controlla le mappature degli stati nelle opzioni dell'integrazione (Impostazioni → Dispositivi e servizi → Securitas → Configura)."
