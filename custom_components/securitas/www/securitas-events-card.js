@@ -369,7 +369,7 @@ function _renderExceptions(exceptions, lang) {
   return `<ul class="exceptions">${items.join("")}</ul>`;
 }
 
-function _renderDetails(event, lang) {
+function _renderRows(event, lang) {
   const rows = [];
   for (const key of DETAIL_FIELDS) {
     const val = event[key];
@@ -384,11 +384,7 @@ function _renderDetails(event, lang) {
     }
     rows.push(`<tr><th>${_escHtml(key)}</th><td>${display}</td></tr>`);
   }
-  const prompt =
-    event.category === "unknown"
-      ? `<div class="unknown-prompt">${_escHtml(_t(lang, "unknown_event_prompt"))}</div>`
-      : "";
-  return `${prompt}<table class="details">${rows.join("")}</table>`;
+  return rows.join("");
 }
 
 // ── Card ─────────────────────────────────────────────────────────────────────
@@ -590,9 +586,55 @@ class SecuritasEventsCard extends HTMLElement {
         <div class="time" title="${_escHtml(event.time || "")}">${_escHtml(rel)}</div>
       </div>
       <div class="details-row ${isExpanded ? "expanded" : ""}" data-id="${_escHtml(id)}">
-        ${_renderDetails(event, lang)}
+        ${this._renderDetails(event, lang)}
       </div>
     `;
+  }
+
+  _renderDetails(event, lang) {
+    const imageBlock =
+      event.category === "image_request" ? this._renderImageBlock(event) : "";
+    const prompt =
+      event.category === "unknown"
+        ? `<div class="unknown-prompt">${_escHtml(_t(lang, "unknown_event_prompt"))}</div>`
+        : "";
+    return `${imageBlock}${prompt}<table class="details">${_renderRows(event, lang)}</table>`;
+  }
+
+  _renderImageBlock(event) {
+    const cameraEntityId = this._findCameraForEvent(event);
+    if (!cameraEntityId) return "";
+    const stateObj = this._hass?.states?.[cameraEntityId];
+    const imgUrl = stateObj?.attributes?.entity_picture;
+    if (!imgUrl) return "";
+    const alt = _escHtml(
+      event.device_name || stateObj.attributes?.friendly_name || "",
+    );
+    return `<img class="event-image" src="${_escHtml(imgUrl)}" alt="${alt}" />`;
+  }
+
+  /** Match an image-request event to its camera entity via the integration's
+   *  unique-id pattern (`v4_<numinst>_camera_<zone>` / `..._full_image`).
+   *  Falls back to null if the entity registry isn't accessible. */
+  _findCameraForEvent(event) {
+    const entities = this._hass?.entities;
+    if (!entities) return null;
+    const sensorEntity = entities[this._config?.entity];
+    const sensorUid = sensorEntity?.unique_id || "";
+    const m = sensorUid.match(/^v4_(\d+)_activity_log$/);
+    if (!m) return null;
+    const numinst = m[1];
+    const zone = event.device;
+    if (!zone) return null;
+    const fullUid = `v4_${numinst}_camera_${zone}_full_image`;
+    const thumbUid = `v4_${numinst}_camera_${zone}`;
+    let thumb = null;
+    for (const [eid, entry] of Object.entries(entities)) {
+      if (!eid.startsWith("camera.")) continue;
+      if (entry.unique_id === fullUid) return eid;
+      if (entry.unique_id === thumbUid) thumb = eid;
+    }
+    return thumb;
   }
 
   _writeShell(bodyHtml) {
@@ -739,6 +781,13 @@ class SecuritasEventsCard extends HTMLElement {
           opacity: 0.85;
         }
         .unknown-prompt a { color: inherit; text-decoration: underline; }
+        img.event-image {
+          display: block;
+          max-width: 100%;
+          margin: 0 auto 8px auto;
+          border-radius: 4px;
+          background: var(--secondary-background-color);
+        }
       </style>
       <ha-card>
         ${refreshBtn}
