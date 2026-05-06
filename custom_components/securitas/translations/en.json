@@ -89,9 +89,9 @@
                     "code_arm_required": "Also require PIN code (if any) to arm alarm",
                     "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
                     "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)",
-                    "enable_interior_panel": "Enable Interior sub-panel",
-                    "enable_perimeter_panel": "Enable Perimeter sub-panel",
-                    "enable_annex_panel": "Enable Annex sub-panel"
+                    "enable_interior_panel": "Enable Interior-only control panel",
+                    "enable_perimeter_panel": "Enable Perimeter-only control panel",
+                    "enable_annex_panel": "Enable Annex-only control panel"
                 },
                 "sections": {
                     "advanced": {

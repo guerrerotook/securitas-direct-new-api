@@ -89,9 +89,9 @@
                     "code_arm_required": "Exigir também o código PIN (se existir) para armar o alarme",
                     "notify_group": "Serviço de notificação para exceções de armar (ex. mobile_app_phone)",
                     "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar as suas próprias automatizações)",
-                    "enable_interior_panel": "Ativar subpainel Interior",
-                    "enable_perimeter_panel": "Ativar subpainel Perímetro",
-                    "enable_annex_panel": "Ativar subpainel Anexo"
+                    "enable_interior_panel": "Ativar painel de controlo apenas Interior",
+                    "enable_perimeter_panel": "Ativar painel de controlo apenas Perímetro",
+                    "enable_annex_panel": "Ativar painel de controlo apenas Anexo"
                 },
                 "sections": {
                     "advanced": {

@@ -89,9 +89,9 @@
                     "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
                     "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
                     "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
-                    "enable_interior_panel": "Activar el subpanell Interior",
-                    "enable_perimeter_panel": "Activar el subpanell Perímetre",
-                    "enable_annex_panel": "Activar el subpanell Annex"
+                    "enable_interior_panel": "Activar el panell de control només Interior",
+                    "enable_perimeter_panel": "Activar el panell de control només Perímetre",
+                    "enable_annex_panel": "Activar el panell de control només Annex"
                 },
                 "sections": {
                     "advanced": {

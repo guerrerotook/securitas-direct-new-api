@@ -89,9 +89,9 @@
                     "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
                     "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
                     "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)",
-                    "enable_interior_panel": "Attiva sotto-pannello Interno",
-                    "enable_perimeter_panel": "Attiva sotto-pannello Perimetrale",
-                    "enable_annex_panel": "Attiva sotto-pannello Annesso"
+                    "enable_interior_panel": "Attiva pannello di controllo solo Interno",
+                    "enable_perimeter_panel": "Attiva pannello di controllo solo Perimetrale",
+                    "enable_annex_panel": "Attiva pannello di controllo solo Annesso"
                 },
                 "sections": {
                     "advanced": {

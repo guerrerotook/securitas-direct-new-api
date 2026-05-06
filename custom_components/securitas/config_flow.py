@@ -747,7 +747,7 @@ class SecuritasOptionsFlowHandler(config_entries.OptionsFlow):
             extra_fields[
                 vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=annex_currently_enabled)
             ] = bool
-        if peri_currently_enabled or annex_currently_enabled:
+        if has_peri or has_annex:
             extra_fields[
                 vol.Optional(
                     CONF_ENABLE_INTERIOR_PANEL,

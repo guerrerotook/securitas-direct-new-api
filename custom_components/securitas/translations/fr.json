@@ -89,9 +89,9 @@
                     "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
                     "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
                     "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
-                    "enable_interior_panel": "Activer le sous-panneau Intérieur",
-                    "enable_perimeter_panel": "Activer le sous-panneau Périmètre",
-                    "enable_annex_panel": "Activer le sous-panneau Annexe"
+                    "enable_interior_panel": "Activer le panneau de contrôle Intérieur uniquement",
+                    "enable_perimeter_panel": "Activer le panneau de contrôle Périmètre uniquement",
+                    "enable_annex_panel": "Activer le panneau de contrôle Annexe uniquement"
                 },
                 "sections": {
                     "advanced": {

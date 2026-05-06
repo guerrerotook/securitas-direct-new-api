@@ -1522,7 +1522,7 @@ async def test_subpanel_perimeter_toggle_hidden_when_no_peri(hass):
 
 
 async def test_subpanel_perimeter_toggle_shown_when_has_peri(hass):
-    """Only PERIMETER toggle shown when has_peri=True but no sibling enabled."""
+    """PERIMETER + INTERIOR toggles shown when has_peri=True regardless of toggle state."""
     entry = _make_entry_with_coordinator(hass, has_peri=True, has_annex=False)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1531,29 +1531,13 @@ async def test_subpanel_perimeter_toggle_shown_when_has_peri(hass):
     keys = _schema_keys(result["data_schema"])
     assert CONF_ENABLE_PERIMETER_PANEL in keys
     assert CONF_ENABLE_ANNEX_PANEL not in keys
-    assert CONF_ENABLE_INTERIOR_PANEL not in keys
+    assert CONF_ENABLE_INTERIOR_PANEL in keys
 
 
-async def test_subpanel_interior_toggle_hidden_when_no_sibling_enabled(hass):
-    """INTERIOR toggle not shown when peri is supported but not currently enabled."""
+async def test_subpanel_interior_toggle_visible_when_has_annex_only(hass):
+    """INTERIOR toggle shown when has_annex=True (sibling capability present)."""
     entry = _make_entry_with_coordinator(
-        hass, has_peri=True, has_annex=False, options={}
-    )
-
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-
-    assert result["type"] == FlowResultType.FORM
-    keys = _schema_keys(result["data_schema"])
-    assert CONF_ENABLE_INTERIOR_PANEL not in keys
-
-
-async def test_subpanel_interior_toggle_visible_when_perimeter_currently_enabled(hass):
-    """INTERIOR toggle shown when CONF_ENABLE_PERIMETER_PANEL is True in options."""
-    entry = _make_entry_with_coordinator(
-        hass,
-        has_peri=True,
-        has_annex=False,
-        options={CONF_ENABLE_PERIMETER_PANEL: True},
+        hass, has_peri=False, has_annex=True, options={}
     )
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1563,13 +1547,13 @@ async def test_subpanel_interior_toggle_visible_when_perimeter_currently_enabled
     assert CONF_ENABLE_INTERIOR_PANEL in keys
 
 
-async def test_subpanel_all_toggles_visible_with_full_caps_and_sibling_enabled(hass):
-    """All three toggles shown when has_peri=True, has_annex=True, peri currently enabled."""
+async def test_subpanel_all_toggles_visible_with_full_caps(hass):
+    """All three toggles shown when has_peri=True and has_annex=True, regardless of toggle state."""
     entry = _make_entry_with_coordinator(
         hass,
         has_peri=True,
         has_annex=True,
-        options={CONF_ENABLE_PERIMETER_PANEL: True},
+        options={},
     )
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
