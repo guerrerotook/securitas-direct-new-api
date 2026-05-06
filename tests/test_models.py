@@ -1015,9 +1015,6 @@ class TestActivityEventCategory:
         assert self._ev(25).category == ActivityCategory.POWER_CUT
         assert self._ev(26).category == ActivityCategory.POWER_RESTORED
 
-    @pytest.mark.skip(
-        reason="TEMP: type=27 mapping disabled to surface the unknown-event UX"
-    )
     def test_status_check(self):
         assert self._ev(27).category == ActivityCategory.STATUS_CHECK
 
