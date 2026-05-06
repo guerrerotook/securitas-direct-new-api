@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
@@ -43,6 +45,8 @@ _DEFAULT_SENTINEL_INTERVAL = timedelta(minutes=30)
 _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
 _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
+_ACTIVITY_STORE_VERSION = 1
+_ACTIVITY_STORE_KEY_PREFIX = "securitas_activity_log"
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -477,7 +481,13 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self.installation = installation
         self._previous_ids: set[str] | None = None
         # HA-synthesized events; merged with polled at the front of the timeline.
+        # Persisted to disk so they survive HA restarts (load via
+        # async_load_persisted, save automatically on inject_event).
         self._injected: list[ActivityEvent] = []
+        # Store is lazy — the constructor accesses hass.config.config_dir
+        # which test mocks may not provide.
+        self._store: Store[dict[str, Any]] | None = None
+        self._persisted_loaded = False
         # One-shot priority for the next _fetch — set by async_manual_refresh,
         # reset to BACKGROUND after each fetch.
         self._next_fetch_priority: int = ApiQueue.BACKGROUND
@@ -538,8 +548,9 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
     def inject_event(self, event: ActivityEvent) -> None:
         """Add a HA-side synthetic event to the front of the timeline.
 
-        Bypasses the polled-side filter and persists across polls until pushed
-        out of the visible window.
+        Bypasses the polled-side filter, persists across polls until pushed
+        out of the visible window, and is saved to disk so it survives
+        HA restarts.
         """
         self._injected = [event, *self._injected][:_ACTIVITY_TIMELINE_WINDOW]
         injected_ids = {e.id_signal for e in self._injected}
@@ -554,3 +565,56 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         self._previous_ids = (self._previous_ids or set()) | {event.id_signal}
         new_data = ActivityData(events=merged, new_events=[event])
         self.async_set_updated_data(new_data)
+        # Schedule the persistence write asynchronously — don't block the
+        # caller (typically a service handler responding to a UI click).
+        self.hass.async_create_task(self._async_save_persisted())
+
+    def _get_store(self) -> Store[dict[str, Any]]:
+        if self._store is None:
+            self._store = Store(
+                self.hass,
+                _ACTIVITY_STORE_VERSION,
+                f"{_ACTIVITY_STORE_KEY_PREFIX}_{self.installation.number}",
+            )
+        return self._store
+
+    async def async_load_persisted(self) -> None:
+        """Load injected events from disk.  Idempotent; call once per setup."""
+        if self._persisted_loaded:
+            return
+        self._persisted_loaded = True
+        try:
+            stored = await self._get_store().async_load()
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "Failed to load persisted activity log for %s",
+                self.installation.number,
+                exc_info=True,
+            )
+            return
+        if not stored or not isinstance(stored.get("events"), list):
+            return
+        events: list[ActivityEvent] = []
+        for raw in stored["events"]:
+            try:
+                events.append(ActivityEvent.model_validate(raw))
+            except Exception:  # pylint: disable=broad-exception-caught
+                continue
+        self._injected = events[:_ACTIVITY_TIMELINE_WINDOW]
+        # Seed previous_ids so a freshly-loaded restored event doesn't fire
+        # again on the next poll as a "new" event.
+        if self._injected:
+            self._previous_ids = {e.id_signal for e in self._injected}
+
+    async def _async_save_persisted(self) -> None:
+        """Write the current injected list to disk."""
+        try:
+            await self._get_store().async_save(
+                {"events": [ev.model_dump() for ev in self._injected]}
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOGGER.warning(
+                "Failed to persist activity log for %s",
+                self.installation.number,
+                exc_info=True,
+            )

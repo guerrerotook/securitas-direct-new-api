@@ -251,6 +251,10 @@ class ActivityLogSensor(  # type: ignore[override]
         lifetime — without a sensor the coordinator stays idle, which avoids
         leaking timers in test setups that skip platform forwarding.
         """
+        # Restore HA-side injected events from disk before the listener
+        # triggers the first refresh — this way, persisted entries appear
+        # in `data.events` from the very first render.
+        await self.coordinator.async_load_persisted()
         await super().async_added_to_hass()
         self._bus_listener_unsub = attach_activity_listener(
             self.hass, self.coordinator, self._installation.number

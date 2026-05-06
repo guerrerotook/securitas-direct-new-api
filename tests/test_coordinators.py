@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -833,6 +834,98 @@ class TestActivityCoordinator:
 
         priority = queue.submit.call_args.kwargs["priority"]
         assert priority == ApiQueue.BACKGROUND
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_persisted_injected_events_round_trip(self):
+        """Injected events round-trip through Store across a coordinator restart."""
+        hass = _make_hass()
+        # Make hass.async_create_task actually schedule the coroutine
+        hass.async_create_task = lambda coro: asyncio.create_task(coro)
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        from custom_components.securitas.coordinators import ActivityCoordinator
+
+        # Patch Store with an in-memory stub for both coordinator instances
+        stub: dict = {"data": None}
+
+        class _StubStore:
+            def __init__(self, *_a, **_k):
+                pass
+
+            async def async_load(self):
+                return stub["data"]
+
+            async def async_save(self, data):
+                stub["data"] = data
+
+        import custom_components.securitas.coordinators as cm
+
+        original_store = cm.Store
+        cm.Store = _StubStore  # type: ignore[assignment]
+        try:
+            client.get_activity.return_value = []
+            coord = ActivityCoordinator(hass, client, queue, installation)
+            await coord.async_load_persisted()  # nothing to load yet
+
+            event = _make_event("ha-1", alias="Armed")
+            coord.inject_event(event)
+            # Allow the scheduled save task to run
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert stub["data"] is not None
+            assert len(stub["data"]["events"]) == 1
+
+            # Simulate a restart — fresh coordinator, then load
+            coord2 = ActivityCoordinator(hass, client, queue, installation)
+            assert coord2._injected == []
+            await coord2.async_load_persisted()
+            assert len(coord2._injected) == 1
+            assert coord2._injected[0].id_signal == "ha-1"
+            assert coord2._injected[0].alias == "Armed"
+        finally:
+            cm.Store = original_store
+
+    @pytest.mark.asyncio
+    async def test_async_load_persisted_is_idempotent(self):
+        """Calling load twice doesn't double-load."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        from custom_components.securitas.coordinators import ActivityCoordinator
+
+        load_calls = 0
+
+        class _StubStore:
+            def __init__(self, *_a, **_k):
+                pass
+
+            async def async_load(self):
+                nonlocal load_calls
+                load_calls += 1
+                return None
+
+            async def async_save(self, _data):
+                pass
+
+        import custom_components.securitas.coordinators as cm
+
+        original_store = cm.Store
+        cm.Store = _StubStore  # type: ignore[assignment]
+        try:
+            coord = ActivityCoordinator(hass, client, queue, installation)
+            await coord.async_load_persisted()
+            await coord.async_load_persisted()
+            await coord.async_load_persisted()
+            assert load_calls == 1
+        finally:
+            cm.Store = original_store
 
     @pytest.mark.asyncio
     async def test_manual_refresh_uses_foreground_priority_then_resets(self):
