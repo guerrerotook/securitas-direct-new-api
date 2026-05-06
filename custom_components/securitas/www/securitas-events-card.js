@@ -449,10 +449,13 @@ class SecuritasEventsCard extends HTMLElement {
   }
 
   static getStubConfig(hass) {
-    // Auto-pick the first activity-log sensor we can find
-    const candidates = Object.keys(hass?.states || {}).filter(
-      (e) => e.startsWith("sensor.") && e.includes("activity_log")
-    );
+    // Auto-pick the first activity-log sensor by its attribute shape.
+    const candidates = Object.entries(hass?.states || {})
+      .filter(
+        ([eid, state]) =>
+          eid.startsWith("sensor.") && Array.isArray(state.attributes?.events)
+      )
+      .map(([eid]) => eid);
     return { entity: candidates[0] || "", limit: 10 };
   }
 
@@ -700,10 +703,21 @@ class SecuritasEventsCardEditor extends HTMLElement {
       value: c,
       label: _t(lang, `category.${c}`),
     }));
+    // Detect activity-log sensors by their attribute shape (an `events` array)
+    // rather than by name.  Falls back to all sensors if none are loaded yet.
+    const activityLogEntities = Object.entries(this._hass?.states || {})
+      .filter(
+        ([eid, state]) =>
+          eid.startsWith("sensor.") && Array.isArray(state.attributes?.events)
+      )
+      .map(([eid]) => eid);
+    const entitySelector = activityLogEntities.length
+      ? { entity: { include_entities: activityLogEntities } }
+      : { entity: { domain: "sensor" } };
     entityForm.schema = [
       {
         name: "entity",
-        selector: { entity: { domain: "sensor" } },
+        selector: entitySelector,
       },
       {
         name: "limit",
