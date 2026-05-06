@@ -401,7 +401,10 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     16: ActivityCategory.IMAGE_REQUEST,
     25: ActivityCategory.POWER_CUT,
     26: ActivityCategory.POWER_RESTORED,
-    27: ActivityCategory.STATUS_CHECK,
+    # TEMP: removed mapping for type=27 to surface the "unknown event" UX
+    # in the card.  Revert this line + the matching skip in test_models.py
+    # before merging.
+    # 27: ActivityCategory.STATUS_CHECK,
 }
 
 
