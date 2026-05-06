@@ -476,7 +476,7 @@ There are two natural ways to react to alarm activity in Home Assistant. Pick wh
 - **Use Activity Log events (`securitas_activity`)** when you need richer detail than just the on/off state — who did it, from where, or things the panel state doesn't reflect at all:
   - "Notify me when someone disarms the alarm and tell me **who** did it."
   - "Send me a message if a **tampering** or **sabotage** event is detected" (these never change the panel's state).
-  - "Log every **image request** to a separate notebook."
+  - "Log every **image request** to a notification channel."
   - "Tell me when the panel **lost power** or **came back online**."
 
 If both would work, the alarm panel entity is usually simpler. Reach for activity events when you need the extra context.

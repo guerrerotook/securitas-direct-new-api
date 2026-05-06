@@ -22,13 +22,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api_queue import ApiQueue
 from .securitas_direct_new_api.client import SecuritasClient
+from .events import HA_ECHO_SOURCE, HA_INJECTABLE_CATEGORIES
 from .securitas_direct_new_api.exceptions import (
     SecuritasDirectError,
     SessionExpiredError,
     WAFBlockedError,
 )
 from .securitas_direct_new_api.models import (
-    ActivityCategory,
     ActivityEvent,
     AirQuality,
     CameraDevice,
@@ -48,23 +48,6 @@ _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
 _ACTIVITY_STORE_VERSION = 1
 _ACTIVITY_STORE_KEY_PREFIX = "securitas_activity_log"
-
-# Categories that the integration injects synthetic events for.  A polled
-# event whose origin matches the HA-issued discriminator (Android source,
-# null user) AND falls into one of these categories is considered the
-# panel's redundant echo of an action HA already recorded — drop it.
-# Categories outside this set (alarms, tamper, power events, status check,
-# unknown) pass through, so any polled record for an action we DON'T inject
-# for stays visible.
-_HA_INJECTABLE_CATEGORIES: frozenset[ActivityCategory] = frozenset(
-    {
-        ActivityCategory.ARMED,
-        ActivityCategory.ARMED_WITH_EXCEPTIONS,
-        ActivityCategory.ARMING_FAILED,
-        ActivityCategory.DISARMED,
-        ActivityCategory.IMAGE_REQUEST,
-    }
-)
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -560,19 +543,13 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         except SecuritasDirectError as err:
             raise UpdateFailed(f"Activity update failed: {err}") from err
 
-        # Drop the panel's redundant echo of HA-issued actions: the
-        # integration sends Android-like headers and no user, so HA-issued
-        # actions surface here with source="Android" and verisure_user=None.
-        # Restrict the filter to categories we actually inject for, so any
-        # action we DON'T cover still shows up in the timeline (and can be
-        # reported / added to the type→category map).
         polled = [
             ev
             for ev in events
             if not (
-                ev.source == "Android"
+                ev.source == HA_ECHO_SOURCE
                 and ev.verisure_user is None
-                and ev.category in _HA_INJECTABLE_CATEGORIES
+                and ev.category in HA_INJECTABLE_CATEGORIES
             )
         ]
         merged = self._merge(self._injected, polled)

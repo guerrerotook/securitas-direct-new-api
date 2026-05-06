@@ -27,6 +27,27 @@ ACTIVITY_EVENT_TYPE = "securitas_activity"
 # carries no user_id (automation/script-driven actions).
 _HA_USER = "Home Assistant"
 
+# How a polled HA-issued action surfaces in the panel timeline: the
+# integration sends Android-like headers (so source="Android") and no
+# Verisure user is attributed.  Paired with HA_INJECTABLE_CATEGORIES, this
+# is what the activity coordinator uses to detect (and drop) the panel's
+# echo of an action HA already injected locally.
+HA_ECHO_SOURCE = "Android"
+
+# Categories the integration emits synthetic events for via
+# ``inject_ha_event``.  Kept here, next to the inject call site, so adding
+# a new injectable category in one place is enough — the coordinator
+# imports this set to suppress the redundant polled echo.
+HA_INJECTABLE_CATEGORIES: frozenset[ActivityCategory] = frozenset(
+    {
+        ActivityCategory.ARMED,
+        ActivityCategory.ARMED_WITH_EXCEPTIONS,
+        ActivityCategory.ARMING_FAILED,
+        ActivityCategory.DISARMED,
+        ActivityCategory.IMAGE_REQUEST,
+    }
+)
+
 
 def fire_activity_events(
     hass: HomeAssistant, numinst: str, events: list[ActivityEvent]
