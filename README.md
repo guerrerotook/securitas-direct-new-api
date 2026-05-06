@@ -484,7 +484,13 @@ condition:
 
 ### Unknown event types
 
-If you see a row in the card marked **Unknown event** and it expands with a "please screenshot" prompt, the panel emitted a numeric type code we haven't catalogued yet. **Take a screenshot of the expanded row** and open an issue at https://github.com/clintongormley/securitas-direct-new-api/issues — the screenshot includes the `type`, `signal_type`, and `alias` we need to add it to the type→category map. A note on what action triggered the event (a manual disarm via the app, an alarm test, a power cut, etc.) is helpful too.
+If you see a row in the card marked **Unknown event** and it expands with a "please screenshot" prompt, the panel emitted a numeric type code we haven't catalogued yet. **Take a screenshot of the expanded row** and open an issue at https://github.com/guerrerotook/securitas-direct-new-api/issues — the screenshot includes the `type`, `signal_type`, and `alias` we need to add it to the type→category map. A note on what action triggered the event (a manual disarm via the app, an alarm test, a power cut, etc.) is helpful too.
+
+### Reporting missed HA actions
+
+When you arm, disarm, or request an image from Home Assistant (the card, an automation, a service call), the integration injects a richer event into the timeline locally — including the HA user, any arming exceptions, and the captured image. The polled echo of that same action from the panel is then suppressed so you don't see the entry twice.
+
+Suppression only kicks in for categories we know how to enrich (`armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `image_request`). If you trigger an action from HA and end up with a *plain* polled row in the timeline (no HA badge, no user name, no exception/image detail) that means the resulting category isn't one we inject for yet. Open an issue at https://github.com/guerrerotook/securitas-direct-new-api/issues describing what you did from HA and what showed up in the log so we can add injection for that category.
 
 ## Automations & Scripts
 

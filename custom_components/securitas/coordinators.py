@@ -28,6 +28,7 @@ from .securitas_direct_new_api.exceptions import (
     WAFBlockedError,
 )
 from .securitas_direct_new_api.models import (
+    ActivityCategory,
     ActivityEvent,
     AirQuality,
     CameraDevice,
@@ -47,6 +48,23 @@ _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
 _ACTIVITY_STORE_VERSION = 1
 _ACTIVITY_STORE_KEY_PREFIX = "securitas_activity_log"
+
+# Categories that the integration injects synthetic events for.  A polled
+# event whose origin matches the HA-issued discriminator (Android source,
+# null user) AND falls into one of these categories is considered the
+# panel's redundant echo of an action HA already recorded — drop it.
+# Categories outside this set (alarms, tamper, power events, status check,
+# unknown) pass through, so any polled record for an action we DON'T inject
+# for stays visible.
+_HA_INJECTABLE_CATEGORIES: frozenset[ActivityCategory] = frozenset(
+    {
+        ActivityCategory.ARMED,
+        ActivityCategory.ARMED_WITH_EXCEPTIONS,
+        ActivityCategory.ARMING_FAILED,
+        ActivityCategory.DISARMED,
+        ActivityCategory.IMAGE_REQUEST,
+    }
+)
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -542,9 +560,22 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         except SecuritasDirectError as err:
             raise UpdateFailed(f"Activity update failed: {err}") from err
 
-        # All polled entries pass through.  Consumers can distinguish polled
-        # events from HA-synthesized ones via the `injected` field.
-        merged = self._merge(self._injected, events)
+        # Drop the panel's redundant echo of HA-issued actions: the
+        # integration sends Android-like headers and no user, so HA-issued
+        # actions surface here with source="Android" and verisure_user=None.
+        # Restrict the filter to categories we actually inject for, so any
+        # action we DON'T cover still shows up in the timeline (and can be
+        # reported / added to the type→category map).
+        polled = [
+            ev
+            for ev in events
+            if not (
+                ev.source == "Android"
+                and ev.verisure_user is None
+                and ev.category in _HA_INJECTABLE_CATEGORIES
+            )
+        ]
+        merged = self._merge(self._injected, polled)
 
         current_ids = {ev.id_signal for ev in merged}
         if self._previous_ids is None:

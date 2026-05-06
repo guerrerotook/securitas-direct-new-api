@@ -325,7 +325,6 @@ class ActivityLogSensor(  # type: ignore[override]
             "mime_type": _sniff_image_mime(image_bytes),
         }
 
-
     @property
     def native_value(self) -> str | None:  # type: ignore[override]
         data = self.coordinator.data

@@ -624,35 +624,93 @@ class TestActivityCoordinator:
         assert result.new_events == []
 
     @pytest.mark.asyncio
-    async def test_polled_entries_pass_through_unchanged(self):
-        """All polled entries are surfaced — no filter on source/verisure_user.
-
-        Each entry's `injected` flag stays at its default of False, letting
-        consumers distinguish polled entries from HA-synthesized ones.
+    async def test_polled_ha_echo_dropped_for_injectable_categories(self):
+        """Polled HA-issued echoes (Android + null user) of categories we
+        inject for are dropped — those rows are redundant with the
+        synthetic injected entries.  Mobile/web/system rows survive.
         """
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
-        ha_polled = _make_event("999", source="Android", verisure_user=None)
-        mobile_event = _make_event("998", source="Android", verisure_user="Luci")
-        system_event = _make_event("997", source=None, verisure_user=None)
-        web_event = _make_event("996", source="Web", verisure_user="Clinton")
+        ha_armed = _make_event("999", type=701, source="Android", verisure_user=None)
+        ha_disarmed = _make_event("998", type=720, source="Android", verisure_user=None)
+        mobile_armed = _make_event(
+            "997", type=701, source="Android", verisure_user="Luci"
+        )
+        system_alarm = _make_event("996", type=13, source=None, verisure_user=None)
+        web_arm = _make_event("995", type=701, source="Web", verisure_user="Clinton")
 
         client.get_activity.return_value = [
-            ha_polled,
-            mobile_event,
-            system_event,
-            web_event,
+            ha_armed,
+            ha_disarmed,
+            mobile_armed,
+            system_alarm,
+            web_arm,
         ]
 
         coord = self._make_coordinator(hass, client, queue, installation)
         result = await coord._async_update_data()
 
         ids = [e.id_signal for e in result.events]
-        assert ids == ["999", "998", "997", "996"]
-        assert all(not e.injected for e in result.events)
+        # ha_armed and ha_disarmed are dropped (HA already injected them);
+        # everything else survives.
+        assert "999" not in ids
+        assert "998" not in ids
+        assert "997" in ids
+        assert "996" in ids
+        assert "995" in ids
+
+    @pytest.mark.asyncio
+    async def test_polled_ha_echo_passes_through_for_unknown_categories(self):
+        """If an HA-shaped polled entry has a category we DON'T inject for
+        (e.g. an unmapped type code), keep it — that's our signal to add a
+        mapping.  Avoids silently dropping events we don't yet understand.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        # Type 99999 isn't in the category map → category=UNKNOWN.
+        unknown_polled = _make_event(
+            "999", type=99999, source="Android", verisure_user=None
+        )
+        # Type 13 (alarm) isn't in our injectable set either.
+        alarm_polled = _make_event("998", type=13, source="Android", verisure_user=None)
+
+        client.get_activity.return_value = [unknown_polled, alarm_polled]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        ids = [e.id_signal for e in result.events]
+        assert "999" in ids
+        assert "998" in ids
+
+    @pytest.mark.asyncio
+    async def test_does_not_filter_mobile_app_action_with_home_assistant_account(self):
+        """Verisure account named 'Home Assistant' still has verisure_user
+        populated — only the absence of verisure_user marks an HA echo.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        mobile_event = _make_event(
+            "999",
+            type=701,
+            source="Android",
+            verisure_user="Home Assistant",
+        )
+        client.get_activity.return_value = [mobile_event]
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        assert mobile_event in result.events
 
     @pytest.mark.asyncio
     async def test_empty_result(self):
