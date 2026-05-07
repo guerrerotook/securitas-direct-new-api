@@ -1,6 +1,5 @@
 """Tests for binary sensor platform (WifiConnectedSensor)."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
@@ -11,7 +10,6 @@ from custom_components.securitas.coordinators import AlarmCoordinator, AlarmStat
 from custom_components.securitas.securitas_direct_new_api.models import SStatus
 
 from tests.conftest import make_installation
-
 
 
 # ---------------------------------------------------------------------------

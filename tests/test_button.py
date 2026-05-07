@@ -1,6 +1,5 @@
 """Tests for button entity (SecuritasRefreshButton)."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.securitas.button import SecuritasRefreshButton, async_setup_entry

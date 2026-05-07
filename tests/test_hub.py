@@ -23,7 +23,6 @@ from custom_components.securitas.securitas_direct_new_api.models import (
 from .conftest import make_installation
 
 
-
 def make_hub() -> SecuritasHub:
     """Create a SecuritasHub with a real ApiQueue and mocked client."""
     hass = MagicMock()

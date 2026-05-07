@@ -19,7 +19,6 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
 from .conftest import make_jwt
 
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 

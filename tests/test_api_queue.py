@@ -8,7 +8,6 @@ import pytest
 from custom_components.securitas.api_queue import ApiQueue
 
 
-
 class TestApiQueueBasic:
     """Basic submit and rate limiting."""
 

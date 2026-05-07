@@ -3,13 +3,11 @@
 import base64
 import json
 
-import pytest
 
 from custom_components.securitas.securitas_direct_new_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
-
 
 
 # ── Dataclass tests ──────────────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 """Tests for sensor and lock platform entities."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.securitas_direct_new_api.models import (
@@ -27,7 +26,6 @@ from custom_components.securitas.sensor import (
 from custom_components.securitas.coordinators import LockData, SentinelData
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.lock import SecuritasLock
-
 
 
 # ---------------------------------------------------------------------------

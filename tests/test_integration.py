@@ -9,12 +9,6 @@ which patch _execute_request directly.
 
 from unittest.mock import MagicMock, patch
 
-
-def _close_coro(coro, *args, **kwargs):
-    """Close coroutines passed to a mocked async_create_task to avoid RuntimeWarning."""
-    if hasattr(coro, "close"):
-        coro.close()
-
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
@@ -48,6 +42,12 @@ from .mock_graphql import (
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _close_coro(coro, *args, **kwargs):
+    """Close coroutines passed to a mocked async_create_task to avoid RuntimeWarning."""
+    if hasattr(coro, "close"):
+        coro.close()
 
 
 def _make_entry(hass: HomeAssistant, **overrides) -> MockConfigEntry:
