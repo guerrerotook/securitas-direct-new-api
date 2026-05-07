@@ -21,7 +21,6 @@ from .conftest import (
     validate_device_response,
 )
 
-pytestmark = pytest.mark.asyncio
 
 
 # ── login() ──────────────────────────────────────────────────────────────────

@@ -12,7 +12,6 @@ from custom_components.securitas.securitas_direct_new_api.models import SStatus
 
 from tests.conftest import make_installation
 
-pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------

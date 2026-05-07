@@ -22,7 +22,6 @@ from custom_components.securitas.securitas_direct_new_api.models import (
     Service,
 )
 
-pytestmark = pytest.mark.asyncio
 
 # ── JWT helpers ──────────────────────────────────────────────────────────────
 

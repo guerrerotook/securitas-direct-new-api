@@ -62,7 +62,6 @@ from tests.conftest import (
     make_securitas_hub_mock,
 )
 
-pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------

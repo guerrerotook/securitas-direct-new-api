@@ -22,7 +22,6 @@ from custom_components.securitas.securitas_direct_new_api.models import (
 
 from .conftest import make_installation
 
-pytestmark = pytest.mark.asyncio
 
 
 def make_hub() -> SecuritasHub:

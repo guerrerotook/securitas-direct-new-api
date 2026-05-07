@@ -25,7 +25,6 @@ from custom_components.securitas.securitas_direct_new_api.responses import (
     GeneralStatusEnvelope,
 )
 
-pytestmark = pytest.mark.asyncio
 
 # ── JWT helpers ──────────────────────────────────────────────────────────────
 

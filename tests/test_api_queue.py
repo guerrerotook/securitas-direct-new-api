@@ -7,7 +7,6 @@ import pytest
 
 from custom_components.securitas.api_queue import ApiQueue
 
-pytestmark = pytest.mark.asyncio
 
 
 class TestApiQueueBasic:

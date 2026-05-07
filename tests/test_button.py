@@ -81,7 +81,6 @@ class TestSecuritasRefreshButtonInit:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestSecuritasRefreshButtonAsyncPress:
     """Tests for SecuritasRefreshButton.async_press."""
 
@@ -176,7 +175,6 @@ class TestSecuritasRefreshButtonAsyncPress:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestAsyncSetupEntry:
     """Tests for async_setup_entry."""
 
@@ -250,7 +248,6 @@ class TestAsyncSetupEntry:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestHassNoneGuardsButton:
     """Verify button entity bails out when hass is None (after removal)."""
 

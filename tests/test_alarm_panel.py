@@ -283,7 +283,12 @@ def make_alarm(
     client.disarm_alarm = AsyncMock()
 
     hass = MagicMock()
-    hass.async_create_task = MagicMock()
+
+    def _consume_coro(coro, *args, **kwargs):
+        if hasattr(coro, "close"):
+            coro.close()
+
+    hass.async_create_task = MagicMock(side_effect=_consume_coro)
     hass.services = MagicMock()
 
     coordinator = MagicMock(spec=AlarmCoordinator)
@@ -615,7 +620,6 @@ class TestSupportedFeatures:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestAsyncAlarmDisarm:
     """Tests for async_alarm_disarm()."""
 
@@ -732,7 +736,6 @@ class TestAsyncAlarmDisarm:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestSetArmState:
     """Tests for set_arm_state()."""
 
@@ -993,7 +996,6 @@ class TestMappingTables:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestForceState:
     """Tests for __force_state behavior through public methods."""
 
@@ -1256,7 +1258,6 @@ class TestForceState:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestAsyncWillRemoveFromHass:
     """Tests for async_will_remove_from_hass()."""
 
@@ -1489,7 +1490,6 @@ class TestCheckCodeForArmIfRequired:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestArmMethods:
     """Tests for async_alarm_arm_home, async_alarm_arm_night, async_alarm_arm_custom_bypass."""
 
@@ -2002,7 +2002,6 @@ class TestForceArmContext:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestForceArmCancel:
     """Tests for the securitas.force_arm_cancel entity service."""
 
@@ -2055,7 +2054,6 @@ def _night_peri_config():
     }
 
 
-@pytest.mark.asyncio
 class TestCompoundArmCommands:
     """Tests for compound arm commands via the resolver + executor."""
 
@@ -2407,7 +2405,6 @@ class TestCompoundArmCommands:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestDynamicDisarm:
     """Tests for dynamic disarm command selection."""
 
@@ -2634,7 +2631,6 @@ class TestDynamicDisarm:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestExecuteTransition:
     """Tests for _execute_transition (resolver + executor integration)."""
 
@@ -2926,7 +2922,6 @@ _FAKE_NOTIFICATION_ENTRY = {
 }
 
 
-@pytest.mark.asyncio
 class TestNotificationContent:
     """Tests for arming exception notification content (event-driven path)."""
 
@@ -3195,7 +3190,6 @@ class TestDismissNotification:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestAsyncAddedToHass:
     """Tests for async_added_to_hass event listener registration."""
 
@@ -3257,7 +3251,6 @@ class TestAsyncAddedToHass:
 # ===========================================================================
 
 
-@pytest.mark.asyncio
 class TestForceArmWorkflow:
     """End-to-end integration tests for the force-arm workflow."""
 

@@ -28,7 +28,6 @@ from custom_components.securitas.coordinators import LockData, SentinelData
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.lock import SecuritasLock
 
-pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,6 @@ from custom_components.securitas.securitas_direct_new_api.models import (
     SmartLockModeStatus,
 )
 
-pytestmark = pytest.mark.asyncio
 
 # ── JWT helpers ──────────────────────────────────────────────────────────────
 

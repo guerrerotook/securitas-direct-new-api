@@ -53,7 +53,6 @@ from tests.conftest import (
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True)

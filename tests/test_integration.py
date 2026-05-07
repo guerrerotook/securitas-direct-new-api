@@ -7,7 +7,13 @@ runs (header construction, JSON parsing, error handling), unlike the unit tests
 which patch _execute_request directly.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+
+def _close_coro(coro, *args, **kwargs):
+    """Close coroutines passed to a mocked async_create_task to avoid RuntimeWarning."""
+    if hasattr(coro, "close"):
+        coro.close()
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -304,7 +310,7 @@ async def test_setup_login_error_raises_auth_failed(
             "custom_components.securitas.async_get_clientsession",
             return_value=mock_http,
         ),
-        patch.object(hass, "async_create_task"),
+        patch.object(hass, "async_create_task", MagicMock(side_effect=_close_coro)),
         pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
     ):
         await async_setup_entry(hass, entry)
@@ -340,7 +346,7 @@ async def test_setup_2fa_error_raises_auth_failed(
             "custom_components.securitas.async_get_clientsession",
             return_value=mock_http,
         ),
-        patch.object(hass, "async_create_task"),
+        patch.object(hass, "async_create_task", MagicMock(side_effect=_close_coro)),
         pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
     ):
         await async_setup_entry(hass, entry)
