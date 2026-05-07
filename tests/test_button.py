@@ -1,14 +1,20 @@
-"""Tests for button entity (SecuritasRefreshButton)."""
+"""Tests for button entity (VerisureRefreshButton)."""
 
+import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.securitas.button import SecuritasRefreshButton, async_setup_entry
-from custom_components.securitas import DOMAIN
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    OperationTimeoutError,
-    SecuritasDirectError,
+from custom_components.verisure_owa.button import (
+    VerisureRefreshButton,
+    async_setup_entry,
 )
-from custom_components.securitas.securitas_direct_new_api.models import OperationStatus
+from custom_components.verisure_owa import DOMAIN
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    OperationTimeoutError,
+    VerisureOwaError,
+)
+from custom_components.verisure_owa.verisure_owa_api.models import (
+    OperationStatus,
+)
 
 from tests.conftest import (
     make_installation,
@@ -22,8 +28,8 @@ from tests.conftest import (
 # ---------------------------------------------------------------------------
 
 
-def make_button(entry_id: str = "test-entry-id") -> SecuritasRefreshButton:
-    """Create a SecuritasRefreshButton with mocked dependencies."""
+def make_button(entry_id: str = "test-entry-id") -> VerisureRefreshButton:
+    """Create a VerisureRefreshButton with mocked dependencies."""
     installation = make_installation()
     client = make_securitas_hub_mock()
     hass = MagicMock()
@@ -32,7 +38,7 @@ def make_button(entry_id: str = "test-entry-id") -> SecuritasRefreshButton:
         return_value=["alarm_control_panel.securitas_123"]
     )
     hass.services = AsyncMock()
-    return SecuritasRefreshButton(installation, client, hass, entry_id)
+    return VerisureRefreshButton(installation, client, hass, entry_id)
 
 
 # ===========================================================================
@@ -40,31 +46,35 @@ def make_button(entry_id: str = "test-entry-id") -> SecuritasRefreshButton:
 # ===========================================================================
 
 
-class TestSecuritasRefreshButtonInit:
-    """Tests for SecuritasRefreshButton.__init__."""
+class TestVerisureRefreshButtonInit:
+    """Tests for VerisureRefreshButton.__init__."""
 
-    def test_name_includes_installation_alias(self):
-        """Button name includes the installation alias."""
+    def test_name_is_short_form_without_alias(self):
+        """Refresh button name is the verb only; alias is on the device."""
         button = make_button()
-        assert button._attr_name == "Refresh Home"
+        assert button._attr_name == "Refresh"
+
+    def test_has_entity_name_is_true(self):
+        button = make_button()
+        assert button._attr_has_entity_name is True
 
     def test_unique_id_format(self):
-        """unique_id follows refresh_button_{number} format."""
+        """unique_id follows the v5 schema."""
         button = make_button()
-        assert button._attr_unique_id == "v4_refresh_button_123456"
+        assert button._attr_unique_id == "v5_verisure_owa.123456_refresh_button"
 
     def test_device_info_identifiers(self):
         """device_info contains correct identifiers, manufacturer, and model."""
         button = make_button()
         info = button._attr_device_info
-        assert (DOMAIN, "v4_securitas_direct.123456") in info["identifiers"]  # type: ignore[typeddict-item]
-        assert info["manufacturer"] == "Securitas Direct"  # type: ignore[typeddict-item]
+        assert (DOMAIN, "v5_verisure_owa.123456") in info["identifiers"]  # type: ignore[typeddict-item]
+        assert info["manufacturer"] == "Verisure"  # type: ignore[typeddict-item]
         assert info["model"] == "SDVFAST"  # type: ignore[typeddict-item]
         assert info["name"] == "Home"  # type: ignore[typeddict-item]
         assert info["hw_version"] == "PLUS"  # type: ignore[typeddict-item]
 
     def test_stores_client_reference(self):
-        """Button stores the client (SecuritasHub) reference."""
+        """Button stores the client (VerisureHub) reference."""
         button = make_button()
         assert button.client is not None
         assert hasattr(button.client, "client")
@@ -80,8 +90,9 @@ class TestSecuritasRefreshButtonInit:
 # ===========================================================================
 
 
-class TestSecuritasRefreshButtonAsyncPress:
-    """Tests for SecuritasRefreshButton.async_press."""
+@pytest.mark.asyncio
+class TestVerisureRefreshButtonAsyncPress:
+    """Tests for VerisureRefreshButton.async_press."""
 
     async def test_calls_refresh_alarm_status(self):
         """async_press calls hub.refresh_alarm_status for authoritative round-trip."""
@@ -140,7 +151,7 @@ class TestSecuritasRefreshButtonAsyncPress:
     async def test_sets_waf_blocked_on_403(self):
         """async_press sets waf_blocked on 403 error and triggers a translated rate-limit notification."""
         button = make_button()
-        err = SecuritasDirectError("blocked", http_status=403)
+        err = VerisureOwaError("blocked", http_status=403)
         button._client.refresh_alarm_status = AsyncMock(side_effect=err)
         alarm_entity = MagicMock()
         button.hass.data = {  # type: ignore[attr-defined]
@@ -148,7 +159,7 @@ class TestSecuritasRefreshButtonAsyncPress:
         }
 
         with patch(
-            "custom_components.securitas.button._async_notify",
+            "custom_components.verisure_owa.button._async_notify",
             AsyncMock(),
         ) as mock_async_notify:
             await button.async_press()
@@ -179,14 +190,14 @@ class TestAsyncSetupEntry:
 
     async def test_creates_one_button_per_device(self):
         """Creates one button per device in hass.data."""
-        from custom_components.securitas import SecuritasDirectDevice
+        from custom_components.verisure_owa import VerisureDevice
 
         hass = MagicMock()
         hass.data = {}
         client = make_securitas_hub_mock()
         inst1 = make_installation(number="111", alias="Office")
         inst2 = make_installation(number="222", alias="Warehouse")
-        devices = [SecuritasDirectDevice(inst1), SecuritasDirectDevice(inst2)]
+        devices = [VerisureDevice(inst1), VerisureDevice(inst2)]
         setup_integration_data(hass, client, devices=devices)
 
         entry = MagicMock()
@@ -200,14 +211,14 @@ class TestAsyncSetupEntry:
         assert len(buttons) == 2
 
     async def test_calls_async_add_entities_with_correct_buttons(self):
-        """Calls async_add_entities with SecuritasRefreshButton instances."""
-        from custom_components.securitas import SecuritasDirectDevice
+        """Calls async_add_entities with VerisureRefreshButton instances."""
+        from custom_components.verisure_owa import VerisureDevice
 
         hass = MagicMock()
         hass.data = {}
         client = make_securitas_hub_mock()
         inst = make_installation(number="333", alias="Garage")
-        devices = [SecuritasDirectDevice(inst)]
+        devices = [VerisureDevice(inst)]
         setup_integration_data(hass, client, devices=devices)
 
         entry = MagicMock()
@@ -218,18 +229,18 @@ class TestAsyncSetupEntry:
 
         buttons = async_add_entities.call_args[0][0]
         assert len(buttons) == 1
-        assert isinstance(buttons[0], SecuritasRefreshButton)
-        assert buttons[0]._attr_name == "Refresh Garage"
-        assert buttons[0]._attr_unique_id == "v4_refresh_button_333"
+        assert isinstance(buttons[0], VerisureRefreshButton)
+        assert buttons[0]._attr_name == "Refresh"
+        assert buttons[0]._attr_unique_id == "v5_verisure_owa.333_refresh_button"
 
     async def test_update_flag_passed_to_async_add_entities(self):
         """async_add_entities is called with update_before_add=True."""
-        from custom_components.securitas import SecuritasDirectDevice
+        from custom_components.verisure_owa import VerisureDevice
 
         hass = MagicMock()
         hass.data = {}
         client = make_securitas_hub_mock()
-        devices = [SecuritasDirectDevice(make_installation())]
+        devices = [VerisureDevice(make_installation())]
         setup_integration_data(hass, client, devices=devices)
 
         entry = MagicMock()
@@ -256,3 +267,31 @@ class TestHassNoneGuardsButton:
 
         # Should not raise or call any API methods
         await button.async_press()
+
+
+# ===========================================================================
+# Capture button unique_id v5 schema
+# ===========================================================================
+
+
+def test_capture_button_unique_id_uses_v5_schema():
+    from custom_components.verisure_owa.button import VerisureCaptureButton
+    from custom_components.verisure_owa.verisure_owa_api.models import (
+        CameraDevice,
+    )
+
+    installation = make_installation()
+    camera_device = CameraDevice(
+        id="c1",
+        code=1,
+        zone_id="YR08",
+        name="Hall",
+        device_type="YR",
+        serial_number="sn",
+    )
+    hub = make_securitas_hub_mock()
+    btn = VerisureCaptureButton(hub, installation, camera_device)
+    assert (
+        btn._attr_unique_id
+        == f"v5_verisure_owa.{installation.number}_capture_{camera_device.zone_id}"
+    )

@@ -1,4 +1,4 @@
-"""Tests for SecuritasClient alarm methods — arm, disarm, check_alarm, get_general_status."""
+"""Tests for VerisureOwaClient alarm methods — arm, disarm, check_alarm, get_general_status."""
 
 from __future__ import annotations
 
@@ -8,16 +8,18 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.client import SecuritasClient
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
+)
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
     ArmingExceptionError,
     OperationTimeoutError,
-    SecuritasDirectError,
+    VerisureOwaError,
 )
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     Installation,
     OperationStatus,
     SStatus,
@@ -62,7 +64,7 @@ def _make_installation(**overrides) -> Installation:
     return Installation(**defaults)
 
 
-def _pre_auth(client: SecuritasClient) -> None:
+def _pre_auth(client: VerisureOwaClient) -> None:
     """Set up a valid auth token so _ensure_auth is a no-op."""
     client.authentication_token = FAKE_JWT
     client._authentication_token_exp = datetime.now() + timedelta(hours=1)
@@ -230,8 +232,8 @@ def transport():
 
 @pytest.fixture
 def client(transport):
-    """Create a SecuritasClient with test credentials, mocked transport, fast polling."""
-    c = SecuritasClient(
+    """Create a VerisureOwaClient with test credentials, mocked transport, fast polling."""
+    c = VerisureOwaClient(
         transport=transport,
         country="ES",
         language="es",
@@ -351,7 +353,7 @@ class TestArm:
             await client.arm(inst, "ARM1")
 
     async def test_arm_blocking_error(self, client, transport):
-        """BLOCKING error type raises SecuritasDirectError."""
+        """BLOCKING error type raises VerisureOwaError."""
         transport.execute.side_effect = [
             arm_submit_response("ref-arm-005"),
             arm_status_response(
@@ -368,7 +370,7 @@ class TestArm:
         ]
 
         inst = _make_installation()
-        with pytest.raises(SecuritasDirectError, match="Arm command failed"):
+        with pytest.raises(VerisureOwaError, match="Arm command failed"):
             await client.arm(inst, "ARM1")
 
 
@@ -393,7 +395,7 @@ class TestDisarm:
         assert client.protom_response == "D"
 
     async def test_disarm_blocking_error(self, client, transport):
-        """BLOCKING error raises SecuritasDirectError."""
+        """BLOCKING error raises VerisureOwaError."""
         transport.execute.side_effect = [
             disarm_submit_response("ref-disarm-002"),
             disarm_status_response(
@@ -407,7 +409,7 @@ class TestDisarm:
         ]
 
         inst = _make_installation()
-        with pytest.raises(SecuritasDirectError, match="Disarm command failed"):
+        with pytest.raises(VerisureOwaError, match="Disarm command failed"):
             await client.disarm(inst, "DARM1")
 
 

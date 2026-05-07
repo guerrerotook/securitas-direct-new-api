@@ -1,6 +1,6 @@
 """Tests for generate_uuid and generate_device_id utility functions."""
 
-from custom_components.securitas.securitas_direct_new_api.client import (
+from custom_components.verisure_owa.verisure_owa_api.client import (
     generate_device_id,
     generate_uuid,
 )

@@ -1,0 +1,11 @@
+force_arm:
+  target:
+    entity:
+      integration: verisure_owa
+      domain: alarm_control_panel
+
+force_arm_cancel:
+  target:
+    entity:
+      integration: verisure_owa
+      domain: alarm_control_panel

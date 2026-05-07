@@ -2,7 +2,7 @@
 
 import logging
 
-from custom_components.securitas.log_filter import SensitiveDataFilter
+from custom_components.verisure_owa.log_filter import SensitiveDataFilter
 
 
 def test_redacts_secret_in_message():

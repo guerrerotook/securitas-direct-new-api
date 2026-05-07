@@ -1,9 +1,9 @@
-"""Tests for securitas_direct_new_api.responses."""
+"""Tests for verisure_owa_api.responses."""
 
 from __future__ import annotations
 
 
-from custom_components.securitas.securitas_direct_new_api.responses import (
+from custom_components.verisure_owa.verisure_owa_api.responses import (
     ActivityEnvelope,
     ArmStatusEnvelope,
     CheckAlarmEnvelope,

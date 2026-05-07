@@ -1,4 +1,4 @@
-"""Architecture enforcement tests for the securitas_direct_new_api package.
+"""Architecture enforcement tests for the verisure_owa_api package.
 
 AST-level tests ensuring type safety conventions are maintained:
 - No bare ``dict`` without type parameters in annotations
@@ -14,8 +14,8 @@ import ast
 import re
 from pathlib import Path
 
-CLIENT_PACKAGE = Path("custom_components/securitas/securitas_direct_new_api")
-INTEGRATION_PACKAGE = Path("custom_components/securitas")
+CLIENT_PACKAGE = Path("custom_components/verisure_owa/verisure_owa_api")
+INTEGRATION_PACKAGE = Path("custom_components/verisure_owa")
 
 # Pydantic validators legitimately use bare dict/Any in signatures
 _VALIDATOR_DECORATORS = frozenset({"field_validator", "model_validator", "validator"})
@@ -29,7 +29,7 @@ def _client_files() -> list[Path]:
 def _integration_files() -> list[Path]:
     """Return top-level .py files in the integration package.
 
-    Excludes the ``securitas_direct_new_api`` sub-package (covered by
+    Excludes the ``verisure_owa_api`` sub-package (covered by
     ``_client_files``) and includes ``__init__.py`` since it contains
     substantial setup logic.
     """

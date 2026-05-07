@@ -1,10 +1,10 @@
-"""Tests for the Securitas Direct config flow."""
+"""Tests for the Verisure OWA config flow."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.securitas import (
+from custom_components.verisure_owa import (
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
@@ -20,20 +20,20 @@ from custom_components.securitas import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
-from custom_components.securitas.const import (
+from custom_components.verisure_owa.const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
 )
-from custom_components.securitas.securitas_direct_new_api import (
+from custom_components.verisure_owa.verisure_owa_api import (
     AccountBlockedError,
     Attribute,
     AuthenticationError,
     OtpPhone,
     PERI_DEFAULTS,
     STD_DEFAULTS,
-    SecuritasDirectError,
-    SecuritasState,
+    VerisureOwaError,
+    VerisureOwaState,
     TwoFactorRequiredError,
 )
 from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
@@ -99,13 +99,13 @@ MOCK_PHONES = [
     OtpPhone(id=1, phone="555-5678"),
 ]
 
-PATCH_HUB = "custom_components.securitas.config_flow.SecuritasHub"
-PATCH_SESSION = "custom_components.securitas.config_flow.async_get_clientsession"
-PATCH_UUID = "custom_components.securitas.config_flow.generate_uuid"
+PATCH_HUB = "custom_components.verisure_owa.config_flow.VerisureHub"
+PATCH_SESSION = "custom_components.verisure_owa.config_flow.async_get_clientsession"
+PATCH_UUID = "custom_components.verisure_owa.config_flow.generate_uuid"
 
 
 def _hub_factory(*, two_fa: bool = False, **overrides):
-    """Create a mock SecuritasHub for config flow tests.
+    """Create a mock VerisureHub for config flow tests.
 
     Starts with no auth token.  login() sets it (via side_effect) so that
     finish_setup's ``get_authentication_token() is None`` check works
@@ -148,13 +148,13 @@ def _hub_factory(*, two_fa: bool = False, **overrides):
 
 
 def _make_hub_class_mock(hub_instance):
-    """Create a mock class that mimics SecuritasHub but returns hub_instance.
+    """Create a mock class that mimics VerisureHub but returns hub_instance.
 
     MagicMock does not have a proper __name__ attribute, so we set it
     to make the mock behave like a real class.
     """
     mock_cls = MagicMock(return_value=hub_instance)
-    mock_cls.__name__ = "SecuritasHub"
+    mock_cls.__name__ = "VerisureHub"
     return mock_cls
 
 
@@ -320,7 +320,7 @@ async def test_step_user_login_error_shows_invalid_auth(hass):
 async def test_step_user_connection_error_shows_cannot_connect(hass):
     """Network errors should re-show the form with cannot_connect error."""
     mock_hub = _hub_factory()
-    mock_hub.login.side_effect = SecuritasDirectError("connection failed")
+    mock_hub.login.side_effect = VerisureOwaError("connection failed")
 
     with _patches(mock_hub):
         result = await hass.config_entries.flow.async_init(
@@ -438,12 +438,12 @@ async def test_phone_list_fallback_selection_by_phone_name(hass):
     We test the fallback logic directly on the flow handler since the
     phone_list form uses a select validator that rejects invalid keys.
     """
-    from custom_components.securitas.config_flow import FlowHandler
+    from custom_components.verisure_owa.config_flow import FlowHandler
 
     mock_hub = _hub_factory()
     flow = FlowHandler()
     flow.hass = hass
-    flow.securitas = mock_hub
+    flow.hub = mock_hub
     flow.otp_challenge = ("otp-hash-abc", MOCK_PHONES)
 
     # Simulate user_input with a key that cannot be parsed as integer index
@@ -510,7 +510,7 @@ async def test_otp_challenge_api_error_shows_error(hass):
     mock_hub = _hub_factory(two_fa=True)
     flow_id = await _get_to_otp_step(hass, mock_hub)
 
-    mock_hub.send_sms_code = AsyncMock(side_effect=SecuritasDirectError("API error"))
+    mock_hub.send_sms_code = AsyncMock(side_effect=VerisureOwaError("API error"))
 
     with _patches(mock_hub):
         result = await hass.config_entries.flow.async_configure(
@@ -520,6 +520,29 @@ async def test_otp_challenge_api_error_shows_error(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "otp_challenge"
     assert result["errors"] == {"base": "invalid_otp"}
+
+
+async def test_otp_challenge_expired_code_shows_otp_expired_error(hass):
+    """OTP expired (auth-code 10002) re-shows phone list with otp_expired error.
+
+    The API surfaces expiry as a GraphQL error with auth-code 10002 in the
+    response body. The flow should restart 2FA so a fresh code can be sent,
+    not re-show the OTP form with the misleading invalid_otp error.
+    """
+    mock_hub = _hub_factory(two_fa=True)
+    flow_id = await _get_to_otp_step(hass, mock_hub)
+
+    err = VerisureOwaError("OTP expired")
+    err.response_body = {"errors": [{"data": {"auth-code": "10002"}}]}
+    mock_hub.send_sms_code = AsyncMock(side_effect=err)
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "otp_expired"}
 
 
 async def test_otp_challenge_advances_to_options(hass):
@@ -614,8 +637,8 @@ async def test_create_client_creates_hub_when_password_present(hass):
 
 
 async def test_create_client_with_real_hub_init(hass):
-    """_create_client with real SecuritasHub.__init__ — catches missing config keys."""
-    from custom_components.securitas.config_flow import FlowHandler
+    """_create_client with real VerisureHub.__init__ — catches missing config keys."""
+    from custom_components.verisure_owa.config_flow import FlowHandler
 
     flow = FlowHandler()
     flow.hass = hass
@@ -635,7 +658,7 @@ async def test_create_client_with_real_hub_init(hass):
 
 async def test_create_client_raises_value_error_when_password_none(hass):
     """_create_client raises ValueError when password is None."""
-    from custom_components.securitas.config_flow import FlowHandler
+    from custom_components.verisure_owa.config_flow import FlowHandler
 
     flow = FlowHandler()
     flow.hass = hass
@@ -792,7 +815,7 @@ async def test_options_mappings_invalid_mapping_falls_back(hass):
         domain=DOMAIN,
         data=make_config_entry_data(
             has_peri=False,
-            map_home=SecuritasState.TOTAL_PERI.value,
+            map_home=VerisureOwaState.TOTAL_PERI.value,
         ),
         options={},
     )
@@ -856,11 +879,11 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
     result = await hass.config_entries.options.async_configure(
         flow_id,
         user_input={
-            CONF_MAP_HOME: SecuritasState.TOTAL.value,
-            CONF_MAP_AWAY: SecuritasState.TOTAL.value,
-            CONF_MAP_NIGHT: SecuritasState.PARTIAL_NIGHT.value,
-            CONF_MAP_CUSTOM: SecuritasState.NOT_USED.value,
-            CONF_MAP_VACATION: SecuritasState.NOT_USED.value,
+            CONF_MAP_HOME: VerisureOwaState.TOTAL.value,
+            CONF_MAP_AWAY: VerisureOwaState.TOTAL.value,
+            CONF_MAP_NIGHT: VerisureOwaState.PARTIAL_NIGHT.value,
+            CONF_MAP_CUSTOM: VerisureOwaState.NOT_USED.value,
+            CONF_MAP_VACATION: VerisureOwaState.NOT_USED.value,
         },
     )
 
@@ -869,7 +892,7 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
     assert CONF_CODE in result["data"]
     assert CONF_SCAN_INTERVAL in result["data"]
     # Mapping data should be present
-    assert result["data"][CONF_MAP_HOME] == SecuritasState.TOTAL.value
+    assert result["data"][CONF_MAP_HOME] == VerisureOwaState.TOTAL.value
 
 
 # ===================================================================
@@ -879,9 +902,9 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
 
 async def test_options_get_reads_from_options_first(hass):
     """_get should return from options when key exists there."""
-    from custom_components.securitas.config_flow import SecuritasOptionsFlowHandler
+    from custom_components.verisure_owa.config_flow import VerisureOptionsFlowHandler
 
-    handler = SecuritasOptionsFlowHandler()
+    handler = VerisureOptionsFlowHandler()
     mock_entry = MagicMock()
     mock_entry.options = {CONF_SCAN_INTERVAL: 60}
     mock_entry.data = {CONF_SCAN_INTERVAL: 120}
@@ -898,9 +921,9 @@ async def test_options_get_reads_from_options_first(hass):
 
 async def test_options_get_falls_back_to_data(hass):
     """_get should fall back to data when key is not in options."""
-    from custom_components.securitas.config_flow import SecuritasOptionsFlowHandler
+    from custom_components.verisure_owa.config_flow import VerisureOptionsFlowHandler
 
-    handler = SecuritasOptionsFlowHandler()
+    handler = VerisureOptionsFlowHandler()
     mock_entry = MagicMock()
     mock_entry.options = {}
     mock_entry.data = {CONF_SCAN_INTERVAL: 120}
@@ -1396,7 +1419,7 @@ async def test_reauth_confirm_cannot_connect(hass):
     flow_id = result["flow_id"]
 
     mock_hub = _hub_factory()
-    mock_hub.login.side_effect = SecuritasDirectError("connection failed")
+    mock_hub.login.side_effect = VerisureOwaError("connection failed")
 
     with _patches(mock_hub):
         result = await hass.config_entries.flow.async_configure(

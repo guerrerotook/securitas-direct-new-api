@@ -1,4 +1,4 @@
-"""Mock GraphQL server for Securitas Direct integration tests.
+"""Mock GraphQL server for the Verisure OWA HA integration tests.
 
 Intercepts aiohttp POST calls at the HTTP transport level so that
 _execute_request() runs fully — header construction, JSON parsing,
@@ -74,7 +74,7 @@ class MockGraphQLServer:
         mock_http = MagicMock()
         mock_http.post = server.post
 
-        with patch("custom_components.securitas.async_get_clientsession",
+        with patch("custom_components.verisure_owa.async_get_clientsession",
                    return_value=mock_http):
             await hass.config_entries.async_setup(entry.entry_id)
 
@@ -609,7 +609,7 @@ def graphql_logout() -> dict:
 
 
 def graphql_error(reason: str = "Unexpected error") -> dict:
-    """Generic GraphQL error response (triggers SecuritasDirectError)."""
+    """Generic GraphQL error response (triggers VerisureOwaError)."""
     return {"errors": {"data": {"reason": reason}}}
 
 

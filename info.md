@@ -1,15 +1,8 @@
-# securitas-direct-new-api
-This repository contains the new securitas direct API that can be integrated in Home Assistant.
+# Verisure OWA
 
-## Example configuration
+A Home Assistant custom integration for **Verisure** (formerly Securitas Direct in some markets), supporting Argentina, Brazil, Chile, France, Ireland, Italy, Peru, Portugal, Spain, and the United Kingdom.
 
-```yaml
-securitas:
-  username: !secret securitas_direct_username
-  password: !secret securitas_direct_password
-  code: !secret securitas_direct_code
-  country: ES
-```
+Renamed from `securitas` to `verisure_owa` in v5.0.0. The legacy domain shim, service aliases, event aliases, and panel URL aliases remain available during a 6-month deprecation window. See the v5 release notes for migration details.
 
 ## Features
 
@@ -18,4 +11,4 @@ securitas:
 
 ## Breaking changes
 
-If you update the component, the domain has been changed from securitas_direct to securitas, so you need to change your configuration as well or Home Assistant will not found the integration.
+If you update the component, the domain has been changed from `securitas` to `verisure_owa` in v5.0.0. A legacy shim handles automatic migration. See the v5 release notes for details.

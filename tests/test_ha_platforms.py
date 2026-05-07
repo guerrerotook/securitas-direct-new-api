@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
     Attribute,
@@ -15,23 +15,23 @@ from custom_components.securitas.securitas_direct_new_api.models import (
     SmartLockMode,
     SmartLockModeStatus,
 )
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    SecuritasDirectError,
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    VerisureOwaError,
 )
-from custom_components.securitas.sensor import (
+from custom_components.verisure_owa.sensor import (
     ActivityLogSensor,
     SentinelAirQuality,
     SentinelAirQualityStatus,
     SentinelHumidity,
     SentinelTemperature,
 )
-from custom_components.securitas.coordinators import (
+from custom_components.verisure_owa.coordinators import (
     ActivityData,
     LockData,
     SentinelData,
 )
-from custom_components.securitas.api_queue import ApiQueue
-from custom_components.securitas.lock import SecuritasLock
+from custom_components.verisure_owa.api_queue import ApiQueue
+from custom_components.verisure_owa.lock import VerisureLock
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def make_sentinel(temp=22, humidity=45):
 
 
 def make_client():
-    """Create a mock SecuritasHub client."""
+    """Create a mock VerisureHub client."""
     client = MagicMock()
     client.session = AsyncMock()
     client.config = {"scan_interval": 120}
@@ -100,7 +100,7 @@ def make_lock(
     lock_config: SmartLock | None = None,
     poll_status: str | None = None,
 ):
-    """Create a SecuritasLock with mocked dependencies.
+    """Create a VerisureLock with mocked dependencies.
 
     Args:
         poll_status: If set, ``get_lock_modes`` returns a mode with this
@@ -125,7 +125,7 @@ def make_lock(
 
     coordinator = _make_lock_coordinator()
 
-    lock_entity = SecuritasLock(
+    lock_entity = VerisureLock(
         coordinator=coordinator,
         installation=installation,
         client=client,
@@ -203,12 +203,24 @@ class TestSentinelTemperature:
         assert str(service.id) in sensor._attr_unique_id  # type: ignore[operator]
         assert "temperature" in sensor._attr_unique_id  # type: ignore[operator]
 
-    def test_name_contains_installation_alias(self):
+    def test_name_is_short_form_without_alias(self):
+        """Modern pattern: entity name carries the suffix only; alias lives on the device."""
         installation = make_installation()
         coordinator = _make_sentinel_coordinator()
         sensor = SentinelTemperature(coordinator, installation, 1)
-        assert installation.alias in sensor._attr_name  # type: ignore[operator]
-        assert "Temperature" in sensor._attr_name  # type: ignore[operator]
+        assert sensor._attr_name == "Temperature"
+        assert installation.alias not in (sensor._attr_name or "")
+
+    def test_has_entity_name_is_true(self):
+        """has_entity_name = True so HA composes display as <device_name> <entity_name>."""
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelTemperature(coordinator, make_installation(), 1)
+        assert sensor._attr_has_entity_name is True
+
+    def test_unique_id_uses_v5_schema(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelTemperature(coordinator, make_installation(), 5)
+        assert sensor._attr_unique_id == "v5_verisure_owa.123456_temperature_5"
 
 
 # ===========================================================================
@@ -261,6 +273,23 @@ class TestSentinelHumidity:
         assert str(service.id) in sensor._attr_unique_id  # type: ignore[operator]
         assert "humidity" in sensor._attr_unique_id  # type: ignore[operator]
 
+    def test_name_is_short_form_without_alias(self):
+        installation = make_installation()
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelHumidity(coordinator, installation, 1)
+        assert sensor._attr_name == "Humidity"
+        assert installation.alias not in (sensor._attr_name or "")
+
+    def test_has_entity_name_is_true(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelHumidity(coordinator, make_installation(), 1)
+        assert sensor._attr_has_entity_name is True
+
+    def test_unique_id_uses_v5_schema(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelHumidity(coordinator, make_installation(), 5)
+        assert sensor._attr_unique_id == "v5_verisure_owa.123456_humidity_5"
+
 
 # ===========================================================================
 # SentinelAirQuality + SentinelAirQualityStatus tests
@@ -311,6 +340,23 @@ class TestSentinelAirQuality:
         sensor = SentinelAirQuality(coordinator, installation, service.id)
         assert installation.number in sensor._attr_unique_id  # type: ignore[operator]
         assert "airquality" in sensor._attr_unique_id  # type: ignore[operator]
+
+    def test_name_is_short_form_without_alias(self):
+        installation = make_installation()
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelAirQuality(coordinator, installation, 1)
+        assert sensor._attr_name == "Air Quality"
+        assert installation.alias not in (sensor._attr_name or "")
+
+    def test_has_entity_name_is_true(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelAirQuality(coordinator, make_installation(), 1)
+        assert sensor._attr_has_entity_name is True
+
+    def test_unique_id_uses_v5_schema(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelAirQuality(coordinator, make_installation(), 5)
+        assert sensor._attr_unique_id == "v5_verisure_owa.123456_airquality_5"
 
 
 class TestSentinelAirQualityStatus:
@@ -401,9 +447,24 @@ class TestSentinelAirQualityStatus:
         assert numeric.native_value == 92
         assert status.native_value == "Good"
 
+    def test_name_is_short_form_without_alias(self):
+        installation = make_installation()
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelAirQualityStatus(coordinator, installation, 1)
+        assert sensor._attr_name == "Air Quality Status"
+        assert installation.alias not in (sensor._attr_name or "")
 
-# ===========================================================================
-# ActivityLogSensor tests
+    def test_has_entity_name_is_true(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelAirQualityStatus(coordinator, make_installation(), 1)
+        assert sensor._attr_has_entity_name is True
+
+    def test_unique_id_uses_v5_schema(self):
+        coordinator = _make_sentinel_coordinator()
+        sensor = SentinelAirQualityStatus(coordinator, make_installation(), 5)
+        assert sensor._attr_unique_id == "v5_verisure_owa.123456_airquality_status_5"
+
+
 # ===========================================================================
 
 
@@ -594,12 +655,12 @@ class TestActivityLogSensor:
 
 
 # ===========================================================================
-# SecuritasLock tests
+# VerisureLock tests
 # ===========================================================================
 
 
-class TestSecuritasLockInit:
-    """Tests for SecuritasLock initial state and properties."""
+class TestVerisureLockInit:
+    """Tests for VerisureLock initial state and properties."""
 
     def test_initial_state_is_locked(self):
         lock = make_lock()
@@ -672,16 +733,16 @@ class TestSecuritasLockInit:
         assert lock.name == "Home Lock 02"
 
 
-class TestSecuritasLockConfig:
-    """Tests for SecuritasLock unique_id, device_info, and extra_state_attributes."""
+class TestVerisureLockConfig:
+    """Tests for VerisureLock unique_id, device_info, and extra_state_attributes."""
 
     def test_unique_id_includes_device_id(self):
         lock = make_lock(device_id="01")
-        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_01"
+        assert lock._attr_unique_id == "v5_verisure_owa.123456_lock_01"
 
     def test_unique_id_different_device(self):
         lock = make_lock(device_id="02")
-        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_02"
+        assert lock._attr_unique_id == "v5_verisure_owa.123456_lock_02"
 
     def test_device_info_creates_separate_lock_device_with_config(self):
         """Lock with config gets its own device with metadata."""
@@ -695,13 +756,13 @@ class TestSecuritasLockConfig:
         info = lock._attr_device_info
         assert info is not None
         assert info["identifiers"] == {
-            ("securitas", "v4_securitas_direct.123456_lock_01")
+            ("verisure_owa", "v5_verisure_owa.123456_lock_01")
         }
-        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
+        assert info["via_device"] == ("verisure_owa", "v5_verisure_owa.123456")
         assert info["name"] == "Front Door"
         assert info["model"] == "DR"
         assert info["serial_number"] == "SN001"
-        assert info["manufacturer"] == "Securitas Direct"
+        assert info["manufacturer"] == "Verisure"
 
     def test_device_info_fallback_without_config(self):
         """Lock without config falls back to installation-based device."""
@@ -709,11 +770,11 @@ class TestSecuritasLockConfig:
         info = lock._attr_device_info
         assert info is not None
         assert info["identifiers"] == {
-            ("securitas", "v4_securitas_direct.123456_lock_01")
+            ("verisure_owa", "v5_verisure_owa.123456_lock_01")
         }
-        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
+        assert info["via_device"] == ("verisure_owa", "v5_verisure_owa.123456")
         assert info["name"] == "Home Lock 01"
-        assert info["manufacturer"] == "Securitas Direct"
+        assert info["manufacturer"] == "Verisure"
 
     def test_device_info_fallback_empty_location(self):
         """Lock with config but empty location uses installation alias."""
@@ -806,8 +867,44 @@ class TestSecuritasLockConfig:
         assert lock.supported_features == lock_mod.LockEntityFeature(0)
 
 
-class TestSecuritasLockActions:
-    """Tests for SecuritasLock async_lock / async_unlock actions."""
+class TestVerisureLockV5Schema:
+    """Lock identifiers use the v5 schema and stay in sync."""
+
+    def test_unique_id_uses_v5_schema(self):
+        lk = make_lock(device_id="01")
+        assert lk._attr_unique_id == "v5_verisure_owa.123456_lock_01"
+
+    def test_device_identifier_uses_v5_schema(self):
+        lk = make_lock(device_id="01")
+        from custom_components.verisure_owa import DOMAIN
+
+        info = lk._attr_device_info
+        assert (DOMAIN, "v5_verisure_owa.123456_lock_01") in info["identifiers"]
+
+    def test_via_device_uses_v5_schema(self):
+        lk = make_lock(device_id="01")
+        from custom_components.verisure_owa import DOMAIN
+
+        info = lk._attr_device_info
+        assert info["via_device"] == (DOMAIN, "v5_verisure_owa.123456")
+
+    def test_update_lock_config_keeps_v5_schema(self):
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            SmartLock,
+        )
+
+        lk = make_lock(device_id="02")
+        new_cfg = SmartLock(location="Front", family="DANALOCK", serial_number="sn")
+        lk.update_lock_config(new_cfg)
+        from custom_components.verisure_owa import DOMAIN
+
+        info = lk._attr_device_info
+        assert (DOMAIN, "v5_verisure_owa.123456_lock_02") in info["identifiers"]
+        assert info["via_device"] == (DOMAIN, "v5_verisure_owa.123456")
+
+
+class TestVerisureLockActions:
+    """Tests for VerisureLock async_lock / async_unlock actions."""
 
     async def test_async_lock_sets_state_to_locking_then_locked_on_success(self):
         lock = make_lock(poll_status="2")
@@ -851,7 +948,7 @@ class TestSecuritasLockActions:
     async def test_async_lock_error_restores_previous_state(self):
         lock = make_lock()
         lock._client.change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError("API error")
+            side_effect=VerisureOwaError("API error")
         )
 
         await lock.async_lock()
@@ -862,7 +959,7 @@ class TestSecuritasLockActions:
     async def test_async_unlock_error_restores_previous_state(self):
         lock = make_lock()
         lock._client.change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError("API error")
+            side_effect=VerisureOwaError("API error")
         )
 
         await lock.async_unlock()
@@ -918,7 +1015,7 @@ class TestSecuritasLockActions:
     async def test_async_open_error_restores_previous_state(self):
         lock = make_lock()
         lock._client.change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError("API error")
+            side_effect=VerisureOwaError("API error")
         )
 
         await lock.async_open()
@@ -1023,9 +1120,7 @@ class TestSecuritasLockActions:
     async def test_operation_in_progress_cleared_on_error(self):
         """_operation_in_progress is cleared even when the command fails."""
         lock = make_lock()
-        lock._client.change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError("fail")
-        )
+        lock._client.change_lock_mode = AsyncMock(side_effect=VerisureOwaError("fail"))
 
         await lock.async_lock()
 
@@ -1056,8 +1151,8 @@ class TestSecuritasLockActions:
         lock.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
 
 
-class TestSecuritasLockCoordinatorUpdate:
-    """Tests for SecuritasLock coordinator-driven state updates."""
+class TestVerisureLockCoordinatorUpdate:
+    """Tests for VerisureLock coordinator-driven state updates."""
 
     def test_coordinator_update_syncs_state_from_data(self):
         lock = make_lock()
@@ -1131,8 +1226,8 @@ class TestSecuritasLockCoordinatorUpdate:
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
 
 
-class TestSecuritasLockRemoval:
-    """Tests for SecuritasLock async_will_remove_from_hass."""
+class TestVerisureLockRemoval:
+    """Tests for VerisureLock async_will_remove_from_hass."""
 
     async def test_async_will_remove_from_hass_cleans_up_config_retries(self):
         lock = make_lock()

@@ -1,21 +1,21 @@
-"""Tests for SecuritasHub orchestration methods."""
+"""Tests for VerisureHub orchestration methods."""
 
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.securitas.api_queue import ApiQueue
-from custom_components.securitas.const import (
+from custom_components.verisure_owa.api_queue import ApiQueue
+from custom_components.verisure_owa.const import (
     API_CACHE_TTL,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
 )
-from custom_components.securitas.hub import SecuritasHub
-from custom_components.securitas.securitas_direct_new_api import (
-    SecuritasDirectError,
+from custom_components.verisure_owa.hub import VerisureHub
+from custom_components.verisure_owa.verisure_owa_api import (
+    VerisureOwaError,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
@@ -23,8 +23,8 @@ from custom_components.securitas.securitas_direct_new_api.models import (
 from .conftest import make_installation
 
 
-def make_hub() -> SecuritasHub:
-    """Create a SecuritasHub with a real ApiQueue and mocked client."""
+def make_hub() -> VerisureHub:
+    """Create a VerisureHub with a real ApiQueue and mocked client."""
     hass = MagicMock()
     hass.data = {}
     config = {
@@ -36,7 +36,7 @@ def make_hub() -> SecuritasHub:
         "idDeviceIndigitall": "indi",
         "delay_check_operation": 0.01,
     }
-    hub = SecuritasHub(config, config_entry=None, http_client=MagicMock(), hass=hass)
+    hub = VerisureHub(config, config_entry=None, http_client=MagicMock(), hass=hass)
     hub._api_queue = ApiQueue(interval=0)
     hub.client = MagicMock()
     hub.client.poll_delay = 0.01
@@ -79,14 +79,14 @@ class TestChangeLockMode:
         assert installation.number not in hub._lock_modes_time
 
     async def test_error_propagates(self):
-        """SecuritasDirectError from client propagates to caller."""
+        """VerisureOwaError from client propagates to caller."""
         hub = make_hub()
         installation = make_installation()
         hub.client.change_lock_mode = AsyncMock(
-            side_effect=SecuritasDirectError("lock error")
+            side_effect=VerisureOwaError("lock error")
         )
 
-        with pytest.raises(SecuritasDirectError, match="lock error"):
+        with pytest.raises(VerisureOwaError, match="lock error"):
             await hub.change_lock_mode(installation, False, "device-1")
 
 
@@ -142,11 +142,11 @@ class TestGetLockModes:
         hub.client.get_lock_modes.assert_awaited_once()
 
     async def test_securitas_error_returns_empty_list(self):
-        """SecuritasDirectError is caught and returns an empty list."""
+        """VerisureOwaError is caught and returns an empty list."""
         hub = make_hub()
         installation = make_installation()
         hub.client.get_lock_modes = AsyncMock(
-            side_effect=SecuritasDirectError("API failure", http_status=500)
+            side_effect=VerisureOwaError("API failure", http_status=500)
         )
 
         result = await hub.get_lock_modes(installation)
@@ -211,7 +211,7 @@ class TestCaptureImage:
         device = make_camera_device()
         _setup_capture(hub)
 
-        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+        with patch("custom_components.verisure_owa.hub.async_dispatcher_send"):
             await hub.capture_image(installation, device)
 
         assert not hub.is_capturing(installation.number, device.zone_id)
@@ -238,7 +238,7 @@ class TestCaptureImage:
 
         calls = []
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
             side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
@@ -248,7 +248,7 @@ class TestCaptureImage:
 
     async def test_coordinator_updated_on_successful_capture(self):
         """Camera coordinator is updated when a new image is captured."""
-        from custom_components.securitas.coordinators import CameraData
+        from custom_components.verisure_owa.coordinators import CameraData
 
         hub = make_hub()
         installation = make_installation()
@@ -267,7 +267,7 @@ class TestCaptureImage:
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
 
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
         ):
             await hub.capture_image(installation, device)
 
@@ -286,7 +286,7 @@ class TestCaptureImage:
 
         calls = []
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
             side_effect=lambda *a: calls.append(a),
         ):
             await hub.capture_image(installation, device)
@@ -304,7 +304,7 @@ class TestCaptureImage:
         device = make_camera_device()
         _setup_capture(hub)
 
-        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+        with patch("custom_components.verisure_owa.hub.async_dispatcher_send"):
             await hub.capture_image(installation, device)
 
         hub.client.capture_image.assert_awaited_once_with(
@@ -320,12 +320,12 @@ class TestCaptureImage:
         installation = make_installation()
         device = make_camera_device()
         hub.client.capture_image = AsyncMock(
-            side_effect=SecuritasDirectError("capture error")
+            side_effect=VerisureOwaError("capture error")
         )
 
         with (
-            patch("custom_components.securitas.hub.async_dispatcher_send"),
-            pytest.raises(SecuritasDirectError),
+            patch("custom_components.verisure_owa.hub.async_dispatcher_send"),
+            pytest.raises(VerisureOwaError),
         ):
             await hub.capture_image(installation, device)
 
@@ -356,7 +356,7 @@ class TestFullImageCapture:
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
-        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+        with patch("custom_components.verisure_owa.hub.async_dispatcher_send"):
             await hub.capture_image(installation, device)
             for task in _tasks:
                 await task
@@ -366,7 +366,7 @@ class TestFullImageCapture:
 
     async def test_capture_updates_coordinator_full_image(self):
         """Camera coordinator is updated with full image after capture."""
-        from custom_components.securitas.coordinators import CameraData
+        from custom_components.verisure_owa.coordinators import CameraData
 
         hub = make_hub()
         installation = make_installation()
@@ -397,7 +397,7 @@ class TestFullImageCapture:
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
         ):
             await hub.capture_image(installation, device)
             for task in _tasks:
@@ -426,7 +426,7 @@ class TestFullImageCapture:
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
 
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
         ):
             await hub.capture_image(installation, device)
 
@@ -487,7 +487,7 @@ class TestFullImageCapture:
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
         ):
             await hub.fetch_latest_thumbnail(installation, device)
             for task in _tasks:
@@ -517,7 +517,7 @@ class TestFullImageCapture:
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
         ):
             await hub.capture_image(installation, device)
             for task in _tasks:
@@ -546,7 +546,7 @@ class TestFullImageCapture:
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
 
         with patch(
-            "custom_components.securitas.hub.async_dispatcher_send",
+            "custom_components.verisure_owa.hub.async_dispatcher_send",
         ):
             await hub.capture_image(installation, device)
             for task in _tasks:

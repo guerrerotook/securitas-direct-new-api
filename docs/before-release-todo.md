@@ -1,11 +1,15 @@
 # Before-release manual testing todo
 
 This branch combines the `subpanels` work (three-axis alarm model + opt-in
-sub-panels) with the `eventlog` work (xSActV2 activity timeline → events
-bus, sensor, Lovelace card). Automated tests cover the unit-level
-behavior; the items below need a real HA install + real Verisure account
-to validate, since they depend on actual API responses, multi-axis
-state, or hardware configuration.
+sub-panels), the `eventlog` work (xSActV2 activity timeline → events
+bus, sensor, Lovelace card), and the **v5 Verisure rebrand** (domain
+renamed from `securitas` to `verisure_owa`, full registry migration via
+a legacy-domain shim, vendored API library renamed to `verisure_owa_api`,
+brand strings updated everywhere, and ~6 months of legacy
+service/event/URL/card-tag aliases for backwards compatibility).
+Automated tests cover the unit-level behavior; the items below need a
+real HA install + real Verisure account to validate, since they depend
+on actual API responses, multi-axis state, or hardware configuration.
 
 ## Required before merge
 
@@ -37,7 +41,7 @@ state, or hardware configuration.
       the Interior toggle should be visible whenever any sibling capability
       (`has_peri` or `has_annex`) is supported, *regardless* of whether the
       sibling toggle is currently enabled. Settings → Devices & Services →
-      Securitas → Configure:
+      Verisure OWA → Configure:
       - With `has_peri=True`: Perimeter and Interior toggles both visible.
       - Toggling Perimeter on/off must NOT cause the Interior toggle to
         appear/disappear.
@@ -49,7 +53,7 @@ state, or hardware configuration.
 
 ### Activity log work
 
-- [ ] **An HA automation can be triggered by `securitas_activity`
+- [ ] **An HA automation can be triggered by `verisure_owa_activity`
       events.** The integration documents these as the primary
       automation entrypoint, but no one has wired one up on a real
       install yet. Create an automation in the UI:
@@ -57,7 +61,7 @@ state, or hardware configuration.
       ```yaml
       trigger:
         - platform: event
-          event_type: securitas_activity
+          event_type: verisure_owa_activity
           event_data:
             category: alarm   # or tampering / sabotage / disarmed / …
       action:
@@ -89,14 +93,14 @@ state, or hardware configuration.
       `arming_failed` row appears with the exceptions list.
 
 - [ ] **Disabling the activity log sensor does not break bus events.**
-      Originally the `securitas_activity` listener was attached inside
-      `ActivityLogSensor.async_added_to_hass`, so disabling the sensor
-      entity in the entity registry silently killed all bus events too.
-      Commit `a084e19` moved the listener to `async_setup_entry` so it
-      lives for the lifetime of the integration. Unit tests cover the
-      decoupling, but the actual HA "disable entity" path isn't
-      automation-testable. Sanity check on a real install:
-      1. Set up an automation that listens for `securitas_activity`
+      Originally the `verisure_owa_activity` listener was attached inside
+      `ActivityLogSensor.async_added_to_hass`,
+      so disabling the sensor entity in the entity registry silently killed
+      all bus events too. Commit `a084e19` moved the listener to
+      `async_setup_entry` so it lives for the lifetime of the integration.
+      Unit tests cover the decoupling, but the actual HA "disable entity"
+      path isn't automation-testable. Sanity check on a real install:
+      1. Set up an automation that listens for `verisure_owa_activity`
          (any category) and writes a persistent notification.
       2. Disable `sensor.<alias>_activity_log` in
          Settings → Devices & Services → Entities.
@@ -105,18 +109,127 @@ state, or hardware configuration.
 
       Then re-enable the sensor.
 
+### V5 Verisure rebrand work
+
+- [ ] **🚧 BLOCKS v5.0.0 TAG: annex camera unique-id collision (issue #441) is still unfixed.**
+      The v5 spec §5 explicitly gates v5.0.0 release on this: "v5 does
+      not ship until investigation completes."
+      
+      What main *did* land via the subpanels work:
+      - `AnnexVerisureOwaAlarmPanel` and `ARMANNEX1` / `DARMANNEX1`
+        command wiring — covers the alarm-panel axis.
+      
+      What's still NOT addressed:
+      - The original [#441](https://github.com/guerrerotook/securitas-direct-new-api/issues/441)
+        report is about **camera** unique-id collisions:
+        `v5_verisure_owa.{numinst}_camera_{zone_id}` collides when main
+        and annex sub-panels both return `zone_id="YR08"`. The annex
+        camera + capture button get silently dropped at HA startup with
+        an `ERROR ... Platform does not generate unique IDs` log.
+      - Locks plausibly have the same collision risk if an annex
+        sub-panel numbers its locks independently from `device_id="01"`
+        — unconfirmed, needs investigation alongside cameras.
+      
+      What we have:
+      - Two HAR captures from Vatrinus (`vatrinus.json`,
+        `customers.verisure.co.uk.redacted.json` — same account, both
+        `numinst: ***5885`) but **neither contains `xSDeviceList`** —
+        only home / status / disarm screens were captured. The captures
+        confirm `panel: SDVFAST` is a per-installation hardware-type
+        identifier (not a per-device discriminator) and that the OWA
+        web frontend models alarm operations as
+        `{interior, exterior, smartLock}` axes — but neither tells us
+        what `xSDeviceList` returns for an annex camera.
+      
+      What we need:
+      - A fresh HAR capture from Vatrinus's OWA web client taken on
+        the *Cameras* screen. That will include the unredacted
+        `xSDeviceList` response and (likely) the `xSSrv` response that
+        delivers `Installation.alarm_partitions` — the two operations
+        we need to settle whether the discriminator is a per-device
+        partition field, a partition-segmented response shape, or
+        something else.
+      - Once we have that, the implementation is mechanical: add the
+        discriminator field to `CameraDevice` and `SmartLock` (only if
+        confirmed for locks too), adjust the unique-id format to
+        append the discriminator only when populated, and ride along
+        with the existing `migrate_legacy_entry` mapping table for
+        existing-user state preservation. The pattern is the same as
+        the `[_{discriminator}]` suffix scheme in the v5 design spec
+        §2's mapping table — the suffix is empty for main-panel
+        devices so existing main-only users come out unchanged after
+        migration.
+      
+      **What we still don't know:** the API field name and shape of
+      the discriminator. Earlier hypotheses (`panel`, partition `id`)
+      are educated guesses that could not be verified from the HAR
+      data we have. Do not pick one speculatively — picking wrong
+      either fails to fix #441 or breaks users who don't have an
+      annex.
+
+- [ ] **Upgrade-from-v4 smoke test (the migration path).** Install v4
+      (current `main` minus this branch) into a Docker HA, configure a
+      `securitas` integration entry, log in, let cameras/sensors
+      discover, customize one entity's name and area assignment in the
+      HA UI, capture the entity_id list. Then update the codebase to
+      this branch and start HA. **Verify:**
+      - The migration shim's persistent notification appears with the
+        full deprecation list (services, two events, URLs, card types)
+        and the v6 removal date.
+      - HA logs show the migration ran without errors (`migrate_legacy_entry`
+        info line, no `ConfigEntryError` rollback).
+      - Restart HA. The integration appears under domain
+        `verisure_owa` (Settings → Devices & Services). The legacy
+        `securitas` entry is gone. All entity_ids match the
+        pre-upgrade snapshot. The customized entity still has its
+        custom name and area.
+      - In Developer Tools → Services: `verisure_owa.force_arm` is
+        listed and works. `securitas.force_arm` (legacy alias) is also
+        listed (marked deprecated in services.yaml description) and,
+        when called, both works AND emits a `_LOGGER.warning`
+        deprecation message in the log.
+      - Browser fetch of `http://<ha>:8123/securitas_panel/securitas-alarm-card.js`
+        and `/verisure_owa_panel/verisure_owa-alarm-card.js` both
+        return 200 with byte-identical content.
+      - Existing dashboards using `type: custom:securitas-alarm-card`
+        keep rendering. Browser console shows the deprecation
+        `console.warn` once per element instance per page load.
+
+- [ ] **Spain user verifies API hostname change.** A Spanish account
+      should now hit `customers.verisure.es` (changed from
+      `customers.securitasdirect.es`). Spot-check the integration's
+      DEBUG logs after a fresh login or refresh — the request URL
+      should show `customers.verisure.es`.
+
+- [ ] **Peru appears in the country dropdown.** During a fresh
+      install via the config flow, Peru (`PE`) is selectable in the
+      country dropdown.
+
+- [ ] **HA brand assets render.** The integration's icon and logo
+      (the four PNG files in `custom_components/verisure_owa/brand/`)
+      should render in HA's integration UI. HA looks them up via the
+      `brand/` directory adjacent to `manifest.json`. Check
+      Settings → Devices & Services and confirm the integration
+      shows the Verisure logo and icon, not a placeholder.
+
 ## Post-merge follow-ups
 
-- [ ] **Annex commands `ARMANNEX1` / `DARMANNEX1`.** Switched from
-      suffix-less `ARMANNEX` / `DARMANNEX` in
-      [f698cb8](https://github.com/clintongormley/securitas-direct-new-api/commit/f698cb8)
-      to match the Verisure web app's dispatch. Has **never** been tested
-      against a real annex installation — needs a Vatrinus UK user (or
-      anyone with `ARMANNEX`/`DARMANNEX` in their JWT cap) to confirm
-      arm/disarm of the annex axis works. Watch for a 4xx response on
-      the new command names — the resolver's `mark_unsupported` runtime
-      fallback will catch a wrong command name, and a 4xx HA log entry
-      will appear, but there's no fallback to the old form on file.
+- [ ] **Map the four perimeter+annex proto codes.** Issue #441 supplied
+      the table for the four annex-armed-without-perimeter codes
+      (X/R/S/O), now mapped to ANNEX_ONLY / PARTIAL_DAY_ANNEX /
+      PARTIAL_NIGHT_ANNEX / TOTAL_ANNEX in PROTO_TO_STATE. The four
+      perimeter+annex combinations remain unmapped:
+      - PERI_ANNEX (no interior, perimeter on, annex on)
+      - PARTIAL_DAY_PERI_ANNEX
+      - PARTIAL_NIGHT_PERI_ANNEX
+      - TOTAL_PERI_ANNEX
+
+      A user with all three axes (interior + perimeter + annex) can
+      cycle through these and capture the protomResponse code for each,
+      then we add four more rows to PROTO_TO_STATE in
+      `verisure_owa_api/const.py`. Until then the alarm panel falls
+      back to ARMED_CUSTOM_BYPASS for these states with an info-level
+      "unmapped proto code" log line.
 
 - [ ] **Compound transition optimization (optional).** Verisure web app
       uses single-API-call compound commands when transitioning between
@@ -138,6 +251,41 @@ state, or hardware configuration.
       events surface as either a `unknown`-category polled row or
       nothing at all.
 
+- [ ] **Repo rename + HACS update (release-day operation).** Per the
+      v5 design spec §8.1: rename the GitHub repo from
+      `guerrerotook/securitas-direct-new-api` to
+      `guerrerotook/verisure-owa-ha`. Update `manifest.json`'s
+      `documentation` and `issue_tracker` URLs, README badges and
+      links, GitHub Actions workflows (if any reference the repo
+      URL), update `hacs.json` → submit a PR to `hacs/default`
+      pointing at the new repo URL. GitHub creates a 301 redirect
+      automatically so existing clones / HACS installs keep working.
+
+- [ ] **v5.0.0 release notes.** Required content:
+      - The Securitas Direct → Verisure OWA rebrand and the GitHub
+        repo rename.
+      - Migration is automatic on first v5 launch; HA restart required.
+        The shim shows a persistent notification listing what changed.
+      - 6-month deprecation window with a hard cutoff in v6.0.0.
+        Specific list of what's deprecated:
+        - `securitas` integration domain (config entries auto-migrate)
+        - `securitas.force_arm[_cancel]` services
+        - `securitas_arming_exception` event
+        - `/securitas_panel/` static URL prefix
+        - `custom:securitas-alarm-card` (and badge / chip / camera-card)
+          Lovelace types
+      - Lovelace resource cleanup hint: users may see a duplicate
+        resource entry (old `/securitas_panel/...js` + new
+        `/verisure_owa_panel/...js`) — both work; either can be
+        deleted manually if desired.
+      - Spain users: API now goes to `customers.verisure.es`
+        automatically, no action required.
+      - Peru added as a new supported country.
+      - Vendored library directory + class names changed (e.g.
+        `SecuritasDirectError` → `VerisureOwaError`). Any third-party
+        tooling that imports from `custom_components.securitas...`
+        must update its import paths.
+
 ## Done
 
 - [x] **Force-arm flow.** Persistent notification with Force Arm /
@@ -151,3 +299,47 @@ state, or hardware configuration.
 - [x] **Sub-panel state derivation.** Multi-axis state from the API is
       correctly projected onto each sub-panel via `_extract_state`.
       Confirmed by user during regular use.
+
+- [x] **V5 rebrand: in-tree work landed.** The following items from
+      the v5 spec landed during the rebrand branch and are covered by
+      automated tests (1300+ passing on this branch):
+      - Domain rename `securitas` → `verisure_owa`; folder rename;
+        DOMAIN constant, manifest, services.yaml, all platform files.
+      - Vendored API library renamed: `securitas_direct_new_api` →
+        `verisure_owa_api`. Classes `SecuritasClient` →
+        `VerisureOwaClient`, `SecuritasDirectError` → `VerisureOwaError`,
+        `SecuritasState` → `VerisureOwaState`. No backwards-compat
+        aliases (vendored library has no external consumers).
+      - Python integration class names renamed `Securitas*` →
+        `Verisure*` / `VerisureOwa*`.
+      - JS card class names renamed `SecuritasAlarmCard` etc. →
+        `VerisureOwaAlarmCard` etc. Custom-element TAG names are
+        preserved as deprecation shims (both `verisure-owa-alarm-card`
+        canonical AND `securitas-alarm-card` legacy registered;
+        `console.warn` on legacy use; only canonical types listed in
+        `window.customCards`).
+      - Atomic per-entry registry migration (`migrate.py`) with
+        try/except + `ConfigEntryError` rollback on failure.
+      - Legacy-domain shim at `custom_components/securitas/` triggers
+        migration on upgrade and shows a persistent notification
+        listing every deprecated surface (services, events, URLs,
+        card types) with the v6 removal date.
+      - Legacy aliases active: `securitas.force_arm[_cancel]`
+        services, `securitas_arming_exception` event,
+        `/securitas_panel/` URL prefix
+        — all forward to / fire alongside the canonical
+        `verisure_owa.*` names with one-time deprecation warnings.
+      - Sentinel sensors / WiFi binary sensor / Refresh button
+        switched to `_attr_has_entity_name = True` so device renames
+        propagate to entity display.
+      - `v5_verisure_owa.*` unique-id and device-identifier schema;
+        CI guardrail asserts every f-string in platform code is in
+        the migration mapping table.
+      - Branding strings updated: hacs.json, README, info.md,
+        strings.json, all 7 translation files, JS card user-visible
+        strings. Verisure brand assets (icon/logo) added to
+        `custom_components/verisure_owa/brand/`.
+      - Peru added to `COUNTRY_CODES`, language map, API domain map.
+        Spain hostname → `customers.verisure.es`.
+      - End-to-end migration tests cover multi-installation and
+        camera-device migration paths.

@@ -1,4 +1,4 @@
-"""Tests for SecuritasClient.get_activity (xSActV2 timeline)."""
+"""Tests for VerisureOwaClient.get_activity (xSActV2 timeline)."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.client import (
-    SecuritasClient,
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
 )
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     ActivityEvent,
     Installation,
 )
@@ -55,7 +55,7 @@ def transport():
 
 @pytest.fixture
 def client(transport):
-    c = SecuritasClient(
+    c = VerisureOwaClient(
         transport=transport,
         country="ES",
         language="es",

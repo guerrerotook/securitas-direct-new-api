@@ -40,7 +40,7 @@ jobs:
           pip install -r requirements_test.txt pylint
 
       - name: Pylint
-        run: pylint custom_components/securitas/
+        run: pylint custom_components/verisure_owa/ custom_components/securitas/
 
   typecheck:
     name: Pyright
@@ -103,6 +103,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           python -m pytest tests/ -v --tb=short \
+            --cov=custom_components/verisure_owa \
             --cov=custom_components/securitas \
             --cov-report=term-missing \
             --cov-fail-under=90

@@ -1,6 +1,6 @@
 # Architecture Guide
 
-This document explains how the Securitas Direct integration works, aimed at developers who want to contribute.
+This document explains how the Verisure OWA integration works, aimed at developers who want to contribute.
 
 ## System overview
 
@@ -11,34 +11,34 @@ The integration has three layers:
 │  Home Assistant Platform Layer                                       │
 │  alarm_control_panel.py  sensor.py  binary_sensor.py                 │
 │  lock.py  button.py  camera.py                                       │
-│  entity.py  (SecuritasEntity base class)                             │
+│  entity.py  (VerisureEntity base class)                              │
 │  coordinators.py  (DataUpdateCoordinators)                           │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Integration Hub Layer                                               │
 │  __init__.py  (setup functions)                                      │
-│  hub.py  (SecuritasHub + SecuritasDirectDevice)                      │
+│  hub.py  (VerisureHub + VerisureDevice)                              │
 │  config_flow.py  (ConfigFlow + OptionsFlow + ReauthFlow)             │
 │  api_queue.py  (Priority-based rate limiting)                        │
 │  log_filter.py  (SensitiveDataFilter)                                │
 ├──────────────────────────────────────────────────────────────────────┤
 │  API Client Layer                                                    │
-│  securitas_direct_new_api/                                           │
-│  client.py  (SecuritasClient — auth, typed GraphQL, polling)         │
+│  verisure_owa_api/                                                   │
+│  client.py  (VerisureOwaClient — auth, typed GraphQL, polling)       │
 │  http_transport.py  (HttpTransport — raw HTTP with retries)          │
 │  graphql_queries.py  command_resolver.py  domains.py                 │
 │  models.py  responses.py  const.py  exceptions.py                    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Securitas' cloud. `SecuritasClient` (in `client.py`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). The integration hub (`SecuritasHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Four `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, and cameras. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
+Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client.py`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Four `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, and cameras. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
 
 ## API client layer
 
-**Location:** `custom_components/securitas/securitas_direct_new_api/`
+**Location:** `custom_components/verisure_owa/verisure_owa_api/`
 
 ### HttpTransport (`http_transport.py`)
 
-The bottom transport layer. It has no knowledge of auth tokens, GraphQL structure, or Securitas API semantics. All it does is POST JSON to a base URL and return the parsed response.
+The bottom transport layer. It has no knowledge of auth tokens, GraphQL structure, or Verisure API semantics. All it does is POST JSON to a base URL and return the parsed response.
 
 **Request execution:** `execute(content, headers)`:
 1. Merges caller-provided headers on top of defaults (`User-Agent`, `content-type`)
@@ -46,16 +46,16 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 3. Retries once on DNS errors (`ClientConnectorDNSError`)
 4. Retries once on HTTP 403 with `Retry-After` header (rate limiting)
 5. Raises `WAFBlockedError` immediately if 403 response contains `_Incapsula_Resource` (WAF blocks require longer backoff — retrying would extend the block)
-6. Raises `SecuritasDirectError` on HTTP >= 400
+6. Raises `VerisureOwaError` on HTTP >= 400
 7. Parses JSON and returns the dict
 
 **Response log sanitization:** Before logging API responses at DEBUG level, `_sanitize_response_for_log()` replaces large fields (`hours`, `image`) with placeholder values (`["..."]` for lists, `"..."` for strings). This prevents base64-encoded camera images and hourly sensor arrays from flooding the debug log.
 
-### SecuritasClient (`client.py`)
+### VerisureOwaClient (`client.py`)
 
 A standalone class (not inheritance-based) that composes an `HttpTransport` for the raw HTTP layer. It implements all business-level API operations: login, refresh, 2FA validation, arm/disarm, status checks, sentinel data, lock operations, camera operations, and service discovery. All GraphQL query and mutation strings are defined in `graphql_queries.py` and imported here.
 
-**Architecture:** `SecuritasClient` takes an `HttpTransport` via its constructor (composition, not inheritance). This separation means the transport layer can be mocked independently of business logic in tests.
+**Architecture:** `VerisureOwaClient` takes an `HttpTransport` via its constructor (composition, not inheritance). This separation means the transport layer can be mocked independently of business logic in tests.
 
 **Typed GraphQL execution:** `_execute_graphql()` is the central entry point for all installation-scoped operations. It:
 1. Calls `_ensure_auth()` (skipped for auth operations like `mkLoginToken`, `RefreshLogin`, `mkSendOTP`, `mkValidateDevice`)
@@ -67,7 +67,7 @@ A standalone class (not inheritance-based) that composes an `HttpTransport` for 
 
 Auth operations that need to inspect the raw response structure use `_execute_raw()` instead, which skips Pydantic validation and returns the raw dict.
 
-**403 session-expired retry:** When the Securitas server returns a GraphQL error with `data.status == 403` (indicating a server-side session expiry), `_check_graphql_errors()` raises `SessionExpiredError`. The `_execute_graphql()` method catches this, forces token re-authentication, and retries the operation once. A `_retried` flag prevents infinite retry loops.
+**403 session-expired retry:** When the Verisure server returns a GraphQL error with `data.status == 403` (indicating a server-side session expiry), `_check_graphql_errors()` raises `SessionExpiredError`. The `_execute_graphql()` method catches this, forces token re-authentication, and retries the operation once. A `_retried` flag prevents infinite retry loops.
 
 **Authentication** is JWT-based with three mechanisms:
 
@@ -77,13 +77,13 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 3. **2FA device validation** (`validate_device()`) — For new devices: calls `validate_device()` which returns a list of phone numbers. The user picks one, `send_otp()` sends the SMS, then `validate_device()` is called again with the OTP code to complete registration.
 
-**Token lifecycle:** Before every API operation, `_ensure_auth()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Errors during refresh are caught with specific exception types (`SecuritasDirectError`, `asyncio.TimeoutError`) rather than bare `except`. Similarly, `_ensure_capabilities()` checks a per-installation capabilities JWT that's obtained from `get_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
+**Token lifecycle:** Before every API operation, `_ensure_auth()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Errors during refresh are caught with specific exception types (`VerisureOwaError`, `asyncio.TimeoutError`) rather than bare `except`. Similarly, `_ensure_capabilities()` checks a per-installation capabilities JWT that's obtained from `get_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
 
 **DRY helpers:** Internal helpers reduce code duplication:
 
 - `_decode_auth_token(token_str)` — Decodes a JWT (HS256, no signature verification), updates `authentication_token_exp` from the `exp` claim. Returns the decoded claims dict or `None` on failure. Used by `login()`, `refresh_token()`, and `validate_device()`.
 
-- `_extract_response_data(response, field_name)` — Extracts `response["data"][field_name]`, raising `SecuritasDirectError` if the data is missing or `None`. Used by poll-status callbacks that work with raw dicts.
+- `_extract_response_data(response, field_name)` — Extracts `response["data"][field_name]`, raising `VerisureOwaError` if the data is missing or `None`. Used by poll-status callbacks that work with raw dicts.
 
 - `_poll_operation(check_fn, *, timeout, continue_on_msg)` — Polls `check_fn()` in a loop until the result is no longer `"WAIT"`. Handles transient errors (connection errors, timeouts, 409 "server busy") by retrying. Raises `OperationTimeoutError` after `timeout` seconds (default `poll_timeout`). Used by arm, disarm, status check, exception fetch, lock, and camera operations.
 
@@ -91,17 +91,17 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 - `_build_headers(operation, *, installation)` — Builds request headers including `app`, `auth` (JSON with JWT hash, user, country), `X-APOLLO-OPERATION-ID`, `X-APOLLO-OPERATION-NAME`, and optionally `numinst`/`panel`/`X-Capabilities` for installation-scoped requests. Auth operations (`mkValidateDevice`, `RefreshLogin`, `mkSendOTP`) use special headers with empty hash/refreshToken.
 
-**Polling pattern:** Arm, disarm, status-check, exception-fetch, lock, and camera operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint via `_poll_operation()` (sleeping `poll_delay` seconds between attempts) until the response changes from `"WAIT"` to a final state or a wall-clock timeout is reached. Transient errors during polling — connection failures, timeouts, and 409 "server busy" responses — are automatically retried rather than failing the operation. After polling completes, `arm()` and `disarm()` check for `res: "ERROR"` with non-`NON_BLOCKING` error types (e.g. `TECHNICAL_ERROR`) and raise `SecuritasDirectError`, enabling the command resolver's fallback chain.
+**Polling pattern:** Arm, disarm, status-check, exception-fetch, lock, and camera operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint via `_poll_operation()` (sleeping `poll_delay` seconds between attempts) until the response changes from `"WAIT"` to a final state or a wall-clock timeout is reached. Transient errors during polling — connection failures, timeouts, and 409 "server busy" responses — are automatically retried rather than failing the operation. After polling completes, `arm()` and `disarm()` check for `res: "ERROR"` with non-`NON_BLOCKING` error types (e.g. `TECHNICAL_ERROR`) and raise `VerisureOwaError`, enabling the command resolver's fallback chain.
 
 **Camera capture:** `capture_image()` submits the capture request, then polls `RequestImagesStatus` at 10-second intervals until the status transitions from "processing" to done. Once done, it fetches the updated thumbnail. The entire flow has a 90-second `asyncio.wait_for` deadline. If the deadline fires, it fetches one final thumbnail as a fallback (the CDN may have caught up). `get_full_image()` fetches full-resolution photos via `xSGetPhotoImages`, selects the largest BINARY image, base64-decodes it, and validates JPEG magic bytes.
 
-**Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Securitas mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
+**Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Verisure mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
 ### Response envelopes (`responses.py`)
 
-Every GraphQL operation has a typed Pydantic `BaseModel` envelope in `responses.py` that mirrors the exact shape of the API response. For example, `ArmPanelEnvelope` wraps `{"data": {"xSArmPanel": {res, msg, referenceId}}}`. This provides compile-time type safety and runtime validation — if the API response shape changes unexpectedly, `model_validate()` raises `ValidationError` which `_execute_graphql()` converts to `SecuritasDirectError`.
+Every GraphQL operation has a typed Pydantic `BaseModel` envelope in `responses.py` that mirrors the exact shape of the API response. For example, `ArmPanelEnvelope` wraps `{"data": {"xSArmPanel": {res, msg, referenceId}}}`. This provides compile-time type safety and runtime validation — if the API response shape changes unexpectedly, `model_validate()` raises `ValidationError` which `_execute_graphql()` converts to `VerisureOwaError`.
 
-Envelopes use a `_NullSafeBase` base class that coerces `None` to `""` for any `str` field with a default. This is necessary because the Securitas API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
+Envelopes use a `_NullSafeBase` base class that coerces `None` to `""` for any `str` field with a default. This is necessary because the Verisure API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
 
 Shared inner models (`_ResMsg`, `_ResMsgRef`, `_OperationResult`, `_GeneralStatus`) are used across multiple envelopes to avoid duplication. `PanelError` carries force-arm context (allowForcing, referenceId, suid).
 
@@ -109,7 +109,7 @@ Shared inner models (`_ResMsg`, `_ResMsgRef`, `_OperationResult`, `_GeneralStatu
 
 Pydantic models for API domain objects. All domain models inherit from `_NullSafeBase` (same null-coercion logic as response envelopes). The most important ones:
 
-- `Installation` — Represents a physical Securitas installation (number, alias, panel type, address, capabilities JWT, `alarm_partitions` list from services response). Uses `validation_alias` for API field name mapping (e.g. `numinst` -> `number`).
+- `Installation` — Represents a physical Verisure installation (number, alias, panel type, address, capabilities JWT, `alarm_partitions` list from services response). Uses `validation_alias` for API field name mapping (e.g. `numinst` -> `number`).
 - `OperationStatus` — Result of an alarm or lock operation (arm, disarm, check) with `protomResponse` (the single-letter state code) and `protomResponseData`
 - `SStatus` — General status with `wifi_connected` boolean (diagnostic) and `timestampUpdate`
 - `OtpPhone` — Phone number option during 2FA setup
@@ -139,7 +139,7 @@ Pydantic models for API domain objects. All domain models inherit from `_NullSaf
 
 ### GraphQL queries (`graphql_queries.py`)
 
-All GraphQL query and mutation strings are extracted into `graphql_queries.py`, keeping `client.py` focused on business logic. This module contains named constants for each operation (e.g. `VALIDATE_DEVICE_MUTATION`, `REFRESH_LOGIN_MUTATION`, `ARM_PANEL_MUTATION`, etc.) that `SecuritasClient` imports and passes to `_execute_graphql()`.
+All GraphQL query and mutation strings are extracted into `graphql_queries.py`, keeping `client.py` focused on business logic. This module contains named constants for each operation (e.g. `VALIDATE_DEVICE_MUTATION`, `REFRESH_LOGIN_MUTATION`, `ARM_PANEL_MUTATION`, etc.) that `VerisureOwaClient` imports and passes to `_execute_graphql()`.
 
 ### Log sanitization (`log_filter.py`)
 
@@ -149,7 +149,7 @@ All GraphQL query and mutation strings are extracted into `graphql_queries.py`, 
 - `update_secret(key, value)` registers a raw secret value with its redaction label (e.g. `"auth_token"` -> `[AUTH_TOKEN]`). Updating a key replaces the old value.
 - `add_installation(number)` registers an installation number for partial masking (last 4 digits visible, e.g. `123456` -> `***3456`).
 - The `filter()` method scans `record.msg` and `record.args` (including nested dicts/lists/tuples), replacing any known secret with its label.
-- Registration happens in `SecuritasClient` via `_register_secret()` — called whenever tokens are obtained or refreshed (login, refresh, validate_device).
+- Registration happens in `VerisureOwaClient` via `_register_secret()` — called whenever tokens are obtained or refreshed (login, refresh, validate_device).
 - Credentials (username, password) are registered at setup time in `async_setup_entry()`.
 - The filter is removed from handlers on `async_unload_entry()`.
 
@@ -174,7 +174,7 @@ All debug log messages use context prefixes for easy filtering:
 
 ### Alarm states and commands (`const.py`, `models.py`)
 
-Securitas alarms have up to three independent axes: **interior mode** (disarmed, partial day, partial night, total), **perimeter** (on or off), and **annex** (on or off). Most installations only use the interior axis ± perimeter; the annex axis is used by some UK Vatrinus installations. The combination of interior × perimeter alone produces these 8 states:
+Verisure alarms have up to three independent axes: **interior mode** (disarmed, partial day, partial night, total), **perimeter** (on or off), and **annex** (on or off). Most installations only use the interior axis ± perimeter; the annex axis is used by some UK Vatrinus installations. The combination of interior × perimeter alone produces these 8 states:
 
 | State | Interior | Perimeter | API Command | Proto Code |
 |-------|----------|-----------|-------------|------------|
@@ -197,7 +197,7 @@ Two mapping tables in `models.py` connect these:
 
 #### Command resolver
 
-**Location:** `securitas_direct_new_api/command_resolver.py`
+**Location:** `verisure_owa_api/command_resolver.py`
 
 The `CommandResolver` class models the alarm as three independent axes — `InteriorMode` (off, day, night, total), `PerimeterMode` (off, on), and `AnnexMode` (off, on) — combined into an `AlarmState`. It replaces the old `_use_multi_step` flag, `_send_arm_command()` / `_send_disarm_command()` methods, `COMPOUND_COMMAND_STEPS` constant, and `PERI_ARMED_PROTO_CODES` set.
 
@@ -209,22 +209,22 @@ The `CommandResolver` class models the alarm as three independent axes — `Inte
 
 3. For Total+Perimeter arm, `ARMINTEXT1` is ordered before `ARM1PERI1` — `ARMINTEXT1` arms interior+perimeter in one step without triggering the siren delay, which is important for Spanish WAF (Wife Acceptance Factor) safety.
 
-4. **Runtime discovery of unsupported commands:** When a command fails with a non-409 `SecuritasDirectError`, `_execute_step()` calls `resolver.mark_unsupported(command)`, and the resolver skips it in all future resolutions. This is per-command granularity (not a global flag), so a disarm-specific failure (e.g. `DARM1DARMPERI`) does not disable unrelated compound arm commands. The unsupported set is in-memory and resets on HA restart.
+4. **Runtime discovery of unsupported commands:** When a command fails with a non-409 `VerisureOwaError`, `_execute_step()` calls `resolver.mark_unsupported(command)`, and the resolver skips it in all future resolutions. This is per-command granularity (not a global flag), so a disarm-specific failure (e.g. `DARM1DARMPERI`) does not disable unrelated compound arm commands. The unsupported set is in-memory and resets on HA restart.
 
 5. **Disarm uses current state:** The resolver determines the disarm command from the current `AlarmState` (derived from `_last_proto_code`), not from configuration flags. If both interior and perimeter are armed, it tries `DARM1DARMPERI` first, falling back to `DARM1`. If only perimeter is armed, it tries `DARMPERI` first, falling back to `DARM1`.
 
 6. **409 errors** (server busy) are re-raised immediately and do not trigger the fallback chain.
 
-Home Assistant has five alarm buttons (Home, Away, Night, Vacation, Custom Bypass). The user maps each button to a Securitas state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Vacation` and `Custom Bypass` buttons are hidden unless a mapping is configured for them.
+Home Assistant has five alarm buttons (Home, Away, Night, Vacation, Custom Bypass). The user maps each button to a Verisure OWA state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Vacation` and `Custom Bypass` buttons are hidden unless a mapping is configured for them.
 
-If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Securitas state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
+If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Verisure OWA state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
 ### Exceptions (`exceptions.py`)
 
 ```
-SecuritasDirectError              Base class (http_status, message, response_body, log_detail())
+VerisureOwaError                  Base class (http_status, message, response_body, log_detail())
 ├── AuthenticationError           Credentials rejected
-│   └── AccountBlockedError       Account blocked by Securitas
+│   └── AccountBlockedError       Account blocked by Verisure
 ├── TwoFactorRequiredError        2FA required
 ├── SessionExpiredError           JWT expired server-side (triggers re-auth in _execute_graphql)
 ├── APIResponseError              GraphQL-level error
@@ -237,30 +237,30 @@ SecuritasDirectError              Base class (http_status, message, response_bod
 └── UnexpectedStateError          Unrecognised protocol code (carries proto_code)
 ```
 
-`SecuritasDirectError` takes `(message, *, http_status)` and has a `response_body` attribute that callers can set after construction. The `message` property returns the short human-readable description. The `log_detail()` method returns just the message for well-known HTTP statuses (400, 403, 409) and appends the response body for unknown errors to aid diagnosis.
+`VerisureOwaError` takes `(message, *, http_status)` and has a `response_body` attribute that callers can set after construction. The `message` property returns the short human-readable description. The `log_detail()` method returns just the message for well-known HTTP statuses (400, 403, 409) and appends the response body for unknown errors to aid diagnosis.
 
 `ArmingExceptionError` is raised when arming fails due to non-blocking exceptions (e.g. open window/door). It carries `reference_id`, `suid`, and the list of exceptions, providing the context needed to retry with `forceArmingRemoteId`.
 
 ## Integration hub layer
 
-**Location:** `custom_components/securitas/hub.py` (SecuritasHub, SecuritasDirectDevice) and `custom_components/securitas/__init__.py` (setup functions only)
+**Location:** `custom_components/verisure_owa/hub.py` (`VerisureHub`, `VerisureDevice`) and `custom_components/verisure_owa/__init__.py` (setup functions only)
 
-### SecuritasHub
+### VerisureHub
 
-The central coordinator between the HA layer and the API client. It owns a `SecuritasClient` session and is shared by all entity platforms via `hass.data[DOMAIN][entry.entry_id]["hub"]`.
+The central coordinator between the HA layer and the API client. It owns a `VerisureOwaClient` session and is shared by all entity platforms via `hass.data[DOMAIN][entry.entry_id]["hub"]`.
 
 **Key responsibilities:**
-- **Login delegation** — Passes credentials through to `SecuritasClient`
-- **Service discovery** — `get_services()` calls `SecuritasClient.get_services()` and caches the results per installation
+- **Login delegation** — Passes credentials through to `VerisureOwaClient`
+- **Service discovery** — `get_services()` calls `VerisureOwaClient.get_services()` and caches the results per installation
 - **API call serialization** — All API calls are submitted via `ApiQueue`, which enforces a minimum gap between calls to avoid triggering the Incapsula WAF rate limiter. See [ApiQueue](#apiqueue) below.
 - **Camera management** — `get_camera_devices()` discovers cameras (cached), `capture_image()` requests new captures via the client and stores results. The hub handles HA-specific concerns: dispatcher signals (`SIGNAL_CAMERA_STATE`), image validation/storage, full-image background fetch, and coordinator data updates. After a capture completes, it pushes the new thumbnail and full image into the `CameraCoordinator` via `async_set_updated_data()`.
 - **Lock management** — `get_lock_modes()` discovers locks (cached with TTL), `change_lock_mode()` performs lock/unlock via queue and invalidates cache, `get_lock_config()` fetches per-lock configuration (auto-detects Smartlock vs Danalock API).
 - **Alarm operations** — `arm_alarm()`, `disarm_alarm()`, `refresh_alarm_status()` submit commands through the queue. `refresh_alarm_status()` uses the authoritative `CheckAlarm` round-trip (not just `xSStatus`).
-- **Session sharing** — Multiple config entries for the same username share a single `SecuritasHub` instance via reference counting in `hass.data[DOMAIN]["sessions"]`. This prevents duplicate logins and reduces WAF pressure.
+- **Session sharing** — Multiple config entries for the same username share a single `VerisureHub` instance via reference counting in `hass.data[DOMAIN]["sessions"]`. This prevents duplicate logins and reduces WAF pressure.
 
 ### Coordinators (`coordinators.py`)
 
-Four `DataUpdateCoordinator` subclasses replace per-entity independent polling. Each coordinator owns a reference to the `SecuritasClient` and `ApiQueue`, fetches data on its configured interval, and handles `SessionExpiredError` (re-login + retry), `WAFBlockedError`, and general `SecuritasDirectError` by raising `UpdateFailed`.
+Four `DataUpdateCoordinator` subclasses replace per-entity independent polling. Each coordinator owns a reference to the `VerisureOwaClient` and `ApiQueue`, fetches data on its configured interval, and handles `SessionExpiredError` (re-login + retry), `WAFBlockedError`, and general `VerisureOwaError` by raising `UpdateFailed`.
 
 **`AlarmCoordinator`** — Polls alarm status via `get_general_status()` (lightweight `xSStatus`, no panel wake). Returns `AlarmStatusData` with `SStatus` and `protom_response`. Update interval is the user-configured `scan_interval`.
 
@@ -270,7 +270,7 @@ Four `DataUpdateCoordinator` subclasses replace per-entity independent polling. 
 
 **`CameraCoordinator`** — Fetches thumbnails for all cameras. Returns `CameraData` with `thumbnails` (per zone_id) and `full_images` (per zone_id). Fixed 30-minute interval. Individual camera failures are logged but don't fail the whole update — previous thumbnails are preserved. When a thumbnail's `id_signal` changes from the previous refresh, the coordinator automatically fetches the full-resolution image via `get_full_image()`. Thumbnails older than 1 hour are skipped for full-image fetch (they likely have no full image available on the CDN).
 
-All coordinators share the same error-handling pattern: catch `SessionExpiredError` -> re-login -> retry once; catch `WAFBlockedError` or `SecuritasDirectError` -> raise `UpdateFailed`.
+All coordinators share the same error-handling pattern: catch `SessionExpiredError` -> re-login -> retry once; catch `WAFBlockedError` or `VerisureOwaError` -> raise `UpdateFailed`.
 
 ### ApiQueue (`api_queue.py`)
 
@@ -299,11 +299,11 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 2. Migrate old config: if no per-button mappings exist, derive from PERI_alarm checkbox
 3. Check for device IDs (device_id, unique_id, id_device_indigitall)
    └── Missing? → raise ConfigEntryNotReady
-4. Create SecuritasHub with aiohttp session + HttpTransport + SecuritasClient
+4. Create VerisureHub with aiohttp session + HttpTransport + VerisureOwaClient
 5. Login
    ├── TwoFactorRequiredError → raise ConfigEntryAuthFailed (triggers reauth flow)
    ├── AuthenticationError → raise ConfigEntryAuthFailed (triggers reauth flow)
-   └── SecuritasDirectError → raise ConfigEntryNotReady (HA retries)
+   └── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
 6. Assign shared ApiQueue (per domain/country)
 7. List installations, get_services() per installation
 8. Create coordinators:
@@ -325,9 +325,9 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 | Platform | Creates | API calls |
 |----------|---------|-----------|
-| alarm_control_panel | SecuritasAlarm entities (CoordinatorEntity) | None (coordinator-driven) |
+| alarm_control_panel | `CombinedVerisureOwaAlarmPanel` entities (CoordinatorEntity) | None (coordinator-driven) |
 | binary_sensor | WifiConnectedSensor entities (CoordinatorEntity) | None (coordinator-driven) |
-| button | SecuritasRefreshButton entities | None (stores callback for capture buttons) |
+| button | `VerisureRefreshButton` entities | None (stores callback for capture buttons) |
 | camera | Nothing | None (stores callback) |
 | sensor | Sentinel sensors (CoordinatorEntity) | None (coordinator-driven) |
 | lock | Nothing | None (stores callback) |
@@ -336,7 +336,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 After all platforms are registered, a single background task discovers cameras and locks via API calls, then adds entities using the stored `async_add_entities` callbacks. This runs concurrently with HA startup, so the integration is immediately available (alarm panel, refresh buttons, sensors) while cameras and locks appear shortly after.
 
-Camera discovery creates a `CameraCoordinator` (stored in entry data as `"camera_coordinator"`) and schedules its initial refresh. For each camera, both a `SecuritasCamera` (thumbnail) and `SecuritasCameraFull` (full-resolution) entity are created.
+Camera discovery creates a `CameraCoordinator` (stored in entry data as `"camera_coordinator"`) and schedules its initial refresh. For each camera, both a `VerisureCamera` (thumbnail) and `VerisureCameraFull` (full-resolution) entity are created.
 
 Lock discovery uses the `LockCoordinator` created during setup. For locks whose initial config fetch fails, a deferred retry is scheduled at exponentially increasing intervals (60s, 120s, 300s).
 
@@ -344,34 +344,34 @@ Lock discovery uses the `LockCoordinator` created during setup. For locks whose 
 
 When the user changes options (PIN code, scan interval, alarm mappings, etc.), the listener merges the new options into the config entry data and reloads the integration. This triggers a full teardown and re-setup.
 
-### SecuritasDirectDevice (`hub.py`)
+### VerisureDevice (`hub.py`)
 
 A thin wrapper around `Installation` that provides `device_info` for the HA device registry. Each physical installation becomes one device.
 
-### SecuritasEntity (`entity.py`)
+### VerisureEntity (`entity.py`)
 
 Base class for non-coordinator entities. Inherits from `homeassistant.helpers.entity.Entity` and provides:
 
-- **Common attributes** — `_installation`, `_client` (the `SecuritasHub`), `_state`, `_last_state`, and `device_info` (via the `securitas_device_info()` helper that groups entities under the installation device).
+- **Common attributes** — `_installation`, `_client` (the `VerisureHub`), `_state`, `_last_state`, and `device_info` (via the `verisure_device_info()` helper that groups entities under the installation device).
 - **State management** — `_force_state(state)` sets a transitional state and schedules an HA state write. Used during lock operations and similar.
 - **Error notifications** — `_notify_error(title, message)` creates a persistent notification with an auto-generated ID scoped to the installation number.
 
-The `SecuritasRefreshButton` and `SecuritasCaptureButton` inherit from `SecuritasEntity`. The alarm, sensor, binary sensor, lock, and camera entities use `CoordinatorEntity` instead and duplicate the relevant helper methods directly (to avoid diamond inheritance).
+The `VerisureRefreshButton` and `VerisureCaptureButton` inherit from `VerisureEntity`. The alarm, sensor, binary sensor, lock, and camera entities use `CoordinatorEntity` instead and duplicate the relevant helper methods directly (to avoid diamond inheritance).
 
-The module also provides `securitas_device_info()` and `camera_device_info()` helpers for building `DeviceInfo` objects.
+The module also provides `verisure_device_info()` and `camera_device_info()` helpers for building `DeviceInfo` objects.
 
 ## Entity platforms
 
 ### Alarm control panel (`alarm_control_panel.py`)
 
-The main entity. One `SecuritasAlarm` per installation. Inherits from `CoordinatorEntity[AlarmCoordinator]` and `AlarmControlPanelEntity`. The entity starts with `_state = None` (renders as "unknown" in HA) until the first successful coordinator update populates the real alarm state. This avoids showing a false "disarmed" state at startup.
+The main entity. One `CombinedVerisureOwaAlarmPanel` per installation. Inherits from `CoordinatorEntity[AlarmCoordinator]` and `AlarmControlPanelEntity`. The entity starts with `_state = None` (renders as "unknown" in HA) until the first successful coordinator update populates the real alarm state. This avoids showing a false "disarmed" state at startup.
 
 **Coordinator integration:** The `_handle_coordinator_update()` callback skips updates while `_operation_in_progress` is True (during arm/disarm) to prevent stale API responses from overwriting the transitional state. On each coordinator update, `_clear_force_context()` is called and `_update_from_coordinator()` maps the `SStatus.status` proto code to an HA state.
 
 **State mapping system:** During `__init__`, two dictionaries are built from the user's configuration:
 
 - `_command_map`: HA state -> API command string. E.g. `ARMED_AWAY` -> `"ARM1"`. Only includes states the user has mapped (not `NOT_USED`).
-- `_status_map`: Protocol response code -> HA state. E.g. `"T"` -> `ARMED_AWAY`. Built by reverse-looking up `PROTO_TO_STATE` for each configured Securitas state.
+- `_status_map`: Protocol response code -> HA state. E.g. `"T"` -> `ARMED_AWAY`. Built by reverse-looking up `PROTO_TO_STATE` for each configured Verisure OWA state.
 
 **`supported_features`** is derived from `_command_map` — only buttons with a configured mapping are exposed.
 
@@ -422,7 +422,7 @@ The main entity. One `SecuritasAlarm` per installation. Inherits from `Coordinat
 ```
 1. set_arm_state() catches ArmingExceptionError from _send_arm_command()
 2. _set_force_context(exc, mode) — stores reference_id, suid, mode, exceptions
-3. _fire_arming_exception_event(exc, mode) — fires securitas_arming_exception event
+3. _fire_arming_exception_event(exc, mode) — fires verisure_owa_arming_exception event
 4. (if force_arm_notifications enabled) built-in handler listens for event:
    a. Persistent notification: lists each open sensor by name, explains how to force-arm
    b. Mobile notification (if notify_group configured): short message with
@@ -430,7 +430,7 @@ The main entity. One `SecuritasAlarm` per installation. Inherits from `Coordinat
 5. State reverts to _last_state
 ```
 
-**Force arm flow** (`securitas.force_arm` / `securitas.force_arm_cancel` services):
+**Force arm flow** (`verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services):
 ```
 force_arm:
   1. Read stored reference_id, suid, mode from _force_context
@@ -453,9 +453,9 @@ Mobile notification actions (when built-in handler enabled):
 
 The `_get_exceptions()` API call uses the same polling pattern as arm/disarm — the server returns `WAIT` on the first poll while the panel reports the open sensors, then `OK` with the full exception list on a subsequent poll.
 
-**Why disarm-before-rearm?** The Securitas API treats interior and perimeter as independent axes. Sending `ARMDAY1` while the perimeter is armed leaves the perimeter armed. Transitioning from `Partial+Perimeter` to `Partial` (no perimeter) would silently fail without disarming first. The `CommandResolver` handles this automatically: when the interior mode changes and the current interior is not off, it inserts a disarm step before the arm step.
+**Why disarm-before-rearm?** The Verisure API treats interior and perimeter as independent axes. Sending `ARMDAY1` while the perimeter is armed leaves the perimeter armed. Transitioning from `Partial+Perimeter` to `Partial` (no perimeter) would silently fail without disarming first. The `CommandResolver` handles this automatically: when the interior mode changes and the current interior is not off, it inserts a disarm step before the arm step.
 
-**WAF rate-limit handling:** When the Securitas Incapsula WAF blocks requests with 403, the integration tracks this via a `waf_blocked` attribute on the alarm entity's `extra_state_attributes`. The custom Lovelace card reads this attribute to show an orange warning banner. A `_set_waf_blocked(blocked)` helper method manages the attribute and auto-dismisses the "Rate limited" persistent notification when the block clears. The attribute is:
+**WAF rate-limit handling:** When the Verisure Incapsula WAF blocks requests with 403, the integration tracks this via a `waf_blocked` attribute on the alarm entity's `extra_state_attributes`. The custom Lovelace card reads this attribute to show an orange warning banner. A `_set_waf_blocked(blocked)` helper method manages the attribute and auto-dismisses the "Rate limited" persistent notification when the block clears. The attribute is:
 - **Set** on 403 errors from status polls, arm/disarm operations, and button presses
 - **Cleared** on successful arm/disarm operations and successful status polls
 - 403 on arm/disarm shows only the rate-limited notification (the generic "Error arming/disarming" notification is suppressed to avoid duplicates)
@@ -471,12 +471,12 @@ When arming is blocked by open sensors (the API returns a `NON_BLOCKING` error),
 
 1. Stores force-arm context (`reference_id`, `suid`, `mode`, `exceptions`) with a 180-second TTL (`_FORCE_ARM_TTL`).
 2. Sets entity attributes `force_arm_available: true` and `arm_exceptions` (list of open zone names) on `extra_state_attributes`.
-3. Fires a `securitas_arming_exception` event on the HA event bus.
+3. Fires a `verisure_owa_arming_exception` event on the HA event bus.
 
 **Event payload:**
 ```python
 {
-    "entity_id": "alarm_control_panel.securitas_my_home",
+    "entity_id": "alarm_control_panel.verisure_owa_my_home",
     "mode": "armed_away",
     "zones": ["Kitchen window", "Bedroom sensor"],
     "details": {
@@ -493,27 +493,27 @@ When arming is blocked by open sensors (the API returns a `NON_BLOCKING` error),
 When the built-in handler is active it:
 - Creates a persistent notification listing open zones with instructions for how to force-arm.
 - Sends a mobile notification (if `notify_group` is configured) with **Force Arm** / **Cancel** action buttons.
-- Listens for `mobile_app_notification_action` events to handle button taps (`SECURITAS_FORCE_ARM_<num>` → `async_force_arm()`, `SECURITAS_CANCEL_FORCE_ARM_<num>` → cancel).
+- Listens for `mobile_app_notification_action` events to handle button taps (`SECURITAS_FORCE_ARM_<num>` → `async_force_arm()`, `SECURITAS_CANCEL_FORCE_ARM_<num>` → cancel). The action names retain the `SECURITAS_` prefix through the v5 deprecation window: the integration both sends the action (in the mobile notification payload) and listens for the resulting press event, so renaming would silently break any user automation hooked to `mobile_app_notification_action` events that match the action string. Renamed in v6 with explicit release-note guidance.
 - When force-arm context expires (180 s), updates the notification to inform the user the alarm was not armed.
 
 **Disabling the built-in handler:**
 
-Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & Services → Securitas → Configure). The `securitas_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `securitas.force_arm` / `securitas.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
+Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & Services → Verisure OWA → Configure). The `verisure_owa_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
 
 **Custom automation examples:**
 
 #### Auto force-arm when leaving home
 ```yaml
-- id: securitas_auto_force_arm
+- id: verisure_owa_auto_force_arm
   alias: "Alarm: auto force-arm when leaving"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   conditions:
     - condition: template
       value_template: "{{ trigger.event.data.mode == 'armed_away' }}"
   actions:
-    - action: securitas.force_arm
+    - action: verisure_owa.force_arm
       target:
         entity_id: "{{ trigger.event.data.entity_id }}"
   mode: single
@@ -521,11 +521,11 @@ Set **Built-in force-arm notifications** to off in the integration options (Sett
 
 #### Notify with open zone details
 ```yaml
-- id: securitas_notify_open_zones
+- id: verisure_owa_notify_open_zones
   alias: "Alarm: notify about open zones"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   actions:
     - action: notify.mobile_app_phone
       data:
@@ -538,11 +538,11 @@ Set **Built-in force-arm notifications** to off in the integration options (Sett
 
 #### Different behaviour per mode
 ```yaml
-- id: securitas_smart_force_arm
+- id: verisure_owa_smart_force_arm
   alias: "Alarm: smart force-arm by mode"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   actions:
     - choose:
         - conditions:
@@ -554,7 +554,7 @@ Set **Built-in force-arm notifications** to off in the integration options (Sett
                 message: >
                   Open zones: {{ trigger.event.data.zones | join(', ') }}
                   — force-arming...
-            - action: securitas.force_arm
+            - action: verisure_owa.force_arm
               target:
                 entity_id: "{{ trigger.event.data.entity_id }}"
         - conditions:
@@ -571,11 +571,11 @@ Set **Built-in force-arm notifications** to off in the integration options (Sett
 
 #### Notify then auto force-arm after delay
 ```yaml
-- id: securitas_delayed_force_arm
+- id: verisure_owa_delayed_force_arm
   alias: "Alarm: notify then force-arm after 30s"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   actions:
     - action: notify.mobile_app_phone
       data:
@@ -584,7 +584,7 @@ Set **Built-in force-arm notifications** to off in the integration options (Sett
           Open zones: {{ trigger.event.data.zones | join(', ') }}.
           Force-arming in 30 seconds...
     - delay: "00:00:30"
-    - action: securitas.force_arm
+    - action: verisure_owa.force_arm
       target:
         entity_id: "{{ trigger.event.data.entity_id }}"
   mode: single
@@ -592,11 +592,11 @@ Set **Built-in force-arm notifications** to off in the integration options (Sett
 
 #### TTS announcement of open zones
 ```yaml
-- id: securitas_tts_open_zones
+- id: verisure_owa_tts_open_zones
   alias: "Alarm: announce open zones on speaker"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   actions:
     - action: tts.speak
       target:
@@ -628,9 +628,9 @@ Sentinel sensors are discovered during setup by scanning services for ones whose
 
 ### Smart lock (`lock.py`)
 
-`SecuritasLock` controls DOORLOCK services. Uses `CoordinatorEntity[LockCoordinator]`. Supports multiple locks per installation — each lock is identified by a `device_id` (extracted from the API response, defaults to `"01"`).
+`VerisureLock` controls DOORLOCK services. Uses `CoordinatorEntity[LockCoordinator]`. Supports multiple locks per installation — each lock is identified by a `device_id` (extracted from the API response, defaults to `"01"`).
 
-**Discovery:** Locks are discovered in the background task (`_async_discover_devices`). When a DOORLOCK service is found, `get_lock_modes()` returns all known lock devices. For each lock, `get_lock_config(device_id)` is called to fetch metadata from the `xSGetSmartlockConfig` API response (location name, serial number, device family). Each lock creates a separate HA device with `via_device` linking to the installation device as parent; name, model, and serial number in the `DeviceInfo` come from the config response. If the config fetch fails, the lock still works but falls back to using the installation alias as the device name with no serial number or model. A deferred retry schedule (60s, 120s, 300s) attempts to fetch config later. One `SecuritasLock` entity is created per device. Unique IDs follow the format `v4_securitas_direct.{number}_lock_{device_id}`.
+**Discovery:** Locks are discovered in the background task (`_async_discover_devices`). When a DOORLOCK service is found, `get_lock_modes()` returns all known lock devices. For each lock, `get_lock_config(device_id)` is called to fetch metadata from the `xSGetSmartlockConfig` API response (location name, serial number, device family). Each lock creates a separate HA device with `via_device` linking to the installation device as parent; name, model, and serial number in the `DeviceInfo` come from the config response. If the config fetch fails, the lock still works but falls back to using the installation alias as the device name with no serial number or model. A deferred retry schedule (60s, 120s, 300s) attempts to fetch config later. One `VerisureLock` entity is created per device. Unique IDs follow the format `v4_securitas_direct.{number}_lock_{device_id}`.
 
 **Lock states** (string codes from the API):
 - `"1"` = unlocked
@@ -648,18 +648,18 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
 
 Two camera entity types per discovered camera, both using `CoordinatorEntity[CameraCoordinator]`:
 
-- **`SecuritasCamera`** — Shows the last captured thumbnail image. `async_camera_image()` returns the decoded thumbnail from `self.coordinator.data.thumbnails[zone_id]`, or a placeholder JPEG if none exists. On `_handle_coordinator_update()`, rotates the access token so the frontend re-fetches.
+- **`VerisureCamera`** — Shows the last captured thumbnail image. `async_camera_image()` returns the decoded thumbnail from `self.coordinator.data.thumbnails[zone_id]`, or a placeholder JPEG if none exists. On `_handle_coordinator_update()`, rotates the access token so the frontend re-fetches.
 
-- **`SecuritasCameraFull`** — Shows the last full-resolution image. `async_camera_image()` returns `self.coordinator.data.full_images[zone_id]`, or a placeholder JPEG if none exists.
+- **`VerisureCameraFull`** — Shows the last full-resolution image. `async_camera_image()` returns `self.coordinator.data.full_images[zone_id]`, or a placeholder JPEG if none exists.
 
 Both entities are grouped under a per-camera child device (via `camera_device_info()`), linked to the installation device as parent via `via_device`.
 
-**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `SecuritasCamera` + `SecuritasCameraFull` + `SecuritasCaptureButton` are created using stored `async_add_entities` callbacks. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
+**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `VerisureCamera` + `VerisureCameraFull` + `VerisureCaptureButton` are created using stored `async_add_entities` callbacks. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
 
 **Image lifecycle:**
 1. On coordinator refresh (every 30 minutes), thumbnails are fetched for all cameras
 2. When a thumbnail's `id_signal` changes, `CameraCoordinator` auto-fetches the full-resolution image (skips thumbnails older than 1 hour)
-3. When `SecuritasCaptureButton` is pressed, `hub.capture_image()` triggers a new capture via the client, validates/stores the result, pushes the new data into the `CameraCoordinator`, and launches a background task to fetch the full-resolution image
+3. When `VerisureCaptureButton` is pressed, `hub.capture_image()` triggers a new capture via the client, validates/stores the result, pushes the new data into the `CameraCoordinator`, and launches a background task to fetch the full-resolution image
 
 **Signals:**
 - `SIGNAL_CAMERA_STATE` — capturing state changed (camera entity writes state without rotating token, so the frontend shows the capturing spinner)
@@ -668,12 +668,12 @@ Both entities are grouped under a per-camera child device (via `camera_device_in
 
 ### Buttons (`button.py`)
 
-**`SecuritasRefreshButton`** — Triggers a manual alarm status refresh via `hub.refresh_alarm_status()`, which calls `SecuritasClient.check_alarm()` (authoritative `CheckAlarm` + `CheckAlarmStatus` polling round-trip to the panel, not just a lightweight `xSStatus` read). One per installation.
+**`VerisureRefreshButton`** — Triggers a manual alarm status refresh via `hub.refresh_alarm_status()`, which calls `VerisureOwaClient.check_alarm()` (authoritative `CheckAlarm` + `CheckAlarmStatus` polling round-trip to the panel, not just a lightweight `xSStatus` read). One per installation.
 - On success: updates `protom_response` on the client, clears `refresh_failed` on the alarm entity, triggers a state write
 - On timeout: sets `refresh_failed` on the alarm entity (card shows stale data banner)
 - On 403: creates "Rate limited" persistent notification and sets `waf_blocked` on the alarm entity
 
-**`SecuritasCaptureButton`** — Requests a new image capture from a Securitas camera. One per camera device, discovered alongside cameras in the background task. Calls `hub.capture_image()` which requests the capture, polls for completion, and stores the resulting image. Grouped under the per-camera child device.
+**`VerisureCaptureButton`** — Requests a new image capture from a Verisure camera. One per camera device, discovered alongside cameras in the background task. Calls `hub.capture_image()` which requests the capture, polls for completion, and stores the resulting image. Grouped under the per-camera child device.
 
 ## Three-axis alarm model
 
@@ -687,7 +687,7 @@ Verisure installations have up to three independent alarm axes:
 
 ## Capability detection
 
-`detect_peri()` and `detect_annex()` live in `securitas_direct_new_api/capabilities.py`. Detection runs on every config-entry load — there is no stored `CONF_HAS_PERI`. `detect_peri()` uses four layered signals (JWT capability set, active PERI service, SCH service `PERI` attribute, alarm partition `id="02"`) so it catches both Spanish SDVFAST panels (which advertise `PERI` via JWT cap or service attribute) and Italian SDVECU panels (which expose perimeter only via the alarm-partition list). `detect_annex()` requires both `ARMANNEX` and `DARMANNEX` capabilities.
+`detect_peri()` and `detect_annex()` live in `verisure_owa_api/capabilities.py`. Detection runs on every config-entry load — there is no stored `CONF_HAS_PERI`. `detect_peri()` uses four layered signals (JWT capability set, active PERI service, SCH service `PERI` attribute, alarm partition `id="02"`) so it catches both Spanish SDVFAST panels (which advertise `PERI` via JWT cap or service attribute) and Italian SDVECU panels (which expose perimeter only via the alarm-partition list). `detect_annex()` requires both `ARMANNEX` and `DARMANNEX` capabilities.
 
 **Why four signals, not just the JWT cap?** The cap claim appears to track contract/role permissions (what the tenant is licensed for), not what the physical panel is configured to do — and on Italian SDVECU it can be both incomplete and inverted. Two witnesses from the same OWNER login:
 
@@ -702,10 +702,10 @@ A single debug log line at startup makes misdetection diagnosable: search the lo
 
 Per installation:
 
-- One **main panel** (always present) — friendly name `Main - <installation alias>`. Drives all three axes through the user-configurable `map_home`/`map_away`/`map_night`/`map_custom`/`map_vacation` mappings. Implementation class is `CombinedSecuritasAlarmPanel`; the user-facing term is "main panel" (contrasts with "Interior-only / Perimeter-only / Annex-only control panel"). Backwards compatible with all existing setups.
+- One **main panel** (always present) — friendly name `Main - <installation alias>`. Drives all three axes through the user-configurable `map_home`/`map_away`/`map_night`/`map_custom`/`map_vacation` mappings. Implementation class is `CombinedVerisureOwaAlarmPanel`; the user-facing term is "main panel" (contrasts with "Interior-only / Perimeter-only / Annex-only control panel"). Backwards compatible with all existing setups.
 - Up to three opt-in **sub-panels** (Interior, Perimeter, Annex) — friendly names `<Axis> - <installation alias>` (e.g. `Interior - <alias>`). Each drives a single axis. Visibility is gated on (a) capability detection, AND (b) the per-axis toggle in the options flow. The Perimeter and Annex toggles are hidden when their respective capability is absent. The Interior toggle is hidden only when the installation has neither perimeter nor annex capability — with no other axis available, the main panel already drives the interior axis and a separate Interior tile would just be noise. Once any second axis is supported, the Interior toggle is offered immediately (it does not depend on whether the sibling toggle is currently enabled).
 
-All four entities subscribe to the same `AlarmCoordinator`; commands from any entity update the joint `AlarmState`, and the coordinator update broadcasts new state to every entity. Sub-panel classes (`InteriorSecuritasAlarmPanel`, `PerimeterSecuritasAlarmPanel`, `AnnexSecuritasAlarmPanel`) inherit from `BaseSecuritasAlarmPanel` and override two hooks: `_resolve_target_state(ha_state)` projects an HA state onto the panel's axis (preserving the others), and `_extract_state(joint)` reads only the panel's axis from the joint state.
+All four entities subscribe to the same `AlarmCoordinator`; commands from any entity update the joint `AlarmState`, and the coordinator update broadcasts new state to every entity. Sub-panel classes (`InteriorVerisureOwaAlarmPanel`, `PerimeterVerisureOwaAlarmPanel`, `AnnexVerisureOwaAlarmPanel`) inherit from `BaseVerisureOwaAlarmPanel` and override two hooks: `_resolve_target_state(ha_state)` projects an HA state onto the panel's axis (preserving the others), and `_extract_state(joint)` reads only the panel's axis from the joint state.
 
 ## Force-arm with sub-panels
 
@@ -731,7 +731,7 @@ Step 4 (select_installation, if multiple): Pick which installation to configure
 Step 5 (options): PIN, code-required-to-arm, notify service
   → Title shows installation name ("Options for {installation_name}")
   → Advanced section (collapsed): scan interval, delay between API requests
-Step 6 (mappings): Map HA alarm buttons to Securitas states
+Step 6 (mappings): Map HA alarm buttons to Verisure OWA states
   Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
 → Create config entry per installation
 ```
@@ -742,7 +742,7 @@ Device IDs are generated during initial setup and stored in the config entry for
 
 Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, updates the config entry with new credentials and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
 
-**Options flow** (`SecuritasOptionsFlowHandler`):
+**Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
 Step 1 (init): General settings
   - PIN code (optional, for HA-side validation only)
@@ -751,11 +751,11 @@ Step 1 (init): General settings
   - Advanced section (collapsed): scan interval, delay between API requests
 
 Step 2 (mappings): Alarm state mappings
-  - Map Home button → Securitas state
-  - Map Away button → Securitas state
-  - Map Night button → Securitas state
-  - Map Vacation button → Securitas state
-  - Map Custom Bypass button → Securitas state
+  - Map Home button → Verisure OWA state
+  - Map Away button → Verisure OWA state
+  - Map Night button → Verisure OWA state
+  - Map Vacation button → Verisure OWA state
+  - Map Custom Bypass button → Verisure OWA state
   Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
 ```
 
@@ -781,7 +781,7 @@ User presses "Arm Away" in HA UI
           Step 2: arm [ARMINTEXT1, ARM1PERI1, ARM1+PERI1]
         → _execute_step(Step 1):
           → try DARM1DARMPERI → success? done
-          → SecuritasDirectError (non-409)? mark_unsupported, try DARM1
+          → VerisureOwaError (non-409)? mark_unsupported, try DARM1
         → _execute_step(Step 2):
           → try ARMINTEXT1 → success? done
           → fail? mark_unsupported, try ARM1PERI1
@@ -802,7 +802,7 @@ AlarmCoordinator fires every scan_interval seconds
       → client.get_general_status(installation)  # Cloud-only xSStatus, no panel wake
       → Return SStatus
     → Return AlarmStatusData(status, protom_response)
-  → _handle_coordinator_update() on SecuritasAlarm
+  → _handle_coordinator_update() on CombinedVerisureOwaAlarmPanel
     → Skip if _operation_in_progress
     → _clear_force_context()
     → _update_from_coordinator(data)
@@ -827,14 +827,14 @@ The test suite has **1028 tests** achieving **92% overall coverage**. Tests run 
 python -m pytest tests/ -v --tb=short
 
 # Run with coverage
-python -m pytest tests/ --cov=custom_components/securitas --cov-report=term-missing
+python -m pytest tests/ --cov=custom_components/verisure_owa --cov-report=term-missing
 
 # Run a single test file
 python -m pytest tests/test_client_auth.py -v
 
 # Lint and type check
 ruff check . && ruff format --check .
-pyright custom_components/
+pyright custom_components/verisure_owa/
 ```
 
 ### Test architecture
@@ -853,14 +853,14 @@ tests/
 ├── test_button.py           Refresh button entity, capture button, 403 WAF notification
 ├── test_camera_api.py       Camera API operations: discover, capture, thumbnails
 ├── test_camera_platform.py  Camera entity platform setup and image serving
-├── test_client_alarm.py     SecuritasClient alarm operations: arm, disarm, check_alarm, polling
-├── test_client_auth.py      SecuritasClient auth lifecycle: login, refresh, 2FA, logout
-├── test_client_camera.py    SecuritasClient camera operations: capture, thumbnail, full image
-├── test_client_lock.py      SecuritasClient lock operations: get_modes, change_mode, config
-├── test_client_misc.py      SecuritasClient misc: sentinel, air quality, services, installations
+├── test_client_alarm.py     VerisureOwaClient alarm operations: arm, disarm, check_alarm, polling
+├── test_client_auth.py      VerisureOwaClient auth lifecycle: login, refresh, 2FA, logout
+├── test_client_camera.py    VerisureOwaClient camera operations: capture, thumbnail, full image
+├── test_client_lock.py      VerisureOwaClient lock operations: get_modes, change_mode, config
+├── test_client_misc.py      VerisureOwaClient misc: sentinel, air quality, services, installations
 ├── test_command_resolver.py CommandResolver state transitions, fallback chains
 ├── test_config_flow.py      Config flow (setup + 2FA + reauth) and options flow
-├── test_constants.py        SENTINEL_SERVICE_NAMES, SecuritasState enum, mapping tables
+├── test_constants.py        SENTINEL_SERVICE_NAMES, VerisureOwaState enum, mapping tables
 ├── test_coordinators.py     DataUpdateCoordinators: alarm, sentinel, lock, camera
 ├── test_domains.py          Country-to-URL routing
 ├── test_exceptions.py       Exception hierarchy, message, log_detail, response_body
@@ -868,7 +868,7 @@ tests/
 ├── test_ha_platforms.py     Platform async_setup_entry for all entity types
 ├── test_helpers.py          DRY helpers: _poll_operation (409 retry, transient errors)
 ├── test_http_transport.py   HttpTransport: POST, retries, WAF detection, JSON parsing
-├── test_hub.py              SecuritasHub: camera management, lock management, queue
+├── test_hub.py              VerisureHub: camera management, lock management, queue
 ├── test_init.py             Integration setup, session sharing, background discovery
 ├── test_integration.py      Integration tests using MockGraphQLServer (see below)
 ├── test_log_filter.py       SensitiveDataFilter: secret redaction, installation masking
@@ -880,7 +880,7 @@ tests/
 ### Key fixtures (`conftest.py`)
 
 **API client fixtures:**
-- `api` — A real `SecuritasClient` instance configured with test credentials (`test@example.com`, country `ES`). Uses a `MagicMock` for the `HttpTransport` so no real network calls are made.
+- `api` — A real `VerisureOwaClient` instance configured with test credentials (`test@example.com`, country `ES`). Uses a `MagicMock` for the `HttpTransport` so no real network calls are made.
 - `mock_transport` — An `AsyncMock(spec=HttpTransport)` used by the `api` fixture.
 - `mock_execute` — The `mock_transport.execute` AsyncMock. Tests set return values on this to control API responses without going through HTTP.
 
@@ -894,7 +894,7 @@ tests/
 **Integration fixtures:**
 - `make_installation(**overrides)` — Factory for `Installation` Pydantic model with defaults (number, panel, address, etc.).
 - `make_config_entry_data()` — Builds a complete config entry data dict with all required keys.
-- `make_securitas_hub_mock()` — Creates a `MagicMock` mimicking `SecuritasHub` with `AsyncMock` methods for login, validate_device, etc.
+- `make_securitas_hub_mock()` — Creates a `MagicMock` mimicking `VerisureHub` with `AsyncMock` methods for login, validate_device, etc.
 - `setup_integration_data(hass, client, devices)` — Populates `hass.data[DOMAIN]` the same way `async_setup_entry` does.
 
 ### Testing patterns
@@ -904,7 +904,7 @@ tests/
 **HA platform tests** (test_alarm_panel, test_button, test_ha_platforms): Create entity instances directly with `MagicMock` dependencies. Use coordinator mocks to provide data. Example:
 
 ```python
-alarm = make_alarm(has_peri=True)  # Creates SecuritasAlarm with mocked hub + coordinator
+alarm = make_alarm(has_peri=True)  # Creates CombinedVerisureOwaAlarmPanel with mocked hub + coordinator
 alarm.client.arm_alarm = AsyncMock(return_value=arm_status)
 await alarm.async_alarm_arm_away()
 assert alarm._state == AlarmControlPanelState.ARMED_AWAY
@@ -918,9 +918,9 @@ result = await hass.config_entries.flow.async_configure(result["flow_id"], user_
 assert result["type"] == FlowResultType.FORM
 ```
 
-**Integration setup tests** (test_init): Patch `SecuritasHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms.
+**Integration setup tests** (test_init): Patch `VerisureHub` constructor and `async_forward_entry_setups` to test the full `async_setup_entry` flow without loading real platforms.
 
-**Coordinator tests** (test_coordinators): Test all four coordinators with mocked `SecuritasClient` and `ApiQueue`. Verify data fetching, error handling (SessionExpiredError re-login, WAFBlockedError, general errors), and data preservation across refreshes.
+**Coordinator tests** (test_coordinators): Test all four coordinators with mocked `VerisureOwaClient` and `ApiQueue`. Verify data fetching, error handling (SessionExpiredError re-login, WAFBlockedError, general errors), and data preservation across refreshes.
 
 ### Integration tests (`test_integration.py`, `mock_graphql.py`)
 
@@ -937,7 +937,7 @@ server.add_response("mkInstallationList", graphql_installations())
 server.set_default_response("CheckAlarm", graphql_check_alarm())
 
 mock_http = server.make_http_client()
-with patch("custom_components.securitas.async_get_clientsession", return_value=mock_http):
+with patch("custom_components.verisure_owa.async_get_clientsession", return_value=mock_http):
     result = await async_setup_entry(hass, entry)
 
 assert server.call_count("mkLoginToken") == 1
@@ -949,7 +949,7 @@ Key design choices:
 - **Queue-based**: each operation has a FIFO queue; `set_default_response()` provides a fallback when the queue is empty
 - **Records all calls**: tests can assert on operation name, request headers, and JSON body
 - **`queue_standard_setup()`**: convenience helper that queues login → list_installations → services and sets defaults for alarm status calls
-- **Response factories**: `graphql_login()`, `graphql_installations()`, `graphql_alarm_status()`, `graphql_arm()`, `graphql_disarm()`, `graphql_sentinel()`, etc. return dicts matching the real Securitas GraphQL schema
+- **Response factories**: `graphql_login()`, `graphql_installations()`, `graphql_alarm_status()`, `graphql_arm()`, `graphql_disarm()`, `graphql_sentinel()`, etc. return dicts matching the real Verisure GraphQL schema
 
 **What integration tests cover:**
 - Full setup flow: login → list installations → get services → forward platforms
@@ -994,7 +994,7 @@ Key design choices:
 Three parallel jobs run on every PR and push to main:
 
 1. **Ruff lint & format** — `ruff check .` and `ruff format --check .`
-2. **Pyright** — `pyright custom_components/` for static type checking
+2. **Pyright** — `pyright custom_components/verisure_owa/` for static type checking
 3. **Tests** — `pytest` with `--cov-fail-under=90` to enforce minimum coverage
 
 ## File reference
@@ -1002,27 +1002,28 @@ Three parallel jobs run on every PR and push to main:
 | File | Lines | Purpose |
 |------|-------|---------|
 | `__init__.py` | 848 | Integration setup functions, session sharing, background discovery, coordinator creation, card resource registration |
-| `hub.py` | 576 | `SecuritasHub` (central hub wrapping SecuritasClient), `SecuritasDirectDevice` (device registry wrapper) |
-| `entity.py` | 96 | `SecuritasEntity` base class, `securitas_device_info()`, `camera_device_info()` |
+| `hub.py` | 576 | `VerisureHub` (central hub wrapping VerisureOwaClient), `VerisureDevice` (device registry wrapper) |
+| `entity.py` | 96 | `VerisureEntity` base class, `verisure_device_info()`, `camera_device_info()` |
 | `coordinators.py` | 429 | `AlarmCoordinator`, `SentinelCoordinator`, `LockCoordinator`, `CameraCoordinator` |
 | `config_flow.py` | 791 | Config flow (setup + 2FA + reauth + installation picker) and options flow (settings + mappings) |
 | `alarm_control_panel.py` | 840 | Alarm entity (CoordinatorEntity) with state mapping, arm/disarm, force arm, PIN validation, WAF tracking |
 | `sensor.py` | 185 | Sentinel temperature, humidity, air quality sensors (CoordinatorEntity) |
 | `binary_sensor.py` | 63 | WiFi connection status diagnostic sensor (CoordinatorEntity, no polling) |
 | `lock.py` | 345 | Multi-lock entity (CoordinatorEntity) with lock feature attributes |
-| `camera.py` | 166 | Camera entities: SecuritasCamera (thumbnail), SecuritasCameraFull (full image), both CoordinatorEntity |
+| `camera.py` | 166 | Camera entities: VerisureCamera (thumbnail), VerisureCameraFull (full image), both CoordinatorEntity |
 | `button.py` | 152 | Refresh button with WAF notification, capture button |
 | `api_queue.py` | 125 | Priority-based rate-limited API queue (FOREGROUND/BACKGROUND) |
 | `const.py` | 58 | Integration constants, signal names, config keys, platform list, card URLs, `SENTINEL_SERVICE_NAMES` |
 | `log_filter.py` | 86 | `SensitiveDataFilter` -- log sanitization for secrets |
-| `securitas_direct_new_api/client.py` | 1764 | `SecuritasClient` -- auth lifecycle, typed GraphQL execution, all business operations |
-| `securitas_direct_new_api/http_transport.py` | 154 | `HttpTransport` -- raw HTTP POST with retries, WAF detection, JSON parsing |
-| `securitas_direct_new_api/graphql_queries.py` | 265 | GraphQL query and mutation string constants |
-| `securitas_direct_new_api/command_resolver.py` | 182 | `CommandResolver`, `AlarmState`, `CommandStep` -- state transition logic |
-| `securitas_direct_new_api/models.py` | 375 | Pydantic domain models (Installation, OperationStatus, SmartLock, CameraDevice, Sentinel, etc.) |
-| `securitas_direct_new_api/responses.py` | 517 | Pydantic response envelopes for every GraphQL operation |
-| `securitas_direct_new_api/const.py` | 107 | `SecuritasState`, command/protocol mappings, defaults |
-| `securitas_direct_new_api/domains.py` | 50 | Country-to-URL routing |
-| `securitas_direct_new_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
-| `www/securitas-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language |
-| `www/securitas-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner |
+| `verisure_owa_api/client.py` | 1764 | `VerisureOwaClient` -- auth lifecycle, typed GraphQL execution, all business operations |
+| `verisure_owa_api/http_transport.py` | 154 | `HttpTransport` -- raw HTTP POST with retries, WAF detection, JSON parsing |
+| `verisure_owa_api/graphql_queries.py` | 265 | GraphQL query and mutation string constants |
+| `verisure_owa_api/command_resolver.py` | 182 | `CommandResolver`, `AlarmState`, `CommandStep` -- state transition logic |
+| `verisure_owa_api/models.py` | 375 | Pydantic domain models (Installation, OperationStatus, SmartLock, CameraDevice, Sentinel, etc.) |
+| `verisure_owa_api/responses.py` | 517 | Pydantic response envelopes for every GraphQL operation |
+| `verisure_owa_api/const.py` | 107 | `VerisureOwaState`, command/protocol mappings, defaults |
+| `verisure_owa_api/domains.py` | 50 | Country-to-URL routing |
+| `verisure_owa_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
+| `www/verisure_owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Legacy filename `securitas-alarm-card.js` is a byte-identical copy retained as a deprecation shim served at the legacy `/securitas_panel/` URL prefix; both removed in v6.) |
+| `www/verisure_owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
+| `www/verisure_owa-events-card.js` | — | Custom Lovelace events card showing recent alarm-panel activity. (Same legacy-copy treatment.) |

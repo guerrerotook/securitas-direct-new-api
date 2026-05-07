@@ -1,4 +1,4 @@
-"""Tests for SecuritasClient helper methods."""
+"""Tests for VerisureOwaClient helper methods."""
 
 import asyncio
 from datetime import datetime
@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import jwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    SecuritasDirectError,
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    VerisureOwaError,
 )
 
 from .conftest import make_jwt
@@ -60,27 +60,27 @@ class TestExtractResponseData:
         assert result == {"res": "OK", "msg": ""}
 
     def test_raises_when_data_key_missing(self, api):
-        """Should raise SecuritasDirectError when 'data' key is absent."""
+        """Should raise VerisureOwaError when 'data' key is absent."""
         response = {"errors": [{"message": "bad"}]}
-        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+        with pytest.raises(VerisureOwaError, match="xSFoo"):
             api._extract_response_data(response, "xSFoo")
 
     def test_raises_when_data_is_none(self, api):
-        """Should raise SecuritasDirectError when response['data'] is None."""
+        """Should raise VerisureOwaError when response['data'] is None."""
         response = {"data": None}
-        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+        with pytest.raises(VerisureOwaError, match="xSFoo"):
             api._extract_response_data(response, "xSFoo")
 
     def test_raises_when_field_is_none(self, api):
-        """Should raise SecuritasDirectError when the named field is None."""
+        """Should raise VerisureOwaError when the named field is None."""
         response = {"data": {"xSFoo": None}}
-        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+        with pytest.raises(VerisureOwaError, match="xSFoo"):
             api._extract_response_data(response, "xSFoo")
 
     def test_raises_when_field_missing(self, api):
-        """Should raise SecuritasDirectError when the named field doesn't exist."""
+        """Should raise VerisureOwaError when the named field doesn't exist."""
         response = {"data": {"xSBar": {"res": "OK"}}}
-        with pytest.raises(SecuritasDirectError, match="xSFoo"):
+        with pytest.raises(VerisureOwaError, match="xSFoo"):
             api._extract_response_data(response, "xSFoo")
 
 
@@ -128,17 +128,15 @@ class TestPollOperation:
 
     async def test_raises_on_non_transient_error(self, api):
         """Should immediately raise non-transient errors (no http_status)."""
-        check_fn = AsyncMock(side_effect=SecuritasDirectError("bad request"))
+        check_fn = AsyncMock(side_effect=VerisureOwaError("bad request"))
         api.poll_delay = 0
 
-        with pytest.raises(SecuritasDirectError, match="bad request"):
+        with pytest.raises(VerisureOwaError, match="bad request"):
             await api._poll_operation(check_fn)
 
     async def test_retries_on_409_conflict(self, api):
-        """Should retry on SecuritasDirectError with http_status=409 (server busy)."""
-        err_409 = SecuritasDirectError(
-            "alarm-manager.alarm_process_error", http_status=409
-        )
+        """Should retry on VerisureOwaError with http_status=409 (server busy)."""
+        err_409 = VerisureOwaError("alarm-manager.alarm_process_error", http_status=409)
         check_fn = AsyncMock(
             side_effect=[
                 err_409,
@@ -151,18 +149,18 @@ class TestPollOperation:
         assert result["res"] == "OK"
         assert check_fn.call_count == 2
 
-    async def test_raises_on_non_409_securitas_error(self, api):
-        """Should immediately raise SecuritasDirectError with non-409 http_status."""
-        err_500 = SecuritasDirectError("server error", http_status=500)
+    async def test_raises_on_non_409_verisure_owa_error(self, api):
+        """Should immediately raise VerisureOwaError with non-409 http_status."""
+        err_500 = VerisureOwaError("server error", http_status=500)
         check_fn = AsyncMock(side_effect=err_500)
         api.poll_delay = 0
 
-        with pytest.raises(SecuritasDirectError, match="server error"):
+        with pytest.raises(VerisureOwaError, match="server error"):
             await api._poll_operation(check_fn)
 
     async def test_timeout_raises(self, api):
         """Should raise OperationTimeoutError when wall-clock timeout is exceeded."""
-        from custom_components.securitas.securitas_direct_new_api.exceptions import (
+        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
             OperationTimeoutError,
         )
 
@@ -194,13 +192,11 @@ class TestPollOperation:
 
 
 class TestCheckAuthenticationTokenErrorHandling:
-    async def test_falls_back_to_login_on_securitas_error(self, api):
-        """Should fall back to login() when refresh raises SecuritasDirectError."""
+    async def test_falls_back_to_login_on_verisure_owa_error(self, api):
+        """Should fall back to login() when refresh raises VerisureOwaError."""
         api.authentication_token = None
         api.refresh_token_value = "some-refresh-token"
-        api.refresh_token = AsyncMock(
-            side_effect=SecuritasDirectError("refresh failed")
-        )
+        api.refresh_token = AsyncMock(side_effect=VerisureOwaError("refresh failed"))
         api.login = AsyncMock()
 
         await api._check_authentication_token()
@@ -263,9 +259,9 @@ class TestLogoutTokenCleanup:
         api.authentication_token_exp = datetime.now()
         api.login_timestamp = 12345
 
-        mock_execute.side_effect = SecuritasDirectError("logout failed")
+        mock_execute.side_effect = VerisureOwaError("logout failed")
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await api.logout()
 
         assert api.authentication_token is None

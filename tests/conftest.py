@@ -1,4 +1,4 @@
-"""Shared fixtures for securitas-direct-new-api integration tests."""
+"""Shared fixtures for the Verisure OWA HA integration tests."""
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -8,7 +8,7 @@ import pytest
 
 from .mock_graphql import MockGraphQLServer
 
-from custom_components.securitas import (
+from custom_components.verisure_owa import (
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
@@ -24,18 +24,20 @@ from custom_components.securitas import (
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    SecuritasDirectDevice,
-    SecuritasHub,
+    VerisureDevice,
+    VerisureHub,
 )
-from custom_components.securitas.securitas_direct_new_api.client import SecuritasClient
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
+)
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.securitas.securitas_direct_new_api.const import (
+from custom_components.verisure_owa.verisure_owa_api.const import (
     PERI_DEFAULTS,
     STD_DEFAULTS,
 )
-from custom_components.securitas.securitas_direct_new_api.models import Installation
+from custom_components.verisure_owa.verisure_owa_api.models import Installation
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -138,7 +140,7 @@ def validate_device_response(
     }
 
 
-# ── SecuritasClient fixture ──────────────────────────────────────────────────
+# ── VerisureOwaClient fixture ──────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -149,8 +151,8 @@ def mock_transport():
 
 @pytest.fixture
 def api(mock_transport):
-    """Create a SecuritasClient instance with test credentials."""
-    return SecuritasClient(
+    """Create a VerisureOwaClient instance with test credentials."""
+    return VerisureOwaClient(
         transport=mock_transport,
         country="ES",
         language="es_ES",
@@ -246,8 +248,8 @@ def make_config_entry_data(
 
 
 def make_securitas_hub_mock(**overrides) -> MagicMock:
-    """Create a MagicMock mimicking SecuritasHub."""
-    hub = MagicMock(spec=SecuritasHub)
+    """Create a MagicMock mimicking VerisureHub."""
+    hub = MagicMock(spec=VerisureHub)
     hub.client = AsyncMock()
     hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
@@ -283,12 +285,12 @@ def mock_server() -> MockGraphQLServer:
 def setup_integration_data(
     hass,
     client: MagicMock,
-    devices: list[SecuritasDirectDevice] | None = None,
+    devices: list[VerisureDevice] | None = None,
     entry_id: str = "test-entry-id",
 ) -> None:
     """Populate hass.data[DOMAIN] the way async_setup_entry does."""
     if devices is None:
-        devices = [SecuritasDirectDevice(make_installation())]
+        devices = [VerisureDevice(make_installation())]
     hass.data[DOMAIN] = {
         CONF_ENTRY_ID: entry_id,
         entry_id: {

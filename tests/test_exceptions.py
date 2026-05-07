@@ -1,10 +1,10 @@
-"""Tests for the Securitas Direct exception hierarchy."""
+"""Tests for the Verisure OWA exception hierarchy."""
 
 from __future__ import annotations
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
     APIConnectionError,
     APIResponseError,
     ArmingExceptionError,
@@ -12,7 +12,7 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
     ImageCaptureError,
     OperationFailedError,
     OperationTimeoutError,
-    SecuritasDirectError,
+    VerisureOwaError,
     SessionExpiredError,
     TwoFactorRequiredError,
     UnexpectedStateError,
@@ -24,7 +24,7 @@ from custom_components.securitas.securitas_direct_new_api.exceptions import (
 
 
 class TestSubclassRelationships:
-    """Every exception type must derive from SecuritasDirectError."""
+    """Every exception type must derive from VerisureOwaError."""
 
     @pytest.mark.parametrize(
         "exc_class",
@@ -43,54 +43,54 @@ class TestSubclassRelationships:
         ],
     )
     def test_is_subclass_of_base(self, exc_class):
-        assert issubclass(exc_class, SecuritasDirectError)
+        assert issubclass(exc_class, VerisureOwaError)
 
     def test_base_is_exception(self):
-        assert issubclass(SecuritasDirectError, Exception)
+        assert issubclass(VerisureOwaError, Exception)
 
 
 # ── Basic construction & message ─────────────────────────────────────────────
 
 
 class TestBasicConstruction:
-    def test_securitas_direct_error_message(self):
-        err = SecuritasDirectError("something went wrong")
+    def test_verisure_owa_error_message(self):
+        err = VerisureOwaError("something went wrong")
         assert err.message == "something went wrong"
 
     def test_authentication_error(self):
         err = AuthenticationError("bad credentials")
         assert err.message == "bad credentials"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
     def test_two_factor_required_error(self):
         err = TwoFactorRequiredError("2FA required")
         assert err.message == "2FA required"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
     def test_session_expired_error(self):
         err = SessionExpiredError("JWT expired")
         assert err.message == "JWT expired"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
     def test_waf_blocked_error(self):
         err = WAFBlockedError("WAF block")
         assert err.message == "WAF block"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
     def test_api_connection_error(self):
         err = APIConnectionError("network failure")
         assert err.message == "network failure"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
     def test_operation_timeout_error(self):
         err = OperationTimeoutError("timed out")
         assert err.message == "timed out"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
     def test_image_capture_error(self):
         err = ImageCaptureError("capture failed")
         assert err.message == "capture failed"
-        assert isinstance(err, SecuritasDirectError)
+        assert isinstance(err, VerisureOwaError)
 
 
 # ── Typed-field exceptions ────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ class TestAPIResponseError:
         assert err.message == "Forbidden"
 
     def test_is_subclass(self):
-        assert issubclass(APIResponseError, SecuritasDirectError)
+        assert issubclass(APIResponseError, VerisureOwaError)
 
 
 class TestOperationFailedError:
@@ -125,7 +125,7 @@ class TestOperationFailedError:
         assert err.message == "rejected"
 
     def test_is_subclass(self):
-        assert issubclass(OperationFailedError, SecuritasDirectError)
+        assert issubclass(OperationFailedError, VerisureOwaError)
 
 
 class TestArmingExceptionError:
@@ -163,7 +163,7 @@ class TestArmingExceptionError:
         assert "Arming blocked by exceptions:" in err.message
 
     def test_is_subclass(self):
-        assert issubclass(ArmingExceptionError, SecuritasDirectError)
+        assert issubclass(ArmingExceptionError, VerisureOwaError)
 
 
 class TestUnexpectedStateError:
@@ -176,7 +176,7 @@ class TestUnexpectedStateError:
         assert "XYZ" in err.message
 
     def test_is_subclass(self):
-        assert issubclass(UnexpectedStateError, SecuritasDirectError)
+        assert issubclass(UnexpectedStateError, VerisureOwaError)
 
 
 # ── log_detail() behaviour ────────────────────────────────────────────────────
@@ -203,15 +203,15 @@ class TestLogDetail:
         assert "oops" in detail
 
     def test_unknown_status_without_body_returns_message(self):
-        err = SecuritasDirectError("bare error", http_status=500)
+        err = VerisureOwaError("bare error", http_status=500)
         assert err.log_detail() == "bare error"
 
     def test_no_status_no_body_returns_message(self):
-        err = SecuritasDirectError("bare error")
+        err = VerisureOwaError("bare error")
         assert err.log_detail() == "bare error"
 
     def test_response_body_set_after_construction(self):
-        err = SecuritasDirectError("late body", http_status=500)
+        err = VerisureOwaError("late body", http_status=500)
         assert err.log_detail() == "late body"
         err.response_body = {"raw": "data"}
         assert "raw" in err.log_detail()

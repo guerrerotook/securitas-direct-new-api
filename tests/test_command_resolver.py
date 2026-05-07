@@ -2,17 +2,17 @@
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.command_resolver import (
+from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
     AlarmState,
     CommandResolver,
     InteriorMode,
     PerimeterMode,
     PROTO_TO_ALARM_STATE,
     ALARM_STATE_TO_PROTO,
-    SECURITAS_STATE_TO_ALARM_STATE,
+    VERISURE_OWA_STATE_TO_ALARM_STATE,
 )
-from custom_components.securitas.securitas_direct_new_api.const import SecuritasState
-from custom_components.securitas.securitas_direct_new_api.models import AnnexMode
+from custom_components.verisure_owa.verisure_owa_api.const import VerisureOwaState
+from custom_components.verisure_owa.verisure_owa_api.models import AnnexMode
 
 
 class TestAlarmState:
@@ -286,17 +286,17 @@ class TestCommandResolverModeChange:
         assert steps[0].commands == ["ARM1"]
 
 
-class TestSecuritasStateAnnexMappings:
-    """Test SecuritasState enum annex variants and their SECURITAS_STATE_TO_ALARM_STATE mappings."""
+class TestVerisureOwaStateAnnexMappings:
+    """Test VerisureOwaState enum annex variants and their VERISURE_OWA_STATE_TO_ALARM_STATE mappings."""
 
     def test_annex_only(self):
-        s = SECURITAS_STATE_TO_ALARM_STATE[SecuritasState.ANNEX_ONLY]
+        s = VERISURE_OWA_STATE_TO_ALARM_STATE[VerisureOwaState.ANNEX_ONLY]
         assert s.interior == InteriorMode.OFF
         assert s.perimeter == PerimeterMode.OFF
         assert s.annex == AnnexMode.ON
 
     def test_total_peri_annex(self):
-        s = SECURITAS_STATE_TO_ALARM_STATE[SecuritasState.TOTAL_PERI_ANNEX]
+        s = VERISURE_OWA_STATE_TO_ALARM_STATE[VerisureOwaState.TOTAL_PERI_ANNEX]
         assert s.interior == InteriorMode.TOTAL
         assert s.perimeter == PerimeterMode.ON
         assert s.annex == AnnexMode.ON
@@ -312,7 +312,7 @@ class TestSecuritasStateAnnexMappings:
             "PARTIAL_NIGHT_PERI_ANNEX",
             "TOTAL_PERI_ANNEX",
         ):
-            assert SecuritasState[name] in SECURITAS_STATE_TO_ALARM_STATE, name
+            assert VerisureOwaState[name] in VERISURE_OWA_STATE_TO_ALARM_STATE, name
 
 
 class TestAnnexResolution:

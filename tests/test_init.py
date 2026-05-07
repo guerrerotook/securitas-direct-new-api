@@ -1,4 +1,4 @@
-"""Tests for custom_components/securitas/__init__.py."""
+"""Tests for custom_components/verisure_owa/__init__.py."""
 
 from collections import OrderedDict
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,12 +13,11 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.securitas import (
+from custom_components.verisure_owa import (
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
@@ -33,8 +32,8 @@ from custom_components.securitas import (
     CONF_FORCE_ARM_NOTIFICATIONS,
     DOMAIN,
     PLATFORMS,
-    SecuritasDirectDevice,
-    SecuritasHub,
+    VerisureDevice,
+    VerisureHub,
     _build_config_dict,
     add_device_information,
     async_migrate_entry,
@@ -42,16 +41,16 @@ from custom_components.securitas import (
     async_unload_entry,
     async_update_options,
 )
-from custom_components.securitas.hub import (
+from custom_components.verisure_owa.hub import (
     _async_notify,
     _notify,
 )
-from custom_components.securitas.securitas_direct_new_api.const import (
+from custom_components.verisure_owa.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
     AuthenticationError,
-    SecuritasDirectError,
+    VerisureOwaError,
     TwoFactorRequiredError,
 )
 
@@ -63,19 +62,19 @@ from tests.conftest import (
 
 
 # ---------------------------------------------------------------------------
-# Helper: patch SecuritasHub preserving __name__
+# Helper: patch VerisureHub preserving __name__
 # ---------------------------------------------------------------------------
 
 
 def _patch_hub(mock_hub):
-    """Patch SecuritasHub constructor to return mock_hub while preserving __name__.
+    """Patch VerisureHub constructor to return mock_hub while preserving __name__.
 
     MagicMock does not have a proper __name__ attribute, so we set it
     to make the mock behave like a real class.
     """
     mock_cls = MagicMock(return_value=mock_hub)
-    mock_cls.__name__ = "SecuritasHub"
-    return patch("custom_components.securitas.SecuritasHub", mock_cls)
+    mock_cls.__name__ = "VerisureHub"
+    return patch("custom_components.verisure_owa.VerisureHub", mock_cls)
 
 
 # ===========================================================================
@@ -128,22 +127,22 @@ class TestAddDeviceInformation:
 
 
 # ===========================================================================
-# 1b. TestSecuritasHubInit — real constructor, catches missing config keys
+# 1b. TestVerisureHubInit — real constructor, catches missing config keys
 # ===========================================================================
 
 
-class TestSecuritasHubInit:
-    """Verify SecuritasHub.__init__ works with config dicts from various sources."""
+class TestVerisureHubInit:
+    """Verify VerisureHub.__init__ works with config dicts from various sources."""
 
     def test_hub_init_with_config_entry_data(self, hass):
-        """SecuritasHub.__init__ should accept make_config_entry_data() without KeyError."""
+        """VerisureHub.__init__ should accept make_config_entry_data() without KeyError."""
         config = make_config_entry_data()
-        hub = SecuritasHub(config, None, MagicMock(), hass)
+        hub = VerisureHub(config, None, MagicMock(), hass)
         assert hub.country == "ES"
 
     def test_hub_init_with_minimal_config_flow_config(self, hass):
-        """SecuritasHub.__init__ should accept the config dict built by _create_client."""
-        from custom_components.securitas import (
+        """VerisureHub.__init__ should accept the config dict built by _create_client."""
+        from custom_components.verisure_owa import (
             DEFAULT_DELAY_CHECK_OPERATION,
         )
 
@@ -159,7 +158,7 @@ class TestSecuritasHubInit:
                 CONF_DEVICE_INDIGITALL: "",
             }
         )
-        hub = SecuritasHub(config, None, MagicMock(), hass)
+        hub = VerisureHub(config, None, MagicMock(), hass)
         assert hub.country == "ES"
 
 
@@ -178,7 +177,7 @@ class TestAsyncNotify:
         hass.services.async_call = AsyncMock()
 
         with patch(
-            "custom_components.securitas.hub.get_notification_strings",
+            "custom_components.verisure_owa.hub.get_notification_strings",
             return_value={"title": "Hello", "message": "World message"},
         ) as mocked:
             await _async_notify(hass, "my_id", "my_key")
@@ -201,7 +200,7 @@ class TestAsyncNotify:
         hass.services.async_call = AsyncMock()
 
         with patch(
-            "custom_components.securitas.hub.get_notification_strings",
+            "custom_components.verisure_owa.hub.get_notification_strings",
             return_value={"title": "Hola {name}", "message": "{count} cosas"},
         ):
             await _async_notify(hass, "g1", "greeting", {"name": "Bob", "count": 3})
@@ -222,16 +221,16 @@ class TestAsyncNotify:
 
 
 # ===========================================================================
-# 3. TestSecuritasDirectDevice
+# 3. TestVerisureDevice
 # ===========================================================================
 
 
-class TestSecuritasDirectDevice:
-    """Tests for the SecuritasDirectDevice wrapper class."""
+class TestVerisureDevice:
+    """Tests for the VerisureDevice wrapper class."""
 
-    def _make_device(self, **overrides) -> SecuritasDirectDevice:
+    def _make_device(self, **overrides) -> VerisureDevice:
         installation = make_installation(**overrides)
-        return SecuritasDirectDevice(installation)
+        return VerisureDevice(installation)
 
     def test_available_returns_true(self):
         """Device should always report as available."""
@@ -262,23 +261,23 @@ class TestSecuritasDirectDevice:
         """device_info should return a valid DeviceInfo dict."""
         device = self._make_device(alias="MyHome", type="PREMIUM", panel="SDVFAST")
         info = device.device_info
-        assert info["identifiers"] == {(DOMAIN, "v4_securitas_direct.123456")}  # type: ignore[typeddict-item]
-        assert info["manufacturer"] == "Securitas Direct"  # type: ignore[typeddict-item]
+        assert info["identifiers"] == {(DOMAIN, "v5_verisure_owa.123456")}  # type: ignore[typeddict-item]
+        assert info["manufacturer"] == "Verisure"  # type: ignore[typeddict-item]
         assert info["model"] == "SDVFAST"  # type: ignore[typeddict-item]
         assert info["hw_version"] == "PREMIUM"  # type: ignore[typeddict-item]
         assert info["name"] == "MyHome"  # type: ignore[typeddict-item]
 
 
 # ===========================================================================
-# 4. TestSecuritasHub
+# 4. TestVerisureHub
 # ===========================================================================
 
 
-class TestSecuritasHub:
-    """Tests for the SecuritasHub wrapper class."""
+class TestVerisureHub:
+    """Tests for the VerisureHub wrapper class."""
 
     def _make_config(self, **overrides) -> OrderedDict:
-        """Build a minimal config OrderedDict for SecuritasHub."""
+        """Build a minimal config OrderedDict for VerisureHub."""
         config = OrderedDict(
             {
                 CONF_USERNAME: "test@example.com",
@@ -296,14 +295,14 @@ class TestSecuritasHub:
         config.update(overrides)
         return config
 
-    def _make_hub(self, config=None, **config_overrides) -> SecuritasHub:
-        """Create a SecuritasHub with mocked dependencies."""
+    def _make_hub(self, config=None, **config_overrides) -> VerisureHub:
+        """Create a VerisureHub with mocked dependencies."""
         if config is None:
             config = self._make_config(**config_overrides)
-        return SecuritasHub(config, MagicMock(), MagicMock(), MagicMock())
+        return VerisureHub(config, MagicMock(), MagicMock(), MagicMock())
 
     def test_init_creates_api_manager(self):
-        """Constructor should create a SecuritasClient."""
+        """Constructor should create a VerisureOwaClient."""
         hub = self._make_hub()
         assert hub.client is not None
         assert hub.config[CONF_USERNAME] == "test@example.com"
@@ -312,7 +311,7 @@ class TestSecuritasHub:
     def test_init_stores_config(self):
         """Constructor should store the domain config."""
         config = self._make_config()
-        hub = SecuritasHub(config, MagicMock(), MagicMock(), MagicMock())
+        hub = VerisureHub(config, MagicMock(), MagicMock(), MagicMock())
         assert hub.config is config
 
     async def test_login_delegates_to_session(self):
@@ -394,7 +393,7 @@ class TestAsyncSetupEntry:
 
     @pytest.fixture
     def mock_hub(self):
-        """Create a mock SecuritasHub for setup tests."""
+        """Create a mock VerisureHub for setup tests."""
         hub = make_securitas_hub_mock()
         hub.client.list_installations = AsyncMock(return_value=[make_installation()])
         return hub
@@ -406,7 +405,7 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -431,8 +430,8 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify") as mock_notify,
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            patch("custom_components.verisure_owa._notify") as mock_notify,
             pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
         ):
             await async_setup_entry(hass, entry)
@@ -447,8 +446,8 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify") as mock_notify,
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            patch("custom_components.verisure_owa._notify") as mock_notify,
             pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
         ):
             await async_setup_entry(hass, entry)
@@ -458,16 +457,14 @@ class TestAsyncSetupEntry:
         )
 
     async def test_setup_securitas_error_during_login(self, hass, mock_hub):
-        """SecuritasDirectError during login should raise ConfigEntryNotReady."""
-        mock_hub.login = AsyncMock(
-            side_effect=SecuritasDirectError("connection failed")
-        )
+        """VerisureOwaError during login should raise ConfigEntryNotReady."""
+        mock_hub.login = AsyncMock(side_effect=VerisureOwaError("connection failed"))
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             pytest.raises(ConfigEntryNotReady),
         ):
             await async_setup_entry(hass, entry)
@@ -475,16 +472,16 @@ class TestAsyncSetupEntry:
     async def test_setup_securitas_error_during_list_installations(
         self, hass, mock_hub
     ):
-        """SecuritasDirectError during list_installations should raise ConfigEntryNotReady."""
+        """VerisureOwaError during list_installations should raise ConfigEntryNotReady."""
         mock_hub.client.list_installations = AsyncMock(
-            side_effect=SecuritasDirectError("network error")
+            side_effect=VerisureOwaError("network error")
         )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             pytest.raises(ConfigEntryNotReady),
         ):
             await async_setup_entry(hass, entry)
@@ -520,13 +517,13 @@ class TestAsyncSetupEntry:
             await async_setup_entry(hass, entry)
 
     async def test_setup_stores_hub_in_hass_data(self, hass, mock_hub):
-        """After successful setup, SecuritasHub should be stored in per-entry data."""
+        """After successful setup, VerisureHub should be stored in per-entry data."""
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -544,7 +541,7 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -555,7 +552,7 @@ class TestAsyncSetupEntry:
 
         devices = hass.data[DOMAIN][entry.entry_id]["devices"]
         assert len(devices) == 1
-        assert isinstance(devices[0], SecuritasDirectDevice)
+        assert isinstance(devices[0], VerisureDevice)
 
     async def test_setup_no_migration_when_maps_present(self, hass, mock_hub):
         """When map_home already has a value, no migration should happen."""
@@ -567,7 +564,7 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -586,7 +583,7 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -609,39 +606,41 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
                 new_callable=AsyncMock,
             ),
             patch(
-                "custom_components.securitas.frontend.add_extra_js_url"
+                "custom_components.verisure_owa.frontend.add_extra_js_url"
             ) as mock_add_js,
         ):
             result = await async_setup_entry(hass, entry)
 
         assert result is True
 
-        # Verify static path registration
+        # Verify static path registration (both new and legacy paths)
         hass.http.async_register_static_paths.assert_awaited_once()
         call_args = hass.http.async_register_static_paths.call_args[0][0]
-        assert len(call_args) == 1
-        assert isinstance(call_args[0], StaticPathConfig)
-        assert call_args[0].url_path == "/securitas_panel"
+        assert len(call_args) == 2
+        paths = [cfg.url_path for cfg in call_args]
+        assert "/verisure_owa_panel" in paths
+        assert "/securitas_panel" in paths
 
         # Verify all three card JS URLs are registered (alarm + camera + events)
         assert mock_add_js.call_count == 3
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
-            u.startswith("/securitas_panel/securitas-alarm-card.js?v=") for u in js_urls
-        )
-        assert any(
-            u.startswith("/securitas_panel/securitas-camera-card.js?v=")
+            u.startswith("/verisure_owa_panel/verisure_owa-alarm-card.js?v=")
             for u in js_urls
         )
         assert any(
-            u.startswith("/securitas_panel/securitas-events-card.js?v=")
+            u.startswith("/verisure_owa_panel/verisure_owa-camera-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/verisure_owa_panel/verisure_owa-events-card.js?v=")
             for u in js_urls
         )
 
@@ -654,14 +653,14 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
                 new_callable=AsyncMock,
             ),
             patch(
-                "custom_components.securitas.frontend.add_extra_js_url"
+                "custom_components.verisure_owa.frontend.add_extra_js_url"
             ) as mock_add_js,
         ):
             result = await async_setup_entry(hass, entry)
@@ -683,14 +682,14 @@ class TestAsyncSetupEntry:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
                 new_callable=AsyncMock,
             ),
             patch(
-                "custom_components.securitas.frontend.add_extra_js_url"
+                "custom_components.verisure_owa.frontend.add_extra_js_url"
             ) as mock_add_js,
         ):
             result1 = await async_setup_entry(hass, entry1)
@@ -703,14 +702,15 @@ class TestAsyncSetupEntry:
         assert mock_add_js.call_count == 3
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
-            u.startswith("/securitas_panel/securitas-alarm-card.js?v=") for u in js_urls
-        )
-        assert any(
-            u.startswith("/securitas_panel/securitas-camera-card.js?v=")
+            u.startswith("/verisure_owa_panel/verisure_owa-alarm-card.js?v=")
             for u in js_urls
         )
         assert any(
-            u.startswith("/securitas_panel/securitas-events-card.js?v=")
+            u.startswith("/verisure_owa_panel/verisure_owa-camera-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/verisure_owa_panel/verisure_owa-events-card.js?v=")
             for u in js_urls
         )
 
@@ -755,11 +755,11 @@ class TestAsyncSetupEntry:
             return hubs_by_username[config[CONF_USERNAME]]
 
         mock_hub_cls = MagicMock(side_effect=hub_factory)
-        mock_hub_cls.__name__ = "SecuritasHub"
+        mock_hub_cls.__name__ = "VerisureHub"
 
         with (
-            patch("custom_components.securitas.SecuritasHub", mock_hub_cls),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.VerisureHub", mock_hub_cls),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -857,7 +857,7 @@ class TestBuildConfigDict:
 
 
 class TestValidateAndStoreImage:
-    """Tests for SecuritasHub._validate_and_store_image()."""
+    """Tests for VerisureHub._validate_and_store_image()."""
 
     def _make_hub(self):
         config = OrderedDict(
@@ -874,7 +874,7 @@ class TestValidateAndStoreImage:
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
-        return SecuritasHub(config, MagicMock(), MagicMock(), MagicMock())
+        return VerisureHub(config, MagicMock(), MagicMock(), MagicMock())
 
     def test_none_thumbnail_returns_none(self):
         """None thumbnail should return None."""
@@ -1144,7 +1144,7 @@ class TestSharedSession:
 
     @pytest.fixture
     def mock_hub(self):
-        """Create a mock SecuritasHub for setup tests."""
+        """Create a mock VerisureHub for setup tests."""
         hub = make_securitas_hub_mock()
         hub.client.list_installations = AsyncMock(
             return_value=[
@@ -1155,10 +1155,10 @@ class TestSharedSession:
         return hub
 
     def _setup_context(self, mock_hub):
-        """Return a context manager stack for patching SecuritasHub + dependencies."""
+        """Return a context manager stack for patching VerisureHub + dependencies."""
         return (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
         )
 
     async def test_first_entry_creates_session_with_ref_count_1(self, hass, mock_hub):
@@ -1170,7 +1170,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1201,7 +1201,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1233,7 +1233,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1271,7 +1271,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1309,7 +1309,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1348,7 +1348,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1381,7 +1381,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1395,9 +1395,9 @@ class TestSharedSession:
         assert entry_data["hub"] is mock_hub
         devices = entry_data["devices"]
         assert len(devices) == 1
-        assert isinstance(devices[0], SecuritasDirectDevice)
+        assert isinstance(devices[0], VerisureDevice)
         # Old backward-compat keys should NOT be present
-        assert SecuritasHub.__name__ not in hass.data[DOMAIN]
+        assert VerisureHub.__name__ not in hass.data[DOMAIN]
 
     async def test_legacy_entry_without_installation_gets_all(self, hass, mock_hub):
         """An entry without CONF_INSTALLATION should get all installations."""
@@ -1408,7 +1408,7 @@ class TestSharedSession:
 
         with (
             _patch_hub(mock_hub),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1442,7 +1442,7 @@ class TestAsyncMigrateEntry:
         )
         entry.add_to_hass(hass)
 
-        with patch("custom_components.securitas._notify") as mock_notify:
+        with patch("custom_components.verisure_owa._notify") as mock_notify:
             result = await async_migrate_entry(hass, entry)
 
         assert result is False
@@ -1465,7 +1465,7 @@ class TestAsyncMigrateEntry:
         )
         entry.add_to_hass(hass)
 
-        with patch("custom_components.securitas._notify"):
+        with patch("custom_components.verisure_owa._notify"):
             result = await async_migrate_entry(hass, entry)
 
         assert result is False
@@ -1513,10 +1513,10 @@ class TestPerDomainQueueSharing:
 
         # Set up entry1
         mock_cls1 = MagicMock(return_value=mock_hub1)
-        mock_cls1.__name__ = "SecuritasHub"
+        mock_cls1.__name__ = "VerisureHub"
         with (
-            patch("custom_components.securitas.SecuritasHub", mock_cls1),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.VerisureHub", mock_cls1),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1527,10 +1527,10 @@ class TestPerDomainQueueSharing:
 
         # Set up entry2
         mock_cls2 = MagicMock(return_value=mock_hub2)
-        mock_cls2.__name__ = "SecuritasHub"
+        mock_cls2.__name__ = "VerisureHub"
         with (
-            patch("custom_components.securitas.SecuritasHub", mock_cls2),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.VerisureHub", mock_cls2),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1564,10 +1564,10 @@ class TestPerDomainQueueSharing:
 
         # Set up ES entry
         mock_cls_es = MagicMock(return_value=mock_hub_es)
-        mock_cls_es.__name__ = "SecuritasHub"
+        mock_cls_es.__name__ = "VerisureHub"
         with (
-            patch("custom_components.securitas.SecuritasHub", mock_cls_es),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.VerisureHub", mock_cls_es),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1578,10 +1578,10 @@ class TestPerDomainQueueSharing:
 
         # Set up IT entry
         mock_cls_it = MagicMock(return_value=mock_hub_it)
-        mock_cls_it.__name__ = "SecuritasHub"
+        mock_cls_it.__name__ = "VerisureHub"
         with (
-            patch("custom_components.securitas.SecuritasHub", mock_cls_it),
-            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.verisure_owa.VerisureHub", mock_cls_it),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
             patch.object(
                 hass.config_entries,
                 "async_forward_entry_setups",
@@ -1606,7 +1606,7 @@ class TestDiscoverCameras:
     @pytest.mark.asyncio
     async def test_empty_camera_list_adds_no_entities(self):
         """When no cameras are found, camera_add_entities must not be called."""
-        from custom_components.securitas import _discover_cameras
+        from custom_components.verisure_owa import _discover_cameras
         from tests.conftest import make_installation
 
         hass = MagicMock()
@@ -1629,7 +1629,7 @@ class TestDiscoverCameras:
     async def test_exception_from_get_camera_devices_is_caught(self, caplog):
         """An exception in get_camera_devices must not propagate — log warning and continue."""
         import logging
-        from custom_components.securitas import _discover_cameras
+        from custom_components.verisure_owa import _discover_cameras
         from tests.conftest import make_installation
 
         hass = MagicMock()
@@ -1643,10 +1643,55 @@ class TestDiscoverCameras:
         }
         entry = MagicMock()
 
-        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
+        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
             # Must not raise
             await _discover_cameras(hass, hub, make_installation(), entry_data, entry)
 
         assert "Failed to get camera devices" in caplog.text
         camera_add.assert_not_called()
         button_add.assert_not_called()
+
+
+# ===========================================================================
+# Phase F3: Static-URL alias
+# ===========================================================================
+
+
+class TestStaticPathAliases:
+    """Verify that both /verisure_owa_panel and /securitas_panel are registered."""
+
+    @pytest.fixture
+    def mock_hub(self):
+        """Create a mock VerisureHub for setup tests."""
+        from tests.conftest import make_securitas_hub_mock, make_installation
+
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    async def test_static_paths_register_both_new_and_legacy(self, hass, mock_hub):
+        """Setup should register both /verisure_owa_panel and /securitas_panel."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch("custom_components.verisure_owa.frontend.add_extra_js_url"),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        hass.http.async_register_static_paths.assert_awaited_once()
+        call_args = hass.http.async_register_static_paths.call_args[0][0]
+        paths = [cfg.url_path for cfg in call_args]
+        assert "/verisure_owa_panel" in paths
+        assert "/securitas_panel" in paths

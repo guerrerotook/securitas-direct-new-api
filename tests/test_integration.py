@@ -1,4 +1,4 @@
-"""Integration tests for the Securitas Direct HA integration.
+"""Integration tests for the Verisure OWA HA integration.
 
 These tests exercise the full stack — from HA config-entry setup through to
 entities in the state machine — using a MockGraphQLServer that intercepts
@@ -14,9 +14,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
-from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    SecuritasDirectError,
+from custom_components.verisure_owa import DOMAIN, async_setup_entry, async_unload_entry
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    VerisureOwaError,
 )
 
 from .conftest import make_config_entry_data
@@ -73,7 +73,7 @@ async def _setup(
     entry = _make_entry(hass)
     mock_http = server.make_http_client()
     with patch(
-        "custom_components.securitas.async_get_clientsession",
+        "custom_components.verisure_owa.async_get_clientsession",
         return_value=mock_http,
     ):
         with patch(
@@ -145,14 +145,14 @@ async def test_setup_makes_only_expected_api_calls(
     mock_http = mock_server.make_http_client()
     with (
         patch(
-            "custom_components.securitas.async_get_clientsession",
+            "custom_components.verisure_owa.async_get_clientsession",
             return_value=mock_http,
         ),
         patch(
             "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
         ) as mock_fwd,
         patch(
-            "custom_components.securitas._async_discover_devices",
+            "custom_components.verisure_owa._async_discover_devices",
         ),
     ):
         mock_fwd.return_value = True
@@ -179,7 +179,7 @@ async def test_setup_makes_only_expected_api_calls(
 async def test_login_sets_auth_token(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """After login, SecuritasClient.authentication_token is set from the JWT."""
+    """After login, VerisureOwaClient.authentication_token is set from the JWT."""
     queue_standard_setup(mock_server, proto="D")
     entry, _ = await _setup(hass, mock_server)
 
@@ -331,7 +331,7 @@ async def test_setup_login_error_raises_auth_failed(
     mock_http = mock_server.make_http_client()
     with (
         patch(
-            "custom_components.securitas.async_get_clientsession",
+            "custom_components.verisure_owa.async_get_clientsession",
             return_value=mock_http,
         ),
         patch.object(hass, "async_create_task", MagicMock(side_effect=_close_coro)),
@@ -367,7 +367,7 @@ async def test_setup_2fa_error_raises_auth_failed(
     mock_http = mock_server.make_http_client()
     with (
         patch(
-            "custom_components.securitas.async_get_clientsession",
+            "custom_components.verisure_owa.async_get_clientsession",
             return_value=mock_http,
         ),
         patch.object(hass, "async_create_task", MagicMock(side_effect=_close_coro)),
@@ -393,7 +393,7 @@ async def test_setup_connection_error_raises_not_ready(
             raise ClientConnectorError(_conn_key, OSError("connection refused"))
 
     with patch(
-        "custom_components.securitas.async_get_clientsession",
+        "custom_components.verisure_owa.async_get_clientsession",
         return_value=_FailPost(),
     ):
         with pytest.raises(ConfigEntryNotReady):
@@ -452,7 +452,7 @@ async def test_services_with_sentinel(
     assert len(sentinel_services) == 1
 
 
-# ── Arm / Disarm via SecuritasClient ───────────────────────────────────────────────
+# ── Arm / Disarm via VerisureOwaClient ───────────────────────────────────────────────
 
 
 async def test_arm_away_api_call(hass: HomeAssistant, mock_server: MockGraphQLServer):
@@ -594,7 +594,7 @@ async def test_unload_removes_entry_id(
 async def test_graphql_error_response_raises(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """A GraphQL errors:{data:{reason:...}} response raises SecuritasDirectError."""
+    """A GraphQL errors:{data:{reason:...}} response raises VerisureOwaError."""
     from .mock_graphql import graphql_error
 
     queue_standard_setup(mock_server)
@@ -608,14 +608,14 @@ async def test_graphql_error_response_raises(
     # Queue an error for the next CheckAlarm call (overrides the default)
     mock_server.add_response("CheckAlarm", graphql_error("Some API error"))
 
-    with pytest.raises(SecuritasDirectError):
+    with pytest.raises(VerisureOwaError):
         await hub.client.check_alarm(installation)
 
 
 async def test_malformed_json_raises(
     hass: HomeAssistant, mock_server: MockGraphQLServer
 ):
-    """Malformed JSON response raises SecuritasDirectError."""
+    """Malformed JSON response raises VerisureOwaError."""
     from tests.mock_graphql import MockContextManager, MockResponse
 
     queue_standard_setup(mock_server)
@@ -630,5 +630,5 @@ async def test_malformed_json_raises(
     bad_response = MockContextManager(MockResponse("not-valid-json"))
     hub.client._transport._session.post = lambda *a, **kw: bad_response
 
-    with pytest.raises(SecuritasDirectError):
+    with pytest.raises(VerisureOwaError):
         await hub.client.check_alarm(installation)

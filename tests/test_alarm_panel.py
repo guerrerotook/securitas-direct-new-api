@@ -13,34 +13,34 @@ from homeassistant.components.alarm_control_panel.const import (
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     Installation,
     OperationStatus,
     SStatus,
 )
-from custom_components.securitas.securitas_direct_new_api.const import (
+from custom_components.verisure_owa.verisure_owa_api.const import (
     PERI_DEFAULTS,
     STATE_TO_COMMAND,
     STD_DEFAULTS,
-    SecuritasState,
+    VerisureOwaState,
 )
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
     ArmingExceptionError,
-    SecuritasDirectError,
+    VerisureOwaError,
 )
-from custom_components.securitas.alarm_control_panel import (
-    SecuritasAlarm,
+from custom_components.verisure_owa.alarm_control_panel import (
+    CombinedVerisureOwaAlarmPanel,
 )
-from custom_components.securitas.coordinators import (
+from custom_components.verisure_owa.coordinators import (
     AlarmCoordinator,
     AlarmStatusData,
 )
-from custom_components.securitas.securitas_direct_new_api.command_resolver import (
+from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
     AlarmState,
     InteriorMode,
     PerimeterMode,
 )
-from custom_components.securitas.const import (
+from custom_components.verisure_owa.const import (
     CONF_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
 )
@@ -75,7 +75,8 @@ class TestForceArmNotificationsConfig:
         assert alarm.client.config.get("force_arm_notifications") is False
 
     async def test_arming_exception_fires_event(self):
-        """ArmingExceptionError fires securitas_arming_exception event."""
+        """ArmingExceptionError fires both verisure_owa_arming_exception and
+        securitas_arming_exception events with the same payload."""
         alarm = make_alarm()
         alarm._state = AlarmControlPanelState.ARMING
         alarm._last_state = AlarmControlPanelState.DISARMED
@@ -96,15 +97,19 @@ class TestForceArmNotificationsConfig:
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
-        alarm.hass.bus.async_fire.assert_called_once()
-        call_args = alarm.hass.bus.async_fire.call_args
-        assert call_args[0][0] == "securitas_arming_exception"
-        event_data = call_args[0][1]
+        # Both events fired (new + legacy alias)
+        assert alarm.hass.bus.async_fire.call_count == 2
+        fired_event_names = [c[0][0] for c in alarm.hass.bus.async_fire.call_args_list]
+        assert "verisure_owa_arming_exception" in fired_event_names
+        assert "securitas_arming_exception" in fired_event_names
+        # Check payload from the first fire call (new event)
+        event_data = alarm.hass.bus.async_fire.call_args_list[0][0][1]
         assert event_data["entity_id"] == alarm.entity_id
         assert event_data["mode"] == AlarmControlPanelState.ARMED_HOME
         assert event_data["zones"] == ["Kitchen Door"]
         assert event_data["details"]["installation"] == "123456"
         assert event_data["details"]["exceptions"] == exc.exceptions
+        assert "_event_id" in event_data
 
     async def test_handler_creates_notifications_when_enabled(self):
         """Built-in handler creates persistent + mobile notifications when enabled."""
@@ -124,22 +129,22 @@ class TestForceArmNotificationsConfig:
         # Register the built-in handler (simulates async_added_to_hass)
         alarm._register_arming_exception_handler()
 
-        # Capture the callback that was registered with async_listen
+        # Capture the callback registered for the new canonical event
         listen_calls = alarm.hass.bus.async_listen.call_args_list
-        arming_exc_call = [
-            c for c in listen_calls if c[0][0] == "securitas_arming_exception"
+        new_exc_calls = [
+            c for c in listen_calls if c[0][0] == "verisure_owa_arming_exception"
         ]
-        assert len(arming_exc_call) == 1
-        handler_cb = arming_exc_call[0][0][1]
+        assert len(new_exc_calls) == 1
+        handler_cb = new_exc_calls[0][0][1]
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
-        # Event fired
-        alarm.hass.bus.async_fire.assert_called_once()
+        # Both events fired (new canonical + legacy alias)
+        assert alarm.hass.bus.async_fire.call_count == 2
 
-        # Manually invoke the captured handler with the event data
+        # Manually invoke the captured handler with the event data from the first fire
         # (since MagicMock bus doesn't actually dispatch)
-        fire_args = alarm.hass.bus.async_fire.call_args
+        fire_args = alarm.hass.bus.async_fire.call_args_list[0]
         mock_event = MagicMock()
         mock_event.data = fire_args[0][1]
         handler_cb(mock_event)
@@ -168,9 +173,9 @@ class TestForceArmNotificationsConfig:
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
-        # Event still fires
-        alarm.hass.bus.async_fire.assert_called_once()
-        # No notifications
+        # Both events still fire (new + legacy alias)
+        assert alarm.hass.bus.async_fire.call_count == 2
+        # No notifications (handler not registered because notifications disabled)
         alarm.hass.async_create_task.assert_not_called()
         # But force context is still stored
         assert alarm._force_context is not None
@@ -246,8 +251,8 @@ def make_alarm(
     has_peri=False,
     initial_status=None,
     code=None,
-) -> SecuritasAlarm:
-    """Create a SecuritasAlarm with mocked dependencies.
+) -> CombinedVerisureOwaAlarmPanel:
+    """Create a CombinedVerisureOwaAlarmPanel with mocked dependencies.
 
     ``code`` sets the CONF_CODE value that check_code() compares against.
     """
@@ -307,10 +312,14 @@ def make_alarm(
 
     # Patch Entity state-writing methods that require a running HA instance.
     with (
-        patch.object(SecuritasAlarm, "async_schedule_update_ha_state", MagicMock()),
-        patch.object(SecuritasAlarm, "async_write_ha_state", MagicMock()),
+        patch.object(
+            CombinedVerisureOwaAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+        ),
+        patch.object(
+            CombinedVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+        ),
     ):
-        alarm = SecuritasAlarm(
+        alarm = CombinedVerisureOwaAlarmPanel(
             installation=installation,
             client=client,
             hass=hass,
@@ -587,14 +596,14 @@ class TestSupportedFeatures:
         assert not (features & AlarmControlPanelEntityFeature.ARM_VACATION)
 
     def test_vacation_feature_when_mapped(self):
-        """Vacation feature is enabled when map_vacation is mapped to a Securitas mode."""
+        """Vacation feature is enabled when map_vacation is mapped to a Verisure mode."""
         config = {
             "PERI_alarm": False,
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
             "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": SecuritasState.TOTAL.value,
+            "map_vacation": VerisureOwaState.TOTAL.value,
             "scan_interval": 120,
         }
         alarm = make_alarm(config=config)
@@ -605,10 +614,10 @@ class TestSupportedFeatures:
         """If all mappings are not_used, no features are reported."""
         config = {
             "PERI_alarm": False,
-            "map_home": SecuritasState.NOT_USED.value,
-            "map_away": SecuritasState.NOT_USED.value,
-            "map_night": SecuritasState.NOT_USED.value,
-            "map_custom": SecuritasState.NOT_USED.value,
+            "map_home": VerisureOwaState.NOT_USED.value,
+            "map_away": VerisureOwaState.NOT_USED.value,
+            "map_night": VerisureOwaState.NOT_USED.value,
+            "map_custom": VerisureOwaState.NOT_USED.value,
             "scan_interval": 120,
         }
         alarm = make_alarm(config=config)
@@ -644,7 +653,7 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm("1234")
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, STATE_TO_COMMAND[SecuritasState.DISARMED]
+            alarm.installation, STATE_TO_COMMAND[VerisureOwaState.DISARMED]
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -666,12 +675,10 @@ class TestAsyncAlarmDisarm:
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto to issue disarm
 
-        alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("API down")
-        )
+        alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("API down"))
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm("1234")
 
@@ -795,7 +802,7 @@ class TestSetArmState:
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._last_state = AlarmControlPanelState.DISARMED
 
-        alarm.client.arm_alarm = AsyncMock(side_effect=SecuritasDirectError("timeout"))
+        alarm.client.arm_alarm = AsyncMock(side_effect=VerisureOwaError("timeout"))
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -810,7 +817,7 @@ class TestSetArmState:
         alarm._last_state = AlarmControlPanelState.ARMED_HOME
 
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("connection lost")
+            side_effect=VerisureOwaError("connection lost")
         )
         alarm.client.arm_alarm = AsyncMock(
             return_value=OperationStatus(
@@ -829,13 +836,13 @@ class TestSetArmState:
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_unmapped_mode_raises_error(self):
-        """If mode has no configured SecuritasState, notifies via arm_failed translation key."""
+        """If mode has no configured VerisureOwaState, notifies via arm_failed translation key."""
         config = {
             "PERI_alarm": False,
-            "map_home": SecuritasState.PARTIAL_DAY.value,
-            "map_away": SecuritasState.TOTAL.value,
-            "map_night": SecuritasState.PARTIAL_NIGHT.value,
-            "map_custom": SecuritasState.NOT_USED.value,
+            "map_home": VerisureOwaState.PARTIAL_DAY.value,
+            "map_away": VerisureOwaState.TOTAL.value,
+            "map_night": VerisureOwaState.PARTIAL_NIGHT.value,
+            "map_custom": VerisureOwaState.NOT_USED.value,
             "scan_interval": 120,
         }
         alarm = make_alarm(config=config)
@@ -843,7 +850,7 @@ class TestSetArmState:
         alarm.client.arm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
@@ -913,16 +920,16 @@ class TestProperties:
         alarm._state = "totally_invalid_state"
         assert alarm.alarm_state is None
 
-    def test_unique_id(self):
-        """unique_id is derived from installation number."""
+    def test_unique_id_uses_v5_schema(self):
+        """unique_id follows the v5 schema."""
         alarm = make_alarm()
-        assert alarm._attr_unique_id == "v4_securitas_direct.123456"
+        assert alarm._attr_unique_id == "v5_verisure_owa.123456"
 
     def test_device_info(self):
         """device_info contains correct manufacturer, model, and name."""
         alarm = make_alarm()
         info = alarm._attr_device_info
-        assert info["manufacturer"] == "Securitas Direct"  # type: ignore[typeddict-item]
+        assert info["manufacturer"] == "Verisure"  # type: ignore[typeddict-item]
         assert info["model"] == "SDVFAST"  # type: ignore[typeddict-item]
         assert info["name"] == "Home"  # type: ignore[typeddict-item]
         assert info["hw_version"] == "PLUS"  # type: ignore[typeddict-item]
@@ -941,15 +948,15 @@ class TestMappingTables:
         alarm = make_alarm(has_peri=False)
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_HOME]
-            == STATE_TO_COMMAND[SecuritasState.PARTIAL_DAY]
+            == STATE_TO_COMMAND[VerisureOwaState.PARTIAL_DAY]
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_AWAY]
-            == STATE_TO_COMMAND[SecuritasState.TOTAL]
+            == STATE_TO_COMMAND[VerisureOwaState.TOTAL]
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_NIGHT]
-            == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT]
+            == STATE_TO_COMMAND[VerisureOwaState.PARTIAL_NIGHT]
         )
         assert AlarmControlPanelState.ARMED_CUSTOM_BYPASS not in alarm._command_map
 
@@ -958,19 +965,19 @@ class TestMappingTables:
         alarm = make_alarm(has_peri=True)
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_HOME]
-            == STATE_TO_COMMAND[SecuritasState.PARTIAL_DAY]
+            == STATE_TO_COMMAND[VerisureOwaState.PARTIAL_DAY]
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_AWAY]
-            == STATE_TO_COMMAND[SecuritasState.TOTAL_PERI]
+            == STATE_TO_COMMAND[VerisureOwaState.TOTAL_PERI]
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_NIGHT]
-            == STATE_TO_COMMAND[SecuritasState.PARTIAL_NIGHT]
+            == STATE_TO_COMMAND[VerisureOwaState.PARTIAL_NIGHT]
         )
         assert (
             alarm._command_map[AlarmControlPanelState.ARMED_CUSTOM_BYPASS]
-            == STATE_TO_COMMAND[SecuritasState.PERI_ONLY]
+            == STATE_TO_COMMAND[VerisureOwaState.PERI_ONLY]
         )
 
     def test_std_status_map(self):
@@ -1125,24 +1132,20 @@ class TestForceState:
         assert alarm._operation_in_progress is False
 
     async def test_operation_in_progress_cleared_after_disarm_error(self):
-        """_operation_in_progress is cleared even when disarm raises SecuritasDirectError."""
+        """_operation_in_progress is cleared even when disarm raises VerisureOwaError."""
         alarm = make_alarm()
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto
-        alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("API error")
-        )
+        alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("API error"))
 
         await alarm.async_alarm_disarm()
 
         assert alarm._operation_in_progress is False
 
     async def test_operation_in_progress_cleared_after_arm_error(self):
-        """_operation_in_progress is cleared even when arm raises SecuritasDirectError."""
+        """_operation_in_progress is cleared even when arm raises VerisureOwaError."""
         alarm = make_alarm()
-        alarm.client.arm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("API error")
-        )
+        alarm.client.arm_alarm = AsyncMock(side_effect=VerisureOwaError("API error"))
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -1155,11 +1158,11 @@ class TestForceState:
         alarm._last_proto_code = "T"
 
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+            side_effect=VerisureOwaError("HTTP 403", http_status=403)
         )
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm("1234")
 
@@ -1178,11 +1181,11 @@ class TestForceState:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         alarm.client.arm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("HTTP 403", http_status=403)
+            side_effect=VerisureOwaError("HTTP 403", http_status=403)
         )
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -1249,7 +1252,7 @@ class TestForceState:
         assert call[1]["domain"] == "persistent_notification"
         assert call[1]["service"] == "dismiss"
         assert call[1]["service_data"]["notification_id"] == (
-            f"securitas.rate_limited_{alarm.installation.number}"
+            f"verisure_owa.rate_limited_{alarm.installation.number}"
         )
 
 
@@ -1280,19 +1283,23 @@ class TestAsyncWillRemoveFromHass:
         await alarm.async_will_remove_from_hass()
 
     async def test_unsubscribes_arming_event_listener(self):
-        """Calls _arming_event_unsub() when it is set."""
+        """Calls both _arming_event_unsub_new() and _arming_event_unsub_legacy() when set."""
         alarm = make_alarm()
-        arming_unsub_mock = MagicMock()
-        alarm._arming_event_unsub = arming_unsub_mock
+        new_unsub_mock = MagicMock()
+        legacy_unsub_mock = MagicMock()
+        alarm._arming_event_unsub_new = new_unsub_mock
+        alarm._arming_event_unsub_legacy = legacy_unsub_mock
 
         await alarm.async_will_remove_from_hass()
 
-        arming_unsub_mock.assert_called_once()
+        new_unsub_mock.assert_called_once()
+        legacy_unsub_mock.assert_called_once()
 
     async def test_handles_none_arming_event_unsub_gracefully(self):
-        """Handles None _arming_event_unsub gracefully (no crash)."""
+        """Handles None _arming_event_unsub_new/_legacy gracefully (no crash)."""
         alarm = make_alarm()
-        alarm._arming_event_unsub = None
+        alarm._arming_event_unsub_new = None
+        alarm._arming_event_unsub_legacy = None
         alarm._mobile_action_unsub = None
 
         # Should not raise
@@ -1415,7 +1422,7 @@ class TestHandleCoordinatorUpdate:
 
     def test_scan_interval_zero_keeps_force_context_retention(self):
         """scan_interval=0 still uses DEFAULT_SCAN_INTERVAL for force_context retention."""
-        from custom_components.securitas import DEFAULT_SCAN_INTERVAL
+        from custom_components.verisure_owa import DEFAULT_SCAN_INTERVAL
 
         alarm = make_alarm(
             config={
@@ -1571,10 +1578,10 @@ class TestArmMethods:
         config = {
             "PERI_alarm": False,
             "map_home": STD_DEFAULTS["map_home"],
-            "map_away": SecuritasState.NOT_USED.value,
+            "map_away": VerisureOwaState.NOT_USED.value,
             "map_night": STD_DEFAULTS["map_night"],
             "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": SecuritasState.TOTAL.value,
+            "map_vacation": VerisureOwaState.TOTAL.value,
             "scan_interval": 120,
         }
         alarm = make_alarm(config=config)
@@ -1732,7 +1739,7 @@ class TestForceArmContext:
         """_notify_force_arm_expired calls _notify with the force_arm_expired translation key."""
         alarm = make_alarm()
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             alarm._notify_force_arm_expired()
 
@@ -2048,7 +2055,7 @@ def _night_peri_config():
         "PERI_alarm": True,
         "map_home": PERI_DEFAULTS["map_home"],
         "map_away": PERI_DEFAULTS["map_away"],
-        "map_night": SecuritasState.PARTIAL_NIGHT_PERI.value,
+        "map_night": VerisureOwaState.PARTIAL_NIGHT_PERI.value,
         "map_custom": PERI_DEFAULTS["map_custom"],
         "scan_interval": 120,
     }
@@ -2067,7 +2074,7 @@ class TestCompoundArmCommands:
         async def track_arm(installation, command, **kwargs):
             calls.append(command)
             if command == "ARMNIGHT1PERI1":
-                raise SecuritasDirectError("does not exist", http_status=400)
+                raise VerisureOwaError("does not exist", http_status=400)
             proto = "Q" if command == "ARMNIGHT1" else "C"
             return OperationStatus(
                 operation_status="OK",
@@ -2200,12 +2207,12 @@ class TestCompoundArmCommands:
                     protom_response="Q",
                     protom_response_data="",
                 )
-            raise SecuritasDirectError("PERI1 failed")
+            raise VerisureOwaError("PERI1 failed")
 
         alarm.client.arm_alarm = arm_side_effect
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
@@ -2219,7 +2226,7 @@ class TestCompoundArmCommands:
 
     async def test_all_commands_already_unsupported_raises_no_supported_command(self):
         """When every command in a step is already marked unsupported, raise translated HomeAssistantError."""
-        from custom_components.securitas.securitas_direct_new_api.command_resolver import (
+        from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
             CommandStep,
         )
 
@@ -2232,7 +2239,7 @@ class TestCompoundArmCommands:
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm._execute_step(step)
 
-        assert excinfo.value.translation_domain == "securitas"
+        assert excinfo.value.translation_domain == "verisure_owa"
         assert excinfo.value.translation_key == "no_supported_command"
 
     async def test_all_alternatives_fail_raises_unsupported_alarm_mode(self):
@@ -2242,13 +2249,13 @@ class TestCompoundArmCommands:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         alarm.client.arm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("API error", http_status=400)
+            side_effect=VerisureOwaError("API error", http_status=400)
         )
 
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
-        assert excinfo.value.translation_domain == "securitas"
+        assert excinfo.value.translation_domain == "verisure_owa"
         assert excinfo.value.translation_key == "unsupported_alarm_mode"
         # Tried compound ARMNIGHT1PERI1 then ARMNIGHT1 (first sub-cmd of ARMNIGHT1+PERI1)
         assert alarm.client.arm_alarm.call_count == 2
@@ -2288,7 +2295,7 @@ class TestCompoundArmCommands:
 
         Marking on any non-None status would let a one-off 503 freeze a working
         command for the rest of the HA session. set_arm_state catches the
-        SecuritasDirectError; the observable is that the command is NOT in
+        VerisureOwaError; the observable is that the command is NOT in
         the unsupported set and only one API call was attempted (no fallback
         cascade).
         """
@@ -2297,10 +2304,10 @@ class TestCompoundArmCommands:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         alarm.client.arm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("Internal server error", http_status=503)
+            side_effect=VerisureOwaError("Internal server error", http_status=503)
         )
 
-        # set_arm_state catches and handles SecuritasDirectError internally
+        # set_arm_state catches and handles VerisureOwaError internally
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
         # Command must NOT be marked unsupported on transient server errors
@@ -2336,7 +2343,7 @@ class TestCompoundArmCommands:
         alarm._last_state = AlarmControlPanelState.DISARMED
 
         alarm.client.arm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError(
+            side_effect=VerisureOwaError(
                 "alarm-manager.alarm_process_error", http_status=409
             )
         )
@@ -2359,7 +2366,7 @@ class TestCompoundArmCommands:
         async def arm_side_effect(installation, command, **kwargs):
             calls.append(command)
             if command == "ARMNIGHT1PERI1":
-                raise SecuritasDirectError(
+                raise VerisureOwaError(
                     'Value "ARMNIGHT1PERI1" does not exist in "ArmCodeRequest" enum.',
                     http_status=400,
                 )
@@ -2395,7 +2402,7 @@ class TestCompoundArmCommands:
         async def track_arm(installation, command, **kwargs):
             calls.append(command)
             if command in ("ARMINTEXT1", "ARM1PERI1"):
-                raise SecuritasDirectError("does not exist", http_status=400)
+                raise VerisureOwaError("does not exist", http_status=400)
             proto = "T" if command == "ARM1" else "A"
             return OperationStatus(
                 operation_status="OK",
@@ -2419,7 +2426,7 @@ class TestCompoundArmCommands:
         """ARMDAY1PERI1 falls back to ARMDAY1 + PERI1 on panel rejection."""
         config = {
             "PERI_alarm": True,
-            "map_home": SecuritasState.PARTIAL_DAY_PERI.value,
+            "map_home": VerisureOwaState.PARTIAL_DAY_PERI.value,
             "map_away": PERI_DEFAULTS["map_away"],
             "map_night": PERI_DEFAULTS["map_night"],
             "map_custom": PERI_DEFAULTS["map_custom"],
@@ -2433,7 +2440,7 @@ class TestCompoundArmCommands:
         async def track_arm(installation, command, **kwargs):
             calls.append(command)
             if command == "ARMDAY1PERI1":
-                raise SecuritasDirectError("does not exist", http_status=400)
+                raise VerisureOwaError("does not exist", http_status=400)
             proto = "P" if command == "ARMDAY1" else "B"
             return OperationStatus(
                 operation_status="OK",
@@ -2496,7 +2503,7 @@ class TestDynamicDisarm:
         async def disarm_side_effect(installation, command):
             calls.append(command)
             if command == "DARM1DARMPERI":
-                raise SecuritasDirectError("404 not found", http_status=400)
+                raise VerisureOwaError("404 not found", http_status=400)
             return OperationStatus(
                 operation_status="OK",
                 message="",
@@ -2544,9 +2551,7 @@ class TestDynamicDisarm:
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto
 
-        alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("API down")
-        )
+        alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("API down"))
 
         await alarm.async_alarm_disarm()
 
@@ -2582,13 +2587,13 @@ class TestDynamicDisarm:
         alarm._last_state = AlarmControlPanelState.ARMED_HOME
 
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("permanent failure", http_status=400)
+            side_effect=VerisureOwaError("permanent failure", http_status=400)
         )
 
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm.async_alarm_disarm()
 
-        assert excinfo.value.translation_domain == "securitas"
+        assert excinfo.value.translation_domain == "verisure_owa"
         assert excinfo.value.translation_key == "unsupported_alarm_mode"
         assert alarm.client.disarm_alarm.call_count == 2
         assert alarm._state == AlarmControlPanelState.ARMED_HOME
@@ -2601,13 +2606,13 @@ class TestDynamicDisarm:
         alarm._last_state = AlarmControlPanelState.ARMED_AWAY
 
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError(
+            side_effect=VerisureOwaError(
                 "alarm-manager.alarm_process_error", http_status=409
             )
         )
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -2628,12 +2633,12 @@ class TestDynamicDisarm:
         alarm._last_state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto
 
-        _err = SecuritasDirectError("API error message", http_status=500)
+        _err = VerisureOwaError("API error message", http_status=500)
         _err.response_body = {"response": "data", "auth": "secret-token"}
         alarm.client.disarm_alarm = AsyncMock(side_effect=_err)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -2654,7 +2659,7 @@ class TestDynamicDisarm:
         async def track_disarm(installation, command):
             disarm_calls.append(command)
             if command == "DARM1DARMPERI":
-                raise SecuritasDirectError("404 not found", http_status=400)
+                raise VerisureOwaError("404 not found", http_status=400)
             return OperationStatus(protom_response="D", operation_status="OK")
 
         alarm.client.disarm_alarm = track_disarm
@@ -2705,7 +2710,7 @@ class TestExecuteTransition:
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=[
-                SecuritasDirectError("unsupported", http_status=400),
+                VerisureOwaError("unsupported", http_status=400),
                 OperationStatus(protom_response="D", operation_status="OK"),
             ]
         )
@@ -2722,7 +2727,7 @@ class TestExecuteTransition:
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
             side_effect=[
-                SecuritasDirectError("unsupported", http_status=400),
+                VerisureOwaError("unsupported", http_status=400),
                 OperationStatus(protom_response="D", operation_status="OK"),
             ]
         )
@@ -2736,9 +2741,9 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("busy", http_status=409)
+            side_effect=VerisureOwaError("busy", http_status=409)
         )
-        with pytest.raises(SecuritasDirectError, match="busy"):
+        with pytest.raises(VerisureOwaError, match="busy"):
             await alarm._execute_transition(
                 AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
@@ -2749,11 +2754,9 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError(
-                "HTTP 403 from Securitas API", http_status=403
-            )
+            side_effect=VerisureOwaError("HTTP 403 from Securitas API", http_status=403)
         )
-        with pytest.raises(SecuritasDirectError, match="403"):
+        with pytest.raises(VerisureOwaError, match="403"):
             await alarm._execute_transition(
                 AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
@@ -2768,9 +2771,9 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("Disarm command failed: TECHNICAL_ERROR"),
+            side_effect=VerisureOwaError("Disarm command failed: TECHNICAL_ERROR"),
         )
-        with pytest.raises(SecuritasDirectError, match="TECHNICAL_ERROR"):
+        with pytest.raises(VerisureOwaError, match="TECHNICAL_ERROR"):
             await alarm._execute_transition(
                 AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
             )
@@ -2786,7 +2789,7 @@ class TestExecuteTransition:
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"
         alarm.client.disarm_alarm = AsyncMock(
-            side_effect=SecuritasDirectError("fail", http_status=400)
+            side_effect=VerisureOwaError("fail", http_status=400)
         )
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm._execute_transition(
@@ -2975,6 +2978,7 @@ _FAKE_NOTIFICATION_ENTRY = {
 }
 
 
+@pytest.mark.asyncio
 class TestNotificationContent:
     """Tests for arming exception notification content (event-driven path)."""
 
@@ -2998,7 +3002,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3008,7 +3012,7 @@ class TestNotificationContent:
         sd = pn_call[1]["service_data"]
         assert sd["title"] == "TITLE"
         assert "- Kitchen Door" in sd["message"]
-        assert sd["notification_id"] == "securitas.arming_exception_123456"
+        assert sd["notification_id"] == "verisure_owa.arming_exception_123456"
 
     async def test_persistent_notification_unknown_sensor_fallback(self):
         """When zones list is empty, sensor_list placeholder uses unknown-sensor fallback."""
@@ -3016,7 +3020,7 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3035,7 +3039,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3046,7 +3050,7 @@ class TestNotificationContent:
             if c[1]["domain"] == "notify"
         )
         data = mobile_call[1]["service_data"]["data"]
-        assert data["tag"] == "securitas.arming_exception_123456"
+        assert data["tag"] == "verisure_owa.arming_exception_123456"
 
     async def test_mobile_notification_action_buttons_translated(self):
         """Mobile action button titles come from translations."""
@@ -3055,7 +3059,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3079,7 +3083,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3099,7 +3103,7 @@ class TestNotificationContent:
         event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3121,7 +3125,7 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3138,7 +3142,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3148,7 +3152,7 @@ class TestNotificationContent:
         sd = calls[0][1]["service_data"]
         assert sd["title"] == "TITLE"
         assert "Kitchen Door" in sd["message"]
-        assert sd["notification_id"] == "securitas.arming_exception_123456"
+        assert sd["notification_id"] == "verisure_owa.arming_exception_123456"
 
     def test_event_handler_schedules_async_helper(self):
         """The sync event handler schedules the async helper via async_create_task."""
@@ -3180,7 +3184,7 @@ class TestDismissNotification:
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         assert pn_call[1]["service"] == "dismiss"
         assert pn_call[1]["service_data"] == {
-            "notification_id": "securitas.arming_exception_123456"
+            "notification_id": "verisure_owa.arming_exception_123456"
         }
 
     def test_dismiss_mobile_notification_with_notify_group(self):
@@ -3195,7 +3199,7 @@ class TestDismissNotification:
         assert mobile_call[1]["service"] == "mobile_app_phone"
         assert mobile_call[1]["service_data"] == {
             "message": "clear_notification",
-            "data": {"tag": "securitas.arming_exception_123456"},
+            "data": {"tag": "verisure_owa.arming_exception_123456"},
         }
 
     def test_dismiss_no_mobile_without_notify_group(self):
@@ -3232,7 +3236,7 @@ class TestDismissNotification:
         assert mobile_call[1]["service_data"]["message"] == "clear_notification"
         assert (
             mobile_call[1]["service_data"]["data"]["tag"]
-            == "securitas.arming_exception_123456"
+            == "verisure_owa.arming_exception_123456"
         )
         # Context should be cleared
         assert alarm._force_context is None
@@ -3386,7 +3390,7 @@ class TestForceArmWorkflow:
         )
         assert (
             pn_dismiss[1]["service_data"]["notification_id"]
-            == "securitas.arming_exception_123456"
+            == "verisure_owa.arming_exception_123456"
         )
 
     async def test_full_cancel_workflow(self):
@@ -3509,24 +3513,22 @@ class TestHassNoneGuardsAlarm:
 
 
 # ===========================================================================
-# Per-panel hook surface tests (Task 12)
-# ===========================================================================
 
 
 class TestPanelHooks:
     def test_base_resolve_target_state_raises(self):
-        from custom_components.securitas.alarm_control_panel import (
-            BaseSecuritasAlarmPanel,
+        from custom_components.verisure_owa.alarm_control_panel import (
+            BaseVerisureOwaAlarmPanel,
         )
 
         with pytest.raises(NotImplementedError):
-            BaseSecuritasAlarmPanel._resolve_target_state(None, "armed_home")  # type: ignore[arg-type]
+            BaseVerisureOwaAlarmPanel._resolve_target_state(None, "armed_home")  # type: ignore[arg-type]
 
     def test_base_extract_state_raises(self):
-        from custom_components.securitas.alarm_control_panel import (
-            BaseSecuritasAlarmPanel,
+        from custom_components.verisure_owa.alarm_control_panel import (
+            BaseVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -3534,11 +3536,11 @@ class TestPanelHooks:
 
         joint = AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         with pytest.raises(NotImplementedError):
-            BaseSecuritasAlarmPanel._extract_state(None, joint)  # type: ignore[arg-type]
+            BaseVerisureOwaAlarmPanel._extract_state(None, joint)  # type: ignore[arg-type]
 
 
 # ===========================================================================
-# InteriorSecuritasAlarmPanel sub-panel tests (Task 13)
+# InteriorVerisureOwaAlarmPanel sub-panel tests (Task 13)
 # ===========================================================================
 
 
@@ -3546,11 +3548,11 @@ def _make_interior_panel(
     capabilities: frozenset = frozenset(["ARM", "ARMDAY", "ARMNIGHT"]),
     current_state=None,
 ):
-    """Build an InteriorSecuritasAlarmPanel with mocked dependencies."""
-    from custom_components.securitas.alarm_control_panel import (
-        InteriorSecuritasAlarmPanel,
+    """Build an InteriorVerisureOwaAlarmPanel with mocked dependencies."""
+    from custom_components.verisure_owa.alarm_control_panel import (
+        InteriorVerisureOwaAlarmPanel,
     )
-    from custom_components.securitas.securitas_direct_new_api.models import (
+    from custom_components.verisure_owa.verisure_owa_api.models import (
         AnnexMode,
         InteriorMode,
         PerimeterMode,
@@ -3581,22 +3583,24 @@ def _make_interior_panel(
 
     with (
         patch.object(
-            InteriorSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+            InteriorVerisureOwaAlarmPanel, "async_schedule_update_ha_state", MagicMock()
         ),
-        patch.object(InteriorSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+        patch.object(
+            InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+        ),
     ):
-        return InteriorSecuritasAlarmPanel(installation, client, hass, coordinator)
+        return InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
 
 
 def _make_perimeter_panel(
     capabilities: frozenset = frozenset(["PERI"]),
     current_state=None,
 ):
-    """Build a PerimeterSecuritasAlarmPanel with mocked dependencies."""
-    from custom_components.securitas.alarm_control_panel import (
-        PerimeterSecuritasAlarmPanel,
+    """Build a PerimeterVerisureOwaAlarmPanel with mocked dependencies."""
+    from custom_components.verisure_owa.alarm_control_panel import (
+        PerimeterVerisureOwaAlarmPanel,
     )
-    from custom_components.securitas.securitas_direct_new_api.models import (
+    from custom_components.verisure_owa.verisure_owa_api.models import (
         AnnexMode,
         InteriorMode,
         PerimeterMode,
@@ -3627,11 +3631,15 @@ def _make_perimeter_panel(
 
     with (
         patch.object(
-            PerimeterSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+            PerimeterVerisureOwaAlarmPanel,
+            "async_schedule_update_ha_state",
+            MagicMock(),
         ),
-        patch.object(PerimeterSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+        patch.object(
+            PerimeterVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+        ),
     ):
-        return PerimeterSecuritasAlarmPanel(installation, client, hass, coordinator)
+        return PerimeterVerisureOwaAlarmPanel(installation, client, hass, coordinator)
 
 
 class TestInteriorSubPanel:
@@ -3659,7 +3667,7 @@ class TestInteriorSubPanel:
             assert feats & F.ARM_AWAY, f"ARM_AWAY missing for caps={caps}"
 
     def test_resolve_target_state_armed_away(self):
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -3681,7 +3689,7 @@ class TestInteriorSubPanel:
 
     def test_resolve_target_disarmed_preserves_perimeter_and_annex(self):
         """Disarming the interior sub-panel must NOT touch perimeter or annex."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -3701,7 +3709,7 @@ class TestInteriorSubPanel:
         assert target.annex == AnnexMode.ON  # preserved
 
     def test_extract_state_only_reads_interior(self):
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -3740,7 +3748,7 @@ class TestPerimeterSubPanel:
         assert not (feats & F.ARM_NIGHT)
 
     def test_resolve_target_armed_away(self):
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -3761,7 +3769,7 @@ class TestPerimeterSubPanel:
 
     def test_resolve_target_disarmed_preserves_interior_and_annex(self):
         """Disarming the perimeter sub-panel must NOT touch interior or annex."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -3787,7 +3795,7 @@ class TestPerimeterSubPanel:
         (full disarm) and on fallback DARM1, which on SDVFAST disarms everything
         — wiping interior even though the user only meant to disarm perimeter.
         """
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -3824,7 +3832,7 @@ class TestPerimeterSubPanel:
         assert target.annex == AnnexMode.OFF  # preserved
 
     def test_extract_state(self):
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -3860,11 +3868,11 @@ def _make_annex_panel(
     capabilities: frozenset = frozenset(["ARMANNEX", "DARMANNEX"]),
     current_state=None,
 ):
-    """Build an AnnexSecuritasAlarmPanel with mocked dependencies."""
-    from custom_components.securitas.alarm_control_panel import (
-        AnnexSecuritasAlarmPanel,
+    """Build an AnnexVerisureOwaAlarmPanel with mocked dependencies."""
+    from custom_components.verisure_owa.alarm_control_panel import (
+        AnnexVerisureOwaAlarmPanel,
     )
-    from custom_components.securitas.securitas_direct_new_api.models import (
+    from custom_components.verisure_owa.verisure_owa_api.models import (
         AnnexMode,
         InteriorMode,
         PerimeterMode,
@@ -3895,11 +3903,11 @@ def _make_annex_panel(
 
     with (
         patch.object(
-            AnnexSecuritasAlarmPanel, "async_schedule_update_ha_state", MagicMock()
+            AnnexVerisureOwaAlarmPanel, "async_schedule_update_ha_state", MagicMock()
         ),
-        patch.object(AnnexSecuritasAlarmPanel, "async_write_ha_state", MagicMock()),
+        patch.object(AnnexVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()),
     ):
-        return AnnexSecuritasAlarmPanel(installation, client, hass, coordinator)
+        return AnnexVerisureOwaAlarmPanel(installation, client, hass, coordinator)
 
 
 class TestAnnexSubPanel:
@@ -3915,7 +3923,7 @@ class TestAnnexSubPanel:
         assert not (feats & F.ARM_NIGHT)
 
     def test_resolve_armed_away_preserves_other_axes(self):
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -3936,7 +3944,7 @@ class TestAnnexSubPanel:
 
     def test_resolve_target_disarmed_preserves_interior_and_perimeter(self):
         """Disarming the annex sub-panel must NOT touch interior or perimeter."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -3956,7 +3964,7 @@ class TestAnnexSubPanel:
         assert s.perimeter == PerimeterMode.ON  # preserved
 
     def test_extract_state(self):
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -4002,7 +4010,7 @@ class TestSubPanelStateExtraction:
 
     def test_interior_update_from_coordinator_uses_extract_state(self):
         """Interior panel derives state from joint state, ignoring user mapping."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4028,7 +4036,7 @@ class TestSubPanelStateExtraction:
 
     def test_interior_update_from_coordinator_disarmed(self):
         """Interior panel shows DISARMED when joint interior axis is OFF."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4051,7 +4059,7 @@ class TestSubPanelStateExtraction:
 
     def test_interior_update_status_alarm_uses_extract_state(self):
         """update_status_alarm uses _extract_state after a successful arm operation."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4083,7 +4091,7 @@ class TestSubPanelStateExtraction:
 
     def test_perimeter_update_from_coordinator_uses_extract_state(self):
         """Perimeter panel derives state from perimeter axis only."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4105,7 +4113,7 @@ class TestSubPanelStateExtraction:
 
     def test_perimeter_update_from_coordinator_off(self):
         """Perimeter panel shows DISARMED when perimeter axis is OFF."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4128,7 +4136,7 @@ class TestSubPanelStateExtraction:
 
     def test_annex_update_from_coordinator_uses_extract_state(self):
         """Annex panel derives state from annex axis only."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4150,7 +4158,7 @@ class TestSubPanelStateExtraction:
 
     def test_annex_update_from_coordinator_off(self):
         """Annex panel shows DISARMED when annex axis is OFF."""
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4190,7 +4198,7 @@ class TestSubPanelStateExtraction:
         wouldn't update and the resolver could compute transitions from
         a stale state.
         """
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4219,7 +4227,7 @@ class TestSubPanelStateExtraction:
         code isn't recognised. Without guarding, _extract_state would then
         report DISARMED — wrong if the system is actually armed.
         """
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -4275,8 +4283,10 @@ class TestSubPanelSetup:
 
     def _setup_kwargs(self, *, options: dict, has_peri: bool, has_annex: bool):
         """Build hass/entry/coordinator suitable for invoking async_setup_entry."""
-        from custom_components.securitas.const import DOMAIN
-        from custom_components.securitas import SecuritasDirectDevice
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa import (
+            VerisureDevice,
+        )
 
         installation = Installation(
             number="123456",
@@ -4286,7 +4296,7 @@ class TestSubPanelSetup:
             address="123 St",
             city="Madrid",
         )
-        device = MagicMock(spec=SecuritasDirectDevice)
+        device = MagicMock(spec=VerisureDevice)
         device.installation = installation
 
         client = MagicMock()
@@ -4323,9 +4333,9 @@ class TestSubPanelSetup:
 
     @pytest.mark.asyncio
     async def test_only_combined_when_no_toggles(self):
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
-            CombinedSecuritasAlarmPanel,
+            CombinedVerisureOwaAlarmPanel,
         )
 
         hass, entry = self._setup_kwargs(options={}, has_peri=True, has_annex=True)
@@ -4335,11 +4345,11 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         assert len(added) == 1
-        assert isinstance(added[0], CombinedSecuritasAlarmPanel)
+        assert isinstance(added[0], CombinedVerisureOwaAlarmPanel)
 
     @pytest.mark.asyncio
     async def test_perimeter_panel_created_when_toggle_on_even_if_caps_not_yet_detected(
@@ -4352,11 +4362,11 @@ class TestSubPanelSetup:
         refresh sees the entity ready to serve. Otherwise the user has to
         reload the integration to recover.
         """
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
-            PerimeterSecuritasAlarmPanel,
+            PerimeterVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas.const import CONF_ENABLE_PERIMETER_PANEL
+        from custom_components.verisure_owa.const import CONF_ENABLE_PERIMETER_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_PERIMETER_PANEL: True},
@@ -4369,10 +4379,10 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
-        assert any(isinstance(p, PerimeterSecuritasAlarmPanel) for p in added)
+        assert any(isinstance(p, PerimeterVerisureOwaAlarmPanel) for p in added)
 
     @pytest.mark.asyncio
     async def test_annex_panel_created_when_toggle_on_even_if_caps_not_yet_detected(
@@ -4381,11 +4391,11 @@ class TestSubPanelSetup:
         """See test_perimeter_panel_created_when_toggle_on_even_if_caps_not_yet_detected
         for the rationale — saved toggle is the source of truth.
         """
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
-            AnnexSecuritasAlarmPanel,
+            AnnexVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas.const import CONF_ENABLE_ANNEX_PANEL
+        from custom_components.verisure_owa.const import CONF_ENABLE_ANNEX_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_ANNEX_PANEL: True},
@@ -4398,10 +4408,10 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
-        assert any(isinstance(p, AnnexSecuritasAlarmPanel) for p in added)
+        assert any(isinstance(p, AnnexVerisureOwaAlarmPanel) for p in added)
 
     @pytest.mark.asyncio
     async def test_interior_panel_created_when_capability_present_no_siblings_enabled(
@@ -4413,11 +4423,11 @@ class TestSubPanelSetup:
         capability-gated (not toggle-gated) in the options flow; the
         entity-creation guard must match.
         """
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
-            InteriorSecuritasAlarmPanel,
+            InteriorVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
+        from custom_components.verisure_owa.const import CONF_ENABLE_INTERIOR_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_INTERIOR_PANEL: True},
@@ -4430,10 +4440,10 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
-        assert any(isinstance(p, InteriorSecuritasAlarmPanel) for p in added)
+        assert any(isinstance(p, InteriorVerisureOwaAlarmPanel) for p in added)
 
     @pytest.mark.asyncio
     async def test_interior_panel_created_when_toggle_on_even_if_caps_not_yet_detected(
@@ -4444,11 +4454,11 @@ class TestSubPanelSetup:
         (the toggle is hidden in options otherwise). Don't let a transient
         capability-detection failure at startup permanently hide the entity.
         """
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
-            InteriorSecuritasAlarmPanel,
+            InteriorVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
+        from custom_components.verisure_owa.const import CONF_ENABLE_INTERIOR_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_INTERIOR_PANEL: True},
@@ -4461,17 +4471,17 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
-        assert any(isinstance(p, InteriorSecuritasAlarmPanel) for p in added)
+        assert any(isinstance(p, InteriorVerisureOwaAlarmPanel) for p in added)
 
     @pytest.mark.asyncio
     async def test_all_three_subpanels_with_full_capabilities(self):
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
         )
-        from custom_components.securitas.const import (
+        from custom_components.verisure_owa.const import (
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
             CONF_ENABLE_ANNEX_PANEL,
@@ -4492,25 +4502,25 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         types = {type(p).__name__ for p in added}
         assert types == {
-            "CombinedSecuritasAlarmPanel",
-            "InteriorSecuritasAlarmPanel",
-            "PerimeterSecuritasAlarmPanel",
-            "AnnexSecuritasAlarmPanel",
+            "CombinedVerisureOwaAlarmPanel",
+            "InteriorVerisureOwaAlarmPanel",
+            "PerimeterVerisureOwaAlarmPanel",
+            "AnnexVerisureOwaAlarmPanel",
         }
 
     @pytest.mark.asyncio
     async def test_alarm_entities_lookup_only_combined(self):
         """Combined panel is the one registered in alarm_entities for force_arm services."""
-        from custom_components.securitas.alarm_control_panel import (
+        from custom_components.verisure_owa.alarm_control_panel import (
             async_setup_entry,
-            CombinedSecuritasAlarmPanel,
+            CombinedVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas.const import (
+        from custom_components.verisure_owa.const import (
             DOMAIN,
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
@@ -4532,9 +4542,71 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         lookup = hass.data[DOMAIN]["alarm_entities"]
         assert set(lookup.keys()) == {"123456"}
-        assert isinstance(lookup["123456"], CombinedSecuritasAlarmPanel)
+        assert isinstance(lookup["123456"], CombinedVerisureOwaAlarmPanel)
+
+
+# Phase F: Service / Event / Static-URL aliases
+# ===========================================================================
+
+
+async def test_legacy_force_arm_service_forwards_to_new(hass, caplog):
+    """securitas.force_arm calls the same handler as verisure_owa.force_arm."""
+    import logging
+    from custom_components.verisure_owa import register_legacy_service_aliases
+
+    new_called = []
+
+    async def fake_handler(call):
+        new_called.append(dict(call.data))
+
+    hass.services.async_register("verisure_owa", "force_arm", fake_handler)
+    register_legacy_service_aliases(hass)
+    with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+        await hass.services.async_call(
+            "securitas",
+            "force_arm",
+            {"entity_id": "alarm_control_panel.x"},
+            blocking=True,
+        )
+    assert new_called == [{"entity_id": "alarm_control_panel.x"}]
+    # Deprecation warning was logged.
+    assert any(
+        "deprecated" in r.message.lower() and "force_arm" in r.message
+        for r in caplog.records
+    )
+
+
+async def test_arming_exception_fires_both_legacy_and_new_events(hass):
+    """_fire_arming_exception_event fires both verisure_owa_arming_exception
+    and securitas_arming_exception with the same payload (including _event_id)."""
+    legacy_events = []
+    new_events = []
+    hass.bus.async_listen(
+        "securitas_arming_exception", lambda e: legacy_events.append(e)
+    )
+    hass.bus.async_listen(
+        "verisure_owa_arming_exception", lambda e: new_events.append(e)
+    )
+
+    alarm = make_alarm()
+    alarm.hass = hass
+
+    exc = ArmingExceptionError(
+        "ref-1",
+        "suid-1",
+        [{"alias": "Window 1", "status": "0", "deviceType": "MG", "zone_id": "3"}],
+    )
+    alarm._fire_arming_exception_event(exc, mode="ARM_HOME")
+    await hass.async_block_till_done()
+
+    assert len(legacy_events) == 1
+    assert len(new_events) == 1
+    # Both events carry identical payloads (same dict object under the hood).
+    assert legacy_events[0].data == new_events[0].data
+    # _event_id is present in the payload.
+    assert "_event_id" in legacy_events[0].data

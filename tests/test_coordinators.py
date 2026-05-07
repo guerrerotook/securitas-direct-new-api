@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.securitas.coordinators import (
+from custom_components.verisure_owa.coordinators import (
     ActivityCoordinator,
     ActivityData,
     AlarmCoordinator,
@@ -24,14 +24,16 @@ from custom_components.securitas.coordinators import (
     SentinelCoordinator,
     SentinelData,
 )
-from custom_components.securitas.api_queue import ApiQueue
-from custom_components.securitas.securitas_direct_new_api.client import SecuritasClient
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    SecuritasDirectError,
+from custom_components.verisure_owa.api_queue import ApiQueue
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
+)
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    VerisureOwaError,
     SessionExpiredError,
     WAFBlockedError,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
     CameraDevice,
@@ -42,9 +44,7 @@ from custom_components.securitas.securitas_direct_new_api.models import (
     SStatus,
     ThumbnailResponse,
 )
-
 from .conftest import make_installation
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -57,8 +57,8 @@ def _make_hass() -> MagicMock:
 
 
 def _make_client() -> AsyncMock:
-    """Create a mock SecuritasClient with async methods."""
-    client = AsyncMock(spec=SecuritasClient)
+    """Create a mock VerisureOwaClient with async methods."""
+    client = AsyncMock(spec=VerisureOwaClient)
     client.protom_response = ""
     return client
 
@@ -142,7 +142,7 @@ class TestAlarmCoordinator:
         installation = _make_installation()
 
         client.get_general_status.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = SecuritasDirectError("login failed")
+        client.login.side_effect = VerisureOwaError("login failed")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):
@@ -176,13 +176,13 @@ class TestAlarmCoordinator:
 
     @pytest.mark.asyncio
     async def test_generic_error_raises_update_failed(self):
-        """Generic SecuritasDirectError raises UpdateFailed."""
+        """Generic VerisureOwaError raises UpdateFailed."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
-        client.get_general_status.side_effect = SecuritasDirectError("some error")
+        client.get_general_status.side_effect = VerisureOwaError("some error")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):
@@ -297,13 +297,13 @@ class TestSentinelCoordinator:
 
     @pytest.mark.asyncio
     async def test_generic_error_raises_update_failed(self):
-        """Generic SecuritasDirectError raises UpdateFailed."""
+        """Generic VerisureOwaError raises UpdateFailed."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
-        client.get_sentinel_data.side_effect = SecuritasDirectError("error")
+        client.get_sentinel_data.side_effect = VerisureOwaError("error")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):
@@ -374,7 +374,7 @@ class TestLockCoordinator:
         installation = _make_installation()
 
         client.get_lock_modes.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = SecuritasDirectError("login failed")
+        client.login.side_effect = VerisureOwaError("login failed")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):
@@ -382,13 +382,13 @@ class TestLockCoordinator:
 
     @pytest.mark.asyncio
     async def test_generic_error_raises_update_failed(self):
-        """Generic SecuritasDirectError raises UpdateFailed."""
+        """Generic VerisureOwaError raises UpdateFailed."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
-        client.get_lock_modes.side_effect = SecuritasDirectError("error")
+        client.get_lock_modes.side_effect = VerisureOwaError("error")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):
@@ -462,7 +462,7 @@ class TestCameraCoordinator:
 
         thumb1 = ThumbnailResponse(image="base64data1")
         client.get_thumbnail.side_effect = [
-            SecuritasDirectError("camera error"),
+            VerisureOwaError("camera error"),
             thumb1,
         ]
 
@@ -497,7 +497,7 @@ class TestCameraCoordinator:
         # Second fetch — first camera fails, second succeeds
         thumb1_new = ThumbnailResponse(image="base64data1_new")
         client.get_thumbnail.side_effect = [
-            SecuritasDirectError("camera error"),
+            VerisureOwaError("camera error"),
             thumb1_new,
         ]
 
@@ -631,7 +631,7 @@ class TestCoordinatorCapabilities:
         """_populate_capabilities sets has_peri=True when services include PERI attr."""
         from unittest.mock import MagicMock as _MM
 
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             Attribute,
         )
 
@@ -706,7 +706,7 @@ class TestCoordinatorCapabilities:
         installation = _make_installation()
 
         client.get_services = AsyncMock(
-            side_effect=SecuritasDirectError("service fetch failed")
+            side_effect=VerisureOwaError("service fetch failed")
         )
         client.get_supported_commands = MagicMock(return_value=frozenset())
 
@@ -733,7 +733,7 @@ class TestCoordinatorCapabilities:
         """The sync path used by async_setup_entry populates from given data."""
         from unittest.mock import MagicMock as _MM
 
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             Attribute,
         )
 
@@ -768,7 +768,7 @@ class TestCoordinatorCapabilities:
         """If populate_capabilities_from_data ran first, _populate_capabilities is a no-op."""
         from unittest.mock import MagicMock as _MM
 
-        from custom_components.securitas.securitas_direct_new_api.models import (
+        from custom_components.verisure_owa.verisure_owa_api.models import (
             Attribute,
         )
 
@@ -1057,7 +1057,7 @@ class TestActivityCoordinator:
         installation = _make_installation()
 
         client.get_activity.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = SecuritasDirectError("login failed")
+        client.login.side_effect = VerisureOwaError("login failed")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):
@@ -1093,7 +1093,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        client.get_activity.side_effect = SecuritasDirectError("boom")
+        client.get_activity.side_effect = VerisureOwaError("boom")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):
@@ -1127,7 +1127,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.securitas.coordinators import ActivityCoordinator
+        from custom_components.verisure_owa.coordinators import ActivityCoordinator
 
         # Patch Store with an in-memory stub for both coordinator instances
         stub: dict = {"data": None}
@@ -1142,7 +1142,7 @@ class TestActivityCoordinator:
             async def async_save(self, data):
                 stub["data"] = data
 
-        import custom_components.securitas.coordinators as cm
+        import custom_components.verisure_owa.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1174,7 +1174,7 @@ class TestActivityCoordinator:
     async def test_first_poll_after_restore_does_not_refire_polled_history(self):
         """After restoring persisted injected events, the first poll must
         still establish the polled-event baseline silently — otherwise up
-        to 30 historical polled rows would fire as `securitas_activity`
+        to 30 historical polled rows would fire as `verisure_owa_activity`
         bus events on every HA restart.
         """
         hass = _make_hass()
@@ -1182,7 +1182,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.securitas.coordinators import ActivityCoordinator
+        from custom_components.verisure_owa.coordinators import ActivityCoordinator
 
         # Persisted store contains one injected event from a prior run
         persisted_event = _make_event("ha-1", alias="Armed by Clinton")
@@ -1197,7 +1197,7 @@ class TestActivityCoordinator:
             async def async_save(self, _data):
                 pass
 
-        import custom_components.securitas.coordinators as cm
+        import custom_components.verisure_owa.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1231,7 +1231,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.securitas.coordinators import ActivityCoordinator
+        from custom_components.verisure_owa.coordinators import ActivityCoordinator
 
         persisted_event = _make_event(
             "ha-1", time="2026-05-05 14:00:00", alias="Armed by Clinton"
@@ -1247,7 +1247,7 @@ class TestActivityCoordinator:
             async def async_save(self, _data):
                 pass
 
-        import custom_components.securitas.coordinators as cm
+        import custom_components.verisure_owa.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1273,13 +1273,17 @@ class TestActivityCoordinator:
 
     @pytest.mark.asyncio
     async def test_async_load_persisted_is_idempotent(self):
-        """Calling load twice doesn't double-load."""
+        """Calling load multiple times doesn't repeat I/O after the first call.
+
+        The first call loads from the primary store (1 async_load call total).
+        Subsequent calls are no-ops.
+        """
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.securitas.coordinators import ActivityCoordinator
+        from custom_components.verisure_owa.coordinators import ActivityCoordinator
 
         load_calls = 0
 
@@ -1295,7 +1299,7 @@ class TestActivityCoordinator:
             async def async_save(self, _data):
                 pass
 
-        import custom_components.securitas.coordinators as cm
+        import custom_components.verisure_owa.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1304,6 +1308,8 @@ class TestActivityCoordinator:
             await coord.async_load_persisted()
             await coord.async_load_persisted()
             await coord.async_load_persisted()
+            # First call: primary store = 1 async_load call.
+            # Subsequent calls are short-circuited by _persisted_loaded = True.
             assert load_calls == 1
         finally:
             cm.Store = original_store

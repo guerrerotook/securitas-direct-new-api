@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.domains import ApiDomains
+from custom_components.verisure_owa.verisure_owa_api.domains import ApiDomains
 
 
 class TestGetUrl:
@@ -11,7 +11,7 @@ class TestGetUrl:
     @pytest.mark.parametrize(
         ("country", "expected_url"),
         [
-            ("ES", "https://customers.securitasdirect.es/owa-api/graphql"),
+            ("ES", "https://customers.verisure.es/owa-api/graphql"),
             ("FR", "https://customers.securitasdirect.fr/owa-api/graphql"),
             ("GB", "https://customers.verisure.co.uk/owa-api/graphql"),
             ("IE", "https://customers.verisure.ie/owa-api/graphql"),
@@ -20,6 +20,7 @@ class TestGetUrl:
             ("BR", "https://customers.verisure.com.br/owa-api/graphql"),
             ("CL", "https://customers.verisure.cl/owa-api/graphql"),
             ("PT", "https://customers.verisure.pt/owa-api/graphql"),
+            ("PE", "https://customers.verisure.pe/owa-api/graphql"),
         ],
     )
     def test_known_country_returns_specific_url(self, country, expected_url):
@@ -39,7 +40,7 @@ class TestGetUrl:
     @pytest.mark.parametrize("country_input", ["es", "Es", "eS"])
     def test_case_insensitive(self, country_input):
         domains = ApiDomains()
-        expected = "https://customers.securitasdirect.es/owa-api/graphql"
+        expected = "https://customers.verisure.es/owa-api/graphql"
         assert domains.get_url(country_input) == expected
 
 
@@ -58,6 +59,7 @@ class TestGetLanguage:
             ("BR", "br"),
             ("CL", "es"),
             ("PT", "pt"),
+            ("PE", "es"),
         ],
     )
     def test_known_country_returns_correct_language(self, country, expected_lang):

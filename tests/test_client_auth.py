@@ -1,4 +1,4 @@
-"""Tests for SecuritasClient — auth lifecycle, typed execute, polling, headers."""
+"""Tests for VerisureOwaClient — auth lifecycle, typed execute, polling, headers."""
 
 from __future__ import annotations
 
@@ -9,19 +9,21 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.client import SecuritasClient
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
+)
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
     AccountBlockedError,
     AuthenticationError,
     OperationTimeoutError,
-    SecuritasDirectError,
+    VerisureOwaError,
     TwoFactorRequiredError,
 )
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.securitas.securitas_direct_new_api.models import Installation
-from custom_components.securitas.securitas_direct_new_api.responses import (
+from custom_components.verisure_owa.verisure_owa_api.models import Installation
+from custom_components.verisure_owa.verisure_owa_api.responses import (
     GeneralStatusEnvelope,
 )
 
@@ -132,8 +134,8 @@ def transport():
 
 @pytest.fixture
 def client(transport):
-    """Create a SecuritasClient with test credentials and mocked transport."""
-    return SecuritasClient(
+    """Create a VerisureOwaClient with test credentials and mocked transport."""
+    return VerisureOwaClient(
         transport=transport,
         country="ES",
         language="es",
@@ -179,7 +181,7 @@ class TestLogin:
         self, client, transport
     ):
         """Account blocked (error 60052) raises AccountBlockedError."""
-        err = SecuritasDirectError("forbidden", http_status=403)
+        err = VerisureOwaError("forbidden", http_status=403)
         err.response_body = {
             "errors": [{"message": "forbidden", "data": {"err": "60052"}}],
             "data": None,
@@ -204,7 +206,7 @@ class TestLogin:
         self, client, transport
     ):
         """Error response with data raises AuthenticationError."""
-        err = SecuritasDirectError("bad request", http_status=400)
+        err = VerisureOwaError("bad request", http_status=400)
         err.response_body = {
             "errors": [{"message": "bad request"}],
             "data": {"xSLoginToken": None},
@@ -215,10 +217,10 @@ class TestLogin:
             await client.login()
 
     async def test_login_connection_error_propagates(self, client, transport):
-        """Connection error (no response_body) re-raises SecuritasDirectError."""
-        transport.execute.side_effect = SecuritasDirectError("Connection failed")
+        """Connection error (no response_body) re-raises VerisureOwaError."""
+        transport.execute.side_effect = VerisureOwaError("Connection failed")
 
-        with pytest.raises(SecuritasDirectError, match="Connection failed"):
+        with pytest.raises(VerisureOwaError, match="Connection failed"):
             await client.login()
 
 
@@ -285,7 +287,7 @@ class TestTypedExecute:
         assert result.data.xSStatus.status == "ARMED"
 
     async def test_graphql_errors_raise_securitas_error(self, client, transport):
-        """GraphQL errors in response raise SecuritasDirectError."""
+        """GraphQL errors in response raise VerisureOwaError."""
         raw = {
             "errors": [{"message": "Something went wrong"}],
             "data": None,
@@ -296,7 +298,7 @@ class TestTypedExecute:
         client.authentication_token = FAKE_JWT
         client._authentication_token_exp = datetime.now() + timedelta(hours=1)
 
-        with pytest.raises(SecuritasDirectError, match="Something went wrong"):
+        with pytest.raises(VerisureOwaError, match="Something went wrong"):
             await client._execute_graphql(
                 content={"operationName": "Status", "query": "..."},
                 operation="Status",
@@ -394,7 +396,7 @@ class TestPollOperation:
 
     async def test_retries_on_409_conflict(self, client):
         """Retries on 409 Conflict."""
-        err_409 = SecuritasDirectError("conflict", http_status=409)
+        err_409 = VerisureOwaError("conflict", http_status=409)
         check_fn = AsyncMock(
             side_effect=[
                 err_409,
@@ -425,11 +427,11 @@ class TestPollOperation:
         assert check_fn.call_count == 2
 
     async def test_non_409_error_propagates(self, client):
-        """Non-409 SecuritasDirectError propagates."""
-        err = SecuritasDirectError("server error", http_status=500)
+        """Non-409 VerisureOwaError propagates."""
+        err = VerisureOwaError("server error", http_status=500)
         check_fn = AsyncMock(side_effect=err)
 
-        with pytest.raises(SecuritasDirectError, match="server error"):
+        with pytest.raises(VerisureOwaError, match="server error"):
             await client._poll_operation(check_fn)
 
 
@@ -562,12 +564,12 @@ class TestLogout:
 
     async def test_clears_state_on_transport_error(self, client, transport):
         """Logout clears state even if transport raises."""
-        transport.execute.side_effect = SecuritasDirectError("gone")
+        transport.execute.side_effect = VerisureOwaError("gone")
 
         client.authentication_token = FAKE_JWT
         client.refresh_token_value = "some-refresh"
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await client.logout()
 
         # State should still be cleared by the finally block

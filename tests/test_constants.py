@@ -1,9 +1,9 @@
-"""Tests for integration and securitas_direct_new_api constants."""
+"""Tests for integration and verisure_owa_api constants."""
 
 import pytest
 
-from custom_components.securitas.const import SENTINEL_SERVICE_NAMES
-from custom_components.securitas.securitas_direct_new_api.const import (
+from custom_components.verisure_owa.const import COUNTRY_CODES, SENTINEL_SERVICE_NAMES
+from custom_components.verisure_owa.verisure_owa_api.const import (
     CommandType,
     PERI_DEFAULTS,
     PERI_OPTIONS,
@@ -12,7 +12,7 @@ from custom_components.securitas.securitas_direct_new_api.const import (
     STATE_TO_COMMAND,
     STD_DEFAULTS,
     STD_OPTIONS,
-    SecuritasState,
+    VerisureOwaState,
 )
 
 
@@ -51,11 +51,11 @@ class TestCommandType:
         assert len(CommandType) == 2
 
 
-# ── SecuritasState ───────────────────────────────────────────────────────────
+# ── VerisureOwaState ───────────────────────────────────────────────────────────
 
 
-class TestSecuritasState:
-    """Tests for SecuritasState enum."""
+class TestVerisureOwaState:
+    """Tests for VerisureOwaState enum."""
 
     EXPECTED_MEMBERS = {
         "NOT_USED": "not_used",
@@ -79,7 +79,8 @@ class TestSecuritasState:
     }
 
     def test_has_all_eighteen_states(self):
-        assert len(SecuritasState) == 18
+        """10 base states + 8 annex-bearing variants = 18 total."""
+        assert len(VerisureOwaState) == 18
 
     @pytest.mark.parametrize(
         ("member_name", "expected_value"),
@@ -87,11 +88,11 @@ class TestSecuritasState:
         ids=EXPECTED_MEMBERS.keys(),
     )
     def test_member_value(self, member_name, expected_value):
-        assert SecuritasState[member_name].value == expected_value
+        assert VerisureOwaState[member_name].value == expected_value
 
     def test_is_str_enum(self):
         """Every member should be directly usable as a string."""
-        for state in SecuritasState:
+        for state in VerisureOwaState:
             assert isinstance(state, str)
 
 
@@ -104,41 +105,41 @@ class TestStateToCommand:
     def test_maps_every_state_except_not_used_and_annex_variants(self):
         """STATE_TO_COMMAND maps all states except NOT_USED and annex variants.
 
-        Annex variants are handled via SECURITAS_STATE_TO_ALARM_STATE mapping
+        Annex variants are handled via VERISURE_OWA_STATE_TO_ALARM_STATE mapping
         in command_resolver.py rather than direct API commands.
         """
         states_with_commands = set(STATE_TO_COMMAND.keys())
-        all_states = set(SecuritasState)
-        annex_states = {
-            SecuritasState.ANNEX_ONLY,
-            SecuritasState.PARTIAL_DAY_ANNEX,
-            SecuritasState.PARTIAL_NIGHT_ANNEX,
-            SecuritasState.TOTAL_ANNEX,
-            SecuritasState.PERI_ANNEX,
-            SecuritasState.PARTIAL_DAY_PERI_ANNEX,
-            SecuritasState.PARTIAL_NIGHT_PERI_ANNEX,
-            SecuritasState.TOTAL_PERI_ANNEX,
+        annex_variants = {
+            VerisureOwaState.ANNEX_ONLY,
+            VerisureOwaState.PARTIAL_DAY_ANNEX,
+            VerisureOwaState.PARTIAL_NIGHT_ANNEX,
+            VerisureOwaState.TOTAL_ANNEX,
+            VerisureOwaState.PERI_ANNEX,
+            VerisureOwaState.PARTIAL_DAY_PERI_ANNEX,
+            VerisureOwaState.PARTIAL_NIGHT_PERI_ANNEX,
+            VerisureOwaState.TOTAL_PERI_ANNEX,
         }
+        all_states = set(VerisureOwaState)
         assert (
             states_with_commands
-            == all_states - {SecuritasState.NOT_USED} - annex_states
+            == all_states - {VerisureOwaState.NOT_USED} - annex_variants
         )
 
     def test_not_used_is_not_in_map(self):
-        assert SecuritasState.NOT_USED not in STATE_TO_COMMAND
+        assert VerisureOwaState.NOT_USED not in STATE_TO_COMMAND
 
     @pytest.mark.parametrize(
         ("state", "expected_cmd"),
         [
-            (SecuritasState.DISARMED, "DARM1"),
-            (SecuritasState.DISARMED_PERI, "DARM1DARMPERI"),
-            (SecuritasState.PARTIAL_DAY, "ARMDAY1"),
-            (SecuritasState.PARTIAL_NIGHT, "ARMNIGHT1"),
-            (SecuritasState.TOTAL, "ARM1"),
-            (SecuritasState.PERI_ONLY, "PERI1"),
-            (SecuritasState.PARTIAL_DAY_PERI, "ARMDAY1PERI1"),
-            (SecuritasState.PARTIAL_NIGHT_PERI, "ARMNIGHT1PERI1"),
-            (SecuritasState.TOTAL_PERI, "ARM1PERI1"),
+            (VerisureOwaState.DISARMED, "DARM1"),
+            (VerisureOwaState.DISARMED_PERI, "DARM1DARMPERI"),
+            (VerisureOwaState.PARTIAL_DAY, "ARMDAY1"),
+            (VerisureOwaState.PARTIAL_NIGHT, "ARMNIGHT1"),
+            (VerisureOwaState.TOTAL, "ARM1"),
+            (VerisureOwaState.PERI_ONLY, "PERI1"),
+            (VerisureOwaState.PARTIAL_DAY_PERI, "ARMDAY1PERI1"),
+            (VerisureOwaState.PARTIAL_NIGHT_PERI, "ARMNIGHT1PERI1"),
+            (VerisureOwaState.TOTAL_PERI, "ARM1PERI1"),
         ],
     )
     def test_specific_command_string(self, state, expected_cmd):
@@ -157,18 +158,24 @@ class TestProtoToState:
     """Tests for PROTO_TO_STATE mapping."""
 
     EXPECTED_PROTO_MAP = {
-        "D": SecuritasState.DISARMED,
-        "E": SecuritasState.PERI_ONLY,
-        "P": SecuritasState.PARTIAL_DAY,
-        "Q": SecuritasState.PARTIAL_NIGHT,
-        "B": SecuritasState.PARTIAL_DAY_PERI,
-        "C": SecuritasState.PARTIAL_NIGHT_PERI,
-        "T": SecuritasState.TOTAL,
-        "A": SecuritasState.TOTAL_PERI,
+        "D": VerisureOwaState.DISARMED,
+        "E": VerisureOwaState.PERI_ONLY,
+        "P": VerisureOwaState.PARTIAL_DAY,
+        "Q": VerisureOwaState.PARTIAL_NIGHT,
+        "B": VerisureOwaState.PARTIAL_DAY_PERI,
+        "C": VerisureOwaState.PARTIAL_NIGHT_PERI,
+        "T": VerisureOwaState.TOTAL,
+        "A": VerisureOwaState.TOTAL_PERI,
+        # Annex-armed codes — source: issue #441 status-code table.
+        # (Annex + perimeter combos are not yet observed in any capture.)
+        "X": VerisureOwaState.ANNEX_ONLY,  # main disarmed, annex armed
+        "R": VerisureOwaState.PARTIAL_DAY_ANNEX,  # main day,      annex armed
+        "S": VerisureOwaState.PARTIAL_NIGHT_ANNEX,  # main night,    annex armed
+        "O": VerisureOwaState.TOTAL_ANNEX,  # main total,    annex armed
     }
 
-    def test_has_eight_protocol_codes(self):
-        assert len(PROTO_TO_STATE) == 8
+    def test_has_twelve_protocol_codes(self):
+        assert len(PROTO_TO_STATE) == 12
 
     @pytest.mark.parametrize(
         ("code", "expected_state"),
@@ -183,9 +190,9 @@ class TestProtoToState:
             assert len(code) == 1
             assert code.isupper()
 
-    def test_all_values_are_securitas_states(self):
+    def test_all_values_are_verisure_owa_states(self):
         for state in PROTO_TO_STATE.values():
-            assert isinstance(state, SecuritasState)
+            assert isinstance(state, VerisureOwaState)
 
 
 # ── STATE_LABELS ─────────────────────────────────────────────────────────────
@@ -194,9 +201,8 @@ class TestProtoToState:
 class TestStateLabels:
     """Tests for STATE_LABELS mapping."""
 
-    def test_has_label_for_every_securitas_state(self):
-        """Every SecuritasState member should have a human-readable label."""
-        assert set(STATE_LABELS.keys()) == set(SecuritasState)
+    def test_has_label_for_every_verisure_owa_state(self):
+        assert set(STATE_LABELS.keys()) == set(VerisureOwaState)
 
     def test_all_labels_are_non_empty_strings(self):
         for label in STATE_LABELS.values():
@@ -206,10 +212,10 @@ class TestStateLabels:
     @pytest.mark.parametrize(
         ("state", "expected_label"),
         [
-            (SecuritasState.NOT_USED, "Not used"),
-            (SecuritasState.TOTAL, "Total"),
-            (SecuritasState.PERI_ONLY, "Perimeter only"),
-            (SecuritasState.TOTAL_PERI, "Total + Perimeter"),
+            (VerisureOwaState.NOT_USED, "Not used"),
+            (VerisureOwaState.TOTAL, "Total"),
+            (VerisureOwaState.PERI_ONLY, "Perimeter only"),
+            (VerisureOwaState.TOTAL_PERI, "Total + Perimeter"),
         ],
     )
     def test_specific_labels(self, state, expected_label):
@@ -224,10 +230,10 @@ class TestStdOptions:
 
     def test_contains_expected_states(self):
         assert set(STD_OPTIONS) == {
-            SecuritasState.NOT_USED,
-            SecuritasState.PARTIAL_DAY,
-            SecuritasState.PARTIAL_NIGHT,
-            SecuritasState.TOTAL,
+            VerisureOwaState.NOT_USED,
+            VerisureOwaState.PARTIAL_DAY,
+            VerisureOwaState.PARTIAL_NIGHT,
+            VerisureOwaState.TOTAL,
         }
 
     def test_is_subset_of_peri_options(self):
@@ -235,16 +241,16 @@ class TestStdOptions:
 
     def test_does_not_contain_peri_specific_states(self):
         peri_only_states = {
-            SecuritasState.PERI_ONLY,
-            SecuritasState.PARTIAL_DAY_PERI,
-            SecuritasState.PARTIAL_NIGHT_PERI,
-            SecuritasState.TOTAL_PERI,
+            VerisureOwaState.PERI_ONLY,
+            VerisureOwaState.PARTIAL_DAY_PERI,
+            VerisureOwaState.PARTIAL_NIGHT_PERI,
+            VerisureOwaState.TOTAL_PERI,
         }
         assert set(STD_OPTIONS).isdisjoint(peri_only_states)
 
     def test_does_not_contain_disarmed_states(self):
-        assert SecuritasState.DISARMED not in STD_OPTIONS
-        assert SecuritasState.DISARMED_PERI not in STD_OPTIONS
+        assert VerisureOwaState.DISARMED not in STD_OPTIONS
+        assert VerisureOwaState.DISARMED_PERI not in STD_OPTIONS
 
 
 class TestPeriOptions:
@@ -252,14 +258,14 @@ class TestPeriOptions:
 
     def test_contains_expected_states(self):
         assert set(PERI_OPTIONS) == {
-            SecuritasState.NOT_USED,
-            SecuritasState.PARTIAL_DAY,
-            SecuritasState.PARTIAL_NIGHT,
-            SecuritasState.TOTAL,
-            SecuritasState.PERI_ONLY,
-            SecuritasState.PARTIAL_DAY_PERI,
-            SecuritasState.PARTIAL_NIGHT_PERI,
-            SecuritasState.TOTAL_PERI,
+            VerisureOwaState.NOT_USED,
+            VerisureOwaState.PARTIAL_DAY,
+            VerisureOwaState.PARTIAL_NIGHT,
+            VerisureOwaState.TOTAL,
+            VerisureOwaState.PERI_ONLY,
+            VerisureOwaState.PARTIAL_DAY_PERI,
+            VerisureOwaState.PARTIAL_NIGHT_PERI,
+            VerisureOwaState.TOTAL_PERI,
         }
 
     def test_contains_all_std_options(self):
@@ -267,14 +273,14 @@ class TestPeriOptions:
             assert opt in PERI_OPTIONS
 
     def test_contains_peri_specific_states(self):
-        assert SecuritasState.PERI_ONLY in PERI_OPTIONS
-        assert SecuritasState.PARTIAL_DAY_PERI in PERI_OPTIONS
-        assert SecuritasState.PARTIAL_NIGHT_PERI in PERI_OPTIONS
-        assert SecuritasState.TOTAL_PERI in PERI_OPTIONS
+        assert VerisureOwaState.PERI_ONLY in PERI_OPTIONS
+        assert VerisureOwaState.PARTIAL_DAY_PERI in PERI_OPTIONS
+        assert VerisureOwaState.PARTIAL_NIGHT_PERI in PERI_OPTIONS
+        assert VerisureOwaState.TOTAL_PERI in PERI_OPTIONS
 
     def test_does_not_contain_disarmed_states(self):
-        assert SecuritasState.DISARMED not in PERI_OPTIONS
-        assert SecuritasState.DISARMED_PERI not in PERI_OPTIONS
+        assert VerisureOwaState.DISARMED not in PERI_OPTIONS
+        assert VerisureOwaState.DISARMED_PERI not in PERI_OPTIONS
 
 
 # ── STD_DEFAULTS / PERI_DEFAULTS ────────────────────────────────────────────
@@ -295,8 +301,8 @@ class TestStdDefaults:
     def test_has_correct_keys(self):
         assert set(STD_DEFAULTS.keys()) == EXPECTED_DEFAULT_KEYS
 
-    def test_values_are_valid_securitas_state_values(self):
-        valid_values = {s.value for s in SecuritasState}
+    def test_values_are_valid_verisure_owa_state_values(self):
+        valid_values = {s.value for s in VerisureOwaState}
         for value in STD_DEFAULTS.values():
             assert value in valid_values
 
@@ -314,8 +320,8 @@ class TestPeriDefaults:
     def test_has_correct_keys(self):
         assert set(PERI_DEFAULTS.keys()) == EXPECTED_DEFAULT_KEYS
 
-    def test_values_are_valid_securitas_state_values(self):
-        valid_values = {s.value for s in SecuritasState}
+    def test_values_are_valid_verisure_owa_state_values(self):
+        valid_values = {s.value for s in VerisureOwaState}
         for value in PERI_DEFAULTS.values():
             assert value in valid_values
 
@@ -340,19 +346,28 @@ class TestPeriDefaults:
         assert PERI_DEFAULTS["map_night"] == STD_DEFAULTS["map_night"]
 
 
-# ── SubPanel Configuration Constants ─────────────────────────────────────────
+class TestCountryCodes:
+    """Tests for the supported COUNTRY_CODES list."""
 
+    def test_includes_peru(self):
+        assert "PE" in COUNTRY_CODES
 
-class TestSubPanelConstants:
-    """Tests for sub-panel toggle configuration constants."""
+    def test_includes_all_currently_supported(self):
+        # Lock the supported set so adding/removing requires a deliberate edit.
+        assert set(COUNTRY_CODES) == {
+            "AR",
+            "BR",
+            "CL",
+            "ES",
+            "FR",
+            "GB",
+            "IE",
+            "IT",
+            "PE",
+            "PT",
+        }
 
-    def test_constants_present(self):
-        from custom_components.securitas.const import (
-            CONF_ENABLE_INTERIOR_PANEL,
-            CONF_ENABLE_PERIMETER_PANEL,
-            CONF_ENABLE_ANNEX_PANEL,
-        )
-
-        assert CONF_ENABLE_INTERIOR_PANEL == "enable_interior_panel"
-        assert CONF_ENABLE_PERIMETER_PANEL == "enable_perimeter_panel"
-        assert CONF_ENABLE_ANNEX_PANEL == "enable_annex_panel"
+    def test_is_a_list(self):
+        # The HA config-flow's CountrySelector consumes the list and renders it
+        # as a dropdown — it must be a list, not a set/frozenset/tuple.
+        assert isinstance(COUNTRY_CODES, list)

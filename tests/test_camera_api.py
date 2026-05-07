@@ -4,7 +4,7 @@ import base64
 import json
 
 
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
@@ -82,7 +82,7 @@ class TestSanitizeResponseForLog:
     """Tests for _sanitize_response_for_log in http_transport."""
 
     def setup_method(self):
-        from custom_components.securitas.securitas_direct_new_api.http_transport import (
+        from custom_components.verisure_owa.verisure_owa_api.http_transport import (
             _sanitize_response_for_log,
         )
 
@@ -122,7 +122,7 @@ class TestSanitizeResponseForLog:
 
 class TestHubCameraOperations:
     def test_signal_camera_state_constant_exists(self):
-        from custom_components.securitas import SIGNAL_CAMERA_STATE
+        from custom_components.verisure_owa import SIGNAL_CAMERA_STATE
 
         assert isinstance(SIGNAL_CAMERA_STATE, str)
 

@@ -1,4 +1,4 @@
-"""Tests for SecuritasClient lock methods — get_lock_modes, get_lock_config, change_lock_mode."""
+"""Tests for VerisureOwaClient lock methods — get_lock_modes, get_lock_config, change_lock_mode."""
 
 from __future__ import annotations
 
@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.client import (
-    SecuritasClient,
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
 )
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
     OperationTimeoutError,
 )
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     Installation,
     SmartLock,
     SmartLockMode,
@@ -63,7 +63,7 @@ def _make_installation(**overrides) -> Installation:
     return Installation(**defaults)
 
 
-def _pre_auth(client: SecuritasClient) -> None:
+def _pre_auth(client: VerisureOwaClient) -> None:
     """Set up a valid auth token so _ensure_auth is a no-op."""
     client.authentication_token = FAKE_JWT
     client._authentication_token_exp = datetime.now() + timedelta(hours=1)
@@ -207,8 +207,8 @@ def transport():
 
 @pytest.fixture
 def client(transport):
-    """Create a SecuritasClient with test credentials, mocked transport, fast polling."""
-    c = SecuritasClient(
+    """Create a VerisureOwaClient with test credentials, mocked transport, fast polling."""
+    c = VerisureOwaClient(
         transport=transport,
         country="ES",
         language="es",
@@ -379,8 +379,8 @@ class TestGetLockConfig:
 
     async def test_smartlock_exception_falls_back_to_danalock(self, client, transport):
         """If smartlock query raises an exception, falls back to danalock."""
-        from custom_components.securitas.securitas_direct_new_api.exceptions import (
-            SecuritasDirectError,
+        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+            VerisureOwaError,
         )
 
         call_count = 0
@@ -389,7 +389,7 @@ class TestGetLockConfig:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise SecuritasDirectError("Smartlock not supported")
+                raise VerisureOwaError("Smartlock not supported")
             if call_count == 2:
                 return danalock_submit_response("ref-dana-003")
             if call_count == 3:

@@ -1,5 +1,5 @@
 {
-  "name": "Securitas Direct Alarm",
+  "name": "Verisure OWA (formerly Securitas Direct)",
   "content_in_root": false,
   "homeassistant": "2025.2.0"
 }

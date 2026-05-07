@@ -1,19 +1,19 @@
-"""Tests for SecuritasClient service methods."""
+"""Tests for VerisureOwaClient service methods."""
 
 from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     Attribute,
     Installation,
     Sentinel,
     Service,
     SmartLockMode,
 )
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    SecuritasDirectError,
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    VerisureOwaError,
 )
 
 from .conftest import make_jwt
@@ -152,7 +152,7 @@ class TestListInstallations:
     async def test_none_xsinstallations_raises_error(self, authed_api, mock_execute):
         mock_execute.return_value = {"data": {"xSInstallations": None}}
 
-        with pytest.raises(SecuritasDirectError, match="Invalid response"):
+        with pytest.raises(VerisureOwaError, match="Invalid response"):
             await authed_api.list_installations()
 
     async def test_empty_installations_returns_empty(self, authed_api, mock_execute):
@@ -421,7 +421,7 @@ class TestGetSentinelData:
     ):
         mock_execute.return_value = {"errors": [{"message": "Something went wrong"}]}
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await authed_api.get_sentinel_data(installation, mock_service)
 
     async def test_none_xscomfort_raises(
@@ -429,7 +429,7 @@ class TestGetSentinelData:
     ):
         mock_execute.return_value = {"data": {"xSComfort": None}}
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await authed_api.get_sentinel_data(installation, mock_service)
 
     async def test_missing_air_quality_code_returns_empty_string(
@@ -500,7 +500,7 @@ class TestSendOtp:
     async def test_none_response_raises_error(self, authed_api, mock_execute):
         mock_execute.return_value = {"data": {"xSSendOtp": None}}
 
-        with pytest.raises(SecuritasDirectError, match="xSSendOtp response is None"):
+        with pytest.raises(VerisureOwaError, match="xSSendOtp response is None"):
             await authed_api.send_otp(device_id=1, auth_otp_hash="hash123")
 
 
@@ -593,10 +593,10 @@ class TestGetAirQualityData:
         assert result.status_current == 1
 
     async def test_raises_on_errors(self, authed_api, mock_execute, installation):
-        """Raises SecuritasDirectError when response has errors."""
+        """Raises VerisureOwaError when response has errors."""
         mock_execute.return_value = {"errors": [{"message": "fail"}]}
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await authed_api.get_air_quality_data(installation, "1")
 
     async def test_returns_status_when_hours_null(
@@ -616,14 +616,14 @@ class TestGetAirQualityData:
     async def test_raises_when_xsairquality_null(
         self, authed_api, mock_execute, installation
     ):
-        """Raises SecuritasDirectError when xSAirQuality is null."""
+        """Raises VerisureOwaError when xSAirQuality is null."""
         mock_execute.return_value = {
             "data": {
                 "xSAirQuality": None,
             }
         }
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await authed_api.get_air_quality_data(installation, "1")
 
 

@@ -1,21 +1,23 @@
-# Securitas Direct Alarm
+# Verisure OWA
 
-A Home Assistant custom integration for [Securitas Direct](https://www.securitasdirect.es/) (also known as Verisure in some countries).
+A Home Assistant custom integration for **Verisure** (formerly Securitas Direct in some markets), supporting Argentina, Brazil, Chile, France, Ireland, Italy, Peru, Portugal, Spain, and the United Kingdom.
+
+Renamed from `securitas` to `verisure_owa` in v5.0.0. The legacy domain shim, service aliases, event aliases, and panel URL aliases remain available during a 6-month deprecation window. See the v5 release notes for migration details.
 
 ## Features
 
 - **Multiple installations** — accounts with multiple installations (e.g. home + office) are fully supported. Each installation gets its own config entry and entities, with a shared API session to minimize login requests.
 - **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
-- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Securitas alarm mode.
-- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration fires a `securitas_arming_exception` event and (optionally) notifies you. Force-arm via mobile notification, the `securitas.force_arm` service, the custom alarm card, or your own automations.
+- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Verisure alarm mode.
+- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration fires a `verisure_owa_arming_exception` event and (optionally) notifies you. Force-arm via mobile notification, the `verisure_owa.force_arm` service, the custom alarm card, or your own automations.
 - **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI, plus a badge.
 - **Refresh button** — manually trigger an alarm status check.
 - **Perimeter alarm support** — full support for installations with external/outdoor sensors.
 - **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
 - **Smart locks** — lock and unlock smart door locks. Multiple locks per installation supported, with door-open (latch hold-back) and auto-lock configuration.
-- **Cameras** — view the latest captured image from Securitas cameras, with a capture button to request new images on demand, and a custom camera card for easy display
+- **Cameras** — view the latest captured image from Verisure cameras, with a capture button to request new images on demand, and a custom camera card for easy display
 - **Custom camera card** — a purpose-built Lovelace card to show photographs from the cameras with a refresh button to request a new photograph
-- **PIN code protection** — optional local PIN code for arming and/or disarming the alarm from Home Assistant (independent of your Securitas account).
+- **PIN code protection** — optional local PIN code for arming and/or disarming the alarm from Home Assistant (independent of your Verisure account).
 - **Two-factor authentication** — login via SMS verification code.
 
 ## Breaking Changes in v4.0.0
@@ -39,8 +41,8 @@ A Home Assistant custom integration for [Securitas Direct](https://www.securitas
 | AR   | Argentina     | Verisure         |
 | BR   | Brazil        | Verisure         |
 | CL   | Chile         | Verisure         |
-| ES   | Spain         | Securitas Direct |
-| FR   | France        | Securitas Direct |
+| ES   | Spain         | Verisure         |
+| FR   | France        | Verisure         |
 | GB   | Great Britain | Verisure         |
 | IE   | Ireland       | Verisure         |
 | IT   | Italy         | Verisure         |
@@ -58,19 +60,19 @@ Or manually:
 
 1. [Install HACS](https://www.hacs.xyz/docs/use/download/download/) if you don't have it already.
 2. Open the HACS dashboard in Home Assistant.
-3. Search for **Securitas Direct Alarm**.
+3. Search for **Verisure OWA**.
 4. Click download.
 
 ## Setup
 
-Go to **Settings → Integrations → Add Integration** and search for **Securitas Direct**.
+Go to **Settings → Integrations → Add Integration** and search for **Verisure OWA**.
 
 The setup flow is a multi-step wizard:
 
 1. **Login** — Enter your country, username, and password. 2FA is handled automatically if your account requires it.
 2. **Installation** — If your account has multiple installations, pick which one to configure. Repeat the setup flow to add additional installations. Perimeter support is auto-detected from the installation's services.
 3. **Options** — Set your PIN code, notification service, and optionally expand the **Advanced** section for scan interval and API delay settings.
-4. **Mappings** — Map each HA alarm button to a Securitas alarm mode.
+4. **Mappings** — Map each HA alarm button to a Verisure alarm mode.
 
 ### Login
 
@@ -78,8 +80,8 @@ The setup flow is a multi-step wizard:
 
 | Option       | Default  | Description                                                                       |
 | ------------ | -------- | --------------------------------------------------------------------------------- |
-| Username     | —        | Your Securitas Direct account username.                                           |
-| Password     | —        | Your Securitas Direct account password.                                           |
+| Username     | —        | Your Verisure account username.                                                   |
+| Password     | —        | Your Verisure account password.                                                   |
 | Country Code | _(auto)_ | Auto-detected from your HA locale. All supported countries available in dropdown. |
 
 ### Two-factor authentication
@@ -90,22 +92,22 @@ If your account requires 2FA, you will automatically be asked to select a phone 
 
 ## Options
 
-After setup, you can change most settings via **Settings → Integrations → Securitas Direct → Configure**.
+After setup, you can change most settings via **Settings → Integrations → Verisure OWA → Configure**.
 
 ![Options](./docs/images/options.png)
 
 | Option                                  | Default   | Description                                                                                                                                                                            |
 | --------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PIN Code                                | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Securitas — it only protects the panel in Home Assistant. Can be numeric or alphanumeric.                       |
+| PIN Code                                | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Can be numeric or alphanumeric.                        |
 | Require PIN to arm                      | No        | When enabled, the PIN is also required to arm the alarm (not just to disarm). Has no effect if no PIN is set.                                                                          |
 | Notify service                          | _(none)_  | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
-| Built-in force-arm notifications        | Yes       | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable this to handle the `securitas_arming_exception` event with your own automations instead. See [Force Arming](#force-arming). |
+| Built-in force-arm notifications        | Yes       | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable this to handle the `verisure_owa_arming_exception` event with your own automations instead. See [Force Arming](#force-arming). |
 | Update interval _(Advanced)_            | 120s      | How often (in seconds) the integration checks the alarm status. Set to 0 to disable automatic polling.                                                                                 |
 | Delay between API requests _(Advanced)_ | 2s        | Minimum delay between consecutive API requests. Higher values reduce the risk of WAF rate limiting.                                                                                    |
 
 ## Alarm State Mappings
 
-Securitas Direct supports several alarm modes, but Home Assistant's alarm panel only has five buttons: **Home**, **Away**, **Night**, **Vacation**, and **Custom Bypass**. This integration lets you choose which Securitas mode each button activates.
+Verisure supports several alarm modes, but Home Assistant's alarm panel only has five buttons: **Home**, **Away**, **Night**, **Vacation**, and **Custom Bypass**. This integration lets you choose which Verisure mode each button activates.
 
 ![Alarm State Mapping](./docs/images/state-mappings.png)
 
@@ -128,9 +130,9 @@ The available modes depend on whether a **Perimetral alarm** has been detected. 
 
 ### How It Works
 
-Each of the five HA alarm buttons can be mapped to any Securitas mode in the integration options. Set a button to "Not Used" to hide it from the alarm panel.
+Each of the five HA alarm buttons can be mapped to any Verisure mode in the integration options. Set a button to "Not Used" to hide it from the alarm panel.
 
-When the integration checks the alarm status, it translates the Securitas response back to the correct HA state using the same mapping. For example, if you mapped **Away** to "Total + Perimeter", then when Securitas reports "Total + Perimeter" the alarm panel will show "Armed Away".
+When the integration checks the alarm status, it translates the Verisure response back to the correct HA state using the same mapping. For example, if you mapped **Away** to "Total + Perimeter", then when Verisure reports "Total + Perimeter" the alarm panel will show "Armed Away".
 
 When switching between modes (e.g. from "Armed Home" to "Armed Away + Perimeter" or to "Disarmed"), the integration automatically determines what changes need to be made to match the requested state.
 
@@ -138,7 +140,7 @@ When switching between modes (e.g. from "Armed Home" to "Armed Away + Perimeter"
 
 **Standard installations** (no perimeter sensors):
 
-| HA Button | Securitas Mode    |
+| HA Button | Verisure Mode     |
 | --------- | ----------------- |
 | Home      | Partial Day       |
 | Away      | Total             |
@@ -148,7 +150,7 @@ When switching between modes (e.g. from "Armed Home" to "Armed Away + Perimeter"
 
 **Perimeter installations** (external sensors enabled):
 
-| HA Button | Securitas Mode    |
+| HA Button | Verisure Mode     |
 | --------- | ----------------- |
 | Home      | Partial Day       |
 | Away      | Total + Perimeter |
@@ -160,7 +162,7 @@ When switching between modes (e.g. from "Armed Home" to "Armed Away + Perimeter"
 
 ### Unmapped Alarm States
 
-If your alarm is put into a Securitas state that you have not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the alarm entity will show as **Custom Bypass**. This is not an error — enable perimeter support or adjust your alarm state mappings in the integration options to resolve it.
+If your alarm is put into a Verisure state that you have not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the alarm entity will show as **Custom Bypass**. This is not an error — enable perimeter support or adjust your alarm state mappings in the integration options to resolve it.
 
 To see which status code the alarm is reporting, [enable debug logging](#reporting-issues).
 
@@ -168,7 +170,7 @@ To see which status code the alarm is reporting, [enable debug logging](#reporti
 
 By default the integration creates one `alarm_control_panel` entity per installation — the **main panel**, named `Main - <installation alias>`. It represents the household's overall alarm intent and is driven by the user-configurable Home / Away / Night / Vacation / Custom mappings (Alarm State Mappings screen). This is unchanged from previous versions and works for almost everyone.
 
-Installations with multiple alarm axes (interior, perimeter, annex) can optionally enable per-axis sub-panels via the integration's options (**Settings → Devices & Services → Securitas Direct → Configure**):
+Installations with multiple alarm axes (interior, perimeter, annex) can optionally enable per-axis sub-panels via the integration's options (**Settings → Devices & Services → Verisure OWA → Configure**):
 
 - **Interior-only control panel** — interior axis only (Home / Away / Night / Disarmed). Named `Interior - <installation alias>`.
 - **Perimeter-only control panel** — perimeter axis only (Armed Away / Disarmed). Named `Perimeter - <installation alias>`. Visible only if your installation has perimeter sensors.
@@ -190,11 +192,11 @@ Enabling sub-panels in HA creates additional `alarm_control_panel` entities, but
 
 ## Force Arming
 
-When you arm the alarm and a sensor is in a fault state (e.g. a window is open), Securitas may block the arm and report a non-blocking exception. The integration handles this as follows:
+When you arm the alarm and a sensor is in a fault state (e.g. a window is open), Verisure may block the arm and report a non-blocking exception. The integration handles this as follows:
 
 1. The alarm panel reverts to its previous state.
 2. The alarm entity attributes `force_arm_available` and `arm_exceptions` are set.
-3. A `securitas_arming_exception` event is fired on the Home Assistant event bus (always, regardless of settings).
+3. A `verisure_owa_arming_exception` event is fired on the Home Assistant event bus (always, regardless of settings).
 4. The [custom alarm card](#custom-alarm-card) shows a warning listing the problematic sensors, with **Force Arm** and **Cancel** buttons.
 5. If **Built-in force-arm notifications** is enabled (default):
    - A **persistent notification** appears listing the affected sensors.
@@ -205,13 +207,13 @@ When you arm the alarm and a sensor is in a fault state (e.g. a window is open),
 - **Fix the issue** (close the window, clear the fault) and arm again normally.
 - **Force arm** to arm despite the exception. You can do this from:
   - The **Force Arm** button in the mobile notification (if built-in notifications are enabled).
-  - The `securitas.force_arm` service, targeted at the alarm panel entity.
+  - The `verisure_owa.force_arm` service, targeted at the alarm panel entity.
   - The **Force Arm** button in the [custom alarm card](#custom-alarm-card).
-  - Your own automation triggered by the `securitas_arming_exception` event.
+  - Your own automation triggered by the `verisure_owa_arming_exception` event.
 
 The force-arm context expires after 180 seconds, so force-arming is only possible shortly after the exception occurs.
 
-### The `securitas_arming_exception` event
+### The `verisure_owa_arming_exception` event
 
 Every time arming is blocked by open sensors, the integration fires this event with the following data:
 
@@ -220,27 +222,27 @@ Every time arming is blocked by open sensors, the integration fires this event w
 | `entity_id` | The alarm panel entity that failed to arm |
 | `mode` | The HA alarm state that was attempted (e.g. `armed_away`, `armed_home`) |
 | `zones` | List of open zone names (e.g. `["Kitchen window", "Bedroom sensor"]`) |
-| `details.installation` | The Securitas installation number |
+| `details.installation` | The Verisure installation number |
 | `details.exceptions` | Full exception list from the API with `alias`, `zone_id`, `device_type` |
 
 This event fires **regardless** of the **Built-in force-arm notifications** toggle, so you can always build automations against it.
 
 ### Custom automations
 
-To write your own force-arm automations, disable **Built-in force-arm notifications** in the integration options, then create automations that listen for the `securitas_arming_exception` event. Some examples:
+To write your own force-arm automations, disable **Built-in force-arm notifications** in the integration options, then create automations that listen for the `verisure_owa_arming_exception` event. Some examples:
 
 **Auto force-arm when leaving home:**
 ```yaml
-- id: securitas_auto_force_arm
+- id: verisure_owa_auto_force_arm
   alias: "Alarm: auto force-arm when leaving"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   conditions:
     - condition: template
       value_template: "{{ trigger.event.data.mode == 'armed_away' }}"
   actions:
-    - action: securitas.force_arm
+    - action: verisure_owa.force_arm
       target:
         entity_id: "{{ trigger.event.data.entity_id }}"
   mode: single
@@ -248,11 +250,11 @@ To write your own force-arm automations, disable **Built-in force-arm notificati
 
 **Notify with open zone details:**
 ```yaml
-- id: securitas_notify_open_zones
+- id: verisure_owa_notify_open_zones
   alias: "Alarm: notify about open zones"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   actions:
     - action: notify.mobile_app_phone
       data:
@@ -265,11 +267,11 @@ To write your own force-arm automations, disable **Built-in force-arm notificati
 
 **Different behaviour per mode** (force-arm for away, notify for night):
 ```yaml
-- id: securitas_smart_force_arm
+- id: verisure_owa_smart_force_arm
   alias: "Alarm: smart force-arm by mode"
   triggers:
     - trigger: event
-      event_type: securitas_arming_exception
+      event_type: verisure_owa_arming_exception
   actions:
     - choose:
         - conditions:
@@ -281,7 +283,7 @@ To write your own force-arm automations, disable **Built-in force-arm notificati
                 message: >
                   Open zones: {{ trigger.event.data.zones | join(', ') }}
                   — force-arming...
-            - action: securitas.force_arm
+            - action: verisure_owa.force_arm
               target:
                 entity_id: "{{ trigger.event.data.entity_id }}"
         - conditions:
@@ -313,23 +315,23 @@ This registers a `notify.mobiles` service. After restarting Home Assistant, `mob
 
 > **Note:** Action buttons (Force Arm / Cancel) in the notification are tied to the installation number, so any household member who taps a button will trigger the correct action regardless of which device they use.
 
-### `securitas.force_arm` service
+### `verisure_owa.force_arm` service
 
-| Field         | Description                                    |
-| ------------- | ---------------------------------------------- |
-| Target entity | The Securitas alarm panel entity to force-arm. |
+| Field         | Description                                   |
+| ------------- | --------------------------------------------- |
+| Target entity | The Verisure alarm panel entity to force-arm. |
 
 Example automation action:
 
 ```yaml
-action: securitas.force_arm
+action: verisure_owa.force_arm
 target:
   entity_id: alarm_control_panel.my_home
 ```
 
 ## Custom Alarm Card
 
-The integration ships with a custom Lovelace card (`securitas-alarm-card`) that is purpose-built for Securitas Direct. It goes beyond the standard HA alarm panel card by integrating the force-arm flow directly into the dashboard.
+The integration ships with a custom Lovelace card (`verisure-owa-alarm-card`) that is purpose-built for Verisure OWA. It goes beyond the standard HA alarm panel card by integrating the force-arm flow directly into the dashboard.
 
 |                   Disarmed                   |                   Armed (Home)                   |                   Custom Mapping                    |
 | :------------------------------------------: | :----------------------------------------------: | :-------------------------------------------------: |
@@ -350,26 +352,26 @@ The integration ships with a custom Lovelace card (`securitas-alarm-card`) that 
 
 The card is registered automatically when the integration loads — no manual file copying or Lovelace resource configuration required.
 
-To add the card to your dashboard, click **Add Card → Search for "Securitas Alarm Card"** and pick your alarm panel entity from the dropdown.
+To add the card to your dashboard, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick your alarm panel entity from the dropdown.
 
 ### Badge
 
-A compact **Securitas Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails.
+A compact **Verisure OWA Alarm Badge** is also available for the badges section of your dashboard. It shows a state-specific shield icon that changes to an amber warning triangle when arming fails.
 
 By default, tapping the badge opens the full alarm card in a popup overlay. You can also configure hold and double-tap actions — for example, to arm or disarm directly from the badge without opening the card. See [Gesture Actions](#gesture-actions) below.
 
-To add the badge, click **Add Badge → Search for "Securitas Alarm Badge"** and pick your alarm panel entity from the dropdown.
+To add the badge, click **Add Badge → Search for "Verisure OWA Alarm Badge"** and pick your alarm panel entity from the dropdown.
 
 ### Mushroom Chip
 
-A **Securitas Alarm Chip** is available for use inside a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom). Use `type: securitas-alarm` in your Mushroom chips config. It shows the same state-specific icon and color as the badge, in a Mushroom-compatible pill shape.
+A **Verisure OWA Alarm Chip** is available for use inside a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom). Use `type: verisure-owa-alarm` in your Mushroom chips config. It shows the same state-specific icon and color as the badge, in a Mushroom-compatible pill shape.
 
 Tapping the chip opens the full alarm card in a popup overlay. Gesture actions (hold, double-tap) are supported via YAML — see [Gesture Actions](#gesture-actions) below.
 
 ```yaml
 type: custom:mushroom-chips-card
 chips:
-  - type: securitas-alarm
+  - type: verisure-owa-alarm
     entity: alarm_control_panel.my_alarm
 ```
 
@@ -401,7 +403,7 @@ The card and badge have a visual editor for gesture actions. The chip only suppo
 ```yaml
 type: custom:mushroom-chips-card
 chips:
-  - type: securitas-alarm
+  - type: verisure-owa-alarm
     entity: alarm_control_panel.my_alarm
     tap_action:
       action: more-info           # default — opens alarm card popup
@@ -437,7 +439,7 @@ If the lock configuration cannot be fetched during startup (e.g. due to a tempor
 
 ## Cameras
 
-If your installation includes Securitas cameras, the integration creates two camera entities per physical camera:
+If your installation includes Verisure cameras, the integration creates two camera entities per physical camera:
 
 - **`camera.<name>`** — the thumbnail image, updated after each capture.
 - **`camera.<name>_full_image`** — the full-resolution image fetched from the API after each capture.
@@ -446,13 +448,13 @@ A **Capture** button entity is also created for each camera, allowing you to req
 
 QR-type cameras, YR-type PIR cameras, and YP/QP perimetral (outdoor) cameras are all supported. The camera entity exposes a `capturing` attribute that is `true` while a capture is in progress, which can be used in automations or displayed on the dashboard.
 
-When the capture button is pressed, the integration checks whether any images were taken since the last update (e.g. via the Securitas app or web portal) and displays them immediately, even before the newly requested capture arrives.
+When the capture button is pressed, the integration checks whether any images were taken since the last update (e.g. via the Verisure app or web portal) and displays them immediately, even before the newly requested capture arrives.
 
 > **Note:** Images are fetched from the API queue and may take up to 30 seconds to appear after a capture completes, depending on queue depth.
 
 ### Custom Camera Card
 
-The integration also ships with a custom Lovelace card (`securitas-camera-card`) purpose-built for Securitas cameras.
+The integration also ships with a custom Lovelace card (`verisure-owa-camera-card`) purpose-built for Verisure cameras.
 
 ![Camera Card](./docs/images/camera-card.png)
 
@@ -462,10 +464,10 @@ It shows the latest thumbnail image with:
 - **Timestamp overlay** — displays when the image was taken, with a relative time and an absolute tooltip
 - **Click to open** — clicking the image opens the HA more-info dialog. If a full-resolution image is available (auto-discovered from the same device), it opens the full-resolution entity; otherwise the thumbnail entity.
 
-The card is registered automatically when the integration loads. To add it to your dashboard, click **Add Card → Search for "Securitas Camera Card"** and pick your camera entity from the dropdown.
+The card is registered automatically when the integration loads. To add it to your dashboard, click **Add Card → Search for "Verisure OWA Camera Card"** and pick your camera entity from the dropdown.
 
 ```yaml
-type: custom:securitas-camera-card
+type: custom:verisure-owa-camera-card
 entity: camera.sala              # thumbnail entity (required)
 name: Sala                       # optional — overrides the entity friendly name
 ```
@@ -481,7 +483,7 @@ The Activity Log shows the same history of events as the Verisure app: when the 
 
 ### Where to find it
 
-- **A Lovelace card.** When editing your dashboard, click **Add Card** and pick **Securitas Events Card**. The card shows the most recent events; click any row to see details, including images for image-request events. There's a refresh button in the top-right corner.
+- **A Lovelace card.** When editing your dashboard, click **Add Card** and pick **Verisure OWA Events Card**. The card shows the most recent events; click any row to see details, including images for image-request events. There's a refresh button in the top-right corner.
 - **A sensor.** `sensor.<alias>_activity_log` shows the most recent event as its state. Its `events` attribute holds the last 30 entries — useful for templates, custom cards, or anything that needs to read the history programmatically.
 - **The event bus.** Each new entry fires a `securitas_activity` event you can use as an automation trigger (see below).
 
@@ -585,48 +587,48 @@ Replace `alarm_arm_away` with the action for the mode you want:
 | `alarm_control_panel.alarm_arm_custom_bypass` | Custom   |
 | `alarm_control_panel.alarm_disarm`            | Disarm   |
 
-> **Important:** Only actions for modes you have mapped in the [Alarm State Mappings](#alarm-state-mappings) will work. If you try to arm with an unmapped mode (e.g. calling `alarm_arm_home` when Home is set to "Not Used"), the action will fail with an error. Check your mappings in **Settings → Integrations → Securitas Direct → Configure → Submit** (second page).
+> **Important:** Only actions for modes you have mapped in the [Alarm State Mappings](#alarm-state-mappings) will work. If you try to arm with an unmapped mode (e.g. calling `alarm_arm_home` when Home is set to "Not Used"), the action will fail with an error. Check your mappings in **Settings → Integrations → Verisure OWA → Configure → Submit** (second page).
 
 You can test which actions are available for your alarm in **Settings → Developer Tools → Actions** — type "arm alarm" to see the list.
 
 ## Troubleshooting
 
-- **HTTP 403 errors / rate limiting** — Securitas uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries once automatically, but if you see repeated 403 errors in the logs:
-  - **Increase the update interval** — Go to **Settings → Integrations → Securitas Direct → Configure**, expand the **Advanced** section, and increase the **Update scan interval** (default: 120 seconds). Try 180 or 300 seconds.
+- **HTTP 403 errors / rate limiting** — Verisure uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries once automatically, but if you see repeated 403 errors in the logs:
+  - **Increase the update interval** — Go to **Settings → Integrations → Verisure OWA → Configure**, expand the **Advanced** section, and increase the **Update scan interval** (default: 120 seconds). Try 180 or 300 seconds.
   - **Increase the API request delay** — The **Delay between API requests** (default: 2 seconds) controls the minimum gap between consecutive API calls. Increasing this to 4–5 seconds reduces request bursts.
   - If you have **multiple installations** on one account, each one polls independently, multiplying the request rate. All API requests to the same country domain are serialized through a shared queue, which helps, but the total volume still increases with each installation.
-- **Alarm shows wrong state after using the Securitas app** — Periodic polling reads the last known status from the Securitas server, which may take a moment to reflect changes made via the app. Press the **Refresh** button to force an immediate panel check.
+- **Alarm shows wrong state after using the Verisure app** — Periodic polling reads the last known status from the Verisure server, which may take a moment to reflect changes made via the app. Press the **Refresh** button to force an immediate panel check.
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
-- **2FA issues** — If 2FA fails, remove and re-add the integration. You will be prompted for a new SMS code. If the error persists, try creating a new user via the Securitas/Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using the new credentials in Home Assistant.
+- **2FA issues** — If 2FA fails, remove and re-add the integration. You will be prompted for a new SMS code. If the error persists, try creating a new user via the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using the new credentials in Home Assistant.
 
 ## Reporting Issues
 
 If you encounter a bug or unexpected behavior, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) and include the following:
 
-1. **Home Assistant version** and **integration version** (from Settings → Integrations → Securitas Direct).
+1. **Home Assistant version** and **integration version** (from Settings → Integrations → Verisure OWA).
 2. **Country code** you are using.
-3. **Debug logs** — enable debug logging from the UI: go to **Settings → Integrations → Securitas Direct**, click the three-dot menu, and select **Enable debug logging**. Reproduce the issue, then click **Disable debug logging** to download the log file.
+3. **Debug logs** — enable debug logging from the UI: go to **Settings → Integrations → Verisure OWA**, click the three-dot menu, and select **Enable debug logging**. Reproduce the issue, then click **Disable debug logging** to download the log file.
 
    If you need debug logs **before the integration has been set up** (e.g. during initial installation), run this action from **Settings → Developer Tools → Actions**:
 
    ```yaml
    action: logger.set_level
    data:
-     custom_components.securitas: debug
+     custom_components.verisure_owa: debug
    ```
 
    Then retrieve the logs from **Settings → System → Logs → three dots in the top right corner → Show full logs**.
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
-5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Securitas Direct integration log messages (after enabling debug logging and reproducing the issue).
+5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Verisure OWA integration log messages (after enabling debug logging and reproducing the issue).
 
 ### HAR File of GraphQL Requests
 
-It would be very helpful to include a HAR (HTTP Archive) file of the GraphQL requests sent by the Securitas website while you perform the task that is not working for you in Home Assistant, for instance setting the alarm, unlocking a lock, or taking a photograph with your camera.
+It would be very helpful to include a HAR (HTTP Archive) file of the GraphQL requests sent by the Verisure website while you perform the task that is not working for you in Home Assistant, for instance setting the alarm, unlocking a lock, or taking a photograph with your camera.
 
 To record the HAR file:
 
-1. Log in to the [Securitas Direct customer web site](https://customers.securitasdirect.es/owa-static/login) in your browser.
+1. Log in to the [Verisure customer web site](https://customers.securitasdirect.es/owa-static/login) in your browser.
 2. Open **Developer Tools** (press **F12**, or **Ctrl+Shift+I** / **Cmd+Opt+I**, or use the browser menu → **More tools** → **Developer tools**).
 3. Navigate to the **Network** tab, tick the **Preserve log** checkbox, and filter on **graphql**.
 

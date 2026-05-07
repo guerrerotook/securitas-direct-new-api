@@ -1,4 +1,4 @@
-"""Tests for SecuritasClient sensor and installation/services methods."""
+"""Tests for VerisureOwaClient sensor and installation/services methods."""
 
 from __future__ import annotations
 
@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.securitas.securitas_direct_new_api.client import (
-    SecuritasClient,
+from custom_components.verisure_owa.verisure_owa_api.client import (
+    VerisureOwaClient,
 )
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.securitas.securitas_direct_new_api.models import (
+from custom_components.verisure_owa.verisure_owa_api.models import (
     AirQuality,
     Attribute,
     Installation,
@@ -80,7 +80,7 @@ def _make_service(**overrides) -> Service:
     return Service(**defaults)
 
 
-def _pre_auth(client: SecuritasClient) -> None:
+def _pre_auth(client: VerisureOwaClient) -> None:
     """Set up a valid auth token so _ensure_auth is a no-op."""
     client.authentication_token = FAKE_JWT
     client._authentication_token_exp = datetime.now() + timedelta(hours=1)
@@ -91,7 +91,7 @@ def _pre_auth(client: SecuritasClient) -> None:
     )
 
 
-def _pre_auth_no_caps(client: SecuritasClient) -> None:
+def _pre_auth_no_caps(client: VerisureOwaClient) -> None:
     """Set up auth token only, no capabilities (for testing get_services)."""
     client.authentication_token = FAKE_JWT
     client._authentication_token_exp = datetime.now() + timedelta(hours=1)
@@ -185,8 +185,8 @@ def transport():
 
 @pytest.fixture
 def client(transport):
-    """Create a SecuritasClient with test credentials, mocked transport, fast polling."""
-    c = SecuritasClient(
+    """Create a VerisureOwaClient with test credentials, mocked transport, fast polling."""
+    c = VerisureOwaClient(
         transport=transport,
         country="ES",
         language="es",
@@ -204,8 +204,8 @@ def client(transport):
 
 @pytest.fixture
 def client_no_caps(transport):
-    """Create a SecuritasClient without capabilities (for get_services tests)."""
-    c = SecuritasClient(
+    """Create a VerisureOwaClient without capabilities (for get_services tests)."""
+    c = VerisureOwaClient(
         transport=transport,
         country="ES",
         language="es",

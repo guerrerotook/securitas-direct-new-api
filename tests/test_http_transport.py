@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiohttp import ClientConnectorDNSError
 
-from custom_components.securitas.securitas_direct_new_api.exceptions import (
-    SecuritasDirectError,
+from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+    VerisureOwaError,
     WAFBlockedError,
 )
-from custom_components.securitas.securitas_direct_new_api.http_transport import (
+from custom_components.verisure_owa.verisure_owa_api.http_transport import (
     HttpTransport,
 )
 
@@ -99,7 +99,7 @@ class TestHttpTransport:
         _mock_post(session, [dns_err, ok])
 
         with patch(
-            "custom_components.securitas.securitas_direct_new_api.http_transport.asyncio.sleep",
+            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             result = await transport.execute(content={}, headers={})
@@ -109,7 +109,7 @@ class TestHttpTransport:
         assert session.post.call_count == 2
 
     async def test_dns_failure_raises_after_second_attempt(self, transport, session):
-        """Two consecutive DNS errors raise SecuritasDirectError."""
+        """Two consecutive DNS errors raise VerisureOwaError."""
         dns_err1 = ClientConnectorDNSError(
             connection_key=MagicMock(), os_error=OSError("DNS failed")
         )
@@ -119,10 +119,10 @@ class TestHttpTransport:
         _mock_post(session, [dns_err1, dns_err2])
 
         with patch(
-            "custom_components.securitas.securitas_direct_new_api.http_transport.asyncio.sleep",
+            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ):
-            with pytest.raises(SecuritasDirectError, match="Connection error"):
+            with pytest.raises(VerisureOwaError, match="Connection error"):
                 await transport.execute(content={}, headers={})
 
     async def test_rate_limit_retry_with_retry_after(self, transport, session):
@@ -136,7 +136,7 @@ class TestHttpTransport:
         _mock_post(session, [fail, ok])
 
         with patch(
-            "custom_components.securitas.securitas_direct_new_api.http_transport.asyncio.sleep",
+            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             result = await transport.execute(content={}, headers={})
@@ -161,21 +161,21 @@ class TestHttpTransport:
 
     @pytest.mark.parametrize("status_code", [400, 404, 500, 502, 503])
     async def test_http_error_raises_with_status(self, transport, session, status_code):
-        """HTTP status >= 400 raises SecuritasDirectError with http_status set."""
+        """HTTP status >= 400 raises VerisureOwaError with http_status set."""
         resp = _make_response(status=status_code, text="error body")
         _mock_post(session, [resp])
 
-        with pytest.raises(SecuritasDirectError) as exc_info:
+        with pytest.raises(VerisureOwaError) as exc_info:
             await transport.execute(content={}, headers={})
 
         assert exc_info.value.http_status == status_code
 
     async def test_json_parse_error_raises(self, transport, session):
-        """Non-JSON response body raises SecuritasDirectError."""
+        """Non-JSON response body raises VerisureOwaError."""
         resp = _make_response(status=200, text="this is not json {{{")
         _mock_post(session, [resp])
 
-        with pytest.raises(SecuritasDirectError):
+        with pytest.raises(VerisureOwaError):
             await transport.execute(content={}, headers={})
 
     async def test_403_without_retry_after_defaults_to_2s(self, transport, session):
@@ -185,7 +185,7 @@ class TestHttpTransport:
         _mock_post(session, [fail, ok])
 
         with patch(
-            "custom_components.securitas.securitas_direct_new_api.http_transport.asyncio.sleep",
+            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             await transport.execute(content={}, headers={})
@@ -209,7 +209,7 @@ class TestSanitizeResponseForLog:
     """Tests for _sanitize_response_for_log."""
 
     def test_truncates_known_keys(self):
-        from custom_components.securitas.securitas_direct_new_api.http_transport import (
+        from custom_components.verisure_owa.verisure_owa_api.http_transport import (
             _sanitize_response_for_log,
         )
 
@@ -221,7 +221,7 @@ class TestSanitizeResponseForLog:
         assert sanitized["image"] == "..."
 
     def test_non_json_returns_as_is(self):
-        from custom_components.securitas.securitas_direct_new_api.http_transport import (
+        from custom_components.verisure_owa.verisure_owa_api.http_transport import (
             _sanitize_response_for_log,
         )
 
