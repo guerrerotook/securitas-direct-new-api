@@ -371,3 +371,21 @@ class TestCountryCodes:
         # The HA config-flow's CountrySelector consumes the list and renders it
         # as a dropdown — it must be a list, not a set/frozenset/tuple.
         assert isinstance(COUNTRY_CODES, list)
+
+
+# ── Lock Automations ─────────────────────────────────────────────────────────
+
+
+def test_lock_automations_constants_exist():
+    from custom_components.verisure_owa.const import (
+        CONF_LOCK_AUTOMATIONS,
+        CIRCUIT_INTERIOR,
+        CIRCUIT_PERIMETER,
+        CIRCUIT_ANNEX,
+        LOCK_CIRCUITS,
+    )
+    assert CONF_LOCK_AUTOMATIONS == "lock_automations"
+    assert CIRCUIT_INTERIOR == "interior"
+    assert CIRCUIT_PERIMETER == "perimeter"
+    assert CIRCUIT_ANNEX == "annex"
+    assert LOCK_CIRCUITS == ("interior", "perimeter", "annex")
