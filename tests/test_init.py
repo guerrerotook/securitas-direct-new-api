@@ -492,6 +492,33 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(hass, entry)
 
+    async def test_setup_login_error_does_not_leak_response_body(
+        self, hass, mock_hub
+    ):
+        """User-facing ConfigEntryNotReady must not embed raw response body.
+
+        log_detail() may include the raw API response (which can contain
+        tokens) for unknown errors. That detail belongs in the (filtered)
+        log, not in the user-facing exception text.
+        """
+        err = VerisureOwaError("connection failed")
+        err.response_body = {
+            "data": {"hash": "leaked-auth-token-value"},
+        }
+        mock_hub.login = AsyncMock(side_effect=err)
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            pytest.raises(ConfigEntryNotReady) as exc_info,
+        ):
+            await async_setup_entry(hass, entry)
+
+        # Token must not appear in the user-facing message
+        assert "leaked-auth-token-value" not in str(exc_info.value)
+
     async def test_setup_securitas_error_during_list_installations(
         self, hass, mock_hub
     ):
