@@ -1599,3 +1599,90 @@ class TestVerisureLockUnlockDisarm:
         lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
         await lock.async_unlock()  # must not raise
         lock._client.change_lock_mode.assert_awaited_once()
+
+
+# ===========================================================================
+# Unlock-disarm failure notification tests (Task 9)
+# ===========================================================================
+
+
+class TestVerisureLockUnlockDisarmFailure:
+    """Tests for unlock-disarm failure surfaces."""
+
+    def _state(self, *, i="OFF", p="OFF", a="OFF"):
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        return AlarmState(
+            interior=getattr(InteriorMode, i),
+            perimeter=getattr(PerimeterMode, p),
+            annex=getattr(AnnexMode, a),
+        )
+
+    def _make_alarm_coord(self, state):
+        coord = MagicMock()
+        coord.alarm_state = state
+        return coord
+
+    async def test_pre_unlock_disarm_failure_notifies_and_proceeds(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+        panel = MagicMock()
+        panel.execute_partial_disarm = AsyncMock(return_value=False)
+        lock._combined_alarm_panel = panel
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock.async_unlock()
+
+        # Notification fired with "Auto-disarm failed" wording.
+        notif_calls = [
+            c for c in lock.hass.services.async_call.await_args_list
+            if c.args[:2] == ("persistent_notification", "create")
+        ]
+        assert len(notif_calls) == 1
+        assert "Auto-disarm failed" in notif_calls[0].args[2]["title"]
+        # Unlock still happened.
+        lock._client.change_lock_mode.assert_awaited_once()
+
+    async def test_unlock_failure_after_successful_disarm_notifies(self):
+        from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+        lock = make_lock(initial_status="2", poll_status="2")  # stays locked
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("nope")
+        )
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+        panel = MagicMock()
+        panel.execute_partial_disarm = AsyncMock(return_value=True)
+        lock._combined_alarm_panel = panel
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock.async_unlock()
+
+        # The unlock failed — notification with "Unlock failed" wording.
+        notif_calls = [
+            c for c in lock.hass.services.async_call.await_args_list
+            if c.args[:2] == ("persistent_notification", "create")
+        ]
+        assert len(notif_calls) == 1
+        assert "Unlock failed" in notif_calls[0].args[2]["title"]
+
+    async def test_no_notification_on_full_success(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+        panel = MagicMock()
+        panel.execute_partial_disarm = AsyncMock(return_value=True)
+        lock._combined_alarm_panel = panel
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock.async_unlock()
+
+        notif_calls = [
+            c for c in lock.hass.services.async_call.await_args_list
+            if c.args[:2] == ("persistent_notification", "create")
+        ]
+        assert notif_calls == []
