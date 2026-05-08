@@ -38,7 +38,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.warning(
         "The 'securitas' integration is deprecated. Migrating config entry %s "
         "to 'verisure_owa'. The legacy 'securitas' shim will be removed entirely "
-        "in v6.0.0 (~6 months from now).",
+        "in v6.0.0.",
         entry.entry_id,
     )
     await migrate_legacy_entry(hass, entry)
@@ -52,7 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Your Securitas Direct integration has been migrated to Verisure OWA. "
             "**Please restart Home Assistant** to complete the upgrade. "
             "All your devices, entities, and customizations are preserved.\n\n"
-            "**The following will be removed in v6.0.0 (~6 months from now). "
+            "**The following will be removed in v6.0.0. "
             "Update your automations and dashboards at your pace:**\n\n"
             "- Service calls: `securitas.force_arm` / `securitas.force_arm_cancel` "
             "→ use `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel`\n"
