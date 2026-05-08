@@ -271,13 +271,16 @@ async def _get_or_create_session(
                 )
                 raise
             except VerisureOwaError as err:
-                detail = err.log_detail()
+                # Log the full detail — the SensitiveDataFilter scrubs known
+                # secrets — but never embed the raw response body in the
+                # user-facing ConfigEntryNotReady text, which doesn't go
+                # through the filter.
                 _LOGGER.error(
                     "Unable to connect to Verisure: %s",
-                    detail,
+                    err.log_detail(),
                 )
                 raise ConfigEntryNotReady(
-                    f"Unable to connect to Verisure: {detail}"
+                    f"Unable to connect to Verisure: {err.message}"
                 ) from None
             sessions[username] = {"hub": client, "ref_count": 1}
 
