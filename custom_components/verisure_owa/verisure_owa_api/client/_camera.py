@@ -96,21 +96,28 @@ class _CameraMixin(_ClientBase):
         *,
         capture_timeout: float = 90.0,
     ) -> ThumbnailResponse:
-        """Request a new image capture and poll until the thumbnail updates.
+        """Request a new image capture, then fetch the resulting thumbnail.
 
-        Follows the flow: get baseline thumbnail -> submit capture request ->
-        poll capture status until not processing -> poll thumbnail until
-        idSignal changes from baseline.
+        Submits a RequestImages mutation and polls RequestImagesStatus until
+        the panel reports a non-processing result (or capture_timeout
+        elapses), then fetches the latest thumbnail in a single follow-up
+        call.  We don't compare idSignal against a pre-capture baseline —
+        the CDN may take a few extra seconds to publish the new frame after
+        status reports done, so a single post-poll fetch is the most
+        reliable signal we have.
 
         Args:
             installation: The installation containing the camera.
             device_code: Camera device code.
             device_type: Camera device type (e.g. "QR", "YR").
             zone_id: Camera zone ID.
-            capture_timeout: Wall-clock timeout for the entire flow (default 30s).
+            capture_timeout: Wall-clock timeout for the status poll
+                (default 90s).
 
         Returns:
-            The new ThumbnailResponse (or baseline if timed out).
+            The latest ThumbnailResponse — typically the freshly captured
+            frame, or the previous one if the poll timed out before the CDN
+            caught up.
         """
         # Submit capture request
         submit_content = {
