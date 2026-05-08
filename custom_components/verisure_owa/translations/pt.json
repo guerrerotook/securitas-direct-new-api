@@ -11,7 +11,8 @@
         },
         "abort": {
             "already_configured": "O serviço já está configurado",
-            "reauth_successful": "Reautenticação bem-sucedida"
+            "reauth_successful": "Reautenticação bem-sucedida",
+            "no_refresh_token": "Início de sessão bem-sucedido, mas a Verisure não devolveu um token de atualização. A integração não pode guardar as credenciais em segurança. Tente novamente mais tarde ou comunique se persistir."
         },
         "step": {
             "reauth_confirm": {

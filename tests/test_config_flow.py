@@ -1118,6 +1118,19 @@ async def test_full_flow_persists_refresh_token_not_password(hass):
     assert CONF_PASSWORD not in result["data"]
 
 
+async def test_full_flow_aborts_when_no_refresh_token_returned(hass):
+    """If login succeeds but no refresh token comes back, abort instead of persisting
+    a passwordless+refreshless entry that cannot authenticate on restart.
+    """
+    mock_hub = _hub_factory()
+    mock_hub.get_refresh_token = MagicMock(return_value="")
+
+    result = await _complete_full_flow(hass, mock_hub)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "no_refresh_token"
+
+
 async def test_full_flow_2fa_creates_entry(hass):
     """Complete 2FA flow: credentials -> phone -> otp -> options -> mappings."""
     mock_hub = _hub_factory(two_fa=True)
@@ -1394,6 +1407,38 @@ async def test_reauth_confirm_valid_credentials(hass):
     assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
     assert CONF_PASSWORD not in entry.data
     mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reauth_aborts_when_no_refresh_token_returned(hass):
+    """If reauth login succeeds but no refresh token is captured, abort and leave the
+    existing entry untouched — never overwrite a working password with empty data.
+    """
+    entry = _make_reauth_entry(hass)
+    original_data = dict(entry.data)
+    result = await _start_reauth_flow(hass, entry)
+    flow_id = result["flow_id"]
+
+    mock_hub = _hub_factory()
+    mock_hub.get_refresh_token = MagicMock(return_value="")
+
+    with (
+        _patches(mock_hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "test@example.com",
+                CONF_PASSWORD: "new-password",
+            },
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "no_refresh_token"
+    assert dict(entry.data) == original_data
+    mock_reload.assert_not_awaited()
 
 
 async def test_reauth_confirm_invalid_auth(hass):

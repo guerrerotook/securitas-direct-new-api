@@ -181,9 +181,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         self.config[CONF_INSTALLATION] = installation.number
         assert self.hub is not None
+        refresh_token = self.hub.get_refresh_token()
+        # Refusing here is the only safe move: dropping the password while
+        # writing an empty refresh token would leave the entry unable to
+        # authenticate on the next restart.
+        if not refresh_token:
+            _LOGGER.error(
+                "Login succeeded but no refresh token was returned; "
+                "refusing to create an entry that cannot reauthenticate"
+            )
+            return self.async_abort(reason="no_refresh_token")
         entry_data = dict(self.config)
         entry_data.pop(CONF_PASSWORD, None)
-        entry_data[CONF_REFRESH_TOKEN] = self.hub.get_refresh_token()
+        entry_data[CONF_REFRESH_TOKEN] = refresh_token
         return self.async_create_entry(title=installation.alias, data=entry_data)
 
     def _create_client(
@@ -430,10 +440,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         assert self._reauth_entry is not None
         assert self.hub is not None
         await self.async_set_unique_id(self._reauth_entry.unique_id)
+        refresh_token = self.hub.get_refresh_token()
+        # Without a refresh token the entry would be left unauthenticatable.
+        # Leave the existing entry data untouched so the user can retry reauth.
+        if not refresh_token:
+            _LOGGER.error(
+                "Reauth login succeeded but no refresh token was returned; "
+                "leaving existing entry unchanged"
+            )
+            return self.async_abort(reason="no_refresh_token")
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = self.config[CONF_USERNAME]
         new_data.pop(CONF_PASSWORD, None)
-        new_data[CONF_REFRESH_TOKEN] = self.hub.get_refresh_token()
+        new_data[CONF_REFRESH_TOKEN] = refresh_token
         self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")

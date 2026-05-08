@@ -11,7 +11,8 @@
         },
         "abort": {
             "already_configured": "Le service est déjà configuré",
-            "reauth_successful": "Réauthentification réussie"
+            "reauth_successful": "Réauthentification réussie",
+            "no_refresh_token": "La connexion a réussi mais Verisure n'a pas renvoyé de jeton d'actualisation. L'intégration ne peut pas enregistrer les identifiants en toute sécurité. Veuillez réessayer plus tard ou signaler le problème s'il persiste."
         },
         "step": {
             "reauth_confirm": {
