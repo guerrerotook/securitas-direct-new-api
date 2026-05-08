@@ -56,6 +56,7 @@ from .verisure_owa_api import (
     OperationStatus,
     PROTO_DISARMED,
     PROTO_TO_STATE,
+    STATE_LABELS,
     VerisureOwaError,
     VerisureOwaState,
     STATE_TO_COMMAND,
@@ -204,6 +205,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._has_peri = coordinator.has_peri
         self._has_annex = coordinator.has_annex
         self._last_proto_code: str | None = None
+        # Tracks the proto code most-recently logged as unmapped so we don't
+        # spam the same warning on every coordinator poll while the panel
+        # sits in that state.
+        self._last_unmapped_logged: str | None = None
         self._resolver = CommandResolver(has_peri=self._has_peri)
 
         # Build outgoing map: HA state -> API command string
@@ -343,10 +348,48 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._state = self._status_map[proto_code]
         else:
             self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-            _LOGGER.info(
-                "Unmapped alarm status code '%s' from Verisure. "
-                "Check your Alarm State Mappings in the integration options",
+            self._log_unmapped_proto_code(proto_code)
+
+    def _log_unmapped_proto_code(self, proto_code: str) -> None:
+        """Warn that the panel reported a state HA can't represent.
+
+        Distinguishes two cases so the user (or a maintainer reading logs)
+        knows whether to fix their config or file a bug:
+
+        - Code is in PROTO_TO_STATE but no HA button maps to that state
+          (the user just needs to bind a button in options).
+        - Code isn't in PROTO_TO_STATE at all — the integration doesn't
+          know this state, please report.
+
+        Deduped per entity: we only re-log when the unmapped code changes,
+        so a panel sitting in the unmapped state doesn't spam every poll.
+        """
+        if self._last_unmapped_logged == proto_code:
+            return
+        self._last_unmapped_logged = proto_code
+        sec_state = PROTO_TO_STATE.get(proto_code)
+        if sec_state is not None:
+            label = STATE_LABELS.get(sec_state, sec_state.value)
+            _LOGGER.warning(
+                "[%s installation=%s] Unmapped alarm state: Verisure reports "
+                "'%s' (proto code '%s'). None of the buttons on the main "
+                "control panel are mapped to it. Map a button in Settings → "
+                "Devices & Services → Verisure OWA → Configure → Alarm State "
+                "Mappings, or HA will keep showing this as 'armed_custom_bypass'.",
+                self.entity_id,
+                self.installation.number,
+                label,
                 proto_code,
+            )
+        else:
+            _LOGGER.warning(
+                "[%s installation=%s] Unmapped alarm state: Verisure proto "
+                "code '%s' is not recognised by this integration. Please "
+                "report at %s.",
+                self.entity_id,
+                self.installation.number,
+                proto_code,
+                _PROJECT_URL,
             )
 
     def _store_operation_status_metadata(self, status: OperationStatus | None) -> bool:
@@ -394,11 +437,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._state = self._status_map[status.protom_response]
         else:
             self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-            _LOGGER.info(
-                "Unmapped alarm status code '%s' from Verisure. "
-                "Check your Alarm State Mappings in the integration options",
-                status.protom_response,
-            )
+            self._log_unmapped_proto_code(status.protom_response)
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
         """Check the code only if arming requires a code and a PIN is configured."""
