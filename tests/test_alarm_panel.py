@@ -731,7 +731,7 @@ class TestAsyncAlarmDisarm:
         alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("API down"))
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm("1234")
 
@@ -903,7 +903,7 @@ class TestSetArmState:
         alarm.client.arm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
@@ -1215,7 +1215,7 @@ class TestForceState:
         )
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm("1234")
 
@@ -1238,7 +1238,7 @@ class TestForceState:
         )
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -1819,7 +1819,7 @@ class TestForceArmContext:
         """_notify_force_arm_expired calls _notify with the force_arm_expired translation key."""
         alarm = make_alarm()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             alarm._notify_force_arm_expired()
 
@@ -2518,7 +2518,7 @@ class TestCompoundArmCommands:
         alarm.client.arm_alarm = arm_side_effect
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
@@ -2918,7 +2918,7 @@ class TestDynamicDisarm:
         )
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -2944,7 +2944,7 @@ class TestDynamicDisarm:
         alarm.client.disarm_alarm = AsyncMock(side_effect=_err)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -3298,7 +3298,7 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm.client.disarm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -3317,7 +3317,7 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm.client.arm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._notify"
+            "custom_components.verisure_owa.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -3439,7 +3439,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3457,7 +3457,7 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3476,7 +3476,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3496,7 +3496,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3520,7 +3520,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3540,7 +3540,7 @@ class TestNotificationContent:
         event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3562,7 +3562,7 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -3579,7 +3579,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.get_notification_strings",
+            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)

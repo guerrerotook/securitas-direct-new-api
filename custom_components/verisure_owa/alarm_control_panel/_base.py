@@ -1,4 +1,11 @@
-"""Support for Verisure OWA alarm control panels."""
+"""Base Verisure OWA alarm panel: coordinator integration, arm/disarm
+flow, force-arm context, and arming-exception notifications.
+
+Sub-panels (Combined, Interior, Perimeter, Annex) live in _panels.py and
+inherit the bulk of their behaviour from BaseVerisureOwaAlarmPanel here.
+"""
+
+from __future__ import annotations
 
 import datetime
 from datetime import timedelta
@@ -7,70 +14,53 @@ from typing import Any
 import uuid
 
 import homeassistant.components.alarm_control_panel as alarm
-import voluptuous as vol
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntityFeature,  # type: ignore[attr-defined]
     CodeFormat,  # type: ignore[attr-defined]
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.entity_platform import (
-    AddEntitiesCallback,
-    async_get_current_platform,
-)
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import (
+from .. import (
     CONF_CODE_ARM_REQUIRED,
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_NOTIFY_GROUP,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
-    VerisureDevice,
     VerisureHub,
     _notify,
 )
-from .const import (
-    CONF_ENABLE_ANNEX_PANEL,
-    CONF_ENABLE_INTERIOR_PANEL,
-    CONF_ENABLE_PERIMETER_PANEL,
-)
-from .coordinators import AlarmCoordinator, AlarmStatusData
-from .entity import VerisureEntity
-from .events import (
+from ..coordinators import AlarmCoordinator, AlarmStatusData
+from ..entity import VerisureEntity
+from ..events import (
     ARMING_EXCEPTION_EVENT_TYPE,
     LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
     inject_ha_event,
 )
-from .notification_translations import get_notification_strings
-from .verisure_owa_api.__version__ import __url__ as _PROJECT_URL
-from .verisure_owa_api.models import ActivityCategory, ActivityException
-from .verisure_owa_api import (
+from ..notification_translations import get_notification_strings
+from ..verisure_owa_api import (
     ArmingExceptionError,
     Installation,
     OperationStatus,
     PROTO_DISARMED,
     PROTO_TO_STATE,
     STATE_LABELS,
+    STATE_TO_COMMAND,
     VerisureOwaError,
     VerisureOwaState,
-    STATE_TO_COMMAND,
     is_proto_letter,
 )
-from .verisure_owa_api.command_resolver import (
-    AlarmState,
-    AnnexMode,
+from ..verisure_owa_api.__version__ import __url__ as _PROJECT_URL
+from ..verisure_owa_api.command_resolver import (
     CommandResolver,
     CommandStep,
-    InteriorMode,
-    PerimeterMode,
     PROTO_TO_ALARM_STATE,
-    VERISURE_OWA_STATE_TO_ALARM_STATE,
+    AlarmState,
 )
+from ..verisure_owa_api.models import ActivityCategory, ActivityException
 
 # Map HA alarm state names to config keys
 HA_STATE_TO_CONF_KEY: dict[str, str] = {
@@ -81,94 +71,7 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
     AlarmControlPanelState.ARMED_VACATION: "map_vacation",
 }
 
-_DISARMED_STATE = AlarmState(
-    interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF
-)
-
 _LOGGER = logging.getLogger(__name__)
-
-
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
-    """Set up Verisure OWA alarm entities based on config_entry.
-
-    No API calls are made here.  Entities start with unknown state;
-    the coordinator drives periodic updates.
-    """
-    entry_data = hass.data[DOMAIN][entry.entry_id]
-    client: VerisureHub = entry_data["hub"]
-    coordinator: AlarmCoordinator = entry_data["alarm_coordinator"]
-    options = entry.options
-
-    enable_peri: bool = options.get(CONF_ENABLE_PERIMETER_PANEL, False)
-    enable_annex: bool = options.get(CONF_ENABLE_ANNEX_PANEL, False)
-    enable_interior: bool = options.get(CONF_ENABLE_INTERIOR_PANEL, False)
-
-    alarms: list[CombinedVerisureOwaAlarmPanel] = []
-    all_entities: list[BaseVerisureOwaAlarmPanel] = []
-    securitas_devices: list[VerisureDevice] = entry_data["devices"]
-    for devices in securitas_devices:
-        combined = CombinedVerisureOwaAlarmPanel(
-            devices.installation,
-            client=client,
-            hass=hass,
-            coordinator=coordinator,
-        )
-        alarms.append(combined)
-        all_entities.append(combined)
-
-        # Saved toggles are the source of truth — the options flow already
-        # gates each toggle on capability, so a saved toggle implies the
-        # capability was supported at config time. Don't gate entity creation
-        # on coordinator.has_peri/has_annex here: a transient capability-
-        # detection failure at startup (e.g. get_services 5xx) would otherwise
-        # permanently hide opted-in entities until the user reloads, even
-        # after the coordinator's later background refresh succeeds.
-        if enable_peri:
-            all_entities.append(
-                PerimeterVerisureOwaAlarmPanel(
-                    devices.installation,
-                    client=client,
-                    hass=hass,
-                    coordinator=coordinator,
-                )
-            )
-
-        if enable_annex:
-            all_entities.append(
-                AnnexVerisureOwaAlarmPanel(
-                    devices.installation,
-                    client=client,
-                    hass=hass,
-                    coordinator=coordinator,
-                )
-            )
-
-        if enable_interior:
-            all_entities.append(
-                InteriorVerisureOwaAlarmPanel(
-                    devices.installation,
-                    client=client,
-                    hass=hass,
-                    coordinator=coordinator,
-                )
-            )
-
-    async_add_entities(all_entities, False)
-    hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
-
-    platform = async_get_current_platform()
-    platform.async_register_entity_service(
-        "force_arm",
-        {vol.Optional(CONF_CODE): cv.string},
-        "async_force_arm",
-    )
-    platform.async_register_entity_service(
-        "force_arm_cancel",
-        {},
-        "async_force_arm_cancel",
-    )
 
 
 class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
@@ -1086,242 +989,3 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if AlarmControlPanelState.ARMED_VACATION in self._command_map:
             features |= AlarmControlPanelEntityFeature.ARM_VACATION
         return features
-
-
-class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
-    """The household-intent panel — drives all three axes via mappings.
-
-    Inherits all behavior from the base. Sub-panels (Interior, Perimeter,
-    Annex) come in subsequent tasks.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._attr_name = f"Main - {self._installation.alias}"
-
-    def _resolve_target_state(self, ha_state: str) -> AlarmState:
-        """Convert an HA alarm mode to an AlarmState using the verisure state map."""
-        if ha_state == AlarmControlPanelState.DISARMED:
-            return _DISARMED_STATE
-        securitas_state = self._securitas_state_map.get(ha_state)
-        if securitas_state is None:
-            raise VerisureOwaError(f"Unsupported alarm mode: {ha_state}")
-        return VERISURE_OWA_STATE_TO_ALARM_STATE[securitas_state]
-
-    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
-        """For the combined panel, map joint state back to HA via user mappings."""
-        for ha_state, sec_state in self._securitas_state_map.items():
-            if VERISURE_OWA_STATE_TO_ALARM_STATE.get(sec_state) == joint_state:
-                try:
-                    return AlarmControlPanelState(ha_state)
-                except ValueError:
-                    return None
-        return None
-
-
-class _AxisSubPanelMixin:
-    """Mixin that routes state updates through _extract_state(joint_state).
-
-    Sub-panels override _extract_state() to project the coordinator's joint
-    AlarmState onto a single axis.  The base-class _update_from_coordinator()
-    and update_status_alarm() use _status_map (the combined-panel user-mapping)
-    which is wrong for axis sub-panels.  This mixin replaces both paths.
-    """
-
-    def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
-        """Project the coordinator's joint state onto this panel's axis.
-
-        Stores any well-formed proto code (single uppercase letter) so that the
-        refuse-on-unknown-state gate in _execute_transition fires for codes we
-        don't yet model.  For codes we do model, also project the coordinator's
-        joint state onto this axis; unknown codes preserve the previous _state
-        because coordinator.alarm_state defaults to all-OFF for them, which
-        would otherwise make the sub-panel silently report DISARMED while the
-        system is actually armed.
-        """
-        # Refresh resolver capabilities — they may have been populated late.
-        self._resolver.update_capabilities(  # type: ignore[attr-defined]
-            has_peri=self.coordinator.has_peri  # type: ignore[attr-defined]
-        )
-        status = data.status
-        if not status.status:
-            return
-        proto_code = status.status
-        if not is_proto_letter(proto_code):
-            return
-        self._last_proto_code = proto_code  # type: ignore[attr-defined]
-        if proto_code not in PROTO_TO_ALARM_STATE:
-            return
-        joint = self.coordinator.alarm_state  # type: ignore[attr-defined]
-        self._state = self._extract_state(joint)  # type: ignore[attr-defined]
-
-    def update_status_alarm(  # type: ignore[override]
-        self, status: OperationStatus | None = None
-    ) -> None:
-        """Update state after an arm/disarm operation using the joint-state projection."""
-        if not self._store_operation_status_metadata(status):  # type: ignore[attr-defined]
-            return
-        assert status is not None  # narrowed by _store_operation_status_metadata
-        # The coordinator hasn't refreshed yet at this point, so reconstruct the
-        # AlarmState from the proto code; if unknown, fall back to the (stale)
-        # coordinator joint state to preserve the most recent known projection.
-        joint = PROTO_TO_ALARM_STATE.get(
-            status.protom_response,
-            self.coordinator.alarm_state,  # type: ignore[attr-defined]
-        )
-        self._state = self._extract_state(joint)  # type: ignore[attr-defined]
-
-
-class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
-    """Sub-panel driving only the interior axis.
-
-    Capabilities (ARMDAY, ARMNIGHT, ARM) gate which HA states are exposed.
-    The perimeter and annex axes are preserved from the coordinator's current
-    joint state when computing target states.
-    """
-
-    _SUFFIX = "_interior"
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Interior - {self._installation.alias}"
-
-    @property
-    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return all interior arming features.
-
-        We deliberately do NOT gate on the JWT capability set: empirically (Italian
-        SDVECU OWNER) the JWT 'cap' claim can be both incomplete and wrong about
-        which arming commands the panel accepts — e.g. claiming ARMNIGHT while
-        the panel rejects ARMNIGHT1 with "not valid for Central Unit", and
-        omitting ARMDAY while the panel happily accepts ARMDAY1. Gating on the
-        cap set therefore hides modes that work and exposes modes that don't.
-        Instead, surface all three interior modes; the resolver's mark_unsupported
-        runtime-fallback catches genuinely-rejected commands and the user gets a
-        clear notification naming the failed command.
-        """
-        return (
-            AlarmControlPanelEntityFeature.ARM_HOME
-            | AlarmControlPanelEntityFeature.ARM_NIGHT
-            | AlarmControlPanelEntityFeature.ARM_AWAY
-        )
-
-    def _resolve_target_state(self, ha_state: str) -> AlarmState:
-        """Map an HA state to a target AlarmState that touches only the interior axis."""
-        interior_target_map: dict[str, InteriorMode] = {
-            AlarmControlPanelState.ARMED_HOME: InteriorMode.DAY,
-            AlarmControlPanelState.ARMED_NIGHT: InteriorMode.NIGHT,
-            AlarmControlPanelState.ARMED_AWAY: InteriorMode.TOTAL,
-            AlarmControlPanelState.DISARMED: InteriorMode.OFF,
-        }
-        if ha_state not in interior_target_map:
-            raise VerisureOwaError(
-                f"Unsupported alarm mode for Interior panel: {ha_state}"
-            )
-        current = self.coordinator.alarm_state
-        return AlarmState(
-            interior=interior_target_map[ha_state],
-            perimeter=current.perimeter,
-            annex=current.annex,
-        )
-
-    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
-        """Project the joint state onto the interior axis only."""
-        mapping = {
-            InteriorMode.OFF: AlarmControlPanelState.DISARMED,
-            InteriorMode.DAY: AlarmControlPanelState.ARMED_HOME,
-            InteriorMode.NIGHT: AlarmControlPanelState.ARMED_NIGHT,
-            InteriorMode.TOTAL: AlarmControlPanelState.ARMED_AWAY,
-        }
-        return mapping.get(joint_state.interior)
-
-
-class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
-    """Sub-panel driving only the perimeter axis.
-
-    Perimeter is binary (ON/OFF). The interior and annex axes are preserved
-    from the coordinator's current joint state when computing target states.
-    """
-
-    _SUFFIX = "_perimeter"
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Perimeter - {self._installation.alias}"
-
-    @property
-    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return supported features for perimeter (binary axis, ARM_AWAY only)."""
-        return AlarmControlPanelEntityFeature.ARM_AWAY
-
-    def _resolve_target_state(self, ha_state: str) -> AlarmState:
-        """Map an HA state to a target AlarmState that touches only the perimeter axis."""
-        perimeter_target_map: dict[str, PerimeterMode] = {
-            AlarmControlPanelState.ARMED_AWAY: PerimeterMode.ON,
-            AlarmControlPanelState.DISARMED: PerimeterMode.OFF,
-        }
-        if ha_state not in perimeter_target_map:
-            raise VerisureOwaError(
-                f"Unsupported alarm mode for Perimeter panel: {ha_state}"
-            )
-        current = self.coordinator.alarm_state
-        return AlarmState(
-            interior=current.interior,
-            perimeter=perimeter_target_map[ha_state],
-            annex=current.annex,
-        )
-
-    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
-        """Project the joint state onto the perimeter axis only."""
-        mapping = {
-            PerimeterMode.OFF: AlarmControlPanelState.DISARMED,
-            PerimeterMode.ON: AlarmControlPanelState.ARMED_AWAY,
-        }
-        return mapping.get(joint_state.perimeter)
-
-
-class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
-    """Sub-panel driving only the annex axis.
-
-    Annex is binary (ON/OFF). The interior and perimeter axes are preserved
-    from the coordinator's current joint state when computing target states.
-    """
-
-    _SUFFIX = "_annex"
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
-        self._attr_name = f"Annex - {self._installation.alias}"
-
-    @property
-    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return supported features for annex (binary axis, ARM_AWAY only)."""
-        return AlarmControlPanelEntityFeature.ARM_AWAY
-
-    def _resolve_target_state(self, ha_state: str) -> AlarmState:
-        """Map an HA state to a target AlarmState that touches only the annex axis."""
-        annex_target_map: dict[str, AnnexMode] = {
-            AlarmControlPanelState.ARMED_AWAY: AnnexMode.ON,
-            AlarmControlPanelState.DISARMED: AnnexMode.OFF,
-        }
-        if ha_state not in annex_target_map:
-            raise VerisureOwaError(
-                f"Unsupported alarm mode for Annex panel: {ha_state}"
-            )
-        current = self.coordinator.alarm_state
-        return AlarmState(
-            interior=current.interior,
-            perimeter=current.perimeter,
-            annex=annex_target_map[ha_state],
-        )
-
-    def _extract_state(self, joint_state: AlarmState) -> AlarmControlPanelState | None:
-        """Project the joint state onto the annex axis only."""
-        mapping = {
-            AnnexMode.OFF: AlarmControlPanelState.DISARMED,
-            AnnexMode.ON: AlarmControlPanelState.ARMED_AWAY,
-        }
-        return mapping.get(joint_state.annex)
