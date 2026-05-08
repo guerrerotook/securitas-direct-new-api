@@ -65,3 +65,11 @@ PLATFORMS = [
 ]
 
 SENTINEL_SERVICE_NAMES: frozenset[str] = frozenset({"CONFORT", "COMFORTO", "COMFORT"})
+
+# Lock automations (issue #449) — per-lock auto-lock-on-arm and
+# auto-disarm-on-unlock configuration.
+CONF_LOCK_AUTOMATIONS = "lock_automations"
+CIRCUIT_INTERIOR = "interior"
+CIRCUIT_PERIMETER = "perimeter"
+CIRCUIT_ANNEX = "annex"
+LOCK_CIRCUITS: tuple[str, ...] = (CIRCUIT_INTERIOR, CIRCUIT_PERIMETER, CIRCUIT_ANNEX)
