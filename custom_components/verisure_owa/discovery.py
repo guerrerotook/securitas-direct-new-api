@@ -234,6 +234,13 @@ async def _discover_locks(
             if entry is not None:
                 new_lock._entry_id = entry.entry_id
             locks.append(new_lock)
+            # Register the lock so the options flow can discover it.
+            entry_data.setdefault("registered_locks", []).append(
+                {
+                    "device_id": device_id,
+                    "alias": new_lock._attr_name or device_id,
+                }
+            )
         lock_add(locks, False)
 
         # Schedule deferred config retry for locks without config.
