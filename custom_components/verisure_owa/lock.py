@@ -226,7 +226,31 @@ class VerisureLock(  # type: ignore[override]
         if prev is None:
             # First update — establish baseline only.
             return
-        # Transition detection deferred to Task 6.
+        if not self._lock_on_arm_circuits:
+            return
+        # Circuits that just transitioned disarmed→armed.
+        newly_armed = new_armed - prev
+        triggers = newly_armed.intersection(self._lock_on_arm_circuits)
+        if not triggers:
+            return
+        # Idempotency: skip if already locked / locking / mid-operation.
+        if self._operation_in_progress:
+            return
+        if self._state in (LOCK_STATUS_LOCKED, LOCK_STATUS_LOCKING):
+            return
+        # Schedule the lock as a background task — listeners must not
+        # block the coordinator-update path.
+        if self.hass is not None:
+            self.hass.async_create_task(self._auto_lock())
+
+    async def _auto_lock(self) -> None:
+        """Perform an auto-lock-on-arm action (failure handling: Task 7)."""
+        await self._change_lock_mode(
+            lock_state=True,
+            transitional_state=LOCK_STATUS_LOCKING,
+            optimistic_state=LOCK_STATUS_LOCKED,
+            operation="Auto-lock",
+        )
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
