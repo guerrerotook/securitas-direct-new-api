@@ -70,8 +70,6 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
     _attr_should_poll = False
     _attr_has_entity_name = True
     _mode: str = "thumbnail"
-    _unique_id_kind: str = "camera"
-    _camera_name: str | None = None
 
     def __init__(
         self,
@@ -87,12 +85,10 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         self._installation = installation
         self._camera_device = camera_device
         self._zone_id = camera_device.zone_id
-        self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}"
-            f"_{self._unique_id_kind}_{camera_device.zone_id}"
-        )
-        if self._camera_name is not None:
-            self._attr_name = self._camera_name
+        suffix = "_full" if self._mode == "full" else ""
+        self._attr_unique_id = f"v5_verisure_owa.{installation.number}_camera{suffix}_{camera_device.zone_id}"
+        if self._mode == "full":
+            self._attr_name = "Full Image"
         self._attr_device_info = camera_device_info(installation, camera_device)
 
     async def async_camera_image(
@@ -163,5 +159,3 @@ class VerisureCameraFull(VerisureCamera):
     """Full-resolution variant of VerisureCamera."""
 
     _mode = "full"
-    _unique_id_kind = "camera_full"
-    _camera_name = "Full Image"
