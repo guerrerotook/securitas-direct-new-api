@@ -48,6 +48,8 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _publish_flow_capabilities,
+    _resolve_flow_capabilities,
     generate_uuid,
 )
 from .const import (
@@ -70,7 +72,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
     TwoFactorRequiredError,
 )
-from .verisure_owa_api.capabilities import detect_peri
+from .verisure_owa_api.capabilities import detect_annex, detect_peri
 
 VERSION = 4
 
@@ -592,8 +594,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         capabilities = self.hub.client.get_supported_commands(installation.number)
         self._has_peri = detect_peri(installation, services, capabilities)
+        has_annex = detect_annex(capabilities)
         _LOGGER.debug(
             "Perimeter detected for %s: %s", installation.number, self._has_peri
+        )
+        # Publish the detection result so the options flow can render the
+        # right toggles even if the user opens it before async_setup_entry
+        # has finished storing the alarm coordinator under entry.entry_id.
+        _publish_flow_capabilities(
+            self.hass, installation.number, self._has_peri, has_annex
         )
 
         return await self.async_step_options()
@@ -745,14 +754,13 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
 
         notify_options = _get_notify_options(self.hass)
 
-        # Capability-gated sub-panel toggles — read from the running coordinator.
-        coordinator = (
-            self.hass.data.get(DOMAIN, {})
-            .get(self.config_entry.entry_id, {})
-            .get("alarm_coordinator")
+        # Capability-gated sub-panel toggles — resolve via the helper so the
+        # options dialog opened during async_setup_entry's get_services await
+        # (when the coordinator dict isn't yet under entry.entry_id) still
+        # picks up the published capabilities from the config flow.
+        has_peri, has_annex = _resolve_flow_capabilities(
+            self.hass, self.config_entry
         )
-        has_peri = bool(coordinator and coordinator.has_peri)
-        has_annex = bool(coordinator and coordinator.has_annex)
         peri_currently_enabled = self.config_entry.options.get(
             CONF_ENABLE_PERIMETER_PANEL, False
         )
@@ -812,13 +820,10 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             data = {**self._general_data, **user_input}
             return self.async_create_entry(title="", data=data)
 
-        # Read has_peri from the running coordinator (live detection).
-        # Falls back to False if the coordinator is unavailable.
-        coordinator_data = self.hass.data.get(DOMAIN, {}).get(
-            self.config_entry.entry_id, {}
-        )
-        coordinator = coordinator_data.get("alarm_coordinator")
-        has_peri = coordinator.has_peri if coordinator is not None else False
+        # Resolve via the helper so we read coordinator → published cache →
+        # False, matching the init step. Avoids the race where the user
+        # opens the dialog before async_setup_entry has stored the coord.
+        has_peri, _ = _resolve_flow_capabilities(self.hass, self.config_entry)
 
         # Determine defaults for mapping dropdowns
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS

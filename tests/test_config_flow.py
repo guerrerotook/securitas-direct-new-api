@@ -938,6 +938,132 @@ async def test_options_get_falls_back_to_data(hass):
 
 
 # ===================================================================
+# TestFlowCapabilitiesPublishResolve
+#
+# Race fix: when async_setup_entry hasn't yet stored the alarm
+# coordinator under entry.entry_id (still inside its `await get_services`),
+# the options flow can't read coordinator.has_peri.  The config flow's
+# _select_installation already detected the capability values, so we
+# publish them to hass.data[DOMAIN]["flow_capabilities"][installation]
+# and the options flow falls back to that.
+# ===================================================================
+
+
+async def test_resolve_flow_capabilities_uses_coordinator_when_populated(hass):
+    """When the coordinator has populated capabilities, prefer it."""
+    from custom_components.verisure_owa import _resolve_flow_capabilities
+
+    coord = MagicMock()
+    coord.capabilities_populated = True
+    coord.has_peri = True
+    coord.has_annex = False
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {CONF_INSTALLATION: "111"}
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"alarm_coordinator": coord}
+    # Stale opposite values in the cache must NOT win over a populated coord.
+    hass.data[DOMAIN]["flow_capabilities"] = {
+        "111": {"has_peri": False, "has_annex": True}
+    }
+
+    has_peri, has_annex = _resolve_flow_capabilities(hass, entry)
+
+    assert (has_peri, has_annex) == (True, False)
+
+
+async def test_resolve_flow_capabilities_falls_back_to_cache_when_coord_missing(hass):
+    """When entry.entry_id isn't yet in hass.data, fall back to the cache."""
+    from custom_components.verisure_owa import _resolve_flow_capabilities
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {CONF_INSTALLATION: "111"}
+    # Note: no entry-id-keyed dict in hass.data — this is the race window.
+    hass.data.setdefault(DOMAIN, {})["flow_capabilities"] = {
+        "111": {"has_peri": True, "has_annex": False}
+    }
+
+    has_peri, has_annex = _resolve_flow_capabilities(hass, entry)
+
+    assert (has_peri, has_annex) == (True, False)
+
+
+async def test_resolve_flow_capabilities_falls_back_when_coord_unpopulated(hass):
+    """A coordinator that hasn't run yet has has_peri=False as the
+    default — that's not authoritative.  Fall back to the cache."""
+    from custom_components.verisure_owa import _resolve_flow_capabilities
+
+    coord = MagicMock()
+    coord.capabilities_populated = False
+    coord.has_peri = False
+    coord.has_annex = False
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {CONF_INSTALLATION: "111"}
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"alarm_coordinator": coord}
+    hass.data[DOMAIN]["flow_capabilities"] = {
+        "111": {"has_peri": True, "has_annex": True}
+    }
+
+    has_peri, has_annex = _resolve_flow_capabilities(hass, entry)
+
+    assert (has_peri, has_annex) == (True, True)
+
+
+async def test_resolve_flow_capabilities_returns_false_when_nothing_known(hass):
+    """No coordinator and no cache → (False, False) — current behaviour."""
+    from custom_components.verisure_owa import _resolve_flow_capabilities
+
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {CONF_INSTALLATION: "111"}
+    hass.data.setdefault(DOMAIN, {})
+
+    has_peri, has_annex = _resolve_flow_capabilities(hass, entry)
+
+    assert (has_peri, has_annex) == (False, False)
+
+
+def _form_has_field(result, field_name: str) -> bool:
+    """Return True if the rendered form schema contains a key with this name."""
+    schema = result["data_schema"].schema
+    for key in schema:
+        # vol.Required / vol.Optional wrap the key — unwrap with `.schema`.
+        name = getattr(key, "schema", key)
+        if name == field_name:
+            return True
+    return False
+
+
+async def test_options_init_renders_peri_toggle_via_published_cache(hass):
+    """Race fix: options init shows the perimeter toggle even if the
+    coordinator dict isn't in hass.data yet, by reading the published
+    capability cache."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**make_config_entry_data(has_peri=True), CONF_INSTALLATION: "111"},
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    # Simulate the race: published cache exists, but no alarm_coordinator
+    # under entry.entry_id yet.
+    hass.data.setdefault(DOMAIN, {})["flow_capabilities"] = {
+        "111": {"has_peri": True, "has_annex": False}
+    }
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+    assert _form_has_field(result, CONF_ENABLE_PERIMETER_PANEL)
+
+
+# ===================================================================
 # TestInstallationSelection (~6 tests)
 # ===================================================================
 

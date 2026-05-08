@@ -161,6 +161,17 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         return self._has_annex
 
     @property
+    def capabilities_populated(self) -> bool:
+        """Return True once has_peri / has_annex have been derived from a
+        real fetch — not the initial False default.
+
+        The options flow uses this to decide whether the coordinator's
+        capability flags are authoritative or whether to fall back to the
+        published capability cache.
+        """
+        return self._capabilities_populated
+
+    @property
     def capabilities(self) -> frozenset[str]:
         """Return the supported command capability set."""
         return self._capabilities
