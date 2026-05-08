@@ -3,6 +3,12 @@ force_arm:
     entity:
       integration: verisure_owa
       domain: alarm_control_panel
+  fields:
+    code:
+      example: "1234"
+      selector:
+        text:
+          type: password
 
 force_arm_cancel:
   target:
