@@ -406,44 +406,66 @@ class VerisureLock(  # type: ignore[override]
             operation="Lock",
         )
 
-    async def async_unlock(self, **kwargs: Any) -> None:
-        await self._dispatch_unlock_disarm()
-        await self._change_lock_mode(
-            lock_state=False,
-            transitional_state=LOCK_STATUS_UNLOCKING,
-            optimistic_state=LOCK_STATUS_UNLOCKED,
-            operation="Unlock",
-        )
-
-    async def async_open(self, **kwargs: Any) -> None:
-        await self._dispatch_unlock_disarm()
-        await self._change_lock_mode(
-            lock_state=False,
-            transitional_state=LOCK_STATUS_UNLOCKING,
-            optimistic_state=LOCK_STATUS_UNLOCKED,
-            operation="Open",
-        )
-
-    async def _dispatch_unlock_disarm(self) -> None:
+    async def _dispatch_unlock_disarm(self) -> bool | None:
         """Disarm configured circuits before unlocking.
 
-        Skipped when no circuits are configured, when the panel is not
-        registered yet, or when no configured circuit is currently
-        armed. Failure handling lives in Task 9.
+        Returns:
+            None  — disarm was skipped (nothing to do).
+            True  — disarm was attempted and succeeded.
+            False — disarm was attempted and failed (notification already fired).
+
+        The unlock always proceeds regardless of the return value.
         """
         if not self._unlock_disarms_circuits:
-            return
-        if self._combined_alarm_panel is None:
-            return
-        if self._alarm_coordinator is None:
-            return
+            return None
+        if self._combined_alarm_panel is None or self._alarm_coordinator is None:
+            return None
         currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
         targets = [
             c for c in self._unlock_disarms_circuits if c in currently_armed
         ]
         if not targets:
-            return
-        await self._combined_alarm_panel.execute_partial_disarm(targets)
+            return None
+        ok = await self._combined_alarm_panel.execute_partial_disarm(targets)
+        if not ok:
+            await self._fire_autolock_notification(
+                title="Auto-disarm failed",
+                message=(
+                    f"Could not disarm before unlocking {self._attr_name}. "
+                    f"The door will be unlocked but the alarm may still be armed."
+                ),
+            )
+        return ok
+
+    async def _perform_user_unlock(self, operation: str) -> None:
+        """Disarm-first unlock used by both async_unlock and async_open."""
+        pre_state = self._state
+        disarm_result = await self._dispatch_unlock_disarm()
+        await self._change_lock_mode(
+            lock_state=False,
+            transitional_state=LOCK_STATUS_UNLOCKING,
+            optimistic_state=LOCK_STATUS_UNLOCKED,
+            operation=operation,
+        )
+        if (
+            disarm_result is True
+            and self._state == pre_state
+            and self._state == LOCK_STATUS_LOCKED
+        ):
+            # Disarm succeeded but the unlock itself failed — state reverted.
+            await self._fire_autolock_notification(
+                title="Unlock failed",
+                message=(
+                    f"{self._attr_name}: alarm has been disarmed but the door "
+                    f"is still locked."
+                ),
+            )
+
+    async def async_unlock(self, **kwargs: Any) -> None:
+        await self._perform_user_unlock("Unlock")
+
+    async def async_open(self, **kwargs: Any) -> None:
+        await self._perform_user_unlock("Open")
 
     @property
     def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
