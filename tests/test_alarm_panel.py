@@ -2089,6 +2089,100 @@ class TestForceArmContext:
 # ===========================================================================
 
 
+class TestUnmappedProtoCodeLogging:
+    """When a proto code falls through to ARMED_CUSTOM_BYPASS the log line
+    must identify the installation, distinguish recognised-but-unmapped
+    from unknown-code, and not spam every poll."""
+
+    @staticmethod
+    def _config_without_total():
+        # STD_DEFAULTS map_away → TOTAL; replace it so 'T' is unmapped.
+        return {
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": VerisureOwaState.PARTIAL_DAY.value,
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": STD_DEFAULTS["map_vacation"],
+            "scan_interval": 120,
+        }
+
+    def test_recognised_unmapped_code_logs_state_name_and_installation(
+        self, caplog
+    ):
+        """Code in PROTO_TO_STATE but not bound to any HA button → WARNING
+        naming the state, the installation number, and the entity_id."""
+        import logging
+
+        alarm = make_alarm(config=self._config_without_total())
+        alarm.entity_id = "alarm_control_panel.home"
+
+        status = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="T",
+            protom_response_data="",
+        )
+        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+            alarm.update_status_alarm(status)
+
+        msg = caplog.text
+        assert "Total" in msg, msg  # human label
+        assert "T" in msg
+        assert "123456" in msg
+        assert "alarm_control_panel.home" in msg
+
+    def test_unknown_code_logs_unrecognised_message(self, caplog):
+        """Code not in PROTO_TO_STATE → WARNING saying the integration
+        doesn't recognise it."""
+        import logging
+
+        alarm = make_alarm(config=self._config_without_total())
+        alarm.entity_id = "alarm_control_panel.home"
+
+        status = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="Z",
+            protom_response_data="",
+        )
+        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+            alarm.update_status_alarm(status)
+
+        msg = caplog.text
+        assert "Z" in msg
+        assert "123456" in msg
+        # Phrasing must clearly mark this as integration-unknown, not user-config.
+        assert "unknown" in msg.lower() or "not recognised" in msg.lower() or "not recognized" in msg.lower()
+
+    def test_repeat_unmapped_code_does_not_spam_log(self, caplog):
+        """Two polls with the same unmapped code → only one warning."""
+        import logging
+
+        alarm = make_alarm(config=self._config_without_total())
+
+        status = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="T",
+            protom_response_data="",
+        )
+        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+            alarm.update_status_alarm(status)
+            alarm.update_status_alarm(status)
+
+        warnings = [
+            r for r in caplog.records
+            if r.levelno >= logging.WARNING and "Unmapped" in r.message
+        ]
+        assert len(warnings) == 1
+
+
 class TestForceArmCodeGate:
     """force_arm trusts the force context as proof of recent PIN auth.
 
