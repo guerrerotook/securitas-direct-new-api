@@ -226,6 +226,34 @@ on actual API responses, multi-axis state, or hardware configuration.
       is 4, `data.token` is gone, and `data.password` is removed (with
       `data.refresh_token` populated).
 
+### Security hardening
+
+- [ ] **`force_arm` service is gated by force context, not by a fresh
+      PIN prompt.** The service registration accepts an optional `code`
+      that's validated as defence-in-depth, but the legitimate flow
+      relies on `_force_context` (set only after a PIN-authenticated
+      arm reached the server, expires after one `scan_interval`).
+      Setup: configure a PIN in options and enable **Code required to
+      arm**. Arm against an open sensor and enter the PIN at the
+      dashboard prompt — the arm will fail with an exception and the
+      Force Arm persistent notification fires. Then verify:
+      - **Mobile notification tap completes the force-arm.** Tap
+        Force Arm on the mobile notification (which can't carry a
+        PIN). The arm proceeds — the context's existence is treated
+        as proof of the PIN auth from the prior step.
+      - **Service call without code, with active context, arms.**
+        Re-trigger the exception. In Developer Tools → Services call
+        `verisure_owa.force_arm` with no `code`. Arms.
+      - **Service call with wrong code raises.** Re-trigger.
+        `verisure_owa.force_arm` with `code: "9999"` →
+        `ServiceValidationError`, no client call, context preserved.
+      - **Service call with correct code arms.** Re-trigger. Same
+        service call with the configured PIN → arms.
+      - **Service call without context is a no-op.** Cancel the
+        force-arm (or wait `scan_interval` seconds for the context
+        to expire). `verisure_owa.force_arm` with no code logs
+        "no force context available" and does nothing.
+
 ## Post-merge follow-ups
 
 - [ ] **Map the four perimeter+annex proto codes.** Issue #441 supplied
