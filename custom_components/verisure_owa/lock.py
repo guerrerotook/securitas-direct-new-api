@@ -243,14 +243,48 @@ class VerisureLock(  # type: ignore[override]
         if self.hass is not None:
             self.hass.async_create_task(self._auto_lock())
 
+    def _autolock_notification_id(self) -> str:
+        return (
+            f"verisure_owa_autolock_{self._installation.number}_{self._device_id}"
+        )
+
+    async def _fire_autolock_notification(
+        self, *, title: str, message: str
+    ) -> None:
+        """Create / replace a persistent notification for an autolock event."""
+        if self.hass is None:
+            return
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "notification_id": self._autolock_notification_id(),
+                "title": title,
+                "message": message,
+            },
+            blocking=False,
+        )
+
     async def _auto_lock(self) -> None:
-        """Perform an auto-lock-on-arm action (failure handling: Task 7)."""
+        """Perform an auto-lock-on-arm action.
+
+        On failure (VerisureOwaError or post-call state still unlocked),
+        creates a persistent notification.
+        """
         await self._change_lock_mode(
             lock_state=True,
             transitional_state=LOCK_STATUS_LOCKING,
             optimistic_state=LOCK_STATUS_LOCKED,
             operation="Auto-lock",
         )
+        if self._state != LOCK_STATUS_LOCKED:
+            await self._fire_autolock_notification(
+                title="Auto-lock failed",
+                message=(
+                    f"Could not lock {self._attr_name} when arming. "
+                    f"The alarm is armed but the door is unlocked."
+                ),
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""

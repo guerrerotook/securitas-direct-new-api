@@ -1451,3 +1451,45 @@ class TestVerisureLockAutoLockOnArm:
         lock._handle_alarm_coordinator_update()
         await _drain_lock_tasks(lock)
         lock._client.change_lock_mode.assert_not_awaited()
+
+
+# ===========================================================================
+# Auto-lock failure notification tests (Task 7)
+# ===========================================================================
+
+
+class TestVerisureLockAutoLockFailure:
+    """Tests for the persistent-notification surface on auto-lock failure."""
+
+    async def test_persistent_notification_created_on_lock_failure(self):
+        from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+        lock = make_lock(initial_status="1", poll_status="1")  # stays unlocked
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        # Patch services so we can capture persistent_notification.create.
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock._auto_lock()
+
+        # Look for a persistent_notification.create call.
+        calls = lock.hass.services.async_call.await_args_list
+        notification_calls = [
+            c for c in calls
+            if c.args[:2] == ("persistent_notification", "create")
+        ]
+        assert len(notification_calls) == 1
+        payload = notification_calls[0].args[2]
+        assert payload["notification_id"].startswith("verisure_owa_autolock_")
+        assert "Auto-lock failed" in payload["title"]
+
+    async def test_no_notification_on_successful_auto_lock(self):
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock.hass.services.async_call = AsyncMock()
+        await lock._auto_lock()
+        notification_calls = [
+            c for c in lock.hass.services.async_call.await_args_list
+            if c.args[:2] == ("persistent_notification", "create")
+        ]
+        assert notification_calls == []
