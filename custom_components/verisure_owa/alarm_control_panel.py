@@ -318,8 +318,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._last_proto_code = proto_code
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
+            self._last_unmapped_logged = None
         elif proto_code in self._status_map:
             self._state = self._status_map[proto_code]
+            self._last_unmapped_logged = None
         else:
             self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
             self._log_unmapped_proto_code(proto_code)
@@ -407,8 +409,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         assert status is not None  # narrowed by _store_operation_status_metadata
         if status.protom_response == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
+            self._last_unmapped_logged = None
         elif status.protom_response in self._status_map:
             self._state = self._status_map[status.protom_response]
+            self._last_unmapped_logged = None
         else:
             self._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
             self._log_unmapped_proto_code(status.protom_response)

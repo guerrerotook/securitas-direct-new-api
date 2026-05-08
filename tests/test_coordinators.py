@@ -188,6 +188,27 @@ class TestAlarmCoordinator:
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
 
+    @pytest.mark.asyncio
+    async def test_waf_block_on_retry_keeps_dedicated_message(self):
+        """WAFBlockedError on the post-relogin retry preserves the
+        'WAF blocked' diagnostic instead of the generic update-failed one."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_general_status.side_effect = [
+            SessionExpiredError("expired"),
+            WAFBlockedError("blocked on retry"),
+        ]
+        client.login.return_value = None
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed) as exc_info:
+            await coord._async_update_data()
+
+        assert "WAF blocked" in str(exc_info.value)
+
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────
 
