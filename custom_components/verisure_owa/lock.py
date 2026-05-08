@@ -140,6 +140,7 @@ class VerisureLock(  # type: ignore[override]
 
         # Auto-lock state — populated when added to hass.
         self._alarm_coordinator = None  # set by async_added_to_hass
+        self._combined_alarm_panel = None  # set by async_added_to_hass
         self._alarm_listener_unsub: Callable[[], None] | None = None
         self._alarm_baseline: set[str] | None = None  # armed circuits at last update
         self._lock_on_arm_circuits: list[str] = []
@@ -406,6 +407,7 @@ class VerisureLock(  # type: ignore[override]
         )
 
     async def async_unlock(self, **kwargs: Any) -> None:
+        await self._dispatch_unlock_disarm()
         await self._change_lock_mode(
             lock_state=False,
             transitional_state=LOCK_STATUS_UNLOCKING,
@@ -414,12 +416,34 @@ class VerisureLock(  # type: ignore[override]
         )
 
     async def async_open(self, **kwargs: Any) -> None:
+        await self._dispatch_unlock_disarm()
         await self._change_lock_mode(
             lock_state=False,
             transitional_state=LOCK_STATUS_UNLOCKING,
             optimistic_state=LOCK_STATUS_UNLOCKED,
             operation="Open",
         )
+
+    async def _dispatch_unlock_disarm(self) -> None:
+        """Disarm configured circuits before unlocking.
+
+        Skipped when no circuits are configured, when the panel is not
+        registered yet, or when no configured circuit is currently
+        armed. Failure handling lives in Task 9.
+        """
+        if not self._unlock_disarms_circuits:
+            return
+        if self._combined_alarm_panel is None:
+            return
+        if self._alarm_coordinator is None:
+            return
+        currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
+        targets = [
+            c for c in self._unlock_disarms_circuits if c in currently_armed
+        ]
+        if not targets:
+            return
+        await self._combined_alarm_panel.execute_partial_disarm(targets)
 
     @property
     def supported_features(self) -> lock.LockEntityFeature:  # type: ignore[override]
