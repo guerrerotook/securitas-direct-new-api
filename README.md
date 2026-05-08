@@ -90,6 +90,10 @@ If your account requires 2FA, you will automatically be asked to select a phone 
 
 ![2FA](./docs/images/2fa.png)
 
+### Credential storage
+
+Your password is **not** persisted to disk. After the initial login the integration stores a long-lived refresh token (~180-day TTL) in the Home Assistant config entry, which is used to keep your session alive across restarts without your password. If the refresh token expires or is revoked (for example, you change your password externally), Home Assistant shows the standard reauth dialog asking you to re-enter your password — entering it once mints a fresh refresh token and the password is discarded again.
+
 ## Options
 
 After setup, you can change most settings via **Settings → Integrations → Verisure OWA → Configure**.

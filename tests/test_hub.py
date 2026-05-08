@@ -5,14 +5,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from homeassistant.const import CONF_PASSWORD
+
 from custom_components.verisure_owa.api_queue import ApiQueue
 from custom_components.verisure_owa.const import (
     API_CACHE_TTL,
+    CONF_REFRESH_TOKEN,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
 )
 from custom_components.verisure_owa.hub import VerisureHub
 from custom_components.verisure_owa.verisure_owa_api import (
+    AuthenticationError,
     VerisureOwaError,
 )
 from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -23,8 +27,12 @@ from custom_components.verisure_owa.verisure_owa_api.models import (
 from .conftest import make_installation
 
 
-def make_hub() -> VerisureHub:
-    """Create a VerisureHub with a real ApiQueue and mocked client."""
+def make_hub(*, mock_client: bool = True, **config_overrides) -> VerisureHub:
+    """Create a VerisureHub with a real ApiQueue and (by default) a mocked client.
+
+    Set mock_client=False to keep the real VerisureOwaClient — useful when the
+    test is exercising the constructor's client-wiring contract directly.
+    """
     hass = MagicMock()
     hass.data = {}
     config = {
@@ -35,12 +43,163 @@ def make_hub() -> VerisureHub:
         "unique_id": "uid",
         "idDeviceIndigitall": "indi",
         "delay_check_operation": 0.01,
+        **config_overrides,
     }
     hub = VerisureHub(config, config_entry=None, http_client=MagicMock(), hass=hass)
     hub._api_queue = ApiQueue(interval=0)
-    hub.client = MagicMock()
-    hub.client.poll_delay = 0.01
+    if mock_client:
+        hub.client = MagicMock()
+        hub.client.poll_delay = 0.01
     return hub
+
+
+# ── Construction tests ──────────────────────────────────────────────────────
+
+
+class TestConstruction:
+    """Tests for VerisureHub.__init__."""
+
+    def test_refresh_token_from_config_prefills_client(self):
+        """A persisted refresh token in domain_config flows into the real client."""
+        hub = make_hub(mock_client=False, **{CONF_REFRESH_TOKEN: "persisted-refresh-token"})
+        assert hub.client.refresh_token_value == "persisted-refresh-token"
+
+    def test_get_refresh_token_returns_clients_refresh_token_value(self):
+        """The hub-level getter mirrors get_authentication_token."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "current-refresh-token"
+        assert hub.get_refresh_token() == "current-refresh-token"
+
+
+class TestRefreshTokenPersistence:
+    """Tests that rotated refresh tokens get written to entry.data."""
+
+    @staticmethod
+    def _hub_with_entry(entry_data: dict) -> tuple[VerisureHub, MagicMock]:
+        hass = MagicMock()
+        hass.data = {}
+        config_entry = MagicMock()
+        config_entry.data = entry_data
+        hub = make_hub()
+        hub.config_entry = config_entry
+        hub.hass = hass
+        return hub, config_entry
+
+    def test_persists_rotated_token_to_entry_data(self):
+        """A token rotation must propagate into entry.data via async_update_entry."""
+        hub, config_entry = self._hub_with_entry(
+            {"username": "test@example.com", CONF_REFRESH_TOKEN: "old-token"}
+        )
+
+        hub._persist_refresh_token("rotated-token")
+
+        hub.hass.config_entries.async_update_entry.assert_called_once()
+        call = hub.hass.config_entries.async_update_entry.call_args
+        assert call.args[0] is config_entry
+        assert call.kwargs["data"][CONF_REFRESH_TOKEN] == "rotated-token"
+
+    def test_strips_legacy_password_on_first_capture(self):
+        """First refresh-token capture on a legacy entry must drop CONF_PASSWORD.
+
+        Pre-migration users have password-shape entries on disk. Capturing a
+        refresh token on the first post-upgrade setup is the natural moment
+        to scrub the password from persisted data.
+        """
+        hub, _ = self._hub_with_entry(
+            {"username": "test@example.com", CONF_PASSWORD: "legacy-password"}
+        )
+
+        hub._persist_refresh_token("first-refresh-token")
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert new_data[CONF_REFRESH_TOKEN] == "first-refresh-token"
+        assert CONF_PASSWORD not in new_data
+
+    def test_skips_write_when_token_unchanged_and_no_password(self):
+        """No-op rotations must not trigger redundant entry-store writes."""
+        hub, _ = self._hub_with_entry(
+            {"username": "test@example.com", CONF_REFRESH_TOKEN: "same-token"}
+        )
+
+        hub._persist_refresh_token("same-token")
+
+        hub.hass.config_entries.async_update_entry.assert_not_called()
+
+    def test_writes_when_token_unchanged_but_legacy_password_present(self):
+        """Same-token rotation must still scrub a lingering CONF_PASSWORD."""
+        hub, _ = self._hub_with_entry(
+            {
+                "username": "test@example.com",
+                CONF_REFRESH_TOKEN: "same-token",
+                CONF_PASSWORD: "legacy-password",
+            }
+        )
+
+        hub._persist_refresh_token("same-token")
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert CONF_PASSWORD not in new_data
+        assert new_data[CONF_REFRESH_TOKEN] == "same-token"
+
+    def test_no_config_entry_skips_persistence(self):
+        """Without a config entry (config-flow path), rotation must not crash."""
+        hub = make_hub()  # config_entry=None
+        hub._persist_refresh_token("anything")
+        hub.hass.config_entries.async_update_entry.assert_not_called()
+
+
+class TestLogin:
+    """Tests for hub.login()."""
+
+    async def test_uses_refresh_when_token_present(self):
+        """With a refresh token in hand, hub.login() must NOT do a password login.
+
+        On reload of a refresh-token-shape entry the password is gone; calling
+        client.login() would send an empty password to Verisure.
+        """
+        hub = make_hub()
+        hub.client.refresh_token_value = "persisted-refresh-token"
+        hub.client.refresh_token = AsyncMock(return_value=True)
+        hub.client.login = AsyncMock()
+
+        await hub.login()
+
+        hub.client.refresh_token.assert_awaited_once()
+        hub.client.login.assert_not_awaited()
+
+    async def test_falls_back_to_login_without_refresh_token(self):
+        """No refresh token → fresh password login (the original code path)."""
+        hub = make_hub()
+        hub.client.refresh_token_value = ""
+        hub.client.refresh_token = AsyncMock()
+        hub.client.login = AsyncMock()
+
+        await hub.login()
+
+        hub.client.login.assert_awaited_once()
+        hub.client.refresh_token.assert_not_awaited()
+
+    async def test_refresh_failure_with_no_password_raises_auth_error(self):
+        """Refresh token rejected and no password to fall back on → AuthenticationError.
+
+        This is the trigger for HA's reauth flow on long-idle installs whose
+        180-day refresh token has finally expired or been server-revoked.
+        Sending an empty password to the API would just waste a round trip.
+        """
+        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+            AuthenticationError,
+        )
+
+        hub = make_hub()
+        hub.client.refresh_token_value = "expired-refresh-token"
+        hub.client.password = ""
+        hub.client.refresh_token = AsyncMock(return_value=False)
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(AuthenticationError):
+            await hub.login()
+
+        hub.client.login.assert_not_awaited()
 
 
 # ── change_lock_mode tests ──────────────────────────────────────────────────

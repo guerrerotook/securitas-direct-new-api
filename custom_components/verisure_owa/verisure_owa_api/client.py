@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Callable
 from datetime import datetime, timedelta
 import json
 import logging
@@ -163,6 +164,8 @@ class VerisureOwaClient:
         poll_delay: float = 2.0,
         poll_timeout: float = 60.0,
         log_filter: Any | None = None,
+        refresh_token: str | None = None,
+        on_refresh_token_changed: Callable[[str], None] | None = None,
     ) -> None:
         # Transport
         self._transport = transport
@@ -176,7 +179,10 @@ class VerisureOwaClient:
         # Auth state
         self.authentication_token: str | None = None
         self._authentication_token_exp: datetime = datetime.min
-        self.refresh_token_value: str = ""
+        self.refresh_token_value: str = refresh_token or ""
+        self._on_refresh_token_changed: Callable[[str], None] | None = (
+            on_refresh_token_changed
+        )
         self.login_timestamp: int = 0
         self.protom_response: str = ""
         self.authentication_otp_challenge_value: tuple[str, str] | None = None
@@ -221,6 +227,13 @@ class VerisureOwaClient:
         """Register a secret with the log filter if available."""
         if self._log_filter and value:
             self._log_filter.update_secret(key, value)
+
+    def _update_refresh_token(self, value: str) -> None:
+        """Store a refresh token and notify the host integration."""
+        self.refresh_token_value = value
+        self._register_secret("refresh_token", value)
+        if self._on_refresh_token_changed is not None:
+            self._on_refresh_token_changed(value)
 
     def _register_installation(self, installation: Installation) -> None:
         """Register an installation number with the log filter."""
@@ -322,11 +335,7 @@ class VerisureOwaClient:
         if not token_str:
             return None
         try:
-            decoded = jwt.decode(
-                token_str,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
+            decoded = jwt.decode(token_str, options={"verify_signature": False})
         except jwt.exceptions.DecodeError:
             _LOGGER.warning("Failed to decode authentication token")
             return None
@@ -623,8 +632,7 @@ class VerisureOwaClient:
             raise _new_err
 
         if login_data.get("refreshToken"):
-            self.refresh_token_value = login_data["refreshToken"]
-            self._register_secret("refresh_token", self.refresh_token_value)
+            self._update_refresh_token(login_data["refreshToken"])
 
         if login_data["hash"] is not None:
             self.authentication_token = login_data["hash"]
@@ -677,8 +685,7 @@ class VerisureOwaClient:
             return False
 
         if refresh_data.get("refreshToken"):
-            self.refresh_token_value = refresh_data["refreshToken"]
-            self._register_secret("refresh_token", self.refresh_token_value)
+            self._update_refresh_token(refresh_data["refreshToken"])
 
         return True
 
@@ -745,8 +752,7 @@ class VerisureOwaClient:
         self._register_secret("auth_token", self.authentication_token)
         self._decode_auth_token(self.authentication_token)
         if validate_data.get("refreshToken"):
-            self.refresh_token_value = validate_data["refreshToken"]
-            self._register_secret("refresh_token", self.refresh_token_value)
+            self._update_refresh_token(validate_data["refreshToken"])
         return (None, None)
 
     # ── Send OTP ─────────────────────────────────────────────────────────
@@ -1776,11 +1782,7 @@ class VerisureOwaClient:
 
         # Decode capabilities JWT and store in self._capabilities
         try:
-            token = jwt.decode(
-                capabilities,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
+            token = jwt.decode(capabilities, options={"verify_signature": False})
         except jwt.exceptions.DecodeError as err:
             raise VerisureOwaError("Failed to decode capabilities token") from err
 
