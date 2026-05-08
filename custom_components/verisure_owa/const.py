@@ -28,6 +28,7 @@ EVENTS_CARD_URL = (
 
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
+CONF_REFRESH_TOKEN = "refresh_token"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"

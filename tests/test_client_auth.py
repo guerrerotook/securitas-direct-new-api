@@ -147,6 +147,58 @@ def client(transport):
     )
 
 
+# ── Construction tests ───────────────────────────────────────────────────────
+
+
+class TestConstruction:
+    async def test_refresh_token_kwarg_prefills_refresh_token_value(self, transport):
+        """Constructing with a refresh token must prefill client.refresh_token_value.
+
+        This is the entry point for HA reload paths: persisted refresh token
+        comes back into the client without a fresh password login.
+        """
+        client = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="",
+            device_id="test-device-id",
+            uuid="test-uuid",
+            id_device_indigitall="test-indigitall",
+            refresh_token=FAKE_REFRESH_TOKEN,
+        )
+        assert client.refresh_token_value == FAKE_REFRESH_TOKEN
+
+    async def test_refresh_rotation_fires_on_change_callback(self, transport):
+        """Server-rotated refresh tokens must invoke on_refresh_token_changed.
+
+        The integration depends on this to persist the new token to entry.data
+        so a future restart still has a valid refresh token.
+        """
+        captured: list[str] = []
+        new_refresh = make_jwt(exp_minutes=180 * 24 * 60, sub="rotated")
+        client = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="",
+            device_id="test-device-id",
+            uuid="test-uuid",
+            id_device_indigitall="test-indigitall",
+            refresh_token="old-refresh-token",
+            on_refresh_token_changed=captured.append,
+        )
+        transport.execute.return_value = refresh_response(refresh_token=new_refresh)
+
+        ok = await client.refresh_token()
+
+        assert ok is True
+        assert client.refresh_token_value == new_refresh
+        assert captured == [new_refresh]
+
+
 # ── Login tests ──────────────────────────────────────────────────────────────
 
 

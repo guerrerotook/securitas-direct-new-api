@@ -24,6 +24,7 @@ from .const import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
+    CONF_REFRESH_TOKEN,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
 )
@@ -31,6 +32,7 @@ from .log_filter import SensitiveDataFilter
 from .notification_translations import get_notification_strings
 from .verisure_owa_api import (
     ApiDomains,
+    AuthenticationError,
     CameraDevice,
     Installation,
     OperationStatus,
@@ -160,12 +162,14 @@ class VerisureHub:
             country=self.country,
             language=self.lang,
             username=domain_config[CONF_USERNAME],
-            password=domain_config[CONF_PASSWORD],
+            password=domain_config.get(CONF_PASSWORD, ""),
             device_id=domain_config[CONF_DEVICE_ID],
             uuid=domain_config[CONF_UNIQUE_ID],
             id_device_indigitall=domain_config[CONF_DEVICE_INDIGITALL],
             poll_delay=domain_config[CONF_DELAY_CHECK_OPERATION],
             log_filter=self.log_filter,
+            refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
+            on_refresh_token_changed=self._persist_refresh_token,
         )
         self.installations: list[Installation] = []
         self._api_queue = ApiQueue(
@@ -183,7 +187,23 @@ class VerisureHub:
         self._full_timestamps: dict[str, str] = {}
 
     async def login(self) -> None:
-        """Login to Verisure."""
+        """Authenticate, preferring a stored refresh token over a password login.
+
+        With no password to fall back on, a rejected refresh token raises
+        AuthenticationError so the caller can map it to ConfigEntryAuthFailed —
+        sending an empty password to the API would just waste a round trip.
+        """
+        if self.client.refresh_token_value:
+            try:
+                if await self.client.refresh_token():
+                    return
+            except VerisureOwaError as err:
+                _LOGGER.warning("Refresh failed: %s", err.log_detail())
+            if not self.client.password:
+                raise AuthenticationError(
+                    "Refresh token rejected and no password available; reauth required"
+                )
+            _LOGGER.info("Falling back to password login after refresh failure")
         await self.client.login()
 
     async def validate_device(self) -> tuple[str | None, list[OtpPhone] | None]:
@@ -465,6 +485,27 @@ class VerisureHub:
     def set_authentication_token(self, value: str) -> None:
         """Set the authentication token."""
         self.client.authentication_token = value
+
+    def get_refresh_token(self) -> str:
+        """Get the long-lived refresh token, or empty string if absent."""
+        return self.client.refresh_token_value
+
+    def _persist_refresh_token(self, value: str) -> None:
+        """Write a rotated refresh token back to the config entry.
+
+        Also scrubs any legacy CONF_PASSWORD on the first capture. No-op when
+        the hub is detached from a config entry (config-flow construction).
+        """
+        if self.config_entry is None:
+            return
+        existing = self.config_entry.data
+        if existing.get(CONF_REFRESH_TOKEN) == value and CONF_PASSWORD not in existing:
+            return
+        new_data = {**existing, CONF_REFRESH_TOKEN: value}
+        new_data.pop(CONF_PASSWORD, None)
+        self.hass.config_entries.async_update_entry(
+            self.config_entry, data=new_data
+        )
 
     async def logout(self) -> bool:
         """Logout from Verisure."""

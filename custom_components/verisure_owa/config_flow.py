@@ -13,7 +13,6 @@ from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
-    CONF_TOKEN,
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
@@ -55,6 +54,7 @@ from .const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_REFRESH_TOKEN,
 )
 from .api_queue import ApiQueue
 from .verisure_owa_api import (
@@ -72,7 +72,7 @@ from .verisure_owa_api import (
 )
 from .verisure_owa_api.capabilities import detect_peri
 
-VERSION = 3
+VERSION = 4
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -157,7 +157,7 @@ def _build_settings_schema(
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow."""
 
-    VERSION = 3
+    VERSION = 4
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     def __init__(self) -> None:
@@ -174,13 +174,17 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _create_entry_for_installation(
         self, installation: Installation
     ) -> config_entries.ConfigFlowResult:
-        """Register new entry for a specific installation."""
+        """Register a new entry, persisting the refresh token (not the password)."""
         username = self.config[CONF_USERNAME]
         unique_id = f"{username}_{installation.number}"
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
         self.config[CONF_INSTALLATION] = installation.number
-        return self.async_create_entry(title=installation.alias, data=dict(self.config))
+        assert self.hub is not None
+        entry_data = dict(self.config)
+        entry_data.pop(CONF_PASSWORD, None)
+        entry_data[CONF_REFRESH_TOKEN] = self.hub.get_refresh_token()
+        return self.async_create_entry(title=installation.alias, data=entry_data)
 
     def _create_client(
         self,
@@ -308,20 +312,17 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.config[CONF_ENTRY_ID] = ""
         # Reuse existing session for this username if one is already running,
         # to avoid a new login that would invalidate the active session.
-        # Password must match to prevent unauthorized addition of installations.
         username = self.config[CONF_USERNAME]
-        password = self.config[CONF_PASSWORD]
         sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
         if username in sessions:
             existing_hub = sessions[username]["hub"]
-            if existing_hub.config[CONF_PASSWORD] == password:
-                self.hub = existing_hub
-                self.config[CONF_DEVICE_ID] = existing_hub.config[CONF_DEVICE_ID]
-                self.config[CONF_UNIQUE_ID] = existing_hub.config[CONF_UNIQUE_ID]
-                self.config[CONF_DEVICE_INDIGITALL] = existing_hub.config.get(
-                    CONF_DEVICE_INDIGITALL, ""
-                )
-                return await self.finish_setup()
+            self.hub = existing_hub
+            self.config[CONF_DEVICE_ID] = existing_hub.config[CONF_DEVICE_ID]
+            self.config[CONF_UNIQUE_ID] = existing_hub.config[CONF_UNIQUE_ID]
+            self.config[CONF_DEVICE_INDIGITALL] = existing_hub.config.get(
+                CONF_DEVICE_INDIGITALL, ""
+            )
+            return await self.finish_setup()
 
         uuid = generate_uuid()
         self.config[CONF_DEVICE_ID] = uuid
@@ -425,12 +426,14 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
-        """Complete reauth by updating entry credentials and reloading."""
+        """Capture a fresh refresh token and reload; the supplied password is never persisted."""
         assert self._reauth_entry is not None
+        assert self.hub is not None
         await self.async_set_unique_id(self._reauth_entry.unique_id)
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = self.config[CONF_USERNAME]
-        new_data[CONF_PASSWORD] = self.config[CONF_PASSWORD]
+        new_data.pop(CONF_PASSWORD, None)
+        new_data[CONF_REFRESH_TOKEN] = self.hub.get_refresh_token()
         self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")
@@ -504,7 +507,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
-        self.config[CONF_TOKEN] = self.hub.get_authentication_token()
 
         self.hass.data.setdefault(DOMAIN, {})
 

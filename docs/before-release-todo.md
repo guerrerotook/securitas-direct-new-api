@@ -212,6 +212,20 @@ on actual API responses, multi-axis state, or hardware configuration.
       Settings → Devices & Services and confirm the integration
       shows the Verisure logo and icon, not a placeholder.
 
+- [ ] **Refresh-token reauth dialog appears on bad token.** Hand-edit the
+      entry's `refresh_token` to garbage (or revoke it server-side) and
+      restart HA — confirm the reauth dialog appears and the log shows
+      `AuthenticationError` → `ConfigEntryAuthFailed`. Re-enter the
+      password and confirm setup completes; the password is scrubbed
+      from disk again on the next successful login.
+
+- [ ] **v3 → v4 migration drops legacy keys.** Take an existing v4
+      `main` install (entry version 3, `data.password` present, possibly
+      `data.token` from older versions). Upgrade to this branch and
+      restart HA. After first successful login, confirm `entry.version`
+      is 4, `data.token` is gone, and `data.password` is removed (with
+      `data.refresh_token` populated).
+
 ## Post-merge follow-ups
 
 - [ ] **Map the four perimeter+annex proto codes.** Issue #441 supplied
@@ -288,8 +302,20 @@ on actual API responses, multi-axis state, or hardware configuration.
         `SecuritasDirectError` → `VerisureOwaError`). Any third-party
         tooling that imports from `custom_components.securitas...`
         must update its import paths.
+      - **Security:** passwords are no longer persisted to disk. The
+        integration now stores a long-lived refresh token (~180-day
+        TTL) and falls back to the standard reauth dialog if refresh
+        fails. Existing v3 entries are migrated to v4 on first launch;
+        any legacy stored password is removed atomically on the first
+        successful login.
 
 ## Done
+
+- [x] **Password not on disk; refresh token persisted.** Configured a
+      fresh entry and confirmed `.storage/core.config_entries` contains
+      `data.refresh_token` and no `data.password` after the first
+      successful login. Restart cycle starts the integration via the
+      refresh token without re-prompting for the password.
 
 - [x] **Force-arm flow.** Persistent notification with Force Arm /
       Cancel buttons fires when arming with an open sensor; Force Arm

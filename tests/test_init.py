@@ -315,9 +315,10 @@ class TestVerisureHub:
         assert hub.config is config
 
     async def test_login_delegates_to_session(self):
-        """login() should delegate to session.login()."""
+        """login() should delegate to session.login() when no refresh token is available."""
         hub = self._make_hub()
         hub.client = AsyncMock()
+        hub.client.refresh_token_value = ""
         await hub.login()
         hub.client.login.assert_awaited_once()
 
@@ -421,6 +422,30 @@ class TestAsyncSetupEntry:
         assert entry.entry_id in hass.data[DOMAIN]
         assert "hub" in hass.data[DOMAIN][entry.entry_id]
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
+
+    async def test_setup_succeeds_with_refresh_token_only_entry(self, hass, mock_hub):
+        """Refresh-token-shape entries (no CONF_PASSWORD) must set up cleanly."""
+        from custom_components.verisure_owa.const import CONF_REFRESH_TOKEN
+
+        data = make_config_entry_data()
+        data.pop(CONF_PASSWORD)
+        data[CONF_REFRESH_TOKEN] = "persisted-refresh-token"
+
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
 
     async def test_setup_login_2fa_error(self, hass, mock_hub):
         """TwoFactorRequiredError raises ConfigEntryAuthFailed and notifies via translation key."""
@@ -1471,10 +1496,19 @@ class TestAsyncMigrateEntry:
         assert result is False
         assert entry.version == 2
 
-    async def test_migration_v3_accepted(self, hass):
-        """v3 entry passes through unchanged (current version)."""
+    async def test_migration_v3_migrated_to_v4_strips_legacy_token(self, hass):
+        """v3 → v4 bumps the version and removes the obsolete CONF_TOKEN key.
+
+        CONF_PASSWORD is left in place: the next successful login will capture
+        a refresh token and the persist-callback strips the password then.
+        Doing it here would force a network login from inside async_migrate_entry,
+        which is fragile (offline boots, account-blocked, etc.).
+        """
+        from homeassistant.const import CONF_TOKEN
+
         data = make_config_entry_data(username="user@example.com")
         data[CONF_INSTALLATION] = "123456"
+        data[CONF_TOKEN] = "stale-jwt"  # legacy dead write from older versions
 
         entry = MockConfigEntry(
             domain=DOMAIN,
@@ -1487,7 +1521,28 @@ class TestAsyncMigrateEntry:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        assert entry.version == 3
+        assert entry.version == 4
+        assert CONF_TOKEN not in entry.data
+        # CONF_PASSWORD intentionally retained — first setup login removes it.
+        assert CONF_PASSWORD in entry.data
+
+    async def test_migration_v4_accepted(self, hass):
+        """v4 entry passes through unchanged (current version)."""
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.version == 4
 
 
 class TestPerDomainQueueSharing:

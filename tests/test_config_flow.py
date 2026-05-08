@@ -24,6 +24,7 @@ from custom_components.verisure_owa.const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_REFRESH_TOKEN,
 )
 from custom_components.verisure_owa.verisure_owa_api import (
     AccountBlockedError,
@@ -50,6 +51,7 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from tests.conftest import (
     FAKE_JWT,
+    FAKE_REFRESH_TOKEN,
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
@@ -579,9 +581,7 @@ async def test_finish_setup_logs_in_gets_token_advances_to_options(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
     mock_hub.login.assert_awaited_once()
-    assert (
-        mock_hub.get_authentication_token.call_count == 2
-    )  # is None check + get token
+    mock_hub.get_authentication_token.assert_called_once()  # is None guard only
 
 
 async def test_finish_setup_lists_installations(hass):
@@ -1091,7 +1091,31 @@ async def test_full_flow_creates_entry(hass):
     assert result["title"] == "Home"  # auto-selected installation alias
     assert result["data"][CONF_USERNAME] == "test@example.com"
     assert result["data"][CONF_INSTALLATION] == "123456"  # default installation number
-    assert result["data"][CONF_TOKEN] == FAKE_JWT
+
+
+async def test_full_flow_does_not_persist_auth_token(hass):
+    """Auth tokens are short-lived and must never be written to entry.data."""
+    mock_hub = _hub_factory()
+
+    result = await _complete_full_flow(hass, mock_hub)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_TOKEN not in result["data"]
+
+
+async def test_full_flow_persists_refresh_token_not_password(hass):
+    """Entry data must hold the refresh token, not the long-term password.
+
+    The integration uses the refresh token on reload to obtain a fresh auth
+    token without ever needing the password again.
+    """
+    mock_hub = _hub_factory()
+
+    result = await _complete_full_flow(hass, mock_hub)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    assert CONF_PASSWORD not in result["data"]
 
 
 async def test_full_flow_2fa_creates_entry(hass):
@@ -1221,8 +1245,13 @@ async def test_existing_session_copies_device_ids(hass):
     assert result["data"][CONF_DEVICE_INDIGITALL] == "existing-indigitall"
 
 
-async def test_existing_session_wrong_password_does_fresh_login(hass):
-    """Wrong password should not reuse session — falls through to fresh login."""
+async def test_existing_session_reused_regardless_of_password(hass):
+    """Existing session is reused on second-add even if the supplied password differs.
+
+    Re-checking the password is security theatre — anyone with HA admin access
+    can already drive the running session. After dropping password persistence
+    there's also nothing to compare against.
+    """
     existing_hub = _hub_factory()
     existing_hub.config = {
         CONF_DEVICE_ID: "existing-device-id",
@@ -1237,19 +1266,20 @@ async def test_existing_session_wrong_password_does_fresh_login(hass):
         "test@example.com": {"hub": existing_hub, "ref_count": 1}
     }
 
-    # The new hub that will be created for the fresh login
+    # If session reuse fails and a fresh hub gets constructed, the patch will
+    # surface it via new_hub.login being awaited — the assertion below catches that.
     new_hub = _hub_factory()
     with _patches(new_hub):
         result = await hass.config_entries.flow.async_init(
             DOMAIN,
             context={"source": SOURCE_USER},
-            data={**USER_INPUT_CREDENTIALS, CONF_PASSWORD: "wrong-password"},
+            data={**USER_INPUT_CREDENTIALS, CONF_PASSWORD: "different-password"},
         )
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "options"
-    # Fresh login should have been called on the NEW hub
-    new_hub.login.assert_awaited_once()
+    new_hub.login.assert_not_awaited()
+    existing_hub.login.assert_not_awaited()
 
 
 # ===================================================================
@@ -1338,7 +1368,7 @@ async def test_reauth_shows_confirm_form(hass):
 
 
 async def test_reauth_confirm_valid_credentials(hass):
-    """Valid credentials in reauth should update entry and abort with reauth_successful."""
+    """Valid reauth captures a fresh refresh token; password is never persisted."""
     entry = _make_reauth_entry(hass)
     result = await _start_reauth_flow(hass, entry)
     flow_id = result["flow_id"]
@@ -1361,8 +1391,8 @@ async def test_reauth_confirm_valid_credentials(hass):
 
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    # Verify the entry was updated with new password
-    assert entry.data[CONF_PASSWORD] == "new-password"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    assert CONF_PASSWORD not in entry.data
     mock_reload.assert_awaited_once_with(entry.entry_id)
 
 
@@ -1478,7 +1508,8 @@ async def test_reauth_with_2fa_flow(hass):
 
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    assert entry.data[CONF_PASSWORD] == "new-password"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    assert CONF_PASSWORD not in entry.data
     mock_reload.assert_awaited_once_with(entry.entry_id)
 
 

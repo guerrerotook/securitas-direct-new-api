@@ -23,6 +23,7 @@ from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
+    CONF_TOKEN,
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
@@ -55,6 +56,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_ENABLE_ANNEX_PANEL,
+    CONF_REFRESH_TOKEN,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
@@ -158,7 +160,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Reject old config entries — users must delete and re-add."""
+    """Reject pre-v3 entries; bump v3 → v4 and drop the obsolete CONF_TOKEN."""
     if config_entry.version < 3:
         _LOGGER.error(
             "Config entry %s uses format v%s which is no longer supported. "
@@ -168,6 +170,16 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         )
         _notify(hass, "migration_required", "migration_required")
         return False
+
+    if config_entry.version == 3:
+        new_data = dict(config_entry.data)
+        had_token = new_data.pop(CONF_TOKEN, None) is not None
+        hass.config_entries.async_update_entry(
+            config_entry,
+            data=new_data if had_token else config_entry.data,
+            version=4,
+        )
+
     return True
 
 
@@ -184,7 +196,8 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
 
     config = OrderedDict()
     config[CONF_USERNAME] = entry.data[CONF_USERNAME]
-    config[CONF_PASSWORD] = entry.data[CONF_PASSWORD]
+    config[CONF_PASSWORD] = entry.data.get(CONF_PASSWORD, "")
+    config[CONF_REFRESH_TOKEN] = entry.data.get(CONF_REFRESH_TOKEN, "")
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
     config[CONF_CODE] = _opt(CONF_CODE, DEFAULT_CODE)
     config[CONF_CODE_ARM_REQUIRED] = _opt(
@@ -457,9 +470,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         log_filter = hass.data[DOMAIN]["log_filter"]
 
-    # Register credentials immediately
     log_filter.update_secret("username", config[CONF_USERNAME])
-    log_filter.update_secret("password", config[CONF_PASSWORD])
+    if config.get(CONF_PASSWORD):
+        log_filter.update_secret("password", config[CONF_PASSWORD])
 
     hass.data[DOMAIN][CONF_ENTRY_ID] = entry.entry_id
     if not need_sign_in:

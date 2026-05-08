@@ -79,9 +79,11 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 **Token lifecycle:** Before every API operation, `_ensure_auth()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Errors during refresh are caught with specific exception types (`VerisureOwaError`, `asyncio.TimeoutError`) rather than bare `except`. Similarly, `_ensure_capabilities()` checks a per-installation capabilities JWT that's obtained from `get_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
 
+**Refresh-token persistence:** The auth token (~15 min TTL) is in-memory only, but the long-lived refresh token (~180 day TTL) is persisted to `entry.data[CONF_REFRESH_TOKEN]` so reloads don't need a password. The client accepts an `on_refresh_token_changed(new_token)` callback that fires whenever `login()`, `refresh_token()`, or `validate_device()` updates `refresh_token_value`. The hub registers `_persist_refresh_token` as that callback, which writes the new value to `entry.data` via `hass.config_entries.async_update_entry` and atomically scrubs any legacy `CONF_PASSWORD`. Same-token rotations on a clean entry are a no-op to avoid redundant store writes.
+
 **DRY helpers:** Internal helpers reduce code duplication:
 
-- `_decode_auth_token(token_str)` — Decodes a JWT (HS256, no signature verification), updates `authentication_token_exp` from the `exp` claim. Returns the decoded claims dict or `None` on failure. Used by `login()`, `refresh_token()`, and `validate_device()`.
+- `_decode_auth_token(token_str)` — Decodes a JWT (signature not verified — Verisure's tokens are EdDSA-signed but we only need the `exp` claim for client-side expiry tracking), updates `authentication_token_exp` from the `exp` claim. Returns the decoded claims dict or `None` on failure. Used by `login()`, `refresh_token()`, and `validate_device()`.
 
 - `_extract_response_data(response, field_name)` — Extracts `response["data"][field_name]`, raising `VerisureOwaError` if the data is missing or `None`. Used by poll-status callbacks that work with raw dicts.
 
@@ -150,7 +152,7 @@ All GraphQL query and mutation strings are extracted into `graphql_queries.py`, 
 - `add_installation(number)` registers an installation number for partial masking (last 4 digits visible, e.g. `123456` -> `***3456`).
 - The `filter()` method scans `record.msg` and `record.args` (including nested dicts/lists/tuples), replacing any known secret with its label.
 - Registration happens in `VerisureOwaClient` via `_register_secret()` — called whenever tokens are obtained or refreshed (login, refresh, validate_device).
-- Credentials (username, password) are registered at setup time in `async_setup_entry()`.
+- The username is registered at setup time in `async_setup_entry()`. The password is registered there only if present (legacy v3 entries on first reload); refresh-token-shape entries skip it because no password is in scope.
 - The filter is removed from handlers on `async_unload_entry()`.
 
 **Error notifications:** When operations fail, error notifications shown to the user use only the short error message (`err.message`), never the full error tuple which could contain headers, tokens, or response bodies. The `log_detail()` method on exceptions provides verbose output only for unknown error types.
@@ -252,7 +254,7 @@ VerisureOwaError                  Base class (http_status, message, response_bod
 The central coordinator between the HA layer and the API client. It owns a `VerisureOwaClient` session and is shared by all entity platforms via `hass.data[DOMAIN][entry.entry_id]["hub"]`.
 
 **Key responsibilities:**
-- **Login delegation** — Passes credentials through to `VerisureOwaClient`
+- **Auth delegation** — `login()` prefers the persisted refresh token (`CONF_REFRESH_TOKEN`, ~180-day TTL) and only falls back to a password login when no refresh token is available. If refresh fails and no password is on hand, `AuthenticationError` propagates up so the caller can map it to `ConfigEntryAuthFailed` and trigger reauth — no point sending an empty password to the API. The hub also registers `_persist_refresh_token` on the client, so server-rotated refresh tokens are written back to `entry.data` and any legacy `CONF_PASSWORD` is scrubbed on first capture.
 - **Service discovery** — `get_services()` calls `VerisureOwaClient.get_services()` and caches the results per installation
 - **API call serialization** — All API calls are submitted via `ApiQueue`, which enforces a minimum gap between calls to avoid triggering the Incapsula WAF rate limiter. See [ApiQueue](#apiqueue) below.
 - **Camera management** — `get_camera_devices()` discovers cameras (cached), `capture_image()` requests new captures via the client and stores results. The hub handles HA-specific concerns: dispatcher signals (`SIGNAL_CAMERA_STATE`), image validation/storage, full-image background fetch, and coordinator data updates. After a capture completes, it pushes the new thumbnail and full image into the `CameraCoordinator` via `async_set_updated_data()`.
@@ -296,13 +298,16 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 **Critical rule:** Platform `async_setup_entry` functions must **never** make API calls. All API-based discovery is deferred to a background task that runs after setup completes. This avoids blocking HA startup.
 
+**Config-entry migration (`async_migrate_entry`):** runs before `async_setup_entry` whenever `entry.version` is below the current `VERSION` (4). Pre-v3 entries are rejected with a user notification. v3 → v4 strips the obsolete `CONF_TOKEN` dead-write key and bumps the version. `CONF_PASSWORD` is intentionally preserved so the next successful login can still happen on legacy entries; it is scrubbed lazily by `VerisureHub._persist_refresh_token` on first capture.
+
 ```
-1. Read config entry data into OrderedDict
+1. Read config entry data into OrderedDict (CONF_PASSWORD optional, CONF_REFRESH_TOKEN preferred)
 2. Migrate old config: if no per-button mappings exist, derive from PERI_alarm checkbox
 3. Check for device IDs (device_id, unique_id, id_device_indigitall)
    └── Missing? → raise ConfigEntryNotReady
 4. Create VerisureHub with aiohttp session + HttpTransport + VerisureOwaClient
-5. Login
+   └── Refresh token (if any) is plumbed into the client; persist callback wired up
+5. Login (refresh-first; falls back to password if available, else AuthenticationError)
    ├── TwoFactorRequiredError → raise ConfigEntryAuthFailed (triggers reauth flow)
    ├── AuthenticationError → raise ConfigEntryAuthFailed (triggers reauth flow)
    └── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
@@ -742,7 +747,7 @@ Device IDs are generated during initial setup and stored in the config entry for
 
 **Reauth flow** (`async_step_reauth` / `async_step_reauth_confirm`):
 
-Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, updates the config entry with new credentials and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
+Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked or expired past its 180-day TTL. Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
