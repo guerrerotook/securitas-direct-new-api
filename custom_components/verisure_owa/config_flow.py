@@ -170,7 +170,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
         self._options_data: dict[str, Any] = {}
+        # Sub-panel toggles selected on the initial flow's options step go
+        # into entry.options on CREATE_ENTRY (kept separate so they don't
+        # pollute entry.data, which is the OptionsFlow's fallback source).
+        self._panel_options: dict[str, Any] = {}
         self._has_peri: bool = False
+        self._has_annex: bool = False
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def _create_entry_for_installation(
@@ -196,7 +201,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         entry_data = dict(self.config)
         entry_data.pop(CONF_PASSWORD, None)
         entry_data[CONF_REFRESH_TOKEN] = refresh_token
-        return self.async_create_entry(title=installation.alias, data=entry_data)
+        return self.async_create_entry(
+            title=installation.alias,
+            data=entry_data,
+            options=dict(self._panel_options) if self._panel_options else None,
+        )
 
     def _create_client(
         self,
@@ -594,7 +603,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         capabilities = self.hub.client.get_supported_commands(installation.number)
         self._has_peri = detect_peri(installation, services, capabilities)
-        has_annex = detect_annex(capabilities)
+        self._has_annex = detect_annex(capabilities)
         _LOGGER.debug(
             "Perimeter detected for %s: %s", installation.number, self._has_peri
         )
@@ -602,7 +611,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # right toggles even if the user opens it before async_setup_entry
         # has finished storing the alarm coordinator under entry.entry_id.
         _publish_flow_capabilities(
-            self.hass, installation.number, self._has_peri, has_annex
+            self.hass, installation.number, self._has_peri, self._has_annex
         )
 
         return await self.async_step_options()
@@ -636,22 +645,50 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_options(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Step 3: PIN, scan interval, notification settings."""
+        """Step 3: PIN, scan interval, notifications, sub-panel toggles."""
         if user_input is not None:
             user_input.setdefault(CONF_CODE, DEFAULT_CODE)
             # Flatten the advanced section back to top-level keys
             advanced = user_input.pop(CONF_ADVANCED, {})
             user_input.update(advanced)
+            # Split the panel-enable toggles out of the data-bound options
+            # so they end up in entry.options (where the post-setup flow
+            # writes them) rather than entry.data.
+            for key in (
+                CONF_ENABLE_PERIMETER_PANEL,
+                CONF_ENABLE_INTERIOR_PANEL,
+                CONF_ENABLE_ANNEX_PANEL,
+            ):
+                if key in user_input:
+                    self._panel_options[key] = user_input.pop(key)
             self._options_data = user_input
             return await self.async_step_mappings()
 
         notify_options = _get_notify_options(self.hass)
+        # Capability-gated sub-panel toggles — same surface as the
+        # post-setup OptionsFlow, so users can opt in during initial setup
+        # without having to re-open Configure afterwards.
+        extra_fields: dict[Any, Any] = {}
+        if self._has_peri:
+            extra_fields[
+                vol.Optional(CONF_ENABLE_PERIMETER_PANEL, default=False)
+            ] = bool
+        if self._has_annex:
+            extra_fields[
+                vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=False)
+            ] = bool
+        if self._has_peri or self._has_annex:
+            extra_fields[
+                vol.Optional(CONF_ENABLE_INTERIOR_PANEL, default=False)
+            ] = bool
+
         schema = _build_settings_schema(
             {
                 CONF_CODE: DEFAULT_CODE,
                 CONF_CODE_ARM_REQUIRED: DEFAULT_CODE_ARM_REQUIRED,
             },
             notify_options,
+            extra_fields=extra_fields,
         )
         install_name = (
             self._selected_installation.alias if self._selected_installation else ""
