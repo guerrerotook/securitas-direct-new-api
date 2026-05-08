@@ -25,11 +25,20 @@ from homeassistant.helpers.entity_platform import (
 
 from .. import DOMAIN, VerisureDevice, VerisureHub
 from ..const import (
+    CIRCUIT_ANNEX,
+    CIRCUIT_INTERIOR,
+    CIRCUIT_PERIMETER,
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
 )
 from ..coordinators import AlarmCoordinator
+from ..verisure_owa_api.models import (
+    AlarmState,
+    AnnexMode,
+    InteriorMode,
+    PerimeterMode,
+)
 from ._base import BaseVerisureOwaAlarmPanel
 from ._panels import (
     AnnexVerisureOwaAlarmPanel,
@@ -45,7 +54,29 @@ __all__ = [
     "InteriorVerisureOwaAlarmPanel",
     "PerimeterVerisureOwaAlarmPanel",
     "async_setup_entry",
+    "build_partial_disarm_target",
 ]
+
+
+def build_partial_disarm_target(
+    current: AlarmState, circuits: list[str]
+) -> AlarmState:
+    """Build an AlarmState that disarms ``circuits`` and keeps the rest.
+
+    Unknown circuit names are silently ignored — the caller validates
+    against ``LOCK_CIRCUITS``.
+    """
+    return AlarmState(
+        interior=(
+            InteriorMode.OFF if CIRCUIT_INTERIOR in circuits else current.interior
+        ),
+        perimeter=(
+            PerimeterMode.OFF if CIRCUIT_PERIMETER in circuits else current.perimeter
+        ),
+        annex=(
+            AnnexMode.OFF if CIRCUIT_ANNEX in circuits else current.annex
+        ),
+    )
 
 
 async def async_setup_entry(
