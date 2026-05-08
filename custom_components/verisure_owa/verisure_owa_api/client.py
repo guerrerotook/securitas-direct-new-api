@@ -209,6 +209,10 @@ class VerisureOwaClient:
         self._apollo_operation_id: str = secrets.token_hex(64)
         self._log_filter: SensitiveDataFilter | None = log_filter
 
+        # Persisted refresh tokens load before any rotation, so any log emitted
+        # before the first refresh would otherwise leak the value in plaintext.
+        self._register_secret("refresh_token", self.refresh_token_value)
+
     # ── Public property for token expiry ────────────────────────────────
 
     @property
@@ -229,11 +233,23 @@ class VerisureOwaClient:
             self._log_filter.update_secret(key, value)
 
     def _update_refresh_token(self, value: str) -> None:
-        """Store a refresh token and notify the host integration."""
+        """Store a refresh token and notify the host integration.
+
+        Persistence failures must not break the auth flow: the in-memory
+        token still works for the current session, and the next rotation
+        will retry the host write.
+        """
         self.refresh_token_value = value
         self._register_secret("refresh_token", value)
         if self._on_refresh_token_changed is not None:
-            self._on_refresh_token_changed(value)
+            try:
+                self._on_refresh_token_changed(value)
+            except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
+                _LOGGER.warning(
+                    "on_refresh_token_changed callback raised; refresh token "
+                    "stored in memory but host persistence may have failed",
+                    exc_info=True,
+                )
 
     def _register_installation(self, installation: Installation) -> None:
         """Register an installation number with the log filter."""

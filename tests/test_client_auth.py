@@ -198,6 +198,56 @@ class TestConstruction:
         assert client.refresh_token_value == new_refresh
         assert captured == [new_refresh]
 
+    async def test_callback_exception_does_not_break_refresh(self, transport):
+        """A raising on_refresh_token_changed callback must not break the auth flow.
+
+        The in-memory token still works; the next rotation retries persistence.
+        """
+        new_refresh = make_jwt(exp_minutes=180 * 24 * 60, sub="rotated")
+
+        def boom(_value: str) -> None:
+            raise RuntimeError("simulated persistence failure")
+
+        client = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="",
+            device_id="test-device-id",
+            uuid="test-uuid",
+            id_device_indigitall="test-indigitall",
+            refresh_token="old-refresh-token",
+            on_refresh_token_changed=boom,
+        )
+        transport.execute.return_value = refresh_response(refresh_token=new_refresh)
+
+        ok = await client.refresh_token()
+
+        assert ok is True
+        assert client.refresh_token_value == new_refresh
+
+    async def test_initial_refresh_token_registered_with_log_filter(self, transport):
+        """An at-construction refresh token must be registered for log redaction.
+
+        Otherwise, any log emitted between construction and the first rotation
+        could leak the persisted refresh token in plaintext.
+        """
+        log_filter = MagicMock()
+        VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="",
+            device_id="test-device-id",
+            uuid="test-uuid",
+            id_device_indigitall="test-indigitall",
+            refresh_token=FAKE_REFRESH_TOKEN,
+            log_filter=log_filter,
+        )
+        log_filter.update_secret.assert_any_call("refresh_token", FAKE_REFRESH_TOKEN)
+
 
 # ── Login tests ──────────────────────────────────────────────────────────────
 
