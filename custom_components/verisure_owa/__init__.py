@@ -9,12 +9,12 @@ from datetime import timedelta
 import logging
 from pathlib import Path
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import uuid4
 
 import voluptuous as vol
 
-from homeassistant.components import frontend
+from homeassistant.components import frontend  # noqa: F401 — re-exported so tests can patch
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -69,12 +69,22 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     SENTINEL_SERVICE_NAMES,
     SIGNAL_CAMERA_STATE,
 )
-from .coordinators import (
+from .coordinators import (  # noqa: F401 — CameraCoordinator re-exported for backwards compatibility
     ActivityCoordinator,
     AlarmCoordinator,
     CameraCoordinator,
     LockCoordinator,
     SentinelCoordinator,
+)
+from .card_resources import (  # noqa: F401 — re-exported for backwards compatibility
+    _register_card_resource,
+    _unregister_card_resource,
+)
+from .discovery import (  # noqa: F401 — re-exported for backwards compatibility
+    _async_discover_devices,
+    _discover_cameras,
+    _discover_locks,
+    _schedule_lock_config_retry,
 )
 from .events import attach_activity_listener
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
@@ -93,9 +103,6 @@ from .verisure_owa_api import (
     generate_device_id,
     generate_uuid,
 )
-
-if TYPE_CHECKING:
-    from .lock import VerisureLock
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -665,304 +672,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     raise ConfigEntryNotReady(
         "Config entry missing device IDs. Delete and re-add the integration."
     )
-
-
-async def _discover_cameras(
-    hass: HomeAssistant,
-    hub: VerisureHub,
-    installation: Installation,
-    entry_data: dict[str, Any],
-    entry: ConfigEntry,
-) -> None:
-    """Discover camera devices for an installation and add entities."""
-    from .button import VerisureCaptureButton
-    from .camera import VerisureCamera, VerisureCameraFull
-
-    _LOGGER.debug(
-        "[camera_discovery] Fetching camera devices for installation %s (%s)",
-        installation.number,
-        installation.alias,
-    )
-    try:
-        cameras = await hub.get_camera_devices(installation)
-    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
-        _LOGGER.warning(
-            "[camera_discovery] Failed to get camera devices for %s",
-            installation.number,
-            exc_info=True,
-        )
-        cameras = []
-
-    _LOGGER.debug(
-        "[camera_discovery] Installation %s: found %d camera(s): %s",
-        installation.number,
-        len(cameras),
-        [c.zone_id for c in cameras],
-    )
-
-    if cameras:
-        # Create and store camera coordinator
-        camera_coord = CameraCoordinator(
-            hass,
-            hub.client,
-            hub.api_queue,
-            installation,
-            cameras=cameras,
-            full_image_fetcher=hub.fetch_full_image,
-            config_entry=entry,
-        )
-        entry_data["camera_coordinator"] = camera_coord
-        entry.async_create_background_task(
-            hass,
-            camera_coord.async_refresh(),
-            "verisure_owa_camera_refresh",
-        )
-
-        camera_add = entry_data.get("camera_add_entities")
-        button_add = entry_data.get("button_add_entities")
-        _LOGGER.debug(
-            "[camera_discovery] Installation %s: camera_add=%s button_add=%s",
-            installation.number,
-            camera_add is not None,
-            button_add is not None,
-        )
-        if camera_add:
-            camera_add(
-                [
-                    VerisureCamera(camera_coord, hub, installation, cam)
-                    for cam in cameras
-                ]
-                + [
-                    VerisureCameraFull(camera_coord, hub, installation, cam)
-                    for cam in cameras
-                ],
-                False,
-            )
-        if button_add:
-            button_add(
-                [VerisureCaptureButton(hub, installation, cam) for cam in cameras],
-                True,
-            )
-
-
-_LOCK_CONFIG_RETRY_DELAYS = (60, 120, 300)  # seconds between retries
-
-
-def _schedule_lock_config_retry(
-    hass: HomeAssistant,
-    hub: VerisureHub,
-    installation: Installation,
-    lock_entity: VerisureLock,
-    attempt: int = 0,
-) -> None:
-    """Schedule a background retry to fetch lock config."""
-    from homeassistant.helpers.event import async_call_later
-
-    if attempt >= len(_LOCK_CONFIG_RETRY_DELAYS):
-        _LOGGER.info(
-            "Lock config retry exhausted for %s device %s",
-            installation.number,
-            lock_entity.device_id,
-        )
-        return
-
-    delay = _LOCK_CONFIG_RETRY_DELAYS[attempt]
-
-    async def _retry(_now: Any) -> None:
-        # Guard: entity may have been removed while the timer was pending.
-        if lock_entity.hass is None:
-            return
-
-        try:
-            config = await hub.get_lock_config(
-                installation,
-                lock_entity.device_id,
-                priority=hub.api_queue.BACKGROUND,
-            )
-        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-            config = None
-
-        if config is not None:
-            _LOGGER.info(
-                "Lock config retry succeeded for %s device %s (attempt %d)",
-                installation.number,
-                lock_entity.device_id,
-                attempt + 1,
-            )
-            lock_entity.update_lock_config(config)
-        else:
-            _LOGGER.debug(
-                "Lock config retry %d failed for %s device %s, scheduling next retry",
-                attempt + 1,
-                installation.number,
-                lock_entity.device_id,
-            )
-            _schedule_lock_config_retry(
-                hass, hub, installation, lock_entity, attempt + 1
-            )
-
-    unsub = async_call_later(hass, delay, _retry)
-    lock_entity.add_config_retry_unsub(unsub)
-    # Mirror the handle at entry-scope so async_unload_entry can cancel any
-    # in-flight retries even if the per-entity teardown races with the timer.
-    if hub.config_entry is not None:
-        entry_data = hass.data.get(DOMAIN, {}).get(hub.config_entry.entry_id)
-        if entry_data is not None:
-            entry_data.setdefault("lock_config_retry_unsubs", []).append(unsub)
-
-
-async def _discover_locks(
-    hass: HomeAssistant,
-    hub: VerisureHub,
-    installation: Installation,
-    entry_data: dict[str, Any],
-) -> None:
-    """Discover lock devices for an installation and add entities."""
-    from .lock import (
-        DOORLOCK_SERVICE,
-        LOCK_STATUS_UNKNOWN,
-        VerisureLock,
-    )
-    from .verisure_owa_api import SmartLock, SmartLockMode
-    from .verisure_owa_api.client import SMARTLOCK_DEVICE_ID
-
-    try:
-        services = await hub.get_services(installation)
-    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
-        _LOGGER.warning("Failed to get services for %s", installation.number)
-        return
-
-    has_doorlock = any(s.request == DOORLOCK_SERVICE for s in services)
-    if not has_doorlock:
-        return
-
-    try:
-        lock_modes: list[SmartLockMode] = await hub.get_lock_modes(installation)
-    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
-        _LOGGER.warning("Failed to get lock modes for %s", installation.number)
-        lock_modes = []
-
-    if not lock_modes:
-        lock_modes = [
-            SmartLockMode(
-                res=None,
-                lock_status=LOCK_STATUS_UNKNOWN,
-                device_id=SMARTLOCK_DEVICE_ID,
-            )
-        ]
-
-    lock_coordinator = entry_data.get("lock_coordinator")
-    lock_add = entry_data.get("lock_add_entities")
-    if lock_add and lock_coordinator is not None:
-        locks = []
-        for mode in lock_modes:
-            device_id = mode.device_id or SMARTLOCK_DEVICE_ID
-            lock_config: SmartLock | None = None
-            try:
-                lock_config = await hub.get_lock_config(installation, device_id)
-            except Exception:  # pylint: disable=broad-exception-caught
-                _LOGGER.debug(
-                    "Could not fetch lock config for %s device %s",
-                    installation.number,
-                    device_id,
-                )
-            locks.append(
-                VerisureLock(
-                    coordinator=lock_coordinator,
-                    installation=installation,
-                    client=hub,
-                    device_id=device_id,
-                    initial_status=mode.lock_status,
-                    lock_config=lock_config,
-                )
-            )
-        lock_add(locks, False)
-
-        # Schedule deferred config retry for locks without config.
-        for lk in locks:
-            if lk.lock_config is None:
-                _schedule_lock_config_retry(hass, hub, installation, lk)
-
-
-async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Discover cameras and locks in the background after setup."""
-    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    if entry_data is None:
-        return
-
-    client: VerisureHub = entry_data["hub"]
-    devices: list[VerisureDevice] = entry_data["devices"]
-
-    for device in devices:
-        installation = device.installation
-        await _discover_cameras(hass, client, installation, entry_data, entry)
-        await _discover_locks(hass, client, installation, entry_data)
-
-
-async def _register_card_resource(
-    hass: HomeAssistant,
-    base_url: str,
-    card_url: str,
-    storage_key: str,
-) -> None:
-    """Register a card JS file as a Lovelace resource.
-
-    Falls back to add_extra_js_url if Lovelace resources are unavailable.
-    ``storage_key`` is used to track the resource ID in hass.data[DOMAIN].
-    """
-    try:
-        lovelace_data = hass.data.get("lovelace")
-        if lovelace_data and hasattr(lovelace_data, "resources"):
-            resources = lovelace_data.resources
-            if hasattr(resources, "async_create_item"):
-                if not resources.loaded:
-                    await resources.async_load()
-                    resources.loaded = True
-                for item in resources.async_items():
-                    url = item.get("url", "")
-                    if url == card_url:
-                        return  # Already current version
-                    if url.startswith(base_url):
-                        await resources.async_update_item(item["id"], {"url": card_url})
-                        hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
-                        return
-                item = await resources.async_create_item(
-                    {"res_type": "module", "url": card_url}
-                )
-                hass.data.setdefault(DOMAIN, {})[storage_key] = item["id"]
-                return
-    except Exception:  # pylint: disable=broad-exception-caught
-        _LOGGER.debug(
-            "[setup] Could not register %s as Lovelace resource, falling back to add_extra_js_url",
-            base_url,
-        )
-    try:
-        frontend.add_extra_js_url(hass, card_url)
-    except (KeyError, Exception):  # pylint: disable=broad-exception-caught
-        _LOGGER.debug("[setup] Could not register %s via add_extra_js_url", base_url)
-
-
-async def _unregister_card_resource(
-    hass: HomeAssistant,
-    card_url: str,
-    storage_key: str,
-) -> None:
-    """Remove a card Lovelace resource on unload."""
-    resource_id = hass.data.get(DOMAIN, {}).get(storage_key)
-    if not resource_id:
-        try:
-            frontend.remove_extra_js_url(hass, card_url)
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-        return
-    try:
-        lovelace_data = hass.data.get("lovelace")
-        if lovelace_data and hasattr(lovelace_data, "resources"):
-            resources = lovelace_data.resources
-            if hasattr(resources, "async_delete_item"):
-                await resources.async_delete_item(resource_id)
-    except Exception:  # pylint: disable=broad-exception-caught
-        _LOGGER.debug("[teardown] Could not remove Lovelace resource %s", resource_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
