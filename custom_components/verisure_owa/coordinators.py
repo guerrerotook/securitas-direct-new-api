@@ -524,18 +524,11 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
     async def _async_update_data(self) -> CameraData:
         """Fetch camera thumbnails and full images for any that changed."""
         previous = self.data
-        try:
-            thumbnails = await self._fetch_thumbnails(previous)
-        except SessionExpiredError:
-            await _handle_session_expired(self._client)
-            try:
-                thumbnails = await self._fetch_thumbnails(previous)
-            except WAFBlockedError as err:
-                raise UpdateFailed(f"WAF blocked camera request: {err}") from err
-            except VerisureOwaError as err:
-                raise UpdateFailed(f"Camera update failed: {err}") from err
-        except WAFBlockedError as err:
-            raise UpdateFailed(f"WAF blocked camera request: {err}") from err
+        thumbnails = await _fetch_with_session_recovery(
+            self._client,
+            lambda: self._fetch_thumbnails(previous),
+            "Camera",
+        )
 
         # Carry forward previous full images
         full_images: dict[str, bytes] = {}
@@ -655,18 +648,9 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         # events out of the first-poll baseline — causing them to re-fire
         # on the bus on the next poll.
         await self.async_load_persisted()
-        try:
-            events = await self._fetch()
-        except SessionExpiredError:
-            await _handle_session_expired(self._client)
-            try:
-                events = await self._fetch()
-            except VerisureOwaError as err:
-                raise UpdateFailed(f"Activity update failed: {err}") from err
-        except WAFBlockedError as err:
-            raise UpdateFailed(f"WAF blocked activity request: {err}") from err
-        except VerisureOwaError as err:
-            raise UpdateFailed(f"Activity update failed: {err}") from err
+        events = await _fetch_with_session_recovery(
+            self._client, self._fetch, "Activity"
+        )
 
         polled = [
             ev

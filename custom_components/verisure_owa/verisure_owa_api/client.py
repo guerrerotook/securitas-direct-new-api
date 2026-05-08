@@ -1284,48 +1284,31 @@ class VerisureOwaClient:
         Returns:
             SmartLock with lock configuration, or SmartLock() on failure.
         """
-        # Submit danalock config request
-        submit_content = {
-            "operationName": "xSGetDanalockConfig",
-            "variables": {
+
+        def status_vars(ref_id: str, counter: int) -> dict[str, Any]:
+            return {
+                "numinst": installation.number,
+                "referenceId": ref_id,
+                "counter": counter,
+            }
+
+        raw = await self._submit_and_poll(
+            installation=installation,
+            submit_op="xSGetDanalockConfig",
+            submit_query=DANALOCK_CONFIG_QUERY,
+            submit_vars={
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "deviceType": SMARTLOCK_DEVICE_TYPE,
                 "deviceId": device_id,
             },
-            "query": DANALOCK_CONFIG_QUERY,
-        }
-        envelope = await self._execute_graphql(
-            submit_content,
-            "xSGetDanalockConfig",
-            DanalockConfigEnvelope,
-            installation=installation,
+            submit_envelope_cls=DanalockConfigEnvelope,
+            submit_data_field="xSGetDanalockConfig",
+            status_op="xSGetDanalockConfigStatus",
+            status_query=DANALOCK_CONFIG_STATUS_QUERY,
+            status_data_field="xSGetDanalockConfigStatus",
+            status_vars_builder=status_vars,
         )
-        reference_id = envelope.data.xSGetDanalockConfig.reference_id
-
-        # Poll for status
-        counter = 0
-
-        async def _check() -> dict[str, Any]:
-            nonlocal counter
-            counter += 1
-            poll_content = {
-                "operationName": "xSGetDanalockConfigStatus",
-                "variables": {
-                    "numinst": installation.number,
-                    "referenceId": reference_id,
-                    "counter": counter,
-                },
-                "query": DANALOCK_CONFIG_STATUS_QUERY,
-            }
-            response = await self._execute_raw(
-                poll_content,
-                "xSGetDanalockConfigStatus",
-                installation=installation,
-            )
-            return self._extract_response_data(response, "xSGetDanalockConfigStatus")
-
-        raw = await self._poll_operation(_check)
 
         if raw.get("res") != "OK":
             return SmartLock()

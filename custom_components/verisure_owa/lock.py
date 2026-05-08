@@ -230,13 +230,6 @@ class VerisureLock(  # type: ignore[override]
 
     # -- Lock/unlock operations ----------------------------------------------
 
-    def _force_state(self, state: str) -> None:
-        """Force entity state and schedule HA update."""
-        self._last_state = self._state
-        self._state = state
-        if self.hass is not None:
-            self.async_schedule_update_ha_state()
-
     async def _change_lock_mode(
         self,
         lock_state: bool,

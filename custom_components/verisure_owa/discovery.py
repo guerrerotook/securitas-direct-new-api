@@ -160,8 +160,7 @@ def _schedule_lock_config_retry(
 
     unsub = async_call_later(hass, delay, _retry)
     lock_entity.add_config_retry_unsub(unsub)
-    # Mirror the handle at entry-scope so async_unload_entry can cancel any
-    # in-flight retries even if the per-entity teardown races with the timer.
+    # Also tracked at entry scope so unload can cancel pending retries.
     if hub.config_entry is not None:
         entry_data = hass.data.get(DOMAIN, {}).get(hub.config_entry.entry_id)
         if entry_data is not None:

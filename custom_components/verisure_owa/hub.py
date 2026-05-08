@@ -348,37 +348,29 @@ class VerisureHub:
         """Fetch a full-resolution image, coalescing concurrent calls per signal.
 
         If another caller is already fetching this `id_signal`, waits on that
-        in-flight result instead of issuing a duplicate API request.
+        in-flight task instead of issuing a duplicate API request.
         """
         if priority is None:
             priority = ApiQueue.BACKGROUND
         key = f"{installation.number}_{id_signal}"
         inflight = self._full_image_inflight.get(key)
         if inflight is not None:
-            return await inflight
+            # Shield so a cancellation of *this* awaiter doesn't tear down
+            # the shared task that other awaiters still depend on.
+            return await asyncio.shield(inflight)
 
-        future: asyncio.Future[bytes | None] = (
-            asyncio.get_running_loop().create_future()
-        )
-        self._full_image_inflight[key] = future
-        try:
-            result = await self._api_queue.submit(
+        task = asyncio.create_task(
+            self._api_queue.submit(
                 self.client.get_full_image,
                 installation,
                 id_signal,
                 signal_type,
                 priority=priority,
             )
-        except Exception as err:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-            if not future.done():
-                future.set_exception(err)
-            raise
-        else:
-            if not future.done():
-                future.set_result(result)
-            return result
-        finally:
-            self._full_image_inflight.pop(key, None)
+        )
+        self._full_image_inflight[key] = task
+        task.add_done_callback(lambda _t: self._full_image_inflight.pop(key, None))
+        return await asyncio.shield(task)
 
     async def _fetch_and_store_full_image(
         self,

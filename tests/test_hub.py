@@ -527,6 +527,39 @@ class TestFullImageCapture:
         assert r2 == b"\xff\xd8full-bytes"
         assert api_call_count == 1
 
+    async def test_fetch_full_image_cancellation_does_not_strand_other_awaiter(self):
+        """Cancelling one fetch_full_image caller must not break a concurrent caller.
+
+        Regression: an earlier Future-based design left a half-set future behind
+        when the originator was cancelled, deadlocking other awaiters of the
+        same in-flight key.
+        """
+        hub = make_hub()
+        installation = make_installation()
+
+        api_can_finish = asyncio.Event()
+
+        async def slow_get_full_image(*_args, **_kwargs):
+            await api_can_finish.wait()
+            return b"\xff\xd8full-bytes"
+
+        hub.client.get_full_image = AsyncMock(side_effect=slow_get_full_image)
+
+        task1 = asyncio.create_task(hub.fetch_full_image(installation, "sig-X", "16"))
+        # Yield so task1 registers the inflight task before task2 looks it up.
+        await asyncio.sleep(0)
+        task2 = asyncio.create_task(hub.fetch_full_image(installation, "sig-X", "16"))
+        await asyncio.sleep(0)
+
+        # Cancel the originator. task2 must still be able to complete.
+        task1.cancel()
+        api_can_finish.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task1
+        result = await asyncio.wait_for(task2, timeout=1.0)
+        assert result == b"\xff\xd8full-bytes"
+
     async def test_capture_updates_coordinator_full_image(self):
         """Camera coordinator is updated with full image after capture."""
         from custom_components.verisure_owa.coordinators import CameraData
