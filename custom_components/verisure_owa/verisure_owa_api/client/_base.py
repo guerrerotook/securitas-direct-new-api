@@ -40,17 +40,6 @@ API_CALLBY = "OWA_10"
 API_ID_PREFIX = "OWA_______________"
 ALARM_STATUS_SERVICE_ID = "11"
 
-# Lock device constants
-SMARTLOCK_DEVICE_ID = "01"
-SMARTLOCK_DEVICE_TYPE = "DR"
-SMARTLOCK_KEY_TYPE = "0"
-
-# Camera / image constants
-CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
-IMAGE_RESOLUTION = 0
-IMAGE_MEDIA_TYPE = 1
-IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
-
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
     {

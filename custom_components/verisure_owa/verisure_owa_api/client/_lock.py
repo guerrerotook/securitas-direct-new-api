@@ -26,14 +26,13 @@ from ..responses import (
     LockModeEnvelope,
     SmartlockConfigEnvelope,
 )
-from ._base import (
-    SMARTLOCK_DEVICE_ID,
-    SMARTLOCK_DEVICE_TYPE,
-    SMARTLOCK_KEY_TYPE,
-    _ClientBase,
-)
+from ._base import _ClientBase
 
 _LOGGER = logging.getLogger(__name__)
+
+SMARTLOCK_DEVICE_ID = "01"
+SMARTLOCK_DEVICE_TYPE = "DR"
+SMARTLOCK_KEY_TYPE = "0"
 
 
 class _LockMixin(_ClientBase):

@@ -22,15 +22,14 @@ from ..responses import (
     RequestImagesStatusEnvelope,
     ThumbnailEnvelope,
 )
-from ._base import (
-    CAMERA_DEVICE_TYPES,
-    IMAGE_DEVICE_TYPE_MAP,
-    IMAGE_MEDIA_TYPE,
-    IMAGE_RESOLUTION,
-    _ClientBase,
-)
+from ._base import _ClientBase
 
 _LOGGER = logging.getLogger(__name__)
+
+CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
+IMAGE_RESOLUTION = 0
+IMAGE_MEDIA_TYPE = 1
+IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
 
 
 class _CameraMixin(_ClientBase):

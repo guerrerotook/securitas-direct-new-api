@@ -19,6 +19,7 @@ from ..coordinators import AlarmStatusData
 from ..verisure_owa_api import (
     OperationStatus,
     VerisureOwaError,
+    VerisureOwaState,
     is_proto_letter,
 )
 from ..verisure_owa_api.command_resolver import (
@@ -31,17 +32,10 @@ from ..verisure_owa_api.command_resolver import (
 )
 from ._base import BaseVerisureOwaAlarmPanel
 
-_DISARMED_STATE = AlarmState(
-    interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF, annex=AnnexMode.OFF
-)
-
 
 class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
-    """The household-intent panel — drives all three axes via mappings.
-
-    Inherits all behavior from the base. Sub-panels (Interior, Perimeter,
-    Annex) come in subsequent tasks.
-    """
+    """The household-intent panel — drives all three axes via the user's
+    HA-state-to-VerisureOwaState mapping configured in options."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -50,7 +44,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the verisure state map."""
         if ha_state == AlarmControlPanelState.DISARMED:
-            return _DISARMED_STATE
+            return VERISURE_OWA_STATE_TO_ALARM_STATE[VerisureOwaState.DISARMED]
         securitas_state = self._securitas_state_map.get(ha_state)
         if securitas_state is None:
             raise VerisureOwaError(f"Unsupported alarm mode: {ha_state}")
