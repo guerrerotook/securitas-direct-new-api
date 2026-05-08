@@ -9,6 +9,7 @@ Four coordinators replace per-entity independent polling:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -309,18 +310,20 @@ class SentinelCoordinator(DataUpdateCoordinator[SentinelData]):
         self._zone = zone
 
     async def _fetch_data(self) -> SentinelData:
-        """Fetch sentinel and air quality data sequentially."""
-        sentinel = await self._queue.submit(
-            self._client.get_sentinel_data,
-            self.installation,
-            self.service,
-            priority=ApiQueue.BACKGROUND,
-        )
-        air_quality = await self._queue.submit(
-            self._client.get_air_quality_data,
-            self.installation,
-            self._zone,
-            priority=ApiQueue.BACKGROUND,
+        """Fetch sentinel and air quality data concurrently."""
+        sentinel, air_quality = await asyncio.gather(
+            self._queue.submit(
+                self._client.get_sentinel_data,
+                self.installation,
+                self.service,
+                priority=ApiQueue.BACKGROUND,
+            ),
+            self._queue.submit(
+                self._client.get_air_quality_data,
+                self.installation,
+                self._zone,
+                priority=ApiQueue.BACKGROUND,
+            ),
         )
         return SentinelData(sentinel=sentinel, air_quality=air_quality)
 
@@ -411,6 +414,7 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         installation: Installation,
         *,
         cameras: list[CameraDevice],
+        full_image_fetcher: Any | None = None,
         config_entry: ConfigEntry | None = None,
     ) -> None:
         super().__init__(
@@ -424,6 +428,10 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         self._queue = queue
         self._installation = installation
         self._cameras = cameras
+        # Optional coalescing fetcher (typically `hub.fetch_full_image`) so
+        # poll-driven full-image requests share an in-flight cache with
+        # capture-driven requests on the same camera.
+        self._full_image_fetcher = full_image_fetcher
 
     async def _fetch_thumbnails(
         self, previous: CameraData | None
@@ -493,13 +501,21 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
             )
             return None
         try:
-            full_bytes = await self._queue.submit(
-                self._client.get_full_image,
-                self._installation,
-                thumbnail.id_signal,
-                thumbnail.signal_type,
-                priority=ApiQueue.BACKGROUND,
-            )
+            if self._full_image_fetcher is not None:
+                full_bytes = await self._full_image_fetcher(
+                    self._installation,
+                    thumbnail.id_signal,
+                    thumbnail.signal_type,
+                    priority=ApiQueue.BACKGROUND,
+                )
+            else:
+                full_bytes = await self._queue.submit(
+                    self._client.get_full_image,
+                    self._installation,
+                    thumbnail.id_signal,
+                    thumbnail.signal_type,
+                    priority=ApiQueue.BACKGROUND,
+                )
         except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
             _LOGGER.warning(
                 "Failed to fetch full image for camera zone %s",

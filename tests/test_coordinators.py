@@ -238,6 +238,39 @@ class TestSentinelCoordinator:
         assert result.air_quality is air_quality
 
     @pytest.mark.asyncio
+    async def test_fetches_run_concurrently(self):
+        """Sentinel and air-quality fetches dispatch concurrently, not serially."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        sentinel_obj = Sentinel(
+            alias="Living Room", air_quality="good", humidity=50, temperature=22
+        )
+        air_quality_obj = AirQuality(value=42, status_current=1)
+        air_quality_started = asyncio.Event()
+
+        async def slow_sentinel(*_args, **_kwargs):
+            # Sentinel can't return until air-quality has also started — only
+            # possible if both are dispatched concurrently.
+            await air_quality_started.wait()
+            return sentinel_obj
+
+        async def air_quality(*_args, **_kwargs):
+            air_quality_started.set()
+            return air_quality_obj
+
+        client.get_sentinel_data.side_effect = slow_sentinel
+        client.get_air_quality_data.side_effect = air_quality
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await asyncio.wait_for(coord._async_update_data(), timeout=1.0)
+
+        assert result.sentinel is sentinel_obj
+        assert result.air_quality is air_quality_obj
+
+    @pytest.mark.asyncio
     async def test_air_quality_none_is_ok(self):
         """Air quality returning None still gives valid SentinelData."""
         hass = _make_hass()

@@ -218,6 +218,10 @@ class VerisureOwaCameraCard extends HTMLElement {
     this._fullEntityId = null;
     this._refreshing = false;
     this._fallbackTimer = null;
+    // Cache for entity lookups indexed by device_id. Invalidated whenever
+    // hass.entities is a new object (HA replaces it atomically on changes).
+    this._entitiesIndex = null;
+    this._entitiesRef = null;
   }
 
   setConfig(config) {
@@ -413,16 +417,34 @@ class VerisureOwaCameraCard extends HTMLElement {
     }
   }
 
+  _entitiesByDeviceId(hass) {
+    if (this._entitiesIndex && this._entitiesRef === hass.entities) {
+      return this._entitiesIndex;
+    }
+    const index = new Map();
+    for (const [eid, entry] of Object.entries(hass.entities || {})) {
+      if (!entry?.device_id) continue;
+      let bucket = index.get(entry.device_id);
+      if (!bucket) {
+        bucket = [];
+        index.set(entry.device_id, bucket);
+      }
+      bucket.push(eid);
+    }
+    this._entitiesIndex = index;
+    this._entitiesRef = hass.entities;
+    return index;
+  }
+
   _findCaptureButton(hass, cameraEntityId) {
     if (!hass?.entities || !cameraEntityId) return null;
     const cameraEntry = hass.entities[cameraEntityId];
     if (!cameraEntry?.device_id) return null;
-    const deviceId = cameraEntry.device_id;
     // Camera and its capture button share the same per-camera sub-device.
     // There is exactly one mdi:camera button per camera device.
-    for (const [eid, entry] of Object.entries(hass.entities)) {
+    const bucket = this._entitiesByDeviceId(hass).get(cameraEntry.device_id) || [];
+    for (const eid of bucket) {
       if (!eid.startsWith("button.")) continue;
-      if (entry.device_id !== deviceId) continue;
       const stateObj = hass.states[eid];
       if (stateObj?.attributes?.icon === "mdi:camera") return eid;
     }
@@ -433,12 +455,11 @@ class VerisureOwaCameraCard extends HTMLElement {
     if (!hass?.entities || !cameraEntityId) return null;
     const cameraEntry = hass.entities[cameraEntityId];
     if (!cameraEntry?.device_id) return null;
-    const deviceId = cameraEntry.device_id;
     // The full-resolution entity shares the same device and has a "_full_image" suffix.
-    for (const [eid, entry] of Object.entries(hass.entities)) {
+    const bucket = this._entitiesByDeviceId(hass).get(cameraEntry.device_id) || [];
+    for (const eid of bucket) {
       if (!eid.startsWith("camera.")) continue;
       if (eid === cameraEntityId) continue;
-      if (entry.device_id !== deviceId) continue;
       if (eid.endsWith("_full_image")) return eid;
     }
     return null;

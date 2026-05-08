@@ -1143,6 +1143,36 @@ class TestAsyncUnloadEntry:
         # DOMAIN should still be in hass.data because entry2 remains
         assert DOMAIN in hass.data
 
+    async def test_unload_cancels_pending_lock_config_retries(self, hass):
+        """async_unload_entry cancels any pending lock-config retry timers."""
+        hub = make_securitas_hub_mock()
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        username = entry.data[CONF_USERNAME]
+
+        unsub_a = MagicMock()
+        unsub_b = MagicMock()
+
+        hass.data[DOMAIN] = {
+            entry.entry_id: {
+                "hub": hub,
+                "devices": [],
+                "lock_config_retry_unsubs": [unsub_a, unsub_b],
+            },
+            "sessions": {username: {"hub": hub, "ref_count": 1}},
+        }
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await async_unload_entry(hass, entry)
+
+        unsub_a.assert_called_once_with()
+        unsub_b.assert_called_once_with()
+
     async def test_unload_removes_domain_when_empty(self, hass):
         """When the last entry is unloaded, DOMAIN should be removed from hass.data."""
         hub = make_securitas_hub_mock()

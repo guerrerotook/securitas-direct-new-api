@@ -708,6 +708,7 @@ async def _discover_cameras(
             hub.api_queue,
             installation,
             cameras=cameras,
+            full_image_fetcher=hub.fetch_full_image,
             config_entry=entry,
         )
         entry_data["camera_coordinator"] = camera_coord
@@ -802,6 +803,12 @@ def _schedule_lock_config_retry(
 
     unsub = async_call_later(hass, delay, _retry)
     lock_entity.add_config_retry_unsub(unsub)
+    # Mirror the handle at entry-scope so async_unload_entry can cancel any
+    # in-flight retries even if the per-entity teardown races with the timer.
+    if hub.config_entry is not None:
+        entry_data = hass.data.get(DOMAIN, {}).get(hub.config_entry.entry_id)
+        if entry_data is not None:
+            entry_data.setdefault("lock_config_retry_unsubs", []).append(unsub)
 
 
 async def _discover_locks(
@@ -964,6 +971,12 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     activity_listener_unsub = entry_data.get("activity_listener_unsub")
     if activity_listener_unsub is not None:
         activity_listener_unsub()
+
+    # Cancel any pending lock-config retry timers before tearing down platforms,
+    # so a timer firing mid-unload can't schedule a follow-up retry against a
+    # half-disposed hub.
+    for unsub in entry_data.get("lock_config_retry_unsubs", []):
+        unsub()
 
     unload_ok = await hass.config_entries.async_unload_platforms(
         config_entry, PLATFORMS

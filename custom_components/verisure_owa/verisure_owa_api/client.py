@@ -1490,57 +1490,47 @@ class VerisureOwaClient:
         )
         reference_id = submit_envelope.data.xSRequestImages.reference_id
 
-        thumbnail: ThumbnailResponse | None = None
+        counter = 0
 
-        async def _poll_capture_result() -> None:
-            nonlocal thumbnail
-            counter = 0
-
-            # Poll status at 10s intervals until it transitions from
-            # "processing" to done (~40-60s for YR/PIR cameras).
-            # Then fetch the thumbnail once.
-            while True:
-                counter += 1
-                status_content = {
-                    "operationName": "RequestImagesStatus",
-                    "variables": {
-                        "numinst": installation.number,
-                        "panel": installation.panel,
-                        "devices": [device_code],
-                        "referenceId": reference_id,
-                        "counter": counter,
-                    },
-                    "query": REQUEST_IMAGES_STATUS_QUERY,
-                }
-                status_envelope = await self._execute_graphql(
-                    status_content,
-                    "RequestImagesStatus",
-                    RequestImagesStatusEnvelope,
-                    installation=installation,
-                )
-                inner = status_envelope.data.xSRequestImagesStatus
-                msg = inner.msg or ""
-                if "processing" not in msg and inner.res != "WAIT":
-                    break
-                await asyncio.sleep(10)
-
-            # Status done — fetch the updated thumbnail
-            thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            status_content = {
+                "operationName": "RequestImagesStatus",
+                "variables": {
+                    "numinst": installation.number,
+                    "panel": installation.panel,
+                    "devices": [device_code],
+                    "referenceId": reference_id,
+                    "counter": counter,
+                },
+                "query": REQUEST_IMAGES_STATUS_QUERY,
+            }
+            status_envelope = await self._execute_graphql(
+                status_content,
+                "RequestImagesStatus",
+                RequestImagesStatusEnvelope,
+                installation=installation,
+            )
+            inner = status_envelope.data.xSRequestImagesStatus
+            msg = inner.msg or ""
+            # _poll_operation continues while res=="WAIT"; remap the
+            # "processing" message into WAIT so the same machinery applies.
+            res = "WAIT" if "processing" in msg else inner.res
+            return {"res": res, "msg": msg}
 
         try:
-            await asyncio.wait_for(_poll_capture_result(), timeout=capture_timeout)
-        except (TimeoutError, asyncio.TimeoutError):
+            await self._poll_operation(_check, timeout=capture_timeout)
+        except OperationTimeoutError:
             _LOGGER.warning(
                 "Image capture timed out after %.0f seconds for %s",
                 capture_timeout,
                 zone_id,
             )
-            if thumbnail is None:
-                # Status polling consumed the entire timeout — fetch one
-                # final thumbnail as the CDN may have caught up.
-                thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
 
-        return thumbnail  # type: ignore[return-value]
+        # Whether status finished or polling timed out, fetch the latest
+        # thumbnail — the CDN may have caught up while we were polling.
+        return await self.get_thumbnail(installation, device_type, zone_id)
 
     async def get_thumbnail(
         self,

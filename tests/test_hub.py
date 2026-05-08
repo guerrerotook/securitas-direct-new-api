@@ -1,5 +1,6 @@
 """Tests for VerisureHub orchestration methods."""
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -492,6 +493,39 @@ class TestCaptureImage:
 
 class TestFullImageCapture:
     """Tests for full-resolution image fetching and storage in the hub."""
+
+    async def test_fetch_full_image_coalesces_concurrent_requests(self):
+        """Two concurrent fetch_full_image calls for the same signal share one API call."""
+        hub = make_hub()
+        installation = make_installation()
+
+        api_call_count = 0
+        api_can_finish = asyncio.Event()
+
+        async def slow_get_full_image(*_args, **_kwargs):
+            nonlocal api_call_count
+            api_call_count += 1
+            await api_can_finish.wait()
+            return b"\xff\xd8full-bytes"
+
+        hub.client.get_full_image = AsyncMock(side_effect=slow_get_full_image)
+
+        task1 = asyncio.create_task(hub.fetch_full_image(installation, "sig-A", "16"))
+        task2 = asyncio.create_task(hub.fetch_full_image(installation, "sig-A", "16"))
+
+        # Yield until both tasks have entered fetch_full_image and the first
+        # has reached the slow API call.
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if api_call_count >= 1:
+                break
+
+        api_can_finish.set()
+        r1, r2 = await asyncio.gather(task1, task2)
+
+        assert r1 == b"\xff\xd8full-bytes"
+        assert r2 == b"\xff\xd8full-bytes"
+        assert api_call_count == 1
 
     async def test_capture_updates_coordinator_full_image(self):
         """Camera coordinator is updated with full image after capture."""
