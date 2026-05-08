@@ -61,7 +61,9 @@ class TestConstruction:
 
     def test_refresh_token_from_config_prefills_client(self):
         """A persisted refresh token in domain_config flows into the real client."""
-        hub = make_hub(mock_client=False, **{CONF_REFRESH_TOKEN: "persisted-refresh-token"})
+        hub = make_hub(
+            mock_client=False, **{CONF_REFRESH_TOKEN: "persisted-refresh-token"}
+        )
         assert hub.client.refresh_token_value == "persisted-refresh-token"
 
     def test_get_refresh_token_returns_clients_refresh_token_value(self):
@@ -186,10 +188,6 @@ class TestLogin:
         180-day refresh token has finally expired or been server-revoked.
         Sending an empty password to the API would just waste a round trip.
         """
-        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
-            AuthenticationError,
-        )
-
         hub = make_hub()
         hub.client.refresh_token_value = "expired-refresh-token"
         hub.client.password = ""

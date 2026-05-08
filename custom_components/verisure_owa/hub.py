@@ -503,9 +503,7 @@ class VerisureHub:
             return
         new_data = {**existing, CONF_REFRESH_TOKEN: value}
         new_data.pop(CONF_PASSWORD, None)
-        self.hass.config_entries.async_update_entry(
-            self.config_entry, data=new_data
-        )
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
 
     async def logout(self) -> bool:
         """Logout from Verisure."""
