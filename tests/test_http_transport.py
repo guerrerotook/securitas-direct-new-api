@@ -200,6 +200,28 @@ class TestHttpTransport:
 
         mock_sleep.assert_awaited_once_with(60)
 
+    async def test_retry_after_negative_is_floored_to_zero(self, transport, session):
+        """A hostile/broken server returning Retry-After: -1 must not crash.
+
+        asyncio.sleep with a negative value raises ValueError; clamp to 0
+        so a malformed header just retries immediately.
+        """
+        fail = _make_response(
+            status=403,
+            text="<html>rate limited</html>",
+            headers={"Retry-After": "-1"},
+        )
+        ok = _make_response(text='{"retried": true}')
+        _mock_post(session, [fail, ok])
+
+        with patch(
+            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            await transport.execute(content={}, headers={})
+
+        mock_sleep.assert_awaited_once_with(0)
+
     async def test_403_without_retry_after_defaults_to_2s(self, transport, session):
         """403 without Retry-After header defaults to 2s delay."""
         fail = _make_response(status=403, text="<html>blocked</html>", headers={})
