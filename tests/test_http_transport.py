@@ -178,6 +178,28 @@ class TestHttpTransport:
         with pytest.raises(VerisureOwaError):
             await transport.execute(content={}, headers={})
 
+    async def test_retry_after_clamped_to_60s(self, transport, session):
+        """A server returning a huge Retry-After must not block the worker.
+
+        Regression: an unbounded Retry-After (e.g. 86400) would freeze the
+        coordinator for that long. Clamp to 60s.
+        """
+        fail = _make_response(
+            status=403,
+            text="<html>rate limited</html>",
+            headers={"Retry-After": "86400"},
+        )
+        ok = _make_response(text='{"retried": true}')
+        _mock_post(session, [fail, ok])
+
+        with patch(
+            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep:
+            await transport.execute(content={}, headers={})
+
+        mock_sleep.assert_awaited_once_with(60)
+
     async def test_403_without_retry_after_defaults_to_2s(self, transport, session):
         """403 without Retry-After header defaults to 2s delay."""
         fail = _make_response(status=403, text="<html>blocked</html>", headers={})
