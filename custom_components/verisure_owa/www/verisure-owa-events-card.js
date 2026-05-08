@@ -18,6 +18,8 @@
  *   title: "Recent activity"            # optional
  */
 
+import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
+
 // ── Translations ─────────────────────────────────────────────────────────────
 
 const TRANSLATIONS = {
@@ -247,20 +249,7 @@ const TRANSLATIONS = {
   },
 };
 
-function _t(lang, key, vars) {
-  const l = TRANSLATIONS[lang] || TRANSLATIONS[lang?.split("-")[0]] || TRANSLATIONS.en;
-  let v = key.split(".").reduce((acc, k) => (acc && acc[k] !== undefined ? acc[k] : null), l);
-  if (v == null) {
-    // Fallback to English for missing keys
-    v = key.split(".").reduce((acc, k) => (acc && acc[k] !== undefined ? acc[k] : null), TRANSLATIONS.en) || key;
-  }
-  if (vars) {
-    for (const [name, val] of Object.entries(vars)) {
-      v = v.replace(new RegExp(`\\{${name}\\}`, "g"), val);
-    }
-  }
-  return v;
-}
+const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
 
 // ── Per-category icon and color ──────────────────────────────────────────────
 
@@ -297,14 +286,6 @@ const CATEGORY_COLORS = {
 };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-
-function _escHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 function _hassLang(hass) {
   return hass?.locale?.language || hass?.language || "en";
@@ -343,8 +324,8 @@ function _relativeTime(timeStr, lang) {
 
 /** Format an event's actor as "by Luci" or "(Cucina)" or "" */
 function _formatActor(event, lang) {
-  if (event.verisure_user) return `${_t(lang, "by")} ${_escHtml(event.verisure_user)}`;
-  if (event.device_name) return `(${_escHtml(event.device_name)})`;
+  if (event.verisure_user) return `${_t(lang, "by")} ${escHtml(event.verisure_user)}`;
+  if (event.device_name) return `(${escHtml(event.device_name)})`;
   return "";
 }
 
@@ -375,9 +356,9 @@ const DETAIL_FIELDS = [
 function _renderExceptions(exceptions, lang) {
   if (!Array.isArray(exceptions) || exceptions.length === 0) return "";
   const items = exceptions.map((exc) => {
-    const aliasText = exc.alias ? _escHtml(exc.alias) : "";
-    const statusText = _escHtml(_t(lang, `exception_status.${exc.status_key || "unknown"}`));
-    const dt = exc.device_type ? ` <span class="device-type">[${_escHtml(exc.device_type)}]</span>` : "";
+    const aliasText = exc.alias ? escHtml(exc.alias) : "";
+    const statusText = escHtml(_t(lang, `exception_status.${exc.status_key || "unknown"}`));
+    const dt = exc.device_type ? ` <span class="device-type">[${escHtml(exc.device_type)}]</span>` : "";
     return `<li>${aliasText} — <em>${statusText}</em>${dt}</li>`;
   });
   return `<ul class="exceptions">${items.join("")}</ul>`;
@@ -392,11 +373,11 @@ function _renderRows(event, lang) {
     if (key === "exceptions") {
       display = _renderExceptions(val, lang);
     } else if (Array.isArray(val) || (typeof val === "object" && val !== null)) {
-      display = `<pre>${_escHtml(JSON.stringify(val, null, 2))}</pre>`;
+      display = `<pre>${escHtml(JSON.stringify(val, null, 2))}</pre>`;
     } else {
-      display = _escHtml(String(val));
+      display = escHtml(String(val));
     }
-    rows.push(`<tr><th>${_escHtml(key)}</th><td>${display}</td></tr>`);
+    rows.push(`<tr><th>${escHtml(key)}</th><td>${display}</td></tr>`);
   }
   return rows.join("");
 }
@@ -556,12 +537,12 @@ class VerisureOwaEventsCard extends HTMLElement {
     const stateObj = this._hass.states[entityId];
     this._lastRenderedState = stateObj;
     if (!stateObj) {
-      this._writeShell(`<div class="missing">${_escHtml(_t(lang, "entity_not_found", { entity: entityId }))}</div>`);
+      this._writeShell(`<div class="missing">${escHtml(_t(lang, "entity_not_found", { entity: entityId }))}</div>`);
       return;
     }
     const events = stateObj.attributes?.events;
     if (!Array.isArray(events)) {
-      this._writeShell(`<div class="missing">${_escHtml(_t(lang, "not_an_activity_log", { entity: entityId }))}</div>`);
+      this._writeShell(`<div class="missing">${escHtml(_t(lang, "not_an_activity_log", { entity: entityId }))}</div>`);
       return;
     }
 
@@ -582,7 +563,7 @@ class VerisureOwaEventsCard extends HTMLElement {
     }
     const body = limited.length
       ? limited.map((ev) => this._renderRow(ev, lang)).join("")
-      : `<div class="empty">${_escHtml(_t(lang, "no_events"))}</div>`;
+      : `<div class="empty">${escHtml(_t(lang, "no_events"))}</div>`;
 
     this._writeShell(body);
     // Wire refresh button
@@ -691,21 +672,21 @@ class VerisureOwaEventsCard extends HTMLElement {
     const isExpanded = this._expanded.has(id);
     const isInjected = event.injected === true;
     const injectedBadge = isInjected
-      ? `<ha-icon class="injected-badge" icon="mdi:home-assistant" title="${_escHtml(_t(lang, "from_home_assistant"))}"></ha-icon>`
+      ? `<ha-icon class="injected-badge" icon="mdi:home-assistant" title="${escHtml(_t(lang, "from_home_assistant"))}"></ha-icon>`
       : "";
-    const detailsId = `details-${_escHtml(id)}`;
+    const detailsId = `details-${escHtml(id)}`;
     return `
-      <div class="event${isExpanded ? " expanded" : ""}${isInjected ? " injected" : ""}" data-id="${_escHtml(id)}" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-controls="${detailsId}">
-        <ha-icon icon="${_escHtml(icon)}" style="color:${color}"></ha-icon>
+      <div class="event${isExpanded ? " expanded" : ""}${isInjected ? " injected" : ""}" data-id="${escHtml(id)}" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-controls="${detailsId}">
+        <ha-icon icon="${escHtml(icon)}" style="color:${color}"></ha-icon>
         <div class="meta">
           <div class="line1">
-            <span class="category" style="color:${color}">${_escHtml(label)}</span>${actor ? ` <span class="actor">${actor}</span>` : ""}${injectedBadge}
+            <span class="category" style="color:${color}">${escHtml(label)}</span>${actor ? ` <span class="actor">${actor}</span>` : ""}${injectedBadge}
           </div>
-          <div class="line2">${_escHtml(event.alias || "")}</div>
+          <div class="line2">${escHtml(event.alias || "")}</div>
         </div>
-        <div class="time" title="${_escHtml(event.time || "")}">${_escHtml(rel)}</div>
+        <div class="time" title="${escHtml(event.time || "")}">${escHtml(rel)}</div>
       </div>
-      <div class="details-row ${isExpanded ? "expanded" : ""}" id="${detailsId}" data-id="${_escHtml(id)}">
+      <div class="details-row ${isExpanded ? "expanded" : ""}" id="${detailsId}" data-id="${escHtml(id)}">
         ${this._renderDetails(event, lang)}
       </div>
     `;
@@ -716,7 +697,7 @@ class VerisureOwaEventsCard extends HTMLElement {
       event.category === "image_request" ? this._renderImageBlock(event) : "";
     const prompt =
       event.category === "unknown"
-        ? `<div class="unknown-prompt">${_escHtml(_t(lang, "unknown_event_prompt"))}</div>`
+        ? `<div class="unknown-prompt">${escHtml(_t(lang, "unknown_event_prompt"))}</div>`
         : "";
     return `${imageBlock}${prompt}<table class="details">${_renderRows(event, lang)}</table>`;
   }
@@ -727,19 +708,19 @@ class VerisureOwaEventsCard extends HTMLElement {
     // Synthetic ids (prefix `ha-`) can't resolve to a server-side image.
     if (id.startsWith("ha-")) return "";
     const cached = this._imageCache.get(id);
-    const alt = _escHtml(event.device_name || "");
+    const alt = escHtml(event.device_name || "");
     if (cached?.state === "loaded" && cached.dataUrl) {
       return `<img class="event-image" src="${cached.dataUrl}" alt="${alt}" />`;
     }
     if (cached?.state === "error") {
-      return `<div class="event-image-error">${_escHtml(_t(lang, "image_unavailable"))}</div>`;
+      return `<div class="event-image-error">${escHtml(_t(lang, "image_unavailable"))}</div>`;
     }
     // Loading or not-yet-fetched (the row's expand handler kicks off the
     // fetch on first click; both states render the same placeholder).
     return `
       <div class="event-image-loading">
         <ha-icon icon="mdi:loading" class="spin"></ha-icon>
-        <span>${_escHtml(_t(lang, "image_loading"))}</span>
+        <span>${escHtml(_t(lang, "image_loading"))}</span>
       </div>`;
   }
 
@@ -752,9 +733,9 @@ class VerisureOwaEventsCard extends HTMLElement {
     const prevScroll = this.shadowRoot.querySelector(".scroll")?.scrollTop || 0;
     const lang = _hassLang(this._hass);
     const titleHtml = this._config.title
-      ? `<div class="card-header">${_escHtml(this._config.title)}</div>`
+      ? `<div class="card-header">${escHtml(this._config.title)}</div>`
       : "";
-    const refreshLabel = _escHtml(_t(lang, "refresh"));
+    const refreshLabel = escHtml(_t(lang, "refresh"));
     const refreshBtn = `
       <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn"
               type="button" title="${refreshLabel}" aria-label="${refreshLabel}">

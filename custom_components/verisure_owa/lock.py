@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureHub
 from .coordinators import LockCoordinator
+from .entity import VerisureEntity
 from .verisure_owa_api import (
     Installation,
     VerisureOwaError,
@@ -52,6 +53,7 @@ async def async_setup_entry(
 
 
 class VerisureLock(  # type: ignore[override]
+    VerisureEntity,
     CoordinatorEntity[LockCoordinator],
     lock.LockEntity,
 ):
@@ -68,9 +70,8 @@ class VerisureLock(  # type: ignore[override]
         initial_status: str = LOCK_STATUS_LOCKED,
         lock_config: SmartLock | None = None,
     ) -> None:
-        super().__init__(coordinator)
-        self._installation = installation
-        self._client = client
+        CoordinatorEntity.__init__(self, coordinator)
+        VerisureEntity.__init__(self, installation, client)
         self._state = (
             initial_status
             if initial_status != LOCK_STATUS_UNKNOWN
@@ -113,16 +114,6 @@ class VerisureLock(  # type: ignore[override]
         self._config_retry_unsubs: list[Callable[[], None]] = []
 
     # -- Properties ----------------------------------------------------------
-
-    @property
-    def installation(self) -> Installation:
-        """Return the installation."""
-        return self._installation
-
-    @property
-    def client(self) -> VerisureHub:
-        """Return the client hub."""
-        return self._client
 
     @property
     def lock_config(self) -> SmartLock | None:

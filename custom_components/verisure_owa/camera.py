@@ -59,10 +59,19 @@ async def async_setup_entry(
 
 
 class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
-    """A Verisure OWA camera entity showing the last captured image."""
+    """A Verisure OWA camera entity.
+
+    Subclass-controlled mode: `_mode = "thumbnail"` reads
+    `coordinator.data.thumbnails` and exposes the `capturing` state attribute
+    plus a SIGNAL_CAMERA_STATE listener; `_mode = "full"` reads
+    `coordinator.data.full_images` instead.
+    """
 
     _attr_should_poll = False
     _attr_has_entity_name = True
+    _mode: str = "thumbnail"
+    _unique_id_kind: str = "camera"
+    _camera_name: str | None = None
 
     def __init__(
         self,
@@ -79,16 +88,24 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         self._camera_device = camera_device
         self._zone_id = camera_device.zone_id
         self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_camera_{camera_device.zone_id}"
+            f"v5_verisure_owa.{installation.number}"
+            f"_{self._unique_id_kind}_{camera_device.zone_id}"
         )
+        if self._camera_name is not None:
+            self._attr_name = self._camera_name
         self._attr_device_info = camera_device_info(installation, camera_device)
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return the last captured image, or a placeholder if none exists."""
+        """Return the relevant image for this mode, or a placeholder."""
         if self.coordinator.data is None:
             return await _get_placeholder_image(self.hass)
+        if self._mode == "full":
+            image = self.coordinator.data.full_images.get(self._zone_id)
+            if image is None:
+                return await _get_placeholder_image(self.hass)
+            return image
         thumb = self.coordinator.data.thumbnails.get(self._zone_id)
         if thumb is None or not thumb.image:
             return await _get_placeholder_image(self.hass)
@@ -108,10 +125,12 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
             thumb = self.coordinator.data.thumbnails.get(self._zone_id)
             if thumb is not None:
                 timestamp = thumb.timestamp
-        capturing = self._client.is_capturing(
-            self._installation.number, self._camera_device.zone_id
-        )
-        return {"image_timestamp": timestamp, "capturing": capturing}
+        attrs: dict[str, Any] = {"image_timestamp": timestamp}
+        if self._mode == "thumbnail":
+            attrs["capturing"] = self._client.is_capturing(
+                self._installation.number, self._camera_device.zone_id
+            )
+        return attrs
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -120,11 +139,14 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to camera state signal and set up coordinator listener."""
+        """Subscribe to camera state signal (thumbnail mode only)."""
         await super().async_added_to_hass()
-        self.async_on_remove(
-            async_dispatcher_connect(self.hass, SIGNAL_CAMERA_STATE, self._handle_state)
-        )
+        if self._mode == "thumbnail":
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass, SIGNAL_CAMERA_STATE, self._handle_state
+                )
+            )
 
     @callback
     def _handle_state(self, installation_number: str, zone_id: str) -> None:
@@ -137,55 +159,9 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         self.async_write_ha_state()
 
 
-class VerisureCameraFull(CoordinatorEntity[CameraCoordinator], Camera):
-    """A Verisure OWA camera entity showing the last full-resolution image."""
+class VerisureCameraFull(VerisureCamera):
+    """Full-resolution variant of VerisureCamera."""
 
-    _attr_should_poll = False
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: CameraCoordinator,
-        hub: VerisureHub,
-        installation: Installation,
-        camera_device: CameraDevice,
-    ) -> None:
-        """Initialize the full-resolution camera entity."""
-        super().__init__(coordinator)
-        Camera.__init__(self)
-        self._client = hub
-        self._installation = installation
-        self._camera_device = camera_device
-        self._zone_id = camera_device.zone_id
-        self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_camera_full_{camera_device.zone_id}"
-        )
-        self._attr_name = "Full Image"
-        self._attr_device_info = camera_device_info(installation, camera_device)
-
-    async def async_camera_image(
-        self, width: int | None = None, height: int | None = None
-    ) -> bytes | None:
-        """Return the last full-resolution image, or a placeholder if none exists."""
-        if self.coordinator.data is None:
-            return await _get_placeholder_image(self.hass)
-        image = self.coordinator.data.full_images.get(self._zone_id)
-        if image is not None:
-            return image
-        return await _get_placeholder_image(self.hass)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[override]
-        """Return extra state attributes."""
-        timestamp: str | None = None
-        if self.coordinator.data is not None:
-            thumb = self.coordinator.data.thumbnails.get(self._zone_id)
-            if thumb is not None:
-                timestamp = thumb.timestamp
-        return {"image_timestamp": timestamp}
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator — rotate token so frontend re-fetches."""
-        self.async_update_token()
-        self.async_write_ha_state()
+    _mode = "full"
+    _unique_id_kind = "camera_full"
+    _camera_name = "Full Image"

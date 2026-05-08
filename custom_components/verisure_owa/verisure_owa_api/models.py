@@ -256,6 +256,7 @@ class SStatus(BaseModel):
         default=None, validation_alias="timestampUpdate"
     )
     wifi_connected: bool | None = Field(default=None, validation_alias="wifiConnected")
+    exceptions: list[dict[str, Any]] | None = None
 
 
 class OtpPhone(BaseModel):

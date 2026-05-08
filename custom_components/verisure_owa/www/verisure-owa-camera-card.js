@@ -14,6 +14,8 @@
  *   name: Front Door   # optional — overrides the device name
  */
 
+import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
+
 // ── Translations ──────────────────────────────────────────────────────────────
 
 const TRANSLATIONS = {
@@ -103,22 +105,7 @@ const TRANSLATIONS = {
   },
 };
 
-function _t(lang, key, vars) {
-  const l = TRANSLATIONS[lang] || TRANSLATIONS[lang?.split("-")[0]] || TRANSLATIONS.en;
-  let s = l[key] || TRANSLATIONS.en[key] || key;
-  if (vars) Object.entries(vars).forEach(([k, v]) => { s = s.replace(`{${k}}`, v); });
-  return s;
-}
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
-function _escHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
@@ -254,7 +241,7 @@ class VerisureOwaCameraCard extends HTMLElement {
       this.shadowRoot.innerHTML = `
       <ha-card>
         <div style="padding:16px;color:var(--error-color)">
-          ${_escHtml(_t(lang, "entity_not_found", { entity: entityId }))}
+          ${escHtml(_t(lang, "entity_not_found", { entity: entityId }))}
         </div>
       </ha-card>`;
       return;
@@ -345,10 +332,10 @@ class VerisureOwaCameraCard extends HTMLElement {
     </style>
     <ha-card>
       <div class="img-wrapper" id="img-wrapper">
-        <img class="camera-img" src="${_escHtml(imgUrl)}" alt="${_escHtml(name)}" />
+        <img class="camera-img" src="${escHtml(imgUrl)}" alt="${escHtml(name)}" />
         <div class="overlay">
-          <span class="name">${_escHtml(name)}</span>
-          ${timestamp ? `<span class="timestamp" title="${_escHtml(absolute)}">${_escHtml(relative)}</span>` : ""}
+          <span class="name">${escHtml(name)}</span>
+          ${timestamp ? `<span class="timestamp" title="${escHtml(absolute)}">${escHtml(relative)}</span>` : ""}
         </div>
         <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn" ${hasCapture ? "" : "hidden"}>
           <ha-icon icon="mdi:refresh"></ha-icon>

@@ -80,17 +80,24 @@ async def async_setup_entry(
         async_add_entities(sensors, False)
 
 
-class SentinelTemperature(  # type: ignore[override]
+AIR_QUALITY_LABELS: dict[str, str] = {
+    "1": "Good",
+    "2": "Fair",
+    "3": "Poor",
+}
+
+
+class SentinelSensorBase(  # type: ignore[override]
     CoordinatorEntity[SentinelCoordinator],
     SensorEntity,
 ):
-    """Sentinel temperature sensor."""
+    """Shared init for sentinel sensors — wires unique_id and device_info.
+
+    Subclasses set _unique_id_suffix and override native_value.
+    """
 
     _attr_has_entity_name = True
-    _attr_name = "Temperature"
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _unique_id_suffix: str = ""
 
     def __init__(
         self,
@@ -102,8 +109,19 @@ class SentinelTemperature(  # type: ignore[override]
         super().__init__(coordinator)
         self._attr_device_info = securitas_device_info(installation)
         self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_temperature_{service_id}"
+            f"v5_verisure_owa.{installation.number}"
+            f"_{self._unique_id_suffix}_{service_id}"
         )
+
+
+class SentinelTemperature(SentinelSensorBase):
+    """Sentinel temperature sensor."""
+
+    _attr_name = "Temperature"
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _unique_id_suffix = "temperature"
 
     @property
     def native_value(self) -> float | None:  # type: ignore[override]
@@ -113,30 +131,14 @@ class SentinelTemperature(  # type: ignore[override]
         return self.coordinator.data.sentinel.temperature
 
 
-class SentinelHumidity(  # type: ignore[override]
-    CoordinatorEntity[SentinelCoordinator],
-    SensorEntity,
-):
+class SentinelHumidity(SentinelSensorBase):
     """Sentinel Humidity sensor."""
 
-    _attr_has_entity_name = True
     _attr_name = "Humidity"
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
-
-    def __init__(
-        self,
-        coordinator: SentinelCoordinator,
-        installation: Installation,
-        service_id: int,
-    ) -> None:
-        """Init the component."""
-        super().__init__(coordinator)
-        self._attr_device_info = securitas_device_info(installation)
-        self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_humidity_{service_id}"
-        )
+    _unique_id_suffix = "humidity"
 
     @property
     def native_value(self) -> float | None:  # type: ignore[override]
@@ -146,35 +148,12 @@ class SentinelHumidity(  # type: ignore[override]
         return self.coordinator.data.sentinel.humidity
 
 
-AIR_QUALITY_LABELS: dict[str, str] = {
-    "1": "Good",
-    "2": "Fair",
-    "3": "Poor",
-}
-
-
-class SentinelAirQuality(  # type: ignore[override]
-    CoordinatorEntity[SentinelCoordinator],
-    SensorEntity,
-):
+class SentinelAirQuality(SentinelSensorBase):
     """Air Quality sensor — numeric value from the most recent hourly reading."""
 
-    _attr_has_entity_name = True
     _attr_name = "Air Quality"
     _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(
-        self,
-        coordinator: SentinelCoordinator,
-        installation: Installation,
-        service_id: int,
-    ) -> None:
-        """Init the component."""
-        super().__init__(coordinator)
-        self._attr_device_info = securitas_device_info(installation)
-        self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_airquality_{service_id}"
-        )
+    _unique_id_suffix = "airquality"
 
     @property
     def native_value(self) -> int | None:  # type: ignore[override]
@@ -184,27 +163,11 @@ class SentinelAirQuality(  # type: ignore[override]
         return self.coordinator.data.air_quality.value
 
 
-class SentinelAirQualityStatus(  # type: ignore[override]
-    CoordinatorEntity[SentinelCoordinator],
-    SensorEntity,
-):
+class SentinelAirQualityStatus(SentinelSensorBase):
     """Air Quality Status sensor — categorical status (Good/Fair/Poor/Bad)."""
 
-    _attr_has_entity_name = True
     _attr_name = "Air Quality Status"
-
-    def __init__(
-        self,
-        coordinator: SentinelCoordinator,
-        installation: Installation,
-        service_id: int,
-    ) -> None:
-        """Init the component."""
-        super().__init__(coordinator)
-        self._attr_device_info = securitas_device_info(installation)
-        self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_airquality_status_{service_id}"
-        )
+    _unique_id_suffix = "airquality_status"
 
     @property
     def native_value(self) -> str | None:  # type: ignore[override]
