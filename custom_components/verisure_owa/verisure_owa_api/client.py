@@ -1761,6 +1761,9 @@ class VerisureOwaClient:
             )
             return []
 
+        config_repo = installation_data.get("configRepoUser") or {}
+        installation.alarm_partitions = config_repo.get("alarmPartitions") or []
+
         raw_data = installation_data.get("services")
         if raw_data is None:
             _LOGGER.warning("API returned no services for %s", installation.number)

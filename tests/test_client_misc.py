@@ -487,6 +487,44 @@ class TestGetServices:
         assert expiry > datetime.now()
         assert isinstance(cap_set, frozenset)
 
+    async def test_populates_alarm_partitions_from_config_repo_user(
+        self, client_no_caps, transport
+    ):
+        """get_services copies configRepoUser.alarmPartitions onto the installation.
+
+        Required for SDVECU panels (Italy) where perimeter availability is
+        signaled only by alarmPartitions[id="02"].enterStates — neither a PERI
+        service nor a PERI JWT capability is present. detect_peri's signal 4
+        reads installation.alarm_partitions, which stays empty without this.
+        """
+        partitions = [
+            {"id": "01", "enterStates": ["01", "02"], "leaveStates": ["01", "02"]},
+            {"id": "02", "enterStates": ["01"], "leaveStates": ["01"]},
+            {"id": "03", "enterStates": [], "leaveStates": []},
+        ]
+        transport.execute.return_value = services_response(
+            services=[],
+            config_repo_user={"alarmPartitions": partitions},
+        )
+
+        inst = _make_installation()
+        await client_no_caps.get_services(inst)
+
+        assert inst.alarm_partitions == partitions
+
+    async def test_alarm_partitions_default_empty_when_config_repo_user_missing(
+        self, client_no_caps, transport
+    ):
+        """Spanish/UK responses omit configRepoUser; alarm_partitions stays empty."""
+        transport.execute.return_value = services_response(
+            services=[], config_repo_user=None
+        )
+
+        inst = _make_installation()
+        await client_no_caps.get_services(inst)
+
+        assert inst.alarm_partitions == []
+
     async def test_returns_empty_list_when_no_installation_data(
         self, client_no_caps, transport
     ):
