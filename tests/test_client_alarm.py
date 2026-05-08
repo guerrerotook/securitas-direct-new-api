@@ -274,6 +274,20 @@ class TestArm:
         # protom_response should be updated on the client
         assert client.protom_response == "T"
 
+    async def test_arm_without_protom_response_does_not_raise(self, client, transport):
+        """If the API response omits protomResponse, arm() preserves the previous value."""
+        submit = arm_submit_response("ref-arm-005")
+        status = arm_status_response(res="OK", status="ARMED")
+        del status["data"]["xSArmStatus"]["protomResponse"]
+        transport.execute.side_effect = [submit, status]
+
+        inst = _make_installation()
+        client.protom_response = "previous-T"
+        result = await client.arm(inst, "ARM1")
+
+        assert result.operation_status == "OK"
+        assert client.protom_response == "previous-T"
+
     async def test_arm_arming_exception_error(self, client, transport):
         """NON_BLOCKING error with allowForcing raises ArmingExceptionError."""
         transport.execute.side_effect = [
@@ -432,6 +446,22 @@ class TestCheckAlarm:
         assert result.operation_status == "OK"
         assert result.status == "ARMED"
         assert client.protom_response == "T"
+
+    async def test_check_alarm_without_protom_response_does_not_raise(
+        self, client, transport
+    ):
+        """If the API response omits protomResponse, check_alarm() preserves the previous value."""
+        check_submit = check_alarm_submit_response("ref-check-002")
+        status = check_alarm_status_response(res="OK", status="ARMED")
+        del status["data"]["xSCheckAlarmStatus"]["protomResponse"]
+        transport.execute.side_effect = [check_submit, status]
+
+        inst = _make_installation()
+        client.protom_response = "previous-T"
+        result = await client.check_alarm(inst)
+
+        assert result.operation_status == "OK"
+        assert client.protom_response == "previous-T"
 
 
 # ── Get general status tests ────────────────────────────────────────────────

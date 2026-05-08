@@ -63,7 +63,7 @@ class _OperationResult(_NullSafeBase):
     status: str | None = None
     numinst: str | None = None
     protom_response: str | None = Field(default=None, validation_alias="protomResponse")
-    protom_response_data: str | None = Field(
+    protom_response_date: str | None = Field(
         None, validation_alias="protomResponseDate"
     )
     request_id: str | None = Field(default=None, validation_alias="requestId")

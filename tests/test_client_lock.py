@@ -474,6 +474,20 @@ class TestChangeLockMode:
         with pytest.raises(OperationTimeoutError):
             await client.change_lock_mode(inst, lock=True)
 
+    async def test_without_protom_response_does_not_raise(self, client, transport):
+        """If the API response omits protomResponse, change_lock_mode() preserves the previous value."""
+        submit = change_lock_submit_response("ref-lock-005")
+        status = change_lock_status_response(res="OK", status="LOCKED")
+        del status["data"]["xSChangeSmartlockModeStatus"]["protomResponse"]
+        transport.execute.side_effect = [submit, status]
+
+        inst = _make_installation()
+        client.protom_response = "previous-L"
+        result = await client.change_lock_mode(inst, lock=True)
+
+        assert result.status == "LOCKED"
+        assert client.protom_response == "previous-L"
+
     async def test_unlock_sends_lock_false(self, client, transport):
         """lock=False is passed correctly in the submit variables."""
         transport.execute.side_effect = [

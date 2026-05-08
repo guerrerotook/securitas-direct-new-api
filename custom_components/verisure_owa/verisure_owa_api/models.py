@@ -233,7 +233,7 @@ class OperationStatus(_NullSafeBase):
     status: str = ""
     installation_number: str = Field(default="", validation_alias="numinst")
     protom_response: str = Field(default="", validation_alias="protomResponse")
-    protom_response_data: str = Field(default="", validation_alias="protomResponseDate")
+    protom_response_date: str = Field(default="", validation_alias="protomResponseDate")
     request_id: str = Field(default="", validation_alias="requestId")
     error: dict[str, Any] | None = None
 

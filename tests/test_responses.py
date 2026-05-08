@@ -251,7 +251,7 @@ class TestArmStatusEnvelope:
         assert result.status == "1"
         assert result.numinst == "123456"
         assert result.protom_response == "T"
-        assert result.protom_response_data == "2024-01-15"
+        assert result.protom_response_date == "2024-01-15"
         assert result.request_id == "req-arm-001"
         assert result.error is None
 
