@@ -86,7 +86,10 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         self._camera_device = camera_device
         self._zone_id = camera_device.zone_id
         suffix = "_full" if self._mode == "full" else ""
-        self._attr_unique_id = f"v5_verisure_owa.{installation.number}_camera{suffix}_{camera_device.zone_id}"
+        self._attr_unique_id = (
+            f"v5_verisure_owa.{installation.number}"
+            f"_camera{suffix}_{camera_device.zone_id}"
+        )
         if self._mode == "full":
             self._attr_name = "Full Image"
         self._attr_device_info = camera_device_info(installation, camera_device)

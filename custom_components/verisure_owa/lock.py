@@ -70,7 +70,7 @@ class VerisureLock(  # type: ignore[override]
         initial_status: str = LOCK_STATUS_LOCKED,
         lock_config: SmartLock | None = None,
     ) -> None:
-        CoordinatorEntity.__init__(self, coordinator)
+        CoordinatorEntity.__init__(self, coordinator)  # type: ignore[arg-type]
         VerisureEntity.__init__(self, installation, client)
         self._state = (
             initial_status
