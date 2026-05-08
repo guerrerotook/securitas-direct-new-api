@@ -150,6 +150,12 @@ class VerisureHub:
         self.lang: str = api_domains.get_language(self.country)
         self.hass: HomeAssistant = hass
         self._services_cache: dict[str, list[Service]] = {}
+        # Mirrors `installation.alarm_partitions` (a side-effect of
+        # client.get_services) keyed by installation number so cache hits
+        # in get_services can re-apply the partitions to a fresh
+        # Installation instance — required by detect_peri's Italian
+        # SDVECU signal.
+        self._partitions_cache: dict[str, list[dict[str, Any]]] = {}
         self.log_filter: SensitiveDataFilter | None = hass.data.get(DOMAIN, {}).get(
             "log_filter"
         )
@@ -227,11 +233,22 @@ class VerisureHub:
     async def get_services(
         self, instalation: Installation, priority: int | None = None
     ) -> list[Service]:
-        """Get the list of services from the installation (cached)."""
+        """Get the list of services from the installation (cached).
+
+        ``client.get_services`` mutates ``installation.alarm_partitions`` as
+        a side effect — Italian SDVECU panels need that field for capability
+        detection (it's the only signal that fires for them).  Cache the
+        partitions alongside the services and re-apply them on cache hits
+        so downstream detect_peri sees them no matter which Installation
+        instance the caller passed in.
+        """
         if priority is None:
             priority = ApiQueue.BACKGROUND
         key = instalation.number
         if key in self._services_cache:
+            cached_partitions = self._partitions_cache.get(key)
+            if cached_partitions is not None:
+                instalation.alarm_partitions = list(cached_partitions)
             return self._services_cache[key]
         services = await self._api_queue.submit(
             self.client.get_services,
@@ -239,6 +256,9 @@ class VerisureHub:
             priority=priority,
         )
         self._services_cache[key] = services
+        # Snapshot the partitions populated by client.get_services so the
+        # next caller with a fresh Installation can recover them.
+        self._partitions_cache[key] = list(instalation.alarm_partitions)
         return services
 
     async def get_camera_devices(
