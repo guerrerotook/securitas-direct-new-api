@@ -89,6 +89,7 @@ venv
 Pipfile*
 share/*
 /Scripts/
+uv.lock
 
 # vimmy stuff
 *.swp
