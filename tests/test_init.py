@@ -374,14 +374,12 @@ class TestVerisureHub:
         result = await hub.logout()
         assert result is True
 
-    def test_get_set_authentication_token(self):
-        """get/set_authentication_token should read/write session.authentication_token."""
+    def test_get_authentication_token(self):
+        """get_authentication_token should read session.authentication_token."""
         hub = self._make_hub()
         hub.client = MagicMock()
         hub.client.authentication_token = "original-token"
         assert hub.get_authentication_token() == "original-token"
-        hub.set_authentication_token("new-token")
-        assert hub.client.authentication_token == "new-token"
 
 
 # ===========================================================================

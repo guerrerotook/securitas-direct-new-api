@@ -482,10 +482,6 @@ class VerisureHub:
         """Get the authentication token."""
         return self.client.authentication_token
 
-    def set_authentication_token(self, value: str) -> None:
-        """Set the authentication token."""
-        self.client.authentication_token = value
-
     def get_refresh_token(self) -> str:
         """Get the long-lived refresh token, or empty string if absent."""
         return self.client.refresh_token_value

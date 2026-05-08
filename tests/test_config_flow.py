@@ -569,8 +569,8 @@ async def test_otp_challenge_advances_to_options(hass):
 # ===================================================================
 
 
-async def test_finish_setup_logs_in_gets_token_advances_to_options(hass):
-    """finish_setup should login, get token, and advance to options."""
+async def test_finish_setup_logs_in_advances_to_options(hass):
+    """finish_setup should login (when no token yet) and advance to options."""
     mock_hub = _hub_factory()
 
     with _patches(mock_hub):
