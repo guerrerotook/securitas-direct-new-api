@@ -1876,3 +1876,178 @@ async def test_subpanel_all_toggles_visible_with_full_caps(hass):
     assert CONF_ENABLE_PERIMETER_PANEL in keys
     assert CONF_ENABLE_ANNEX_PANEL in keys
     assert CONF_ENABLE_INTERIOR_PANEL in keys
+
+
+# ===================================================================
+# TestLockAutomationsOptionsStep (~5 tests)
+# ===================================================================
+
+
+def _make_entry_with_locks(
+    hass,
+    *,
+    registered_locks: list[dict],
+    enabled_circuits: set[str] | None = None,
+    entry_options: dict | None = None,
+):
+    """Create MockConfigEntry and inject registered_locks + circuit options into hass.data."""
+    from custom_components.verisure_owa.const import (
+        CONF_ENABLE_ANNEX_PANEL,
+        CONF_ENABLE_INTERIOR_PANEL,
+        CONF_ENABLE_PERIMETER_PANEL,
+    )
+
+    circuits = enabled_circuits if enabled_circuits is not None else {"interior"}
+    options = entry_options or {}
+    # Map circuit names to option keys
+    options.setdefault(CONF_ENABLE_INTERIOR_PANEL, "interior" in circuits)
+    options.setdefault(CONF_ENABLE_PERIMETER_PANEL, "perimeter" in circuits)
+    options.setdefault(CONF_ENABLE_ANNEX_PANEL, "annex" in circuits)
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options=options,
+    )
+    entry.add_to_hass(hass)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "registered_locks": registered_locks,
+    }
+    return entry
+
+
+async def _advance_to_lock_automations(hass, entry):
+    """Navigate init -> mappings -> lock_automations and return flow_id."""
+    flow_id = await _advance_to_mappings(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+        },
+    )
+    assert result["step_id"] == "lock_automations", (
+        f"Expected lock_automations step, got {result['step_id']}"
+    )
+    return result["flow_id"]
+
+
+async def test_lock_automations_renders_one_section_per_lock(hass):
+    """Form should have two fields per registered lock (lock_on_arm, unlock_disarms)."""
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[
+            {"device_id": "lockA", "alias": "Front Door"},
+            {"device_id": "lockB", "alias": "Back Door"},
+        ],
+        enabled_circuits={"interior", "perimeter", "annex"},
+    )
+    flow_id = await _advance_to_lock_automations(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(flow_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "lock_automations"
+    keys = {str(k) for k in result["data_schema"].schema.keys()}
+    assert any("lockA" in k for k in keys)
+    assert any("lockB" in k for k in keys)
+
+
+async def test_lock_automations_disabled_circuits_excluded(hass):
+    """Circuits not enabled on this installation should not appear as options."""
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[{"device_id": "lockA", "alias": "Front Door"}],
+        enabled_circuits={"interior"},
+    )
+    flow_id = await _advance_to_lock_automations(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(flow_id)
+
+    schema_str = str(result["data_schema"])
+    assert "perimeter" not in schema_str
+    assert "annex" not in schema_str
+
+
+async def test_lock_automations_submission_persists_per_lock_config(hass):
+    """Submitting the form should save per-lock config in CONF_LOCK_AUTOMATIONS."""
+    from custom_components.verisure_owa.const import CONF_LOCK_AUTOMATIONS
+
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[{"device_id": "lockA", "alias": "Front Door"}],
+        enabled_circuits={"interior", "perimeter", "annex"},
+    )
+    flow_id = await _advance_to_lock_automations(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            "lockA__lock_on_arm": ["interior", "perimeter"],
+            "lockA__unlock_disarms": ["interior"],
+        },
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_LOCK_AUTOMATIONS in result["data"]
+    assert result["data"][CONF_LOCK_AUTOMATIONS]["lockA"] == {
+        "lock_on_arm": ["interior", "perimeter"],
+        "unlock_disarms": ["interior"],
+    }
+
+
+async def test_lock_automations_re_edit_prefills_existing_values(hass):
+    """Re-opening options flow should prefill previously saved lock automation values."""
+    from custom_components.verisure_owa.const import CONF_LOCK_AUTOMATIONS
+
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[{"device_id": "lockA", "alias": "Front Door"}],
+        enabled_circuits={"interior", "perimeter", "annex"},
+        entry_options={
+            CONF_LOCK_AUTOMATIONS: {
+                "lockA": {
+                    "lock_on_arm": ["perimeter"],
+                    "unlock_disarms": ["interior", "annex"],
+                }
+            }
+        },
+    )
+    flow_id = await _advance_to_lock_automations(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(flow_id)
+
+    assert result["type"] == FlowResultType.FORM
+    schema = result["data_schema"].schema
+    for k, _v in schema.items():
+        key_str = str(k)
+        if "lockA__lock_on_arm" in key_str:
+            assert k.default() == ["perimeter"]
+        if "lockA__unlock_disarms" in key_str:
+            assert k.default() == ["interior", "annex"]
+
+
+async def test_lock_automations_skipped_when_no_locks_discovered(hass):
+    """When no locks are registered, the step should be skipped (CREATE_ENTRY)."""
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[],
+        enabled_circuits={"interior"},
+    )
+    flow_id = await _advance_to_mappings(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+        },
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY

@@ -18,6 +18,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
@@ -53,10 +54,15 @@ from . import (
     generate_uuid,
 )
 from .const import (
+    CIRCUIT_ANNEX,
+    CIRCUIT_INTERIOR,
+    CIRCUIT_PERIMETER,
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
+    CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
+    LOCK_CIRCUITS,
 )
 from .api_queue import ApiQueue
 from .verisure_owa_api import (
@@ -846,8 +852,8 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Step 2: Alarm state mappings."""
         if user_input is not None:
-            data = {**self._general_data, **user_input}
-            return self.async_create_entry(title="", data=data)
+            self._general_data = {**self._general_data, **user_input}
+            return await self.async_step_lock_automations()
 
         # Resolve via the helper so we read coordinator → published cache →
         # False, matching the init step. Avoids the race where the user
@@ -888,3 +894,72 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             }
         )
         return self.async_show_form(step_id="mappings", data_schema=schema)
+
+    async def async_step_lock_automations(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 3: Per-lock automation settings (lock-on-arm / disarm-on-unlock)."""
+        registered_locks = self._get_registered_locks()
+        if not registered_locks:
+            return self.async_create_entry(title="", data=self._general_data)
+
+        enabled_circuits = self._get_enabled_circuits()
+
+        if user_input is not None:
+            new_map: dict[str, dict[str, list[str]]] = {}
+            for lk in registered_locks:
+                did = lk["device_id"]
+                new_map[did] = {
+                    "lock_on_arm": list(user_input.get(f"{did}__lock_on_arm", [])),
+                    "unlock_disarms": list(
+                        user_input.get(f"{did}__unlock_disarms", [])
+                    ),
+                }
+            return self.async_create_entry(
+                title="",
+                data={**self._general_data, CONF_LOCK_AUTOMATIONS: new_map},
+            )
+
+        existing = self.config_entry.options.get(CONF_LOCK_AUTOMATIONS, {})
+        circuit_options = {c: c.title() for c in LOCK_CIRCUITS if c in enabled_circuits}
+
+        fields: dict[Any, Any] = {}
+        for lk in registered_locks:
+            did = lk["device_id"]
+            saved = existing.get(did, {})
+            fields[
+                vol.Optional(
+                    f"{did}__lock_on_arm",
+                    default=saved.get("lock_on_arm", []),
+                )
+            ] = cv.multi_select(circuit_options)
+            fields[
+                vol.Optional(
+                    f"{did}__unlock_disarms",
+                    default=saved.get("unlock_disarms", []),
+                )
+            ] = cv.multi_select(circuit_options)
+
+        return self.async_show_form(
+            step_id="lock_automations",
+            data_schema=vol.Schema(fields),
+        )
+
+    def _get_registered_locks(self) -> list[dict[str, str]]:
+        """Return [{device_id, alias}] for each lock registered for this entry."""
+        domain_entry = self.hass.data.get(DOMAIN, {}).get(
+            self.config_entry.entry_id, {}
+        )
+        return list(domain_entry.get("registered_locks", []))
+
+    def _get_enabled_circuits(self) -> set[str]:
+        """Return the set of circuit labels enabled on this installation."""
+        opts = self.config_entry.options
+        enabled: set[str] = set()
+        if opts.get(CONF_ENABLE_INTERIOR_PANEL, True):
+            enabled.add(CIRCUIT_INTERIOR)
+        if opts.get(CONF_ENABLE_PERIMETER_PANEL, False):
+            enabled.add(CIRCUIT_PERIMETER)
+        if opts.get(CONF_ENABLE_ANNEX_PANEL, False):
+            enabled.add(CIRCUIT_ANNEX)
+        return enabled
