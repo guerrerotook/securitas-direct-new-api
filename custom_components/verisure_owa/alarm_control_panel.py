@@ -7,6 +7,7 @@ from typing import Any
 import uuid
 
 import homeassistant.components.alarm_control_panel as alarm
+import voluptuous as vol
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntityFeature,  # type: ignore[attr-defined]
     CodeFormat,  # type: ignore[attr-defined]
@@ -15,6 +16,7 @@ from homeassistant.components.alarm_control_panel.const import AlarmControlPanel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
@@ -159,7 +161,7 @@ async def async_setup_entry(
     platform = async_get_current_platform()
     platform.async_register_entity_service(
         "force_arm",
-        {},
+        {vol.Optional(CONF_CODE): cv.string},
         "async_force_arm",
     )
     platform.async_register_entity_service(
@@ -972,12 +974,22 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._dismiss_arming_exception_notification()
         self.async_write_ha_state()
 
-    async def async_force_arm(self) -> None:
+    async def async_force_arm(self, code: str | None = None) -> None:
         """Force-arm using stored exception context.
 
         Called by the verisure_owa.force_arm service. Re-arms in the same mode
         that previously failed, passing the stored referenceId and suid to
         override non-blocking exceptions.
+
+        The presence of self._force_context is itself proof that a PIN-
+        authenticated arm reached the server within the last scan_interval
+        — set_arm_state can only populate the context after _async_arm
+        passes _check_code_for_arm_if_required.  So we don't re-prompt for
+        the PIN on this second-half completion (which would also break the
+        mobile-notification tap flow, since notifications can't carry a PIN).
+
+        If a service caller passes ``code`` explicitly (defence-in-depth for
+        paranoid automations) we still validate it against the configured PIN.
         """
         if self._force_context is None:
             _LOGGER.warning(
@@ -985,6 +997,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 self.installation.number,
             )
             return
+        if code is not None:
+            self._check_code(code)
         mode = self._force_context["mode"]
         ref_id = self._force_context["reference_id"]
         suid = self._force_context["suid"]

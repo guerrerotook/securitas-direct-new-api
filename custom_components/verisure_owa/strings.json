@@ -120,7 +120,13 @@
     "services": {
         "force_arm": {
             "name": "Force arm",
-            "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt."
+            "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt.",
+            "fields": {
+                "code": {
+                    "name": "PIN code",
+                    "description": "Optional. If supplied, validated against the configured PIN before completing the force-arm. Most callers don't need this — the prior arm attempt that produced the force-arm context already validated the PIN."
+                }
+            }
         },
         "force_arm_cancel": {
             "name": "Cancel force arm",

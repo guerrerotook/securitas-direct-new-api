@@ -2089,6 +2089,99 @@ class TestForceArmContext:
 # ===========================================================================
 
 
+class TestForceArmCodeGate:
+    """force_arm trusts the force context as proof of recent PIN auth.
+
+    The context is set only after _check_code_for_arm_if_required passes
+    in _async_arm, so its existence is itself proof.  We additionally
+    accept an optional code argument and validate it for defence-in-depth
+    callers.
+    """
+
+    @staticmethod
+    def _make_alarm_with_code(code_required: bool):
+        """make_alarm with a configured PIN, optionally requiring code on arm."""
+        defaults = STD_DEFAULTS
+        config = {
+            "map_home": defaults["map_home"],
+            "map_away": defaults["map_away"],
+            "map_night": defaults["map_night"],
+            "map_custom": defaults["map_custom"],
+            "map_vacation": defaults["map_vacation"],
+            "scan_interval": 120,
+            "code": "1234",
+            "code_arm_required": code_required,
+        }
+        return make_alarm(config=config)
+
+    @staticmethod
+    def _seed_force_context(alarm):
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-789",
+            "suid": "suid-789",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_data="",
+            )
+        )
+
+    async def test_force_arm_with_context_proceeds_without_code(self):
+        """Force context exists → arm without re-prompting for the PIN.
+
+        The context is set only after a PIN-authenticated arm reached
+        the server, so re-prompting on the second-half completion would
+        be redundant and would break the mobile-notification flow.
+        """
+        alarm = self._make_alarm_with_code(code_required=True)
+        self._seed_force_context(alarm)
+
+        await alarm.async_force_arm()
+
+        alarm.client.arm_alarm.assert_awaited_once()
+
+    async def test_force_arm_no_context_no_op(self):
+        """No force context → no client call, regardless of code_arm_required."""
+        alarm = self._make_alarm_with_code(code_required=True)
+        alarm.client.arm_alarm = AsyncMock()
+        # No _seed_force_context — context is None.
+
+        await alarm.async_force_arm()
+
+        alarm.client.arm_alarm.assert_not_awaited()
+
+    async def test_force_arm_with_explicit_wrong_code_raises(self):
+        """Defence-in-depth: explicit wrong code rejected even with context."""
+        alarm = self._make_alarm_with_code(code_required=True)
+        self._seed_force_context(alarm)
+
+        with pytest.raises(ServiceValidationError):
+            await alarm.async_force_arm(code="9999")
+
+        alarm.client.arm_alarm.assert_not_awaited()
+        # Force context must remain so the user can retry with the right code.
+        assert alarm._force_context is not None
+
+    async def test_force_arm_with_explicit_correct_code_proceeds(self):
+        """Defence-in-depth: explicit correct code accepted."""
+        alarm = self._make_alarm_with_code(code_required=True)
+        self._seed_force_context(alarm)
+
+        await alarm.async_force_arm(code="1234")
+
+        alarm.client.arm_alarm.assert_awaited_once()
+
+
 class TestForceArmCancel:
     """Tests for the securitas.force_arm_cancel entity service."""
 
