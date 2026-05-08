@@ -358,22 +358,6 @@ class TestVerisureHub:
         hub.client.get_services.assert_awaited_once_with(inst)
         assert result == []
 
-    async def test_logout_returns_false_on_failure(self):
-        """logout() should return False when client.logout() raises."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.logout = AsyncMock(side_effect=Exception("logout failed"))
-        result = await hub.logout()
-        assert result is False
-
-    async def test_logout_returns_true_on_success(self):
-        """logout() should return True when client.logout() succeeds."""
-        hub = self._make_hub()
-        hub.client = AsyncMock()
-        hub.client.logout = AsyncMock()
-        result = await hub.logout()
-        assert result is True
-
     def test_get_authentication_token(self):
         """get_authentication_token should read session.authentication_token."""
         hub = self._make_hub()

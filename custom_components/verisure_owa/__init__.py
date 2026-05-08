@@ -170,7 +170,7 @@ def _resolve_flow_capabilities(
 def add_device_information[T: dict](config: T) -> T:
     """Add device information to the configuration."""
     if CONF_DEVICE_ID not in config:
-        config[CONF_DEVICE_ID] = generate_device_id(config[CONF_COUNTRY])
+        config[CONF_DEVICE_ID] = generate_device_id()
 
     if CONF_UNIQUE_ID not in config:
         config[CONF_UNIQUE_ID] = generate_uuid()

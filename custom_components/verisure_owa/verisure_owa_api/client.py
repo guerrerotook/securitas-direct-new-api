@@ -127,7 +127,7 @@ def generate_uuid() -> str:
     return str(uuid4()).replace("-", "")[0:16]
 
 
-def generate_device_id(_lang: str) -> str:
+def generate_device_id() -> str:
     """Create a device identifier for the API."""
     return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
 
@@ -194,8 +194,6 @@ class VerisureOwaClient:
         self.device_brand: str = "samsung"
         self.device_name: str = "SM-S901U"
         self.device_os_version: str = "12"
-        self.device_resolution: str = ""
-        self.device_type: str = ""
         self.device_version: str = "10.102.0"
 
         # Polling configuration
@@ -411,7 +409,6 @@ class VerisureOwaClient:
     def _check_graphql_errors(
         self,
         response_dict: dict[str, Any],
-        operation: str,  # pylint: disable=unused-argument
     ) -> None:
         """Check for GraphQL-level errors in the response and raise if needed."""
         if "errors" not in response_dict:
@@ -541,7 +538,7 @@ class VerisureOwaClient:
 
         # Check for GraphQL errors — raises SessionExpiredError for 403
         try:
-            self._check_graphql_errors(response_dict, operation)
+            self._check_graphql_errors(response_dict)
         except SessionExpiredError:
             if _retried or operation in _AUTH_OPERATIONS:
                 raise
@@ -599,9 +596,9 @@ class VerisureOwaClient:
                 "lang": self.language,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
-                "deviceType": self.device_type,
+                "deviceType": "",
                 "deviceVersion": self.device_version,
-                "deviceResolution": self.device_resolution,
+                "deviceResolution": "",
                 "deviceName": self.device_name,
                 "deviceBrand": self.device_brand,
                 "deviceOsVersion": self.device_os_version,
@@ -679,9 +676,9 @@ class VerisureOwaClient:
                 "callby": API_CALLBY,
                 "idDevice": self.device_id,
                 "idDeviceIndigitall": self.id_device_indigitall,
-                "deviceType": self.device_type,
+                "deviceType": "",
                 "deviceVersion": self.device_version,
-                "deviceResolution": self.device_resolution,
+                "deviceResolution": "",
                 "deviceName": self.device_name,
                 "deviceBrand": self.device_brand,
                 "deviceOsVersion": self.device_os_version,

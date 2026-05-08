@@ -177,7 +177,6 @@ class VerisureHub:
             refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
             on_refresh_token_changed=self._persist_refresh_token,
         )
-        self.installations: list[Installation] = []
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
         )
@@ -189,8 +188,6 @@ class VerisureHub:
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
-        self._full_images: dict[str, bytes] = {}
-        self._full_timestamps: dict[str, str] = {}
 
     async def login(self) -> None:
         """Authenticate, preferring a stored refresh token over a password login.
@@ -316,9 +313,7 @@ class VerisureHub:
             )
 
             # Push thumbnail into the camera coordinator so entities update
-            self._update_camera_coordinator_thumbnail(
-                installation, device.zone_id, thumbnail
-            )
+            self._update_camera_coordinator_thumbnail(device.zone_id, thumbnail)
 
             if image_bytes is None:
                 async_dispatcher_send(
@@ -337,38 +332,6 @@ class VerisureHub:
             return image_bytes, thumbnail
         finally:
             self._camera_capturing.discard(capture_key)
-
-    async def fetch_latest_thumbnail(
-        self, installation: Installation, camera_device: CameraDevice
-    ) -> None:
-        """Fetch the current thumbnail from the API and store it."""
-        try:
-            thumbnail = await self._api_queue.submit(
-                self.client.get_thumbnail,
-                installation,
-                camera_device.device_type,
-                camera_device.zone_id,
-                priority=ApiQueue.BACKGROUND,
-            )
-        except Exception:  # pylint: disable=broad-exception-caught  # API call may raise anything
-            _LOGGER.debug(
-                "[hub] Could not fetch thumbnail for %s on startup",
-                camera_device.name,
-            )
-            return
-
-        image_bytes = self._validate_and_store_image(
-            thumbnail, installation, camera_device, log_warnings=False
-        )
-        if image_bytes is not None:
-            self._update_camera_coordinator_thumbnail(
-                installation, camera_device.zone_id, thumbnail
-            )
-
-        if thumbnail.id_signal and thumbnail.signal_type:
-            self.hass.async_create_task(
-                self._fetch_and_store_full_image(installation, camera_device, thumbnail)
-            )
 
     async def _fetch_and_store_full_image(
         self,
@@ -396,15 +359,8 @@ class VerisureHub:
         if not full_bytes or not full_bytes.startswith(b"\xff\xd8"):
             return
 
-        key = f"{installation.number}_{camera_device.zone_id}"
-        self._full_images[key] = full_bytes
-        if thumbnail.timestamp:
-            self._full_timestamps[key] = thumbnail.timestamp
-
         # Push full image into the camera coordinator so entities update
-        self._update_camera_coordinator_full_image(
-            installation, camera_device.zone_id, full_bytes
-        )
+        self._update_camera_coordinator_full_image(camera_device.zone_id, full_bytes)
 
     def _validate_and_store_image(
         self,
@@ -433,11 +389,8 @@ class VerisureHub:
             self.camera_timestamps[key] = thumbnail.timestamp
         return image_bytes
 
-    def _get_camera_coordinator(
-        self,
-        installation: Installation,  # pylint: disable=unused-argument
-    ) -> Any | None:
-        """Return the CameraCoordinator for an installation, if available."""
+    def _get_camera_coordinator(self) -> Any | None:
+        """Return the CameraCoordinator for this entry, if available."""
         entry_id = self.config_entry.entry_id if self.config_entry else None
         if entry_id is None:
             return None
@@ -447,12 +400,12 @@ class VerisureHub:
         return entry_data.get("camera_coordinator")
 
     def _update_camera_coordinator_thumbnail(
-        self, installation: Installation, zone_id: str, thumbnail: ThumbnailResponse
+        self, zone_id: str, thumbnail: ThumbnailResponse
     ) -> None:
         """Push a new thumbnail into the CameraCoordinator's data."""
         if thumbnail is None:
             return
-        camera_coord = self._get_camera_coordinator(installation)
+        camera_coord = self._get_camera_coordinator()
         if camera_coord is None or camera_coord.data is None:
             return
         from .coordinators import CameraData
@@ -465,10 +418,10 @@ class VerisureHub:
         camera_coord.async_set_updated_data(new_data)
 
     def _update_camera_coordinator_full_image(
-        self, installation: Installation, zone_id: str, full_bytes: bytes
+        self, zone_id: str, full_bytes: bytes
     ) -> None:
         """Push a new full-resolution image into the CameraCoordinator's data."""
-        camera_coord = self._get_camera_coordinator(installation)
+        camera_coord = self._get_camera_coordinator()
         if camera_coord is None or camera_coord.data is None:
             return
         from .coordinators import CameraData
@@ -489,14 +442,6 @@ class VerisureHub:
     ) -> str | None:
         """Return the timestamp of the last captured image."""
         return self.camera_timestamps.get(f"{installation_number}_{zone_id}")
-
-    def get_full_image(self, installation_number: str, zone_id: str) -> bytes | None:
-        """Return the last full-resolution image for a camera."""
-        return self._full_images.get(f"{installation_number}_{zone_id}")
-
-    def get_full_timestamp(self, installation_number: str, zone_id: str) -> str | None:
-        """Return the timestamp of the last full-resolution image."""
-        return self._full_timestamps.get(f"{installation_number}_{zone_id}")
 
     def get_authentication_token(self) -> str | None:
         """Get the authentication token."""
@@ -520,15 +465,6 @@ class VerisureHub:
         new_data = {**existing, CONF_REFRESH_TOKEN: value}
         new_data.pop(CONF_PASSWORD, None)
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
-
-    async def logout(self) -> bool:
-        """Logout from Verisure."""
-        try:
-            await self.client.logout()
-        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
-            _LOGGER.error("Could not log out from Verisure", exc_info=True)
-            return False
-        return True
 
     async def get_lock_modes(
         self, installation: Installation, *, priority: int | None = None

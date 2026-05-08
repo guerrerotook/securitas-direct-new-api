@@ -78,7 +78,7 @@ VERSION = 4
 
 _LOGGER = logging.getLogger(__name__)
 
-_NOTIFY_EXCLUDE = {"notify", "send_message", "persistent_notification"}
+_NOTIFY_EXCLUDE = {"notify", "send_message"}
 
 PANEL_OPTION_KEYS = (
     CONF_ENABLE_PERIMETER_PANEL,

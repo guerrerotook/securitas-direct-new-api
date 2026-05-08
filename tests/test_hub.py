@@ -493,34 +493,6 @@ class TestCaptureImage:
 class TestFullImageCapture:
     """Tests for full-resolution image fetching and storage in the hub."""
 
-    async def test_capture_stores_full_image(self):
-        """After a successful capture, the full image is stored in _full_images."""
-        hub = make_hub()
-        installation = make_installation()
-        device = make_camera_device()
-
-        full_jpeg = b"\xff\xd8\xff\xe0full"
-        new_thumb = make_thumbnail(
-            id_signal="sig2",
-            image="base64data",
-            timestamp="2026-03-11 10:01:00",
-            signal_type="16",
-        )
-        hub.client.capture_image = AsyncMock(return_value=new_thumb)
-        hub.client.get_full_image = AsyncMock(return_value=full_jpeg)
-        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
-
-        _tasks = []
-        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
-
-        with patch("custom_components.verisure_owa.hub.async_dispatcher_send"):
-            await hub.capture_image(installation, device)
-            for task in _tasks:
-                await task
-
-        key = f"{installation.number}_{device.zone_id}"
-        assert hub._full_images[key] == full_jpeg
-
     async def test_capture_updates_coordinator_full_image(self):
         """Camera coordinator is updated with full image after capture."""
         from custom_components.verisure_owa.coordinators import CameraData
@@ -589,72 +561,8 @@ class TestFullImageCapture:
 
         hub.client.get_full_image.assert_not_called()
 
-    async def test_get_full_image_returns_none_when_empty(self):
-        """get_full_image returns None when no full image has been stored."""
-        hub = make_hub()
-        installation = make_installation()
-        device = make_camera_device()
-
-        result = hub.get_full_image(installation.number, device.zone_id)
-        assert result is None
-
-    async def test_get_full_image_returns_stored_bytes(self):
-        """get_full_image returns the correct bytes after storage."""
-        hub = make_hub()
-        installation = make_installation()
-        device = make_camera_device()
-
-        key = f"{installation.number}_{device.zone_id}"
-        hub._full_images[key] = b"\xff\xd8full"
-        assert (
-            hub.get_full_image(installation.number, device.zone_id) == b"\xff\xd8full"
-        )
-
-    async def test_get_full_timestamp_returns_stored_value(self):
-        """get_full_timestamp returns the timestamp stored alongside the full image."""
-        hub = make_hub()
-        installation = make_installation()
-        device = make_camera_device()
-
-        key = f"{installation.number}_{device.zone_id}"
-        hub._full_timestamps[key] = "2026-03-25 17:40:41"
-        assert (
-            hub.get_full_timestamp(installation.number, device.zone_id)
-            == "2026-03-25 17:40:41"
-        )
-
-    async def test_fetch_latest_thumbnail_also_fetches_full_image(self):
-        """fetch_latest_thumbnail stores full image and updates coordinator."""
-        hub = make_hub()
-        installation = make_installation()
-        device = make_camera_device()
-
-        full_jpeg = b"\xff\xd8\xff\xe0full"
-        thumb = make_thumbnail(
-            id_signal="sig1",
-            image="base64data",
-            timestamp="2026-03-11 10:00:00",
-            signal_type="16",
-        )
-        hub.client.get_thumbnail = AsyncMock(return_value=thumb)
-        hub.client.get_full_image = AsyncMock(return_value=full_jpeg)
-        hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
-
-        _tasks = []
-        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
-
-        with patch(
-            "custom_components.verisure_owa.hub.async_dispatcher_send",
-        ):
-            await hub.fetch_latest_thumbnail(installation, device)
-            for task in _tasks:
-                await task
-
-        key = f"{installation.number}_{device.zone_id}"
-        assert hub._full_images[key] == full_jpeg
-
     async def test_full_image_not_stored_when_not_jpeg(self):
-        """When get_full_image returns non-JPEG bytes, the full image is not stored."""
+        """When get_full_image returns non-JPEG bytes, the coordinator is not updated."""
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -669,6 +577,7 @@ class TestFullImageCapture:
         hub.client.capture_image = AsyncMock(return_value=new_thumb)
         hub.client.get_full_image = AsyncMock(return_value=non_jpeg)
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+        hub._update_camera_coordinator_full_image = MagicMock()
 
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
@@ -680,11 +589,10 @@ class TestFullImageCapture:
             for task in _tasks:
                 await task
 
-        key = f"{installation.number}_{device.zone_id}"
-        assert key not in hub._full_images
+        hub._update_camera_coordinator_full_image.assert_not_called()
 
     async def test_full_image_not_stored_when_get_full_image_returns_none(self):
-        """When get_full_image returns None, the full image is not stored."""
+        """When get_full_image returns None, the coordinator is not updated."""
         hub = make_hub()
         installation = make_installation()
         device = make_camera_device()
@@ -698,6 +606,7 @@ class TestFullImageCapture:
         hub.client.capture_image = AsyncMock(return_value=new_thumb)
         hub.client.get_full_image = AsyncMock(return_value=None)
         hub._validate_and_store_image = MagicMock(return_value=b"\xff\xd8")
+        hub._update_camera_coordinator_full_image = MagicMock()
 
         _tasks = []
         hub.hass.async_create_task = lambda coro: _tasks.append(coro)
@@ -709,8 +618,7 @@ class TestFullImageCapture:
             for task in _tasks:
                 await task
 
-        key = f"{installation.number}_{device.zone_id}"
-        assert key not in hub._full_images
+        hub._update_camera_coordinator_full_image.assert_not_called()
 
 
 class TestGetServicesPartitionsCache:

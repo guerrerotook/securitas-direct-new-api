@@ -60,7 +60,6 @@ def mock_hub():
     hub.camera_images = {}
     hub.get_camera_image = MagicMock(return_value=None)
     hub.is_capturing = MagicMock(return_value=False)
-    hub.fetch_latest_thumbnail = AsyncMock()
     return hub
 
 
