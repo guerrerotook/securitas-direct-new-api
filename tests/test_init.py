@@ -492,9 +492,7 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(hass, entry)
 
-    async def test_setup_login_error_does_not_leak_response_body(
-        self, hass, mock_hub
-    ):
+    async def test_setup_login_error_does_not_leak_response_body(self, hass, mock_hub):
         """User-facing ConfigEntryNotReady must not embed raw response body.
 
         log_detail() may include the raw API response (which can contain

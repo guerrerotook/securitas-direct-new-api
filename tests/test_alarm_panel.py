@@ -2106,9 +2106,7 @@ class TestUnmappedProtoCodeLogging:
             "scan_interval": 120,
         }
 
-    def test_recognised_unmapped_code_logs_state_name_and_installation(
-        self, caplog
-    ):
+    def test_recognised_unmapped_code_logs_state_name_and_installation(self, caplog):
         """Code in PROTO_TO_STATE but not bound to any HA button → WARNING
         naming the state, the installation number, and the entity_id."""
         import logging
@@ -2156,7 +2154,11 @@ class TestUnmappedProtoCodeLogging:
         assert "Z" in msg
         assert "123456" in msg
         # Phrasing must clearly mark this as integration-unknown, not user-config.
-        assert "unknown" in msg.lower() or "not recognised" in msg.lower() or "not recognized" in msg.lower()
+        assert (
+            "unknown" in msg.lower()
+            or "not recognised" in msg.lower()
+            or "not recognized" in msg.lower()
+        )
 
     def test_repeat_unmapped_code_does_not_spam_log(self, caplog):
         """Two polls with the same unmapped code → only one warning."""
@@ -2177,7 +2179,8 @@ class TestUnmappedProtoCodeLogging:
             alarm.update_status_alarm(status)
 
         warnings = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.levelno >= logging.WARNING and "Unmapped" in r.message
         ]
         assert len(warnings) == 1

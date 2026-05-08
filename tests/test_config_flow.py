@@ -1016,9 +1016,7 @@ async def test_initial_flow_persists_panel_toggles_to_entry_options(hass):
         CONF_ENABLE_INTERIOR_PANEL: True,
     }
 
-    result = await _complete_full_flow(
-        hass, mock_hub, options=options_with_toggles
-    )
+    result = await _complete_full_flow(hass, mock_hub, options=options_with_toggles)
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["options"][CONF_ENABLE_PERIMETER_PANEL] is True
