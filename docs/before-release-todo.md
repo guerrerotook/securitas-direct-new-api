@@ -254,6 +254,45 @@ on actual API responses, multi-axis state, or hardware configuration.
         to expire). `verisure_owa.force_arm` with no code logs
         "no force context available" and does nothing.
 
+- [ ] **User-facing setup error doesn't leak raw response body.**
+      Synthetic test: edit `/etc/hosts` (or use firewall) to point
+      `customers.verisure.es` (or whichever country host the entry
+      uses) at `127.0.0.1`, restart the container. The integration
+      setup will fail. In Settings → Devices & Services, the entry's
+      error message should be short ("Unable to connect to Verisure:
+      …") with no raw JSON dump. Logs still contain the full filtered
+      detail (the redaction filter scrubs known secrets). Restore
+      `/etc/hosts` and reload.
+
+- [ ] **Unmapped proto-code log is actionable.** Trigger an alarm
+      state that isn't bound to any HA button on a multi-installation
+      setup (e.g. arm Total when no button maps to Total). Confirm
+      the warning:
+      - is at WARNING level, not INFO,
+      - identifies the entity_id and installation number so you can
+        tell which panel triggered it on a multi-install setup,
+      - names the state ("Total") and the proto code ("T"),
+      - says "None of the buttons on the main control panel are
+        mapped to it",
+      - fires once per state (does not spam every 30s coordinator
+        poll while the panel sits in the unmapped state).
+
+#### Done
+
+- [x] **PIN never appears in the alarm card's serialised shadow DOM.**
+      With the PIN entry open, `document.querySelector(
+      "verisure-owa-alarm-card").shadowRoot.getElementById(
+      "pin-keyboard-input").outerHTML` shows no `value=` attribute,
+      while `.value` on the same element holds what was typed. The
+      PIN survives unrelated re-renders and is zeroed on
+      `disconnectedCallback`.
+
+- [x] **Wrong OTP doesn't poison the next attempt.** On a 2FA
+      account, entering a wrong OTP, then retrying with the correct
+      OTP, completes setup. The wrong (hash, code) pair was
+      invalidated on the error path so the second request used a
+      fresh challenge.
+
 ## Post-merge follow-ups
 
 - [ ] **Map the four perimeter+annex proto codes.** Issue #441 supplied
