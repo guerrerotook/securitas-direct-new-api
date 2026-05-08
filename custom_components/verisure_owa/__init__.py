@@ -649,6 +649,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "lock_coordinator": lock_coord,
             "activity_coordinator": activity_coord,
             "activity_listener_unsub": activity_listener_unsub,
+            "config_entry": entry,
         }
 
         # Schedule non-blocking first refresh for each coordinator
