@@ -406,6 +406,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+    // Zero in-flight PIN entry so it doesn't linger in memory if the card is
+    // detached mid-entry (e.g. dashboard tab switch).
+    this._pin = "";
+    this._uiState = "normal";
+    this._pendingAction = null;
   }
 
   setConfig(config) {
@@ -626,7 +631,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
         <div class="pin-section">
           <div class="pin-label">${_t(lang, "enter_pin", { action: actionLabel })}</div>
           <input id="pin-keyboard-input" class="pin-input" type="password"
-                 inputmode="numeric" autocomplete="off" value="${this._pin}"
+                 inputmode="numeric" autocomplete="off"
                  placeholder="\u2022\u2022\u2022\u2022" />
           <div class="keypad">
             ${[1,2,3,4,5,6,7,8,9].map(n =>
@@ -645,7 +650,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
       <div class="pin-section">
         <div class="pin-label">${_t(lang, "enter_code", { action: actionLabel })}</div>
         <input class="code-input" type="password" autocomplete="off"
-               placeholder="${_t(lang, "code")}" value="${this._esc(this._pin)}" id="code-input" />
+               placeholder="${_t(lang, "code")}" id="code-input" />
         <div class="text-pin-btns">
           <button class="btn btn-cancel-force" data-action="cancel-pin">${_t(lang, "cancel")}</button>
           <button class="btn btn-arm" data-action="confirm-pin">${_t(lang, "confirm")}</button>
@@ -680,6 +685,8 @@ class VerisureOwaAlarmCard extends HTMLElement {
       });
     });
     if (pinInput) {
+      // Restore in-flight PIN imperatively — never via the HTML value attribute.
+      pinInput.value = this._pin;
       requestAnimationFrame(() => pinInput.focus());
       pinInput.addEventListener("input", e => {
         this._pin = e.target.value.replace(/\D/g, "");
@@ -694,6 +701,8 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Text code input
     const codeInput = this.shadowRoot.getElementById("code-input");
     if (codeInput) {
+      // Restore in-flight code imperatively — never via the HTML value attribute.
+      codeInput.value = this._pin;
       requestAnimationFrame(() => codeInput.focus());
       codeInput.addEventListener("input", e => { this._pin = e.target.value; });
       codeInput.addEventListener("keydown", e => {
@@ -1420,7 +1429,10 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
-    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; this._pinState = null; this._pin = ""; }
+    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
+    // Always zero PIN state on disconnect, even without an active overlay.
+    this._pinState = null;
+    this._pin = "";
   }
 
   setConfig(config) {
@@ -1703,7 +1715,10 @@ class VerisureOwaAlarmChip extends HTMLElement {
 
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
-    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; this._pinState = null; this._pin = ""; }
+    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
+    // Always zero PIN state on disconnect, even without an active overlay.
+    this._pinState = null;
+    this._pin = "";
   }
 
   setConfig(config) {
