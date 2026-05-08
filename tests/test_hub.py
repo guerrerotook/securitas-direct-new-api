@@ -711,3 +711,38 @@ class TestFullImageCapture:
 
         key = f"{installation.number}_{device.zone_id}"
         assert key not in hub._full_images
+
+
+class TestGetServicesPartitionsCache:
+    """get_services must preserve the alarm_partitions side-effect across
+    cache hits — Italian SDVECU peri detection reads it.
+    """
+
+    async def test_get_services_restores_partitions_on_cache_hit(self):
+        """Second call with a fresh Installation must end up with partitions
+        populated, even though the cache hit short-circuits the network call.
+        """
+        hub = make_hub()
+        partitions = [{"id": "02", "enterStates": ["01"], "leaveStates": ["01"]}]
+
+        async def fake_client_get_services(install):
+            install.alarm_partitions = partitions
+            return ["service-list-marker"]
+
+        hub.client.get_services = AsyncMock(side_effect=fake_client_get_services)
+
+        # First call populates the cache and the passed installation.
+        first = make_installation(number="2654190")
+        services = await hub.get_services(first)
+        assert services == ["service-list-marker"]
+        assert first.alarm_partitions == partitions
+
+        # Second call with a NEW Installation instance — alarm_partitions
+        # starts empty.  Cache hit must still surface the partitions.
+        second = make_installation(number="2654190")
+        assert second.alarm_partitions == []  # fresh default
+        services = await hub.get_services(second)
+        assert services == ["service-list-marker"]
+        assert second.alarm_partitions == partitions
+        # Underlying client.get_services must NOT have been called again.
+        assert hub.client.get_services.await_count == 1
