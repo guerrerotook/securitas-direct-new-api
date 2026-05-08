@@ -766,8 +766,7 @@ class VerisureOwaClient:
                 except (KeyError, IndexError, TypeError):
                     pass
             raise
-        else:
-            self.authentication_otp_challenge_value = None
+        self.authentication_otp_challenge_value = None
 
         if "errors" in response and response["errors"][0]["message"] == "Unauthorized":
             return self._extract_otp_data(response["errors"][0]["data"])

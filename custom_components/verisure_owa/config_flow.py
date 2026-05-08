@@ -108,7 +108,9 @@ def _build_panel_extra_fields(
     if has_annex:
         fields[vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=annex_default)] = bool
     if has_peri or has_annex:
-        fields[vol.Optional(CONF_ENABLE_INTERIOR_PANEL, default=interior_default)] = bool
+        fields[vol.Optional(CONF_ENABLE_INTERIOR_PANEL, default=interior_default)] = (
+            bool
+        )
     return fields
 
 
@@ -806,9 +808,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         # options dialog opened during async_setup_entry's get_services await
         # (when the coordinator dict isn't yet under entry.entry_id) still
         # picks up the published capabilities from the config flow.
-        has_peri, has_annex = _resolve_flow_capabilities(
-            self.hass, self.config_entry
-        )
+        has_peri, has_annex = _resolve_flow_capabilities(self.hass, self.config_entry)
         opts = self.config_entry.options
         extra_fields = _build_panel_extra_fields(
             has_peri=has_peri,
