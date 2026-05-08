@@ -272,6 +272,24 @@ class TestLogin:
         assert client._authentication_token_exp > datetime.now()
         assert client._authentication_token_exp < datetime.now() + timedelta(minutes=20)
 
+    async def test_login_decodes_non_hs256_token(self, client, transport):
+        """Token decoding must succeed regardless of the JWT signing algorithm.
+
+        The Verisure API actually signs tokens with EdDSA, not HS256. We don't
+        verify signatures (the token comes from a trusted HTTPS endpoint), so
+        the decode path must accept any algorithm.
+        """
+        exp = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
+        non_hs256_token = jwt.encode(
+            {"exp": exp, "sub": "test"}, "k", algorithm="HS512"
+        )
+        transport.execute.return_value = login_response(hash_token=non_hs256_token)
+
+        await client.login()
+
+        assert client.authentication_token == non_hs256_token
+        assert client._authentication_token_exp > datetime.now()
+
     async def test_login_2fa_raises_two_factor_required(self, client, transport):
         """Login with needDeviceAuthorization raises TwoFactorRequiredError."""
         transport.execute.return_value = login_response(need_2fa=True)
@@ -806,6 +824,60 @@ class TestAuthRequestContracts:
         assert v["deviceName"] == "SM-S901U"
         assert v["deviceOsVersion"] == "12"
         assert v["deviceVersion"] == "10.102.0"
+
+    async def test_username_with_special_chars_does_not_break_auth_header(
+        self, transport
+    ):
+        """Username with " or \\ must round-trip cleanly through the auth header.
+
+        Regression: the request id concatenates the username into a string,
+        which is then placed in a dict value and serialised with json.dumps.
+        json.dumps escapes embedded quotes/backslashes, so the auth header
+        remains valid JSON.
+        """
+        client = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username='qu"ote\\back@example.com',
+            password="x",
+            device_id="d",
+            uuid="u",
+            id_device_indigitall="i",
+        )
+        client.authentication_token = FAKE_JWT
+        client.login_timestamp = 1
+        transport.execute.return_value = {"data": {"xSGetExceptions": {}}}
+
+        # Trigger any non-auth GraphQL call so headers are built and sent.
+        await client._execute_raw(
+            {"operationName": "GetExceptions", "variables": {}, "query": "q"},
+            "GetExceptions",
+        )
+
+        headers = transport.execute.call_args[0][1]
+        # The auth header must be valid JSON and round-trip the username.
+        decoded = json.loads(headers["auth"])
+        assert decoded["user"] == 'qu"ote\\back@example.com'
+        assert client.username in decoded["id"]
+
+    async def test_validate_device_clears_otp_challenge_on_error(
+        self, client, transport
+    ):
+        """A failed validate_device must invalidate the (hash, code) pair.
+
+        Without this, a wrong OTP leaves the same challenge in memory and the
+        next request would reuse it in headers — letting a guessed code stay
+        valid until the server expires the hash.
+        """
+        transport.execute.side_effect = VerisureOwaError("validation failed")
+
+        with pytest.raises(VerisureOwaError):
+            await client.validate_device(
+                otp_succeed=True, auth_otp_hash="stale-hash", sms_code="000000"
+            )
+
+        assert client.authentication_otp_challenge_value is None
 
     # ── 4. send OTP payload ─────────────────────────────────────────────
 
