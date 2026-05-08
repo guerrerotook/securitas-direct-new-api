@@ -5,8 +5,8 @@ sub-panels), the `eventlog` work (xSActV2 activity timeline → events
 bus, sensor, Lovelace card), and the **v5 Verisure rebrand** (domain
 renamed from `securitas` to `verisure_owa`, full registry migration via
 a legacy-domain shim, vendored API library renamed to `verisure_owa_api`,
-brand strings updated everywhere, and ~6 months of legacy
-service/event/URL/card-tag aliases for backwards compatibility).
+brand strings updated everywhere, and legacy service/event/URL/card-tag
+aliases for backwards compatibility, removed in v6.0.0).
 Automated tests cover the unit-level behavior; the items below need a
 real HA install + real Verisure account to validate, since they depend
 on actual API responses, multi-axis state, or hardware configuration.
@@ -266,7 +266,7 @@ on actual API responses, multi-axis state, or hardware configuration.
         repo rename.
       - Migration is automatic on first v5 launch; HA restart required.
         The shim shows a persistent notification listing what changed.
-      - 6-month deprecation window with a hard cutoff in v6.0.0.
+      - Deprecation window with a hard cutoff in v6.0.0.
         Specific list of what's deprecated:
         - `securitas` integration domain (config entries auto-migrate)
         - `securitas.force_arm[_cancel]` services
