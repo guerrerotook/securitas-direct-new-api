@@ -188,7 +188,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         coordinator: AlarmCoordinator,
     ) -> None:
         """Initialize the Verisure alarm panel."""
-        CoordinatorEntity.__init__(self, coordinator)
+        CoordinatorEntity.__init__(self, coordinator)  # type: ignore[arg-type]
         VerisureEntity.__init__(self, installation, client)
         self._device: str = installation.address
         self._attr_name = installation.alias

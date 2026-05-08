@@ -69,7 +69,9 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     SENTINEL_SERVICE_NAMES,
     SIGNAL_CAMERA_STATE,
 )
-from .coordinators import (  # noqa: F401 — CameraCoordinator re-exported for backwards compatibility
+
+# CameraCoordinator re-exported for backwards compatibility
+from .coordinators import (  # noqa: F401
     ActivityCoordinator,
     AlarmCoordinator,
     CameraCoordinator,
