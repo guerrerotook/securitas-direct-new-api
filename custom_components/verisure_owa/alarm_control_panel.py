@@ -407,17 +407,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return False
         self._message = status.message
         self._attr_extra_state_attributes["message"] = status.message
-        self._attr_extra_state_attributes["response_data"] = status.protom_response_data
+        self._attr_extra_state_attributes["response_data"] = status.protom_response_date
         if not status.protom_response:
             _LOGGER.debug(
                 "[%s] Received empty protomResponse"
                 " (operation_status: %s, message: %s, status: %s,"
-                " protomResponseData: %s), ignoring",
+                " protomResponseDate: %s), ignoring",
                 self.entity_id,
                 status.operation_status,
                 status.message,
                 status.status,
-                status.protom_response_data,
+                status.protom_response_date,
             )
             return False
         if is_proto_letter(status.protom_response):

@@ -470,7 +470,7 @@ class TestOperationStatus:
         assert op.status == ""
         assert op.installation_number == ""
         assert op.protom_response == ""
-        assert op.protom_response_data == ""
+        assert op.protom_response_date == ""
         assert op.request_id == ""
         assert op.error is None
 
@@ -490,7 +490,7 @@ class TestOperationStatus:
         assert op.message == "Operation completed"
         assert op.installation_number == "123456"
         assert op.protom_response == "T"
-        assert op.protom_response_data == "2024-01-01"
+        assert op.protom_response_date == "2024-01-01"
         assert op.request_id == "req-001"
 
     def test_error_field_can_be_dict(self):

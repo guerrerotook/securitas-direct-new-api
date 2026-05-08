@@ -959,7 +959,8 @@ class VerisureOwaClient:
                     f"Arm command failed: {raw.get('msg', 'unknown error')}"
                 )
 
-        self.protom_response = raw["protomResponse"]
+        if raw.get("protomResponse"):
+            self.protom_response = raw["protomResponse"]
         return OperationStatus.model_validate(raw)
 
     async def disarm(
@@ -1082,7 +1083,8 @@ class VerisureOwaClient:
 
         raw = await self._poll_operation(_check)
 
-        self.protom_response = raw["protomResponse"]
+        if raw.get("protomResponse"):
+            self.protom_response = raw["protomResponse"]
         return OperationStatus.model_validate(raw)
 
     async def get_general_status(self, installation: Installation) -> SStatus:
@@ -1387,7 +1389,8 @@ class VerisureOwaClient:
         raw = await self._poll_operation(_check)
 
         # ── Process result ──
-        self.protom_response = raw["protomResponse"]
+        if raw.get("protomResponse"):
+            self.protom_response = raw["protomResponse"]
         return SmartLockModeStatus.model_validate(raw)
 
     # ── Camera operations ──────────────────────────────────────────────────
