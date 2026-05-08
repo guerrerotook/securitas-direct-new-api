@@ -1387,6 +1387,20 @@ class TestVerisureLockAutoLockOnArm:
         await _drain_lock_tasks(lock)
         lock._client.change_lock_mode.assert_not_awaited()
 
+    async def test_does_not_lock_when_already_locking(self):
+        # Lock currently mid-lock-operation (status=4); a new arm transition
+        # should not enqueue another auto-lock.
+        lock = make_lock(initial_status="4", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock()
+        lock._lock_on_arm_circuits = ["interior"]
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()  # baseline = OFF
+        coord.alarm_state = self._state(i="TOTAL")
+        lock._handle_alarm_coordinator_update()
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_not_awaited()
+
     async def test_does_not_lock_when_unconfigured_circuit_arms(self):
         lock = make_lock(initial_status="1", poll_status="2")
         lock._client.change_lock_mode = AsyncMock()

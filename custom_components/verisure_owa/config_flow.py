@@ -953,11 +953,15 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         return list(domain_entry.get("registered_locks", []))
 
     def _get_enabled_circuits(self) -> set[str]:
-        """Return the set of circuit labels enabled on this installation."""
+        """Return the set of circuit labels enabled on this installation.
+
+        Interior is always available — every installation has interior alarm.
+        The CONF_ENABLE_INTERIOR_PANEL flag controls whether a separate
+        sub-panel entity is exposed, not whether the circuit exists.
+        Perimeter and annex are gated on their explicit toggles.
+        """
         opts = self.config_entry.options
-        enabled: set[str] = set()
-        if opts.get(CONF_ENABLE_INTERIOR_PANEL, True):
-            enabled.add(CIRCUIT_INTERIOR)
+        enabled: set[str] = {CIRCUIT_INTERIOR}
         if opts.get(CONF_ENABLE_PERIMETER_PANEL, False):
             enabled.add(CIRCUIT_PERIMETER)
         if opts.get(CONF_ENABLE_ANNEX_PANEL, False):
