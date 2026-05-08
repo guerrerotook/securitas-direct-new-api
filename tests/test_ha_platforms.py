@@ -1493,3 +1493,109 @@ class TestVerisureLockAutoLockFailure:
             if c.args[:2] == ("persistent_notification", "create")
         ]
         assert notification_calls == []
+
+
+# ===========================================================================
+# Unlock→disarm flow tests (Task 8)
+# ===========================================================================
+
+
+class TestVerisureLockUnlockDisarm:
+    """Tests for unlock→disarm flow (success paths)."""
+
+    def _state(self, *, i="OFF", p="OFF", a="OFF"):
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        return AlarmState(
+            interior=getattr(InteriorMode, i),
+            perimeter=getattr(PerimeterMode, p),
+            annex=getattr(AnnexMode, a),
+        )
+
+    def _make_alarm_panel(self, *, success=True):
+        panel = MagicMock()
+        panel.execute_partial_disarm = AsyncMock(return_value=success)
+        return panel
+
+    def _make_alarm_coord(self, state):
+        coord = MagicMock()
+        coord.alarm_state = state
+        return coord
+
+    async def test_disarm_runs_before_unlock_when_configured(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._combined_alarm_panel = self._make_alarm_panel(success=True)
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+
+        # Capture call order.
+        order: list[str] = []
+        async def fake_disarm(circuits):
+            order.append("disarm")
+            return True
+        async def fake_change(installation, lock_state, device_id=None):
+            order.append("unlock")
+            return MagicMock()
+        lock._combined_alarm_panel.execute_partial_disarm = AsyncMock(
+            side_effect=fake_disarm
+        )
+        lock._client.change_lock_mode = AsyncMock(side_effect=fake_change)
+
+        await lock.async_unlock()
+
+        assert order == ["disarm", "unlock"]
+        lock._combined_alarm_panel.execute_partial_disarm.assert_awaited_once_with(
+            ["interior"]
+        )
+
+    async def test_disarm_skipped_when_alarm_already_disarmed(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._combined_alarm_panel = self._make_alarm_panel(success=True)
+        # Alarm already fully disarmed.
+        lock._alarm_coordinator = self._make_alarm_coord(self._state())
+
+        await lock.async_unlock()
+
+        lock._combined_alarm_panel.execute_partial_disarm.assert_not_awaited()
+        # Unlock still proceeds.
+        lock._client.change_lock_mode.assert_awaited_once()
+
+    async def test_disarm_skipped_when_no_circuits_configured(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = []  # no automation
+        lock._combined_alarm_panel = self._make_alarm_panel(success=True)
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+
+        await lock.async_unlock()
+
+        lock._combined_alarm_panel.execute_partial_disarm.assert_not_awaited()
+        lock._client.change_lock_mode.assert_awaited_once()
+
+    async def test_async_open_follows_same_disarm_first_flow(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._combined_alarm_panel = self._make_alarm_panel(success=True)
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+
+        await lock.async_open()
+
+        lock._combined_alarm_panel.execute_partial_disarm.assert_awaited_once_with(
+            ["interior"]
+        )
+        lock._client.change_lock_mode.assert_awaited_once()
+
+    async def test_no_disarm_dispatched_when_panel_unavailable(self):
+        # Defensive: missing panel reference (e.g., setup race) → skip disarm.
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior"]
+        lock._combined_alarm_panel = None
+        lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
+        await lock.async_unlock()  # must not raise
+        lock._client.change_lock_mode.assert_awaited_once()
