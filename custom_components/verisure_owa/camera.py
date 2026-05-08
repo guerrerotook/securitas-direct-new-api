@@ -1,5 +1,6 @@
 """Verisure OWA camera platform."""
 
+import asyncio
 import base64
 import logging
 from pathlib import Path
@@ -20,7 +21,29 @@ from .verisure_owa_api.models import CameraDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-_PLACEHOLDER_IMAGE = (Path(__file__).parent / "placeholder.jpg").read_bytes()
+_PLACEHOLDER_IMAGE_PATH = Path(__file__).parent / "placeholder.jpg"
+# Cache for the placeholder JPEG bytes — populated on first access via the
+# event loop's executor to avoid sync file I/O during integration startup.
+_PLACEHOLDER_IMAGE: bytes | None = None
+_placeholder_lock: asyncio.Lock | None = None
+
+
+async def _get_placeholder_image(hass: HomeAssistant) -> bytes:
+    """Return the placeholder JPEG, reading the file once via the executor."""
+    global _PLACEHOLDER_IMAGE, _placeholder_lock  # pylint: disable=global-statement  # noqa: PLW0603
+    cached = _PLACEHOLDER_IMAGE
+    if cached is not None:
+        return cached
+    if _placeholder_lock is None:
+        _placeholder_lock = asyncio.Lock()
+    async with _placeholder_lock:
+        if _PLACEHOLDER_IMAGE is None:
+            loaded: bytes = await hass.async_add_executor_job(
+                _PLACEHOLDER_IMAGE_PATH.read_bytes
+            )
+            _PLACEHOLDER_IMAGE = loaded
+            return loaded
+        return _PLACEHOLDER_IMAGE
 
 
 async def async_setup_entry(
@@ -65,16 +88,16 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
     ) -> bytes | None:
         """Return the last captured image, or a placeholder if none exists."""
         if self.coordinator.data is None:
-            return _PLACEHOLDER_IMAGE
+            return await _get_placeholder_image(self.hass)
         thumb = self.coordinator.data.thumbnails.get(self._zone_id)
         if thumb is None or not thumb.image:
-            return _PLACEHOLDER_IMAGE
+            return await _get_placeholder_image(self.hass)
         try:
             image_bytes = base64.b64decode(thumb.image)
         except (ValueError, TypeError):
-            return _PLACEHOLDER_IMAGE
+            return await _get_placeholder_image(self.hass)
         if not image_bytes.startswith(b"\xff\xd8"):
-            return _PLACEHOLDER_IMAGE
+            return await _get_placeholder_image(self.hass)
         return image_bytes
 
     @property
@@ -145,9 +168,11 @@ class VerisureCameraFull(CoordinatorEntity[CameraCoordinator], Camera):
     ) -> bytes | None:
         """Return the last full-resolution image, or a placeholder if none exists."""
         if self.coordinator.data is None:
-            return _PLACEHOLDER_IMAGE
+            return await _get_placeholder_image(self.hass)
         image = self.coordinator.data.full_images.get(self._zone_id)
-        return image if image is not None else _PLACEHOLDER_IMAGE
+        if image is not None:
+            return image
+        return await _get_placeholder_image(self.hass)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[override]

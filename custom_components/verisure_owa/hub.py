@@ -1,5 +1,6 @@
 """VerisureHub and VerisureDevice classes for Verisure OWA integration."""
 
+import asyncio
 import base64
 import logging
 import time
@@ -188,6 +189,9 @@ class VerisureHub:
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
+        # Coalesce concurrent full-image fetches for the same id_signal — two
+        # dashboard cards on the same camera share one API call.
+        self._full_image_inflight: dict[str, asyncio.Future[bytes | None]] = {}
 
     async def login(self) -> None:
         """Authenticate, preferring a stored refresh token over a password login.
@@ -333,6 +337,49 @@ class VerisureHub:
         finally:
             self._camera_capturing.discard(capture_key)
 
+    async def fetch_full_image(
+        self,
+        installation: Installation,
+        id_signal: str,
+        signal_type: str,
+        *,
+        priority: int | None = None,
+    ) -> bytes | None:
+        """Fetch a full-resolution image, coalescing concurrent calls per signal.
+
+        If another caller is already fetching this `id_signal`, waits on that
+        in-flight result instead of issuing a duplicate API request.
+        """
+        if priority is None:
+            priority = ApiQueue.BACKGROUND
+        key = f"{installation.number}_{id_signal}"
+        inflight = self._full_image_inflight.get(key)
+        if inflight is not None:
+            return await inflight
+
+        future: asyncio.Future[bytes | None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._full_image_inflight[key] = future
+        try:
+            result = await self._api_queue.submit(
+                self.client.get_full_image,
+                installation,
+                id_signal,
+                signal_type,
+                priority=priority,
+            )
+        except Exception as err:  # pylint: disable=broad-exception-caught  # noqa: BLE001
+            if not future.done():
+                future.set_exception(err)
+            raise
+        else:
+            if not future.done():
+                future.set_result(result)
+            return result
+        finally:
+            self._full_image_inflight.pop(key, None)
+
     async def _fetch_and_store_full_image(
         self,
         installation: Installation,
@@ -340,9 +387,10 @@ class VerisureHub:
         thumbnail: ThumbnailResponse,
     ) -> None:
         """Fetch the full-resolution photo and store it, then notify the frontend."""
+        if not thumbnail.id_signal or not thumbnail.signal_type:
+            return
         try:
-            full_bytes = await self._api_queue.submit(
-                self.client.get_full_image,
+            full_bytes = await self.fetch_full_image(
                 installation,
                 thumbnail.id_signal,
                 thumbnail.signal_type,

@@ -355,6 +355,39 @@ class TestCaptureImage:
         assert result.id_signal == "new-sig"
         assert result.image == "new-image-data"
 
+    async def test_transient_error_during_status_poll_is_retried(
+        self, client, transport
+    ):
+        """ClientConnectorError on a status poll is retried, not propagated."""
+        from aiohttp import ClientConnectorError
+        from aiohttp.client_reqrep import ConnectionKey
+
+        conn_key = ConnectionKey("example.com", 443, False, True, None, None, None)
+        poll_count = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal poll_count
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                poll_count += 1
+                if poll_count == 1:
+                    raise ClientConnectorError(conn_key, OSError("transient"))
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                return thumbnail_response(id_signal="new-sig", image="data")
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(inst, 1, "QR", "QR01")
+
+        assert result.id_signal == "new-sig"
+        assert poll_count == 2  # First raised transient, second succeeded
+
     async def test_timeout_fetches_final_thumbnail(self, client, transport):
         """When status polling times out, fetches one final thumbnail."""
         call_count = 0

@@ -75,6 +75,17 @@ def mock_coordinator():
 
 
 @pytest.fixture
+def placeholder_bytes():
+    """Pre-populate the camera module's lazy placeholder cache for assertions."""
+    from custom_components.verisure_owa import camera as cam_module
+
+    bytes_ = b"\xff\xd8\xff\xe0test-placeholder"
+    cam_module._PLACEHOLDER_IMAGE = bytes_
+    yield bytes_
+    cam_module._PLACEHOLDER_IMAGE = None
+
+
+@pytest.fixture
 def jpeg_thumbnail():
     """Return a ThumbnailResponse with valid JPEG base64 data."""
     jpeg_bytes = b"\xff\xd8\xff\xe0fake_jpeg"
@@ -132,40 +143,46 @@ class TestVerisureCamera:
 
     @pytest.mark.asyncio
     async def test_camera_image_returns_placeholder_when_empty(
-        self, mock_coordinator, mock_hub, installation, camera_device
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import (
-            VerisureCamera,
-            _PLACEHOLDER_IMAGE,
-        )
+        from custom_components.verisure_owa.camera import VerisureCamera
 
         mock_coordinator.data = CameraData(thumbnails={}, full_images={})
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         result = await cam.async_camera_image()
-        assert result == _PLACEHOLDER_IMAGE
+        assert result == placeholder_bytes
 
     @pytest.mark.asyncio
     async def test_camera_image_returns_placeholder_when_no_data(
-        self, mock_coordinator, mock_hub, installation, camera_device
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import (
-            VerisureCamera,
-            _PLACEHOLDER_IMAGE,
-        )
+        from custom_components.verisure_owa.camera import VerisureCamera
 
         mock_coordinator.data = None
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         result = await cam.async_camera_image()
-        assert result == _PLACEHOLDER_IMAGE
+        assert result == placeholder_bytes
 
     @pytest.mark.asyncio
     async def test_camera_image_returns_placeholder_for_non_jpeg(
-        self, mock_coordinator, mock_hub, installation, camera_device
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import (
-            VerisureCamera,
-            _PLACEHOLDER_IMAGE,
-        )
+        from custom_components.verisure_owa.camera import VerisureCamera
 
         # Non-JPEG data (e.g. a file path encoded as base64)
         non_jpeg = ThumbnailResponse(
@@ -176,7 +193,56 @@ class TestVerisureCamera:
         )
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         result = await cam.async_camera_image()
-        assert result == _PLACEHOLDER_IMAGE
+        assert result == placeholder_bytes
+
+    @pytest.mark.asyncio
+    async def test_placeholder_loaded_via_executor_on_first_call(
+        self, mock_coordinator, mock_hub, installation, camera_device
+    ):
+        """First placeholder access uses hass.async_add_executor_job and caches the result."""
+        from custom_components.verisure_owa import camera as cam_module
+
+        cam_module._PLACEHOLDER_IMAGE = None
+
+        mock_coordinator.data = None
+        cam = cam_module.VerisureCamera(
+            mock_coordinator, mock_hub, installation, camera_device
+        )
+
+        placeholder_bytes = b"\xff\xd8\xff\xe0fake-placeholder"
+        mock_hass = MagicMock()
+        mock_hass.async_add_executor_job = AsyncMock(return_value=placeholder_bytes)
+        cam.hass = mock_hass
+
+        result = await cam.async_camera_image()
+
+        mock_hass.async_add_executor_job.assert_called_once()
+        assert result == placeholder_bytes
+        assert cam_module._PLACEHOLDER_IMAGE == placeholder_bytes
+
+    @pytest.mark.asyncio
+    async def test_placeholder_cached_after_first_load(
+        self, mock_coordinator, mock_hub, installation, camera_device
+    ):
+        """Subsequent placeholder accesses return the cached bytes without re-reading."""
+        from custom_components.verisure_owa import camera as cam_module
+
+        placeholder_bytes = b"\xff\xd8cached-placeholder"
+        cam_module._PLACEHOLDER_IMAGE = placeholder_bytes
+
+        mock_coordinator.data = None
+        cam = cam_module.VerisureCamera(
+            mock_coordinator, mock_hub, installation, camera_device
+        )
+
+        mock_hass = MagicMock()
+        mock_hass.async_add_executor_job = AsyncMock()
+        cam.hass = mock_hass
+
+        result = await cam.async_camera_image()
+
+        mock_hass.async_add_executor_job.assert_not_called()
+        assert result == placeholder_bytes
 
     def test_device_info_uses_camera_sub_device(
         self, mock_coordinator, mock_hub, installation, camera_device
@@ -398,35 +464,39 @@ class TestVerisureCameraFull:
 
     @pytest.mark.asyncio
     async def test_camera_image_returns_placeholder_when_empty(
-        self, mock_coordinator, mock_hub, installation, camera_device
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import (
-            VerisureCameraFull,
-            _PLACEHOLDER_IMAGE,
-        )
+        from custom_components.verisure_owa.camera import VerisureCameraFull
 
         mock_coordinator.data = CameraData(thumbnails={}, full_images={})
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
         )
         result = await cam.async_camera_image()
-        assert result == _PLACEHOLDER_IMAGE
+        assert result == placeholder_bytes
 
     @pytest.mark.asyncio
     async def test_camera_image_returns_placeholder_when_no_data(
-        self, mock_coordinator, mock_hub, installation, camera_device
+        self,
+        mock_coordinator,
+        mock_hub,
+        installation,
+        camera_device,
+        placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import (
-            VerisureCameraFull,
-            _PLACEHOLDER_IMAGE,
-        )
+        from custom_components.verisure_owa.camera import VerisureCameraFull
 
         mock_coordinator.data = None
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
         )
         result = await cam.async_camera_image()
-        assert result == _PLACEHOLDER_IMAGE
+        assert result == placeholder_bytes
 
     def test_device_info_matches_thumbnail_entity(
         self, mock_coordinator, mock_hub, installation, camera_device
