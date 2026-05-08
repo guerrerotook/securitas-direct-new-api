@@ -2185,6 +2185,42 @@ class TestUnmappedProtoCodeLogging:
         ]
         assert len(warnings) == 1
 
+    def test_unmapped_code_warns_again_after_returning_to_mapped_state(self, caplog):
+        """Unmapped → mapped → same unmapped: the second occurrence must
+        warn again so the issue resurfaces in the log instead of being
+        silenced for the entity's lifetime."""
+        import logging
+
+        alarm = make_alarm(config=self._config_without_total())
+
+        unmapped = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="T",
+            protom_response_date="",
+        )
+        disarmed = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="D",
+            protom_response_date="",
+        )
+        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+            alarm.update_status_alarm(unmapped)
+            alarm.update_status_alarm(disarmed)
+            alarm.update_status_alarm(unmapped)
+
+        warnings = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and "Unmapped" in r.message
+        ]
+        assert len(warnings) == 2
+
 
 class TestForceArmCodeGate:
     """force_arm trusts the force context as proof of recent PIN auth.

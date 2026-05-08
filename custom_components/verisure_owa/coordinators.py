@@ -137,6 +137,8 @@ async def _fetch_with_session_recovery[T](
         await _handle_session_expired(client)
         try:
             return await fetcher()
+        except WAFBlockedError as err:
+            raise UpdateFailed(f"WAF blocked {label.lower()} request: {err}") from err
         except VerisureOwaError as err:
             raise UpdateFailed(f"{label} update failed: {err}") from err
     except WAFBlockedError as err:
