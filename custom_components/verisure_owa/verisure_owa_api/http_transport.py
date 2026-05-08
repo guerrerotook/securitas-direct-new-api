@@ -20,6 +20,10 @@ from .exceptions import VerisureOwaError, WAFBlockedError
 
 _LOGGER = logging.getLogger(__name__)
 
+# Upper bound on a server-supplied Retry-After delay. Without this, a hostile
+# or misconfigured server can block the worker for arbitrarily long.
+_RETRY_AFTER_MAX_SECONDS = 60
+
 # Keys whose values should be replaced with a placeholder in debug logs
 _LOG_TRUNCATE_KEYS = {"hours", "image", "reg"}
 
@@ -127,6 +131,11 @@ class HttpTransport:
                     delay = int(retry_after) if retry_after else 2
                 except (ValueError, TypeError):
                     delay = 2
+                # Clamp to a sensible upper bound — a hostile or buggy server
+                # could send Retry-After: 86400 and freeze the coordinator
+                # for a day. A 60s ceiling lets the rate limiter recover
+                # gracefully without blocking the event loop indefinitely.
+                delay = min(delay, _RETRY_AFTER_MAX_SECONDS)
                 _LOGGER.warning("HTTP 403, retrying in %ds", delay)
                 await asyncio.sleep(delay)
                 continue
