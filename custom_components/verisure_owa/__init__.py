@@ -421,7 +421,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.http.async_register_static_paths(
             [
                 StaticPathConfig(
-                    "/verisure_owa_panel",
+                    "/verisure-owa-panel",
                     panel_dir,
                     cache_headers=False,
                 ),

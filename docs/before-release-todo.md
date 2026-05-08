@@ -189,7 +189,7 @@ on actual API responses, multi-axis state, or hardware configuration.
         when called, both works AND emits a `_LOGGER.warning`
         deprecation message in the log.
       - Browser fetch of `http://<ha>:8123/securitas_panel/securitas-alarm-card.js`
-        and `/verisure_owa_panel/verisure_owa-alarm-card.js` both
+        and `/verisure-owa-panel/verisure-owa-alarm-card.js` both
         return 200 with byte-identical content.
       - Existing dashboards using `type: custom:securitas-alarm-card`
         keep rendering. Browser console shows the deprecation
@@ -279,7 +279,7 @@ on actual API responses, multi-axis state, or hardware configuration.
           Lovelace types
       - Lovelace resource cleanup hint: users may see a duplicate
         resource entry (old `/securitas_panel/...js` + new
-        `/verisure_owa_panel/...js`) — both work; either can be
+        `/verisure-owa-panel/...js`) — both work; either can be
         deleted manually if desired.
       - Spain users: API now goes to `customers.verisure.es`
         automatically, no action required.

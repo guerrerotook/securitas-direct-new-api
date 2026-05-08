@@ -15,15 +15,15 @@ def _file_hash(path: Path) -> str:
 
 
 _WWW = Path(__file__).parent / "www"
-CARD_BASE_URL = "/verisure_owa_panel/verisure_owa-alarm-card.js"
-CARD_URL = f"{CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure_owa-alarm-card.js')}"
-CAMERA_CARD_BASE_URL = "/verisure_owa_panel/verisure_owa-camera-card.js"
+CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-alarm-card.js"
+CARD_URL = f"{CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-alarm-card.js')}"
+CAMERA_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-camera-card.js"
 CAMERA_CARD_URL = (
-    f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure_owa-camera-card.js')}"
+    f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-camera-card.js')}"
 )
-EVENTS_CARD_BASE_URL = "/verisure_owa_panel/verisure_owa-events-card.js"
+EVENTS_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-events-card.js"
 EVENTS_CARD_URL = (
-    f"{EVENTS_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure_owa-events-card.js')}"
+    f"{EVENTS_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-events-card.js')}"
 )
 
 CONF_ADVANCED = "advanced"

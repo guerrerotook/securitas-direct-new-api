@@ -1026,6 +1026,6 @@ Three parallel jobs run on every PR and push to main:
 | `verisure_owa_api/const.py` | 107 | `VerisureOwaState`, command/protocol mappings, defaults |
 | `verisure_owa_api/domains.py` | 50 | Country-to-URL routing |
 | `verisure_owa_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
-| `www/verisure_owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Legacy filename `securitas-alarm-card.js` is a byte-identical copy retained as a deprecation shim served at the legacy `/securitas_panel/` URL prefix; both removed in v6.) |
-| `www/verisure_owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
-| `www/verisure_owa-events-card.js` | — | Custom Lovelace events card showing recent alarm-panel activity. (Same legacy-copy treatment.) |
+| `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Legacy filename `securitas-alarm-card.js` is a byte-identical copy retained as a deprecation shim served at the legacy `/securitas_panel/` URL prefix; both removed in v6.) |
+| `www/verisure-owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
+| `www/verisure-owa-events-card.js` | — | Custom Lovelace events card showing recent alarm-panel activity. (Same legacy-copy treatment.) |
