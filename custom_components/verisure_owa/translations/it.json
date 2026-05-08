@@ -11,7 +11,8 @@
         },
         "abort": {
             "already_configured": "Il servizio è già configurato",
-            "reauth_successful": "Riautenticazione riuscita"
+            "reauth_successful": "Riautenticazione riuscita",
+            "no_refresh_token": "Il login è riuscito ma Verisure non ha restituito un token di aggiornamento. L'integrazione non può salvare le credenziali in modo sicuro. Riprova più tardi o segnala il problema se persiste."
         },
         "step": {
             "reauth_confirm": {

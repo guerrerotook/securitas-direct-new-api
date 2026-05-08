@@ -11,7 +11,8 @@
         },
         "abort": {
             "already_configured": "El servei ja està configurat",
-            "reauth_successful": "Reautenticació correcta"
+            "reauth_successful": "Reautenticació correcta",
+            "no_refresh_token": "L'inici de sessió ha estat correcte però Verisure no ha retornat un token d'actualització. La integració no pot desar les credencials de manera segura. Torna-ho a provar més tard o comunica-ho si persisteix."
         },
         "step": {
             "reauth_confirm": {
