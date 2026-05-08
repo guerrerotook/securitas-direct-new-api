@@ -351,6 +351,10 @@ class VerisureOwaClient:
         if not token_str:
             return None
         try:
+            # Tokens come from a trusted HTTPS endpoint, so we don't verify
+            # signatures here. The Verisure API signs with EdDSA, not HS256 —
+            # passing a constraining `algorithms=` would be misleading and
+            # would break if signature verification were ever turned on.
             decoded = jwt.decode(token_str, options={"verify_signature": False})
         except jwt.exceptions.DecodeError:
             _LOGGER.warning("Failed to decode authentication token")
@@ -749,8 +753,11 @@ class VerisureOwaClient:
 
         try:
             response = await self._execute_raw(content, "mkValidateDevice")
-            self.authentication_otp_challenge_value = None
         except VerisureOwaError as err:
+            # Always invalidate the (hash, code) pair on failure so a wrong
+            # OTP cannot be replayed in the next request's headers; the user
+            # must request a fresh OTP via send_otp.
+            self.authentication_otp_challenge_value = None
             if err.response_body is not None:
                 try:
                     error_data = err.response_body["errors"][0]["data"]
@@ -759,6 +766,8 @@ class VerisureOwaClient:
                 except (KeyError, IndexError, TypeError):
                     pass
             raise
+        else:
+            self.authentication_otp_challenge_value = None
 
         if "errors" in response and response["errors"][0]["message"] == "Unauthorized":
             return self._extract_otp_data(response["errors"][0]["data"])
@@ -1796,7 +1805,9 @@ class VerisureOwaClient:
             _LOGGER.warning("API returned no capabilities for %s", installation.number)
             return []
 
-        # Decode capabilities JWT and store in self._capabilities
+        # Decode capabilities JWT and store in self._capabilities. As with
+        # the auth token, tokens come from a trusted HTTPS endpoint and are
+        # signed with EdDSA, so we don't verify signatures here.
         try:
             token = jwt.decode(capabilities, options={"verify_signature": False})
         except jwt.exceptions.DecodeError as err:
