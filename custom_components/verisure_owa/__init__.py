@@ -118,6 +118,55 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
+def _publish_flow_capabilities(
+    hass: HomeAssistant,
+    installation_number: str,
+    has_peri: bool,
+    has_annex: bool,
+) -> None:
+    """Cache detected capability flags so the options flow can read them
+    while async_setup_entry is still running.
+
+    Both the config flow's _select_installation step and async_setup_entry's
+    populate_capabilities_from_data call this so the options dialog opened
+    immediately after CREATE_ENTRY (or during a slow restart) doesn't see
+    has_peri=False just because the alarm coordinator dict isn't yet under
+    entry.entry_id in hass.data.
+    """
+    hass.data.setdefault(DOMAIN, {}).setdefault("flow_capabilities", {})[
+        installation_number
+    ] = {"has_peri": has_peri, "has_annex": has_annex}
+
+
+def _resolve_flow_capabilities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> tuple[bool, bool]:
+    """Return (has_peri, has_annex) for *entry* using the most authoritative
+    available source.
+
+    Order:
+      1. The alarm coordinator if it has populated capabilities.
+      2. The published capability cache (set by the config flow and by
+         async_setup_entry as soon as detection runs) — covers the race
+         window where the entry isn't yet stored in hass.data.
+      3. (False, False) if neither source has data — current default.
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    entry_data = domain_data.get(entry.entry_id, {})
+    coord = entry_data.get("alarm_coordinator")
+    if coord is not None and getattr(coord, "capabilities_populated", False):
+        return coord.has_peri, coord.has_annex
+
+    installation_number = entry.data.get(CONF_INSTALLATION)
+    if installation_number:
+        cached = domain_data.get("flow_capabilities", {}).get(installation_number)
+        if cached:
+            return cached["has_peri"], cached["has_annex"]
+
+    return False, False
+
+
 def add_device_information[T: dict](config: T) -> T:
     """Add device information to the configuration."""
     if CONF_DEVICE_ID not in config:
@@ -534,6 +583,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     first_installation.number
                 )
                 alarm_coord.populate_capabilities_from_data(services, capabilities)
+                # Publish detected capabilities for the options-flow race
+                # window (before entry data is stored under entry.entry_id).
+                _publish_flow_capabilities(
+                    hass,
+                    first_installation.number,
+                    alarm_coord.has_peri,
+                    alarm_coord.has_annex,
+                )
 
             # Sentinel coordinator — needs a sentinel service and its zone
             for service in services:
