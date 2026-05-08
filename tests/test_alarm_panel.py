@@ -450,6 +450,59 @@ class TestUpdateStatusAlarm:
         assert alarm._attr_extra_state_attributes["message"] == "Panel ok"
         assert alarm._attr_extra_state_attributes["response_data"] == "some-data"
 
+    def test_unknown_single_letter_updates_last_proto_code(self):
+        """Unknown but well-formed proto code (single uppercase letter) is stored.
+
+        Forward-compat: if Verisure adds new state codes we don't yet model,
+        we keep `_last_proto_code` truthful so the next arm/disarm can refuse
+        cleanly instead of acting on a stale cached state.
+        """
+        alarm = make_alarm()
+        assert alarm._last_proto_code == "D"  # from initial_status
+
+        status = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="Z",  # not in PROTO_TO_ALARM_STATE; forward-compat for new codes
+            protom_response_data="",
+        )
+        alarm.update_status_alarm(status)
+        assert alarm._last_proto_code == "Z"
+
+    def test_multi_char_protom_response_does_not_update_last_proto_code(self):
+        """xSStatus polling values like 'ARMED_TOTAL' must not pollute _last_proto_code."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "T"  # known prior state
+
+        status = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="ARMED_TOTAL",
+            protom_response_data="",
+        )
+        alarm.update_status_alarm(status)
+        assert alarm._last_proto_code == "T"
+
+    def test_lowercase_protom_response_does_not_update_last_proto_code(self):
+        """Lowercase letters are not valid proto codes — drop on the floor."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "T"
+
+        status = OperationStatus(
+            operation_status="OK",
+            message="",
+            status="",
+            installation_number="123456",
+            protom_response="t",
+            protom_response_data="",
+        )
+        alarm.update_status_alarm(status)
+        assert alarm._last_proto_code == "T"
+
 
 # ===========================================================================
 # update_status_alarm  (PERI config)
@@ -1414,6 +1467,33 @@ class TestHandleCoordinatorUpdate:
         alarm = make_alarm()
         alarm.coordinator.data = AlarmStatusData(
             status=SStatus(status="T"), protom_response="T"
+        )
+
+        alarm._handle_coordinator_update()
+
+        assert alarm._last_proto_code == "T"
+
+    def test_coordinator_update_unknown_letter_updates_last_proto_code(self):
+        """Unknown but well-formed proto code from coordinator is stored.
+
+        Forward-compat: when Verisure returns a code we don't yet model,
+        store it so a later arm/disarm refuses cleanly with the actual code.
+        """
+        alarm = make_alarm()
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="Z"), protom_response="Z"
+        )
+
+        alarm._handle_coordinator_update()
+
+        assert alarm._last_proto_code == "Z"
+
+    def test_coordinator_update_multi_char_does_not_update_last_proto_code(self):
+        """Multi-char status string from coordinator must not pollute _last_proto_code."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "T"
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="ARMED_TOTAL"), protom_response="ARMED_TOTAL"
         )
 
         alarm._handle_coordinator_update()
@@ -2889,6 +2969,137 @@ class TestExecuteTransition:
         )
         assert result.protom_response == "T"
         alarm.client.arm_alarm.assert_called_once()
+
+
+# ===========================================================================
+# Refuse arm/disarm when current state is unknown
+# ===========================================================================
+
+
+class TestExecuteTransitionRefusesUnknownState:
+    """When _last_proto_code is None or an unrecognised proto, refuse to act.
+
+    Acting on a stale or unknown current state is the v5.0.0 disarm-fails-when-
+    annex-armed bug (#441): the resolver computed a no-op transition off a stale
+    'D' and silently skipped DARM1.  We now refuse outright and surface the
+    actual code so the user can report it.
+    """
+
+    async def test_disarm_refused_when_last_proto_code_none(self):
+        """No status poll yet → refuse, do not call disarm_alarm."""
+        alarm = make_alarm()
+        alarm._last_proto_code = None
+        alarm.client.disarm_alarm = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await alarm._execute_transition(
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+            )
+
+        alarm.client.disarm_alarm.assert_not_called()
+
+    async def test_arm_refused_when_last_proto_code_none(self):
+        """No status poll yet → refuse, do not call arm_alarm."""
+        alarm = make_alarm()
+        alarm._last_proto_code = None
+        alarm.client.arm_alarm = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await alarm._execute_transition(
+                AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)
+            )
+
+        alarm.client.arm_alarm.assert_not_called()
+
+    async def test_disarm_refused_when_last_proto_code_unknown_letter(self):
+        """Unknown letter (e.g. 'O' on v5.0.0) → refuse rather than silent no-op."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "Z"  # unrecognised
+        alarm.client.disarm_alarm = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await alarm._execute_transition(
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+            )
+
+        alarm.client.disarm_alarm.assert_not_called()
+
+    async def test_arm_refused_when_last_proto_code_unknown_letter(self):
+        """Unknown letter → refuse arm too, even though resolver could compute a delta."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "Z"
+        alarm.client.arm_alarm = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await alarm._execute_transition(
+                AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)
+            )
+
+        alarm.client.arm_alarm.assert_not_called()
+
+    async def test_unknown_state_error_contains_code(self):
+        """Refusal message names the unrecognised code so users can report it."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "Z"
+
+        with pytest.raises(VerisureOwaError) as excinfo:
+            await alarm._execute_transition(
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+            )
+
+        assert "'Z'" in excinfo.value.message
+
+    async def test_unknown_state_error_points_to_issue_tracker(self):
+        """Refusal message points users to the upstream issue tracker."""
+        alarm = make_alarm()
+        alarm._last_proto_code = "Z"
+
+        with pytest.raises(VerisureOwaError) as excinfo:
+            await alarm._execute_transition(
+                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+            )
+
+        assert (
+            "github.com/guerrerotook/securitas-direct-new-api/issues"
+            in excinfo.value.message
+        )
+
+    async def test_disarm_via_public_api_fires_disarm_failed_notification(self):
+        """async_alarm_disarm with unknown current state surfaces translated notification."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        alarm._last_proto_code = "Z"
+        alarm.client.disarm_alarm = AsyncMock()
+
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.async_alarm_disarm()
+
+        alarm.client.disarm_alarm.assert_not_called()
+        mock_notify.assert_called_once()
+        args, _ = mock_notify.call_args
+        # _notify(hass, notification_id, translation_key, params)
+        assert args[2] == "disarm_failed"
+        assert "'Z'" in args[3]["error"]
+
+    async def test_arm_via_public_api_fires_arm_failed_notification(self):
+        """set_arm_state with unknown current state surfaces translated notification."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        alarm._last_proto_code = "Z"
+        alarm.client.arm_alarm = AsyncMock()
+
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._notify"
+        ) as mock_notify:
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        alarm.client.arm_alarm.assert_not_called()
+        mock_notify.assert_called_once()
+        args, _ = mock_notify.call_args
+        assert args[2] == "arm_failed"
+        assert "'Z'" in args[3]["error"]
 
 
 # ===========================================================================

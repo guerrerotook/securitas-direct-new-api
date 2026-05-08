@@ -37,6 +37,7 @@ from .models import (  # noqa: F401
     SmartLockMode,
     SmartLockModeStatus,
     ThumbnailResponse,
+    is_proto_letter,
     parse_proto_code,
 )
 from .domains import ApiDomains  # noqa: F401

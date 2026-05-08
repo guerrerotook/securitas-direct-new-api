@@ -219,6 +219,8 @@ Home Assistant has five alarm buttons (Home, Away, Night, Vacation, Custom Bypas
 
 If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Verisure OWA state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
+**Unknown proto codes refuse arm/disarm** (issue [#441](https://github.com/guerrerotook/securitas-direct-new-api/issues/441)). `_last_proto_code` admits any single uppercase ASCII letter — including codes we don't yet model (e.g. the unmapped perimeter+annex combinations). When an arm/disarm is requested while `_last_proto_code` is unmodeled, `_execute_transition()` refuses with a translated notification naming the actual code. Acting on an unknown current state would silently no-op the disarm path (the bug behind #441 — resolver computed `current==target` off a stale `D` and skipped `DARM1`) or send incorrect transitions on the arm path. The refusal clears automatically on the next poll once the alarm returns to a state we model.
+
 ### Exceptions (`exceptions.py`)
 
 ```
