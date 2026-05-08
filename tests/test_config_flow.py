@@ -1956,6 +1956,15 @@ async def test_lock_automations_renders_one_section_per_lock(hass):
     assert any("lockB" in k for k in keys)
 
 
+def _circuit_options_from_schema(schema) -> set[str]:
+    """Extract circuit labels from all multi_select values in a lock-automations schema."""
+    circuits: set[str] = set()
+    for v in schema.schema.values():
+        if hasattr(v, "options"):
+            circuits.update(v.options.keys())
+    return circuits
+
+
 async def test_lock_automations_disabled_circuits_excluded(hass):
     """Circuits not enabled on this installation should not appear as options."""
     entry = _make_entry_with_locks(
@@ -1967,9 +1976,30 @@ async def test_lock_automations_disabled_circuits_excluded(hass):
 
     result = await hass.config_entries.options.async_configure(flow_id)
 
-    schema_str = str(result["data_schema"])
-    assert "perimeter" not in schema_str
-    assert "annex" not in schema_str
+    circuits = _circuit_options_from_schema(result["data_schema"])
+    assert "interior" in circuits
+    assert "perimeter" not in circuits
+    assert "annex" not in circuits
+
+
+async def test_lock_automations_interior_always_present_even_when_panel_disabled(hass):
+    """Interior is always available on the combined panel; the lock-automations
+    UI should always offer it as a circuit option, regardless of whether the
+    interior sub-panel entity is enabled."""
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[{"device_id": "lockA", "alias": "Front Door"}],
+        # Explicitly disable all sub-panels including interior.
+        enabled_circuits=set(),
+    )
+    flow_id = await _advance_to_lock_automations(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(flow_id)
+
+    circuits = _circuit_options_from_schema(result["data_schema"])
+    assert "interior" in circuits
+    assert "perimeter" not in circuits
+    assert "annex" not in circuits
 
 
 async def test_lock_automations_submission_persists_per_lock_config(hass):
