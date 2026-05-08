@@ -229,7 +229,10 @@ on actual API responses, multi-axis state, or hardware configuration.
       then we add four more rows to PROTO_TO_STATE in
       `verisure_owa_api/const.py`. Until then the alarm panel falls
       back to ARMED_CUSTOM_BYPASS for these states with an info-level
-      "unmapped proto code" log line.
+      "unmapped proto code" log line. Arm/disarm against an unmapped
+      code is now refused cleanly with a notification naming the actual
+      code (vs. v5.0.0's silent disarm no-op) — see the refuse-on-
+      unknown-proto behaviour in `architecture.md`.
 
 - [ ] **Compound transition optimization (optional).** Verisure web app
       uses single-API-call compound commands when transitioning between

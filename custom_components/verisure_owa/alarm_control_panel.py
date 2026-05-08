@@ -46,6 +46,7 @@ from .events import (
     inject_ha_event,
 )
 from .notification_translations import get_notification_strings
+from .verisure_owa_api.__version__ import __url__ as _PROJECT_URL
 from .verisure_owa_api.models import ActivityCategory, ActivityException
 from .verisure_owa_api import (
     ArmingExceptionError,
@@ -56,6 +57,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
     VerisureOwaState,
     STATE_TO_COMMAND,
+    is_proto_letter,
 )
 from .verisure_owa_api.command_resolver import (
     AlarmState,
@@ -328,10 +330,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return
         # status.status is the proto code like "D", "T", etc.
         proto_code = status.status
-        # Only update _last_proto_code when it is a known proto code.
-        # Use PROTO_TO_ALARM_STATE (12 entries — includes annex codes X/R/S/O)
-        # not const.PROTO_TO_STATE (8 entries — pre-annex).
-        if proto_code in PROTO_TO_ALARM_STATE:
+        # Store any well-formed proto code (single uppercase letter), even ones
+        # we don't yet model — this keeps _last_proto_code truthful so the next
+        # arm/disarm refuses cleanly instead of acting on a stale cached state.
+        if is_proto_letter(proto_code):
             self._last_proto_code = proto_code
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
@@ -352,11 +354,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         caller should derive ``_state`` from it.  Returns False to short-circuit
         (no status, no message attribute, or empty protom_response).
 
-        Also updates ``_last_proto_code`` when protom_response is a known proto
-        code.  Periodic polling uses xSStatus which returns values like
-        "ARMED_TOTAL" instead of proto codes; those must not overwrite the
-        last proto code or the resolver's state-based command selection will
-        break.
+        Also updates ``_last_proto_code`` when protom_response has the proto-code
+        shape (single uppercase letter).  Periodic polling uses xSStatus which
+        returns values like "ARMED_TOTAL" instead of proto codes; those must not
+        overwrite the last proto code or the resolver's state-based command
+        selection will break.
         """
         if status is None or not hasattr(status, "message"):
             return False
@@ -375,7 +377,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 status.protom_response_data,
             )
             return False
-        if status.protom_response in PROTO_TO_ALARM_STATE:
+        if is_proto_letter(status.protom_response):
             self._last_proto_code = status.protom_response
         return True
 
@@ -456,19 +458,33 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         panel's actual state matches the target.  If not (e.g. because
         ``_last_proto_code`` was stale), updates the proto code from the
         real response and retries with the corrected current state.
+
+        Refuses to act when the panel's current state is unknown (no poll
+        seen yet, or a proto code we don't model).  Acting on an unknown
+        current state would silently no-op the disarm path (issue #441) or
+        send incorrect transitions on the arm path.
         """
+        if self._last_proto_code is None:
+            raise VerisureOwaError(
+                "Alarm state not yet known. "
+                "Please wait for the first status poll and try again."
+            )
+        if self._last_proto_code not in PROTO_TO_ALARM_STATE:
+            raise VerisureOwaError(
+                f"Alarm is in unknown state '{self._last_proto_code}'. "
+                f"Please open an issue at {_PROJECT_URL}/issues "
+                "including this state code."
+            )
+
         result: OperationStatus | None = None
 
         for attempt in range(2):
-            current = PROTO_TO_ALARM_STATE.get(
-                self._last_proto_code or "D",
-                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF),
-            )
+            current = PROTO_TO_ALARM_STATE[self._last_proto_code]
             steps = self._resolver.resolve(current, target)
 
             if not steps:
                 # Resolver says we're already in the target state.
-                return OperationStatus(protom_response=self._last_proto_code or "D")
+                return OperationStatus(protom_response=self._last_proto_code)
 
             for step in steps:
                 result = await self._execute_step(step, **force_params)
@@ -1084,12 +1100,13 @@ class _AxisSubPanelMixin:
     def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
         """Project the coordinator's joint state onto this panel's axis.
 
-        Unknown proto codes preserve the previous _state. coordinator.alarm_state
-        defaults to all-OFF for unrecognised codes, which would otherwise make
-        the sub-panel silently report DISARMED while the system is actually armed.
-
-        Uses PROTO_TO_ALARM_STATE (12 entries — includes annex codes X/R/S/O)
-        not const.PROTO_TO_STATE (8 entries — pre-annex).
+        Stores any well-formed proto code (single uppercase letter) so that the
+        refuse-on-unknown-state gate in _execute_transition fires for codes we
+        don't yet model.  For codes we do model, also project the coordinator's
+        joint state onto this axis; unknown codes preserve the previous _state
+        because coordinator.alarm_state defaults to all-OFF for them, which
+        would otherwise make the sub-panel silently report DISARMED while the
+        system is actually armed.
         """
         # Refresh resolver capabilities — they may have been populated late.
         self._resolver.update_capabilities(  # type: ignore[attr-defined]
@@ -1099,9 +1116,11 @@ class _AxisSubPanelMixin:
         if not status.status:
             return
         proto_code = status.status
-        if proto_code not in PROTO_TO_ALARM_STATE:
+        if not is_proto_letter(proto_code):
             return
         self._last_proto_code = proto_code  # type: ignore[attr-defined]
+        if proto_code not in PROTO_TO_ALARM_STATE:
+            return
         joint = self.coordinator.alarm_state  # type: ignore[attr-defined]
         self._state = self._extract_state(joint)  # type: ignore[attr-defined]
 

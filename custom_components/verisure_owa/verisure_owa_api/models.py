@@ -117,6 +117,16 @@ def parse_proto_code(code: str) -> ProtoCode:
         raise UnexpectedStateError(code) from exc
 
 
+def is_proto_letter(value: object) -> bool:
+    """Return True iff value has the proto-code wire shape (single uppercase letter).
+
+    Looser than ``ProtoCode(value)`` — admits well-formed codes we don't yet
+    model so callers can distinguish "alarm in a state we don't recognise"
+    (refuse cleanly) from "API noise like 'ARMED_TOTAL'" (drop on the floor).
+    """
+    return isinstance(value, str) and len(value) == 1 and "A" <= value <= "Z"
+
+
 # ── Mapping tables ────────────────────────────────────────────────────────────
 
 PROTO_TO_STATE: dict[ProtoCode, AlarmState] = {
