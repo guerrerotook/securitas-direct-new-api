@@ -5057,8 +5057,12 @@ class TestBuildPartialDisarmTarget:
             build_partial_disarm_target,
         )
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         current = AlarmState(
             interior=InteriorMode.TOTAL,
             perimeter=PerimeterMode.ON,
@@ -5074,8 +5078,12 @@ class TestBuildPartialDisarmTarget:
             build_partial_disarm_target,
         )
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         current = AlarmState(
             interior=InteriorMode.TOTAL,
             perimeter=PerimeterMode.ON,
@@ -5091,8 +5099,12 @@ class TestBuildPartialDisarmTarget:
             build_partial_disarm_target,
         )
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         current = AlarmState(
             interior=InteriorMode.NIGHT,
             perimeter=PerimeterMode.ON,
@@ -5106,8 +5118,11 @@ class TestBuildPartialDisarmTarget:
             build_partial_disarm_target,
         )
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
         )
+
         current = AlarmState(
             interior=InteriorMode.TOTAL,
             perimeter=PerimeterMode.ON,
@@ -5126,8 +5141,12 @@ class TestExecutePartialDisarm:
 
     async def test_returns_true_on_success_and_calls_execute_transition(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         panel = make_alarm()  # existing helper
         # Pretend alarm is currently TOTAL + perimeter ON + annex ON.
         panel.coordinator.alarm_state = AlarmState(
@@ -5152,17 +5171,19 @@ class TestExecutePartialDisarm:
     async def test_returns_false_on_verisure_error(self):
         from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         panel = make_alarm()
         panel.coordinator.alarm_state = AlarmState(
             interior=InteriorMode.TOTAL,
             perimeter=PerimeterMode.OFF,
             annex=AnnexMode.OFF,
         )
-        panel._execute_transition = AsyncMock(
-            side_effect=VerisureOwaError("boom")
-        )
+        panel._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
         ok = await panel.execute_partial_disarm(["interior"])
         assert ok is False
 
@@ -5240,7 +5261,9 @@ class TestCombinedPanelRegistration:
     async def test_combined_panels_keyed_by_installation_number_multi(self):
         """With two installations, combined_alarm_panels must be a dict with one entry per installation."""
         from unittest.mock import MagicMock
-        from custom_components.verisure_owa.alarm_control_panel import CombinedVerisureOwaAlarmPanel
+        from custom_components.verisure_owa.alarm_control_panel import (
+            CombinedVerisureOwaAlarmPanel,
+        )
         from custom_components.verisure_owa import DOMAIN
         from custom_components.verisure_owa.coordinators import AlarmCoordinator
 
@@ -5287,7 +5310,9 @@ class TestCombinedPanelRegistration:
     async def test_combined_panel_per_installation_with_single_install(self):
         """With one installation, combined_alarm_panels must be a dict with exactly one entry."""
         from unittest.mock import MagicMock
-        from custom_components.verisure_owa.alarm_control_panel import CombinedVerisureOwaAlarmPanel
+        from custom_components.verisure_owa.alarm_control_panel import (
+            CombinedVerisureOwaAlarmPanel,
+        )
         from custom_components.verisure_owa import DOMAIN
         from custom_components.verisure_owa.coordinators import AlarmCoordinator
 

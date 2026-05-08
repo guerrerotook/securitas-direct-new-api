@@ -384,6 +384,7 @@ def test_lock_automations_constants_exist():
         CIRCUIT_ANNEX,
         LOCK_CIRCUITS,
     )
+
     assert CONF_LOCK_AUTOMATIONS == "lock_automations"
     assert CIRCUIT_INTERIOR == "interior"
     assert CIRCUIT_PERIMETER == "perimeter"
