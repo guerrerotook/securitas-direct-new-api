@@ -205,9 +205,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._has_peri = coordinator.has_peri
         self._has_annex = coordinator.has_annex
         self._last_proto_code: str | None = None
-        # Tracks the proto code most-recently logged as unmapped so we don't
-        # spam the same warning on every coordinator poll while the panel
-        # sits in that state.
+        # Last proto code we warned about; dedupes the per-poll spam.
         self._last_unmapped_logged: str | None = None
         self._resolver = CommandResolver(has_peri=self._has_peri)
 

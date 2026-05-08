@@ -80,6 +80,37 @@ _LOGGER = logging.getLogger(__name__)
 
 _NOTIFY_EXCLUDE = {"notify", "send_message", "persistent_notification"}
 
+PANEL_OPTION_KEYS = (
+    CONF_ENABLE_PERIMETER_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_ANNEX_PANEL,
+)
+
+
+def _build_panel_extra_fields(
+    *,
+    has_peri: bool,
+    has_annex: bool,
+    peri_default: bool = False,
+    annex_default: bool = False,
+    interior_default: bool = False,
+) -> dict[Any, Any]:
+    """Build the capability-gated panel-toggle entries for a settings schema.
+
+    The interior toggle appears whenever any sibling axis is supported; this
+    matches the post-setup options behaviour so users on any peri- or annex-
+    capable installation can carve a separate interior sub-panel even after
+    flipping the sibling off.
+    """
+    fields: dict[Any, Any] = {}
+    if has_peri:
+        fields[vol.Optional(CONF_ENABLE_PERIMETER_PANEL, default=peri_default)] = bool
+    if has_annex:
+        fields[vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=annex_default)] = bool
+    if has_peri or has_annex:
+        fields[vol.Optional(CONF_ENABLE_INTERIOR_PANEL, default=interior_default)] = bool
+    return fields
+
 
 def _get_notify_options(hass: HomeAssistant) -> list[dict[str, str]]:
     """Build notify service dropdown options."""
@@ -170,9 +201,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
         self._options_data: dict[str, Any] = {}
-        # Sub-panel toggles selected on the initial flow's options step go
-        # into entry.options on CREATE_ENTRY (kept separate so they don't
-        # pollute entry.data, which is the OptionsFlow's fallback source).
+        # Kept separate from _options_data so toggles end up on entry.options,
+        # not entry.data — matches where the post-setup OptionsFlow writes them.
         self._panel_options: dict[str, Any] = {}
         self._has_peri: bool = False
         self._has_annex: bool = False
@@ -651,36 +681,17 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             # Flatten the advanced section back to top-level keys
             advanced = user_input.pop(CONF_ADVANCED, {})
             user_input.update(advanced)
-            # Split the panel-enable toggles out of the data-bound options
-            # so they end up in entry.options (where the post-setup flow
-            # writes them) rather than entry.data.
-            for key in (
-                CONF_ENABLE_PERIMETER_PANEL,
-                CONF_ENABLE_INTERIOR_PANEL,
-                CONF_ENABLE_ANNEX_PANEL,
-            ):
+            # Toggles belong on entry.options, not entry.data.
+            for key in PANEL_OPTION_KEYS:
                 if key in user_input:
                     self._panel_options[key] = user_input.pop(key)
             self._options_data = user_input
             return await self.async_step_mappings()
 
         notify_options = _get_notify_options(self.hass)
-        # Capability-gated sub-panel toggles — same surface as the
-        # post-setup OptionsFlow, so users can opt in during initial setup
-        # without having to re-open Configure afterwards.
-        extra_fields: dict[Any, Any] = {}
-        if self._has_peri:
-            extra_fields[
-                vol.Optional(CONF_ENABLE_PERIMETER_PANEL, default=False)
-            ] = bool
-        if self._has_annex:
-            extra_fields[
-                vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=False)
-            ] = bool
-        if self._has_peri or self._has_annex:
-            extra_fields[
-                vol.Optional(CONF_ENABLE_INTERIOR_PANEL, default=False)
-            ] = bool
+        extra_fields = _build_panel_extra_fields(
+            has_peri=self._has_peri, has_annex=self._has_annex
+        )
 
         schema = _build_settings_schema(
             {
@@ -798,33 +809,14 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         has_peri, has_annex = _resolve_flow_capabilities(
             self.hass, self.config_entry
         )
-        peri_currently_enabled = self.config_entry.options.get(
-            CONF_ENABLE_PERIMETER_PANEL, False
+        opts = self.config_entry.options
+        extra_fields = _build_panel_extra_fields(
+            has_peri=has_peri,
+            has_annex=has_annex,
+            peri_default=opts.get(CONF_ENABLE_PERIMETER_PANEL, False),
+            annex_default=opts.get(CONF_ENABLE_ANNEX_PANEL, False),
+            interior_default=opts.get(CONF_ENABLE_INTERIOR_PANEL, False),
         )
-        annex_currently_enabled = self.config_entry.options.get(
-            CONF_ENABLE_ANNEX_PANEL, False
-        )
-
-        extra_fields: dict[Any, Any] = {}
-        if has_peri:
-            extra_fields[
-                vol.Optional(
-                    CONF_ENABLE_PERIMETER_PANEL, default=peri_currently_enabled
-                )
-            ] = bool
-        if has_annex:
-            extra_fields[
-                vol.Optional(CONF_ENABLE_ANNEX_PANEL, default=annex_currently_enabled)
-            ] = bool
-        if has_peri or has_annex:
-            extra_fields[
-                vol.Optional(
-                    CONF_ENABLE_INTERIOR_PANEL,
-                    default=self.config_entry.options.get(
-                        CONF_ENABLE_INTERIOR_PANEL, False
-                    ),
-                )
-            ] = bool
 
         schema = _build_settings_schema(
             {
