@@ -76,6 +76,7 @@ async def async_setup_entry(
             hass=hass,
             coordinator=coordinator,
         )
+        entry_data["combined_alarm_panel"] = combined
         alarms.append(combined)
         all_entities.append(combined)
 
