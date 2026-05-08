@@ -141,6 +141,19 @@ def make_lock(
     return lock_entity
 
 
+async def _drain_lock_tasks(lock):
+    """Run all coroutines scheduled via the mocked ``hass.async_create_task``.
+
+    The mocked hass collects scheduled coroutines as MagicMock call args;
+    we await each one in turn so test assertions can observe the side effects.
+    """
+    calls = lock.hass.async_create_task.call_args_list
+    for call in calls:
+        coro = call.args[0]
+        await coro
+    lock.hass.async_create_task.reset_mock()
+
+
 # ===========================================================================
 # Sentinel sensor helper — mock coordinator
 # ===========================================================================
@@ -1317,3 +1330,124 @@ class TestVerisureLockAlarmListener:
         }
         s = self._state()  # all OFF
         assert _armed_circuits(s) == set()
+
+
+# ===========================================================================
+# Auto-lock-on-arm tests (Task 6)
+# ===========================================================================
+
+
+class TestVerisureLockAutoLockOnArm:
+    """Tests for auto-lock-on-arm behavior."""
+
+    def _make_alarm_coord(self, state):
+        coord = MagicMock()
+        coord.alarm_state = state
+        coord.async_add_listener = MagicMock(return_value=lambda: None)
+        return coord
+
+    def _state(self, *, i="OFF", p="OFF", a="OFF"):
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        return AlarmState(
+            interior=getattr(InteriorMode, i),
+            perimeter=getattr(PerimeterMode, p),
+            annex=getattr(AnnexMode, a),
+        )
+
+    async def test_locks_when_configured_circuit_transitions_to_armed(self):
+        # Lock currently unlocked. Auto-lock configured for [interior].
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._lock_on_arm_circuits = ["interior"]
+        # Establish baseline = all OFF.
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()  # baseline
+        # Now interior arms.
+        coord.alarm_state = self._state(i="TOTAL")
+        lock._handle_alarm_coordinator_update()
+        # Drain pending tasks.
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_awaited_once()
+        # Was a lock command (state=True).
+        call = lock._client.change_lock_mode.await_args
+        assert call.args[1] is True
+
+    async def test_does_not_lock_when_already_locked(self):
+        lock = make_lock(initial_status="2", poll_status="2")  # already locked
+        lock._client.change_lock_mode = AsyncMock()
+        lock._lock_on_arm_circuits = ["interior"]
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()
+        coord.alarm_state = self._state(i="TOTAL")
+        lock._handle_alarm_coordinator_update()
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_not_awaited()
+
+    async def test_does_not_lock_when_unconfigured_circuit_arms(self):
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock()
+        lock._lock_on_arm_circuits = ["interior"]  # only interior
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()
+        coord.alarm_state = self._state(p="ON")  # perimeter, not interior
+        lock._handle_alarm_coordinator_update()
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_not_awaited()
+
+    async def test_or_semantics_any_configured_circuit_fires(self):
+        # Configured for [interior, perimeter]; only perimeter arms.
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._lock_on_arm_circuits = ["interior", "perimeter"]
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()
+        coord.alarm_state = self._state(p="ON")
+        lock._handle_alarm_coordinator_update()
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_awaited_once()
+
+    async def test_dedupe_when_multiple_circuits_arm_simultaneously(self):
+        # Combined-panel arm flips interior + perimeter together.
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._lock_on_arm_circuits = ["interior", "perimeter"]
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()
+        coord.alarm_state = self._state(i="TOTAL", p="ON")
+        lock._handle_alarm_coordinator_update()
+        await _drain_lock_tasks(lock)
+        # Only one lock command, not two.
+        assert lock._client.change_lock_mode.await_count == 1
+
+    async def test_no_lock_on_disarm_transition(self):
+        # Going armed→disarmed should NEVER trigger a lock.
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock()
+        lock._lock_on_arm_circuits = ["interior"]
+        coord = self._make_alarm_coord(self._state(i="TOTAL"))
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()  # baseline = armed
+        coord.alarm_state = self._state()
+        lock._handle_alarm_coordinator_update()  # now disarmed
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_not_awaited()
+
+    async def test_no_lock_when_operation_in_progress(self):
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock()
+        lock._lock_on_arm_circuits = ["interior"]
+        lock._operation_in_progress = True  # simulate ongoing manual lock
+        coord = self._make_alarm_coord(self._state())
+        lock._alarm_coordinator = coord
+        lock._handle_alarm_coordinator_update()
+        coord.alarm_state = self._state(i="TOTAL")
+        lock._handle_alarm_coordinator_update()
+        await _drain_lock_tasks(lock)
+        lock._client.change_lock_mode.assert_not_awaited()
