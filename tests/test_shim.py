@@ -113,7 +113,7 @@ async def test_shim_notification_lists_deprecated_surfaces(hass: HomeAssistant):
     # And each maps to the new identifier.
     assert "verisure_owa.force_arm" in body
     assert "verisure_owa_arming_exception" in body
-    assert "/verisure_owa_panel" in body
+    assert "/verisure-owa-panel" in body
     assert "custom:verisure-owa-alarm-card" in body
 
 

@@ -59,7 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "- Events: `securitas_arming_exception` "
             "→ use `verisure_owa_arming_exception`\n"
             "- Lovelace card URLs: `/securitas_panel/...` "
-            "→ use `/verisure_owa_panel/...`\n"
+            "→ use `/verisure-owa-panel/...`\n"
             "- Lovelace card types: `custom:securitas-alarm-card` (and `-badge`, "
             "`-chip`, `-camera-card`) "
             "→ use `custom:verisure-owa-alarm-card` (and matching new names)"

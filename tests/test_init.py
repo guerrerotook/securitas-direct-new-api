@@ -625,22 +625,22 @@ class TestAsyncSetupEntry:
         call_args = hass.http.async_register_static_paths.call_args[0][0]
         assert len(call_args) == 2
         paths = [cfg.url_path for cfg in call_args]
-        assert "/verisure_owa_panel" in paths
+        assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
 
         # Verify all three card JS URLs are registered (alarm + camera + events)
         assert mock_add_js.call_count == 3
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
-            u.startswith("/verisure_owa_panel/verisure_owa-alarm-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
             for u in js_urls
         )
         assert any(
-            u.startswith("/verisure_owa_panel/verisure_owa-camera-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-camera-card.js?v=")
             for u in js_urls
         )
         assert any(
-            u.startswith("/verisure_owa_panel/verisure_owa-events-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-events-card.js?v=")
             for u in js_urls
         )
 
@@ -702,15 +702,15 @@ class TestAsyncSetupEntry:
         assert mock_add_js.call_count == 3
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
-            u.startswith("/verisure_owa_panel/verisure_owa-alarm-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
             for u in js_urls
         )
         assert any(
-            u.startswith("/verisure_owa_panel/verisure_owa-camera-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-camera-card.js?v=")
             for u in js_urls
         )
         assert any(
-            u.startswith("/verisure_owa_panel/verisure_owa-events-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-events-card.js?v=")
             for u in js_urls
         )
 
@@ -1658,7 +1658,7 @@ class TestDiscoverCameras:
 
 
 class TestStaticPathAliases:
-    """Verify that both /verisure_owa_panel and /securitas_panel are registered."""
+    """Verify that both /verisure-owa-panel and /securitas_panel are registered."""
 
     @pytest.fixture
     def mock_hub(self):
@@ -1670,7 +1670,7 @@ class TestStaticPathAliases:
         return hub
 
     async def test_static_paths_register_both_new_and_legacy(self, hass, mock_hub):
-        """Setup should register both /verisure_owa_panel and /securitas_panel."""
+        """Setup should register both /verisure-owa-panel and /securitas_panel."""
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
@@ -1693,5 +1693,5 @@ class TestStaticPathAliases:
         hass.http.async_register_static_paths.assert_awaited_once()
         call_args = hass.http.async_register_static_paths.call_args[0][0]
         paths = [cfg.url_path for cfg in call_args]
-        assert "/verisure_owa_panel" in paths
+        assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
