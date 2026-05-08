@@ -173,12 +173,8 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
     if config_entry.version == 3:
         new_data = dict(config_entry.data)
-        had_token = new_data.pop(CONF_TOKEN, None) is not None
-        hass.config_entries.async_update_entry(
-            config_entry,
-            data=new_data if had_token else config_entry.data,
-            version=4,
-        )
+        new_data.pop(CONF_TOKEN, None)
+        hass.config_entries.async_update_entry(config_entry, data=new_data, version=4)
 
     return True
 
