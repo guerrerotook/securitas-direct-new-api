@@ -43,7 +43,7 @@ async def main():
     country = "ES"
     async with aiohttp.ClientSession() as aiohttp_session:
         uuid = generate_uuid()
-        device_id = generate_device_id(country)
+        device_id = generate_device_id()
         id_device_indigitall = str(uuid4())
         api_domains = ApiDomains()
         transport = HttpTransport(

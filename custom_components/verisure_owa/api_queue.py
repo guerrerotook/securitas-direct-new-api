@@ -38,10 +38,7 @@ class ApiQueue:
         self,
         interval: float = DEFAULT_INTERVAL,
     ) -> None:
-        self._intervals = {
-            self.FOREGROUND: interval,
-            self.BACKGROUND: interval,
-        }
+        self._interval: float = interval
         self._lock = asyncio.Lock()
         self._last_api_time: float = 0
         self._pending_foreground: int = 0
@@ -86,7 +83,7 @@ class ApiQueue:
 
                 # Compute throttle delay outside the lock so we don't block
                 # other callers (especially foreground) during the sleep.
-                interval = self._intervals[priority]
+                interval = self._interval
                 elapsed = time.monotonic() - self._last_api_time
                 if elapsed < interval:
                     delay = interval - elapsed

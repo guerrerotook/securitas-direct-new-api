@@ -257,7 +257,6 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub.config = {}
     hub.services = {1: []}
     hub.sentinel_services = []
-    hub.installations = []
     hub.login = AsyncMock()
     hub.validate_device = AsyncMock()
     hub.send_sms_code = AsyncMock()
@@ -265,7 +264,6 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     hub.send_opt = AsyncMock()
     hub._services_cache = {}
     hub.get_services = AsyncMock(return_value=[])
-    hub.logout = AsyncMock(return_value=True)
     hub.get_authentication_token = MagicMock(return_value=FAKE_JWT)
     hub.get_refresh_token = MagicMock(return_value=FAKE_REFRESH_TOKEN)
     for key, val in overrides.items():
