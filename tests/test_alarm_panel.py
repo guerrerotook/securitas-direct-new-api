@@ -5114,3 +5114,61 @@ class TestBuildPartialDisarmTarget:
         )
         target = build_partial_disarm_target(current, ["bogus"])
         assert target == current
+
+
+# ===========================================================================
+# execute_partial_disarm
+# ===========================================================================
+
+
+class TestExecutePartialDisarm:
+    """Tests for CombinedVerisureOwaAlarmPanel.execute_partial_disarm."""
+
+    async def test_returns_true_on_success_and_calls_execute_transition(self):
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        panel = make_alarm()  # existing helper
+        # Pretend alarm is currently TOTAL + perimeter ON + annex ON.
+        panel.coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.ON,
+        )
+        panel._execute_transition = AsyncMock(
+            return_value=MagicMock(protom_response="D")
+        )
+
+        ok = await panel.execute_partial_disarm(["interior"])
+
+        assert ok is True
+        panel._execute_transition.assert_awaited_once()
+        # Inspect the target passed to _execute_transition.
+        target = panel._execute_transition.await_args.args[0]
+        assert target.interior == InteriorMode.OFF
+        assert target.perimeter == PerimeterMode.ON
+        assert target.annex == AnnexMode.ON
+
+    async def test_returns_false_on_verisure_error(self):
+        from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        panel = make_alarm()
+        panel.coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        panel._execute_transition = AsyncMock(
+            side_effect=VerisureOwaError("boom")
+        )
+        ok = await panel.execute_partial_disarm(["interior"])
+        assert ok is False
+
+    async def test_skips_when_no_circuits_specified(self):
+        panel = make_alarm()
+        panel._execute_transition = AsyncMock()
+        ok = await panel.execute_partial_disarm([])
+        assert ok is True
+        panel._execute_transition.assert_not_awaited()

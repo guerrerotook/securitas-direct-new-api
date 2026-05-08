@@ -8,6 +8,7 @@ preserve the others when computing target states.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.alarm_control_panel import (
@@ -30,7 +31,9 @@ from ..verisure_owa_api.command_resolver import (
     PROTO_TO_ALARM_STATE,
     VERISURE_OWA_STATE_TO_ALARM_STATE,
 )
-from ._base import BaseVerisureOwaAlarmPanel
+from ._base import BaseVerisureOwaAlarmPanel, build_partial_disarm_target
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
@@ -59,6 +62,30 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 except ValueError:
                     return None
         return None
+
+    async def execute_partial_disarm(self, circuits: list[str]) -> bool:
+        """Disarm the specified circuits, leaving others unchanged.
+
+        Returns True on success, False on VerisureOwaError. Empty
+        ``circuits`` is a no-op success.
+        """
+        if not circuits:
+            return True
+        current = self.coordinator.alarm_state
+        target = build_partial_disarm_target(current, circuits)
+        if target == current:
+            return True
+        try:
+            await self._execute_transition(target)
+            return True
+        except VerisureOwaError as err:
+            _LOGGER.error(
+                "Partial disarm failed for %s circuits %s: %s",
+                self._installation.number,
+                circuits,
+                err.log_detail(),
+            )
+            return False
 
 
 class _AxisSubPanelMixin:

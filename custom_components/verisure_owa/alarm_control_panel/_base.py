@@ -33,6 +33,7 @@ from .. import (
     VerisureHub,
     _notify,
 )
+from ..const import CIRCUIT_ANNEX, CIRCUIT_INTERIOR, CIRCUIT_PERIMETER
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
 from ..events import (
@@ -55,10 +56,13 @@ from ..verisure_owa_api import (
 )
 from ..verisure_owa_api.__version__ import __url__ as _PROJECT_URL
 from ..verisure_owa_api.command_resolver import (
+    AlarmState,
+    AnnexMode,
     CommandResolver,
     CommandStep,
+    InteriorMode,
+    PerimeterMode,
     PROTO_TO_ALARM_STATE,
-    AlarmState,
 )
 from ..verisure_owa_api.models import ActivityCategory, ActivityException
 
@@ -72,6 +76,27 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 }
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def build_partial_disarm_target(
+    current: AlarmState, circuits: list[str]
+) -> AlarmState:
+    """Build an AlarmState that disarms ``circuits`` and keeps the rest.
+
+    Unknown circuit names are silently ignored — the caller validates
+    against ``LOCK_CIRCUITS``.
+    """
+    return AlarmState(
+        interior=(
+            InteriorMode.OFF if CIRCUIT_INTERIOR in circuits else current.interior
+        ),
+        perimeter=(
+            PerimeterMode.OFF if CIRCUIT_PERIMETER in circuits else current.perimeter
+        ),
+        annex=(
+            AnnexMode.OFF if CIRCUIT_ANNEX in circuits else current.annex
+        ),
+    )
 
 
 class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
