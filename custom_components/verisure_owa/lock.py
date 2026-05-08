@@ -19,7 +19,6 @@ from .const import (
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
     CIRCUIT_ANNEX,
-    LOCK_CIRCUITS,
 )
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity
@@ -53,6 +52,7 @@ def _armed_circuits(state: AlarmState) -> set[str]:
     if state.annex != AnnexMode.OFF:
         armed.add(CIRCUIT_ANNEX)
     return armed
+
 
 # Service request name that identifies a smart-lock capability
 DOORLOCK_SERVICE = "DOORLOCK"
@@ -246,13 +246,9 @@ class VerisureLock(  # type: ignore[override]
             self.hass.async_create_task(self._auto_lock())
 
     def _autolock_notification_id(self) -> str:
-        return (
-            f"verisure_owa_autolock_{self._installation.number}_{self._device_id}"
-        )
+        return f"verisure_owa_autolock_{self._installation.number}_{self._device_id}"
 
-    async def _fire_autolock_notification(
-        self, *, title: str, message: str
-    ) -> None:
+    async def _fire_autolock_notification(self, *, title: str, message: str) -> None:
         """Create / replace a persistent notification for an autolock event."""
         if self.hass is None:
             return
@@ -308,9 +304,7 @@ class VerisureLock(  # type: ignore[override]
         # Establish baseline + subscribe.
         if self._alarm_coordinator is not None:
             # Read the current state to seed the baseline (no firing).
-            self._alarm_baseline = _armed_circuits(
-                self._alarm_coordinator.alarm_state
-            )
+            self._alarm_baseline = _armed_circuits(self._alarm_coordinator.alarm_state)
             self._alarm_listener_unsub = self._alarm_coordinator.async_add_listener(
                 self._handle_alarm_coordinator_update
             )
@@ -452,9 +446,7 @@ class VerisureLock(  # type: ignore[override]
         if self._combined_alarm_panel is None or self._alarm_coordinator is None:
             return None
         currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
-        targets = [
-            c for c in self._unlock_disarms_circuits if c in currently_armed
-        ]
+        targets = [c for c in self._unlock_disarms_circuits if c in currently_armed]
         if not targets:
             return None
         ok = await self._combined_alarm_panel.execute_partial_disarm(targets)

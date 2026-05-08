@@ -1288,8 +1288,12 @@ class TestVerisureLockAlarmListener:
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         return AlarmState(
             interior=getattr(InteriorMode, i),
             perimeter=getattr(PerimeterMode, p),
@@ -1309,6 +1313,7 @@ class TestVerisureLockAlarmListener:
 
         # Baseline must be recorded as currently TOTAL.
         from custom_components.verisure_owa.const import CIRCUIT_INTERIOR
+
         assert CIRCUIT_INTERIOR in (lock._alarm_baseline or set())
         # And no lock action was attempted.
         # (verified more thoroughly in Task 6; here we just check no crash and
@@ -1318,15 +1323,20 @@ class TestVerisureLockAlarmListener:
     def test_armed_circuits_helper_excludes_off_modes(self):
         from custom_components.verisure_owa.lock import _armed_circuits
         from custom_components.verisure_owa.const import (
-            CIRCUIT_INTERIOR, CIRCUIT_PERIMETER, CIRCUIT_ANNEX,
+            CIRCUIT_INTERIOR,
+            CIRCUIT_PERIMETER,
+            CIRCUIT_ANNEX,
         )
+
         s = self._state(i="OFF", p="ON", a="OFF")
         assert _armed_circuits(s) == {CIRCUIT_PERIMETER}
         s = self._state(i="DAY", p="OFF", a="ON")
         assert _armed_circuits(s) == {CIRCUIT_INTERIOR, CIRCUIT_ANNEX}
         s = self._state(i="TOTAL", p="ON", a="ON")
         assert _armed_circuits(s) == {
-            CIRCUIT_INTERIOR, CIRCUIT_PERIMETER, CIRCUIT_ANNEX
+            CIRCUIT_INTERIOR,
+            CIRCUIT_PERIMETER,
+            CIRCUIT_ANNEX,
         }
         s = self._state()  # all OFF
         assert _armed_circuits(s) == set()
@@ -1348,8 +1358,12 @@ class TestVerisureLockAutoLockOnArm:
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         return AlarmState(
             interior=getattr(InteriorMode, i),
             perimeter=getattr(PerimeterMode, p),
@@ -1477,6 +1491,7 @@ class TestVerisureLockAutoLockFailure:
 
     async def test_persistent_notification_created_on_lock_failure(self):
         from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+
         lock = make_lock(initial_status="1", poll_status="1")  # stays unlocked
         lock._client.change_lock_mode = AsyncMock(
             side_effect=VerisureOwaError("network down")
@@ -1489,8 +1504,7 @@ class TestVerisureLockAutoLockFailure:
         # Look for a persistent_notification.create call.
         calls = lock.hass.services.async_call.await_args_list
         notification_calls = [
-            c for c in calls
-            if c.args[:2] == ("persistent_notification", "create")
+            c for c in calls if c.args[:2] == ("persistent_notification", "create")
         ]
         assert len(notification_calls) == 1
         payload = notification_calls[0].args[2]
@@ -1503,7 +1517,8 @@ class TestVerisureLockAutoLockFailure:
         lock.hass.services.async_call = AsyncMock()
         await lock._auto_lock()
         notification_calls = [
-            c for c in lock.hass.services.async_call.await_args_list
+            c
+            for c in lock.hass.services.async_call.await_args_list
             if c.args[:2] == ("persistent_notification", "create")
         ]
         assert notification_calls == []
@@ -1519,8 +1534,12 @@ class TestVerisureLockUnlockDisarm:
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         return AlarmState(
             interior=getattr(InteriorMode, i),
             perimeter=getattr(PerimeterMode, p),
@@ -1546,12 +1565,15 @@ class TestVerisureLockUnlockDisarm:
 
         # Capture call order.
         order: list[str] = []
+
         async def fake_disarm(circuits):
             order.append("disarm")
             return True
+
         async def fake_change(installation, lock_state, device_id=None):
             order.append("unlock")
             return MagicMock()
+
         lock._combined_alarm_panel.execute_partial_disarm = AsyncMock(
             side_effect=fake_disarm
         )
@@ -1625,8 +1647,12 @@ class TestVerisureLockUnlockDisarmFailure:
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
         )
+
         return AlarmState(
             interior=getattr(InteriorMode, i),
             perimeter=getattr(PerimeterMode, p),
@@ -1652,7 +1678,8 @@ class TestVerisureLockUnlockDisarmFailure:
 
         # Notification fired with "Auto-disarm failed" wording.
         notif_calls = [
-            c for c in lock.hass.services.async_call.await_args_list
+            c
+            for c in lock.hass.services.async_call.await_args_list
             if c.args[:2] == ("persistent_notification", "create")
         ]
         assert len(notif_calls) == 1
@@ -1662,10 +1689,9 @@ class TestVerisureLockUnlockDisarmFailure:
 
     async def test_unlock_failure_after_successful_disarm_notifies(self):
         from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+
         lock = make_lock(initial_status="2", poll_status="2")  # stays locked
-        lock._client.change_lock_mode = AsyncMock(
-            side_effect=VerisureOwaError("nope")
-        )
+        lock._client.change_lock_mode = AsyncMock(side_effect=VerisureOwaError("nope"))
         lock._unlock_disarms_circuits = ["interior"]
         lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
         panel = MagicMock()
@@ -1677,7 +1703,8 @@ class TestVerisureLockUnlockDisarmFailure:
 
         # The unlock failed — notification with "Unlock failed" wording.
         notif_calls = [
-            c for c in lock.hass.services.async_call.await_args_list
+            c
+            for c in lock.hass.services.async_call.await_args_list
             if c.args[:2] == ("persistent_notification", "create")
         ]
         assert len(notif_calls) == 1
@@ -1696,7 +1723,8 @@ class TestVerisureLockUnlockDisarmFailure:
         await lock.async_unlock()
 
         notif_calls = [
-            c for c in lock.hass.services.async_call.await_args_list
+            c
+            for c in lock.hass.services.async_call.await_args_list
             if c.args[:2] == ("persistent_notification", "create")
         ]
         assert notif_calls == []
@@ -1714,14 +1742,18 @@ class TestVerisureLockSetupAndTeardown:
         from custom_components.verisure_owa.const import (
             CONF_LOCK_AUTOMATIONS,
         )
+
         lock = make_lock(initial_status="2")
         # Stand in for hass-managed plumbing.
         unsub = MagicMock()
         alarm_coord = MagicMock()
         alarm_coord.async_add_listener = MagicMock(return_value=unsub)
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
         )
+
         alarm_coord.alarm_state = AlarmState(
             interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
         )
@@ -1737,6 +1769,7 @@ class TestVerisureLockSetupAndTeardown:
             }
         }
         from custom_components.verisure_owa import DOMAIN
+
         lock.hass.data = {
             DOMAIN: {
                 "entry-1": {
@@ -1765,8 +1798,11 @@ class TestVerisureLockSetupAndTeardown:
         alarm_coord = MagicMock()
         alarm_coord.async_add_listener = MagicMock(return_value=lambda: None)
         from custom_components.verisure_owa.verisure_owa_api.models import (
-            AlarmState, InteriorMode, PerimeterMode,
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
         )
+
         alarm_coord.alarm_state = AlarmState(
             interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
         )
@@ -1774,6 +1810,7 @@ class TestVerisureLockSetupAndTeardown:
         entry.entry_id = "entry-1"
         entry.options = {}
         from custom_components.verisure_owa import DOMAIN
+
         lock.hass.data = {
             DOMAIN: {
                 "entry-1": {

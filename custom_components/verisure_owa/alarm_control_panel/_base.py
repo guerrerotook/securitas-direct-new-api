@@ -78,9 +78,7 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 _LOGGER = logging.getLogger(__name__)
 
 
-def build_partial_disarm_target(
-    current: AlarmState, circuits: list[str]
-) -> AlarmState:
+def build_partial_disarm_target(current: AlarmState, circuits: list[str]) -> AlarmState:
     """Build an AlarmState that disarms ``circuits`` and keeps the rest.
 
     Unknown circuit names are silently ignored — the caller validates
@@ -93,9 +91,7 @@ def build_partial_disarm_target(
         perimeter=(
             PerimeterMode.OFF if CIRCUIT_PERIMETER in circuits else current.perimeter
         ),
-        annex=(
-            AnnexMode.OFF if CIRCUIT_ANNEX in circuits else current.annex
-        ),
+        annex=(AnnexMode.OFF if CIRCUIT_ANNEX in circuits else current.annex),
     )
 
 
