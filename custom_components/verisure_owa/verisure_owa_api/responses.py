@@ -13,6 +13,7 @@ from .models import (
     Installation,
     LockFeatures,
     SmartLock,
+    SStatus,
     ThumbnailResponse,
 )
 from .pydantic_utils import NullSafeBase as _NullSafeBase
@@ -68,19 +69,6 @@ class _OperationResult(_NullSafeBase):
     )
     request_id: str | None = Field(default=None, validation_alias="requestId")
     error: PanelError | None = None
-
-
-class _GeneralStatus(BaseModel):
-    """Current status of the alarm system."""
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    status: str | None = None
-    timestamp_update: str | None = Field(
-        default=None, validation_alias="timestampUpdate"
-    )
-    wifi_connected: bool | None = Field(default=None, validation_alias="wifiConnected")
-    exceptions: list[dict[str, Any]] | None = None
 
 
 # ── Auth envelopes ─────────────────────────────────────────────────────────────
@@ -227,7 +215,7 @@ class GeneralStatusEnvelope(BaseModel):
     """Response envelope for xSStatus."""
 
     class Data(BaseModel):
-        xSStatus: _GeneralStatus  # noqa: N815
+        xSStatus: SStatus  # noqa: N815
 
     data: Data
 

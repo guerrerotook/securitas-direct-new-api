@@ -17,7 +17,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     async_get_current_platform,
@@ -41,7 +40,7 @@ from .const import (
     CONF_ENABLE_PERIMETER_PANEL,
 )
 from .coordinators import AlarmCoordinator, AlarmStatusData
-from .entity import securitas_device_info
+from .entity import VerisureEntity
 from .events import (
     ARMING_EXCEPTION_EVENT_TYPE,
     LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
@@ -173,7 +172,9 @@ async def async_setup_entry(
 
 
 class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
-    CoordinatorEntity[AlarmCoordinator], alarm.AlarmControlPanelEntity
+    VerisureEntity,
+    CoordinatorEntity[AlarmCoordinator],
+    alarm.AlarmControlPanelEntity,
 ):
     """Representation of a Verisure alarm status."""
 
@@ -187,14 +188,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         coordinator: AlarmCoordinator,
     ) -> None:
         """Initialize the Verisure alarm panel."""
-        super().__init__(coordinator)
-        self._installation = installation
-        self._client = client
-        self._attr_device_info: DeviceInfo = (  # type: ignore[override]
-            securitas_device_info(installation)
-        )
-        self._state: str | None = None
-        self._last_state: str | None = None
+        CoordinatorEntity.__init__(self, coordinator)
+        VerisureEntity.__init__(self, installation, client)
         self._device: str = installation.address
         self._attr_name = installation.alias
         self._attr_unique_id: str | None = f"v5_verisure_owa.{installation.number}"
@@ -257,25 +252,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._arming_event_unsub_new = None
         self._arming_event_unsub_legacy = None
         self._last_handled_event_id: str | None = None
-
-    # -- Properties formerly from VerisureEntity --------------------------
-
-    @property
-    def installation(self) -> Installation:
-        """Return the installation."""
-        return self._installation
-
-    @property
-    def client(self) -> VerisureHub:
-        """Return the client hub."""
-        return self._client
-
-    def _force_state(self, state: AlarmControlPanelState) -> None:
-        """Force entity state and schedule HA update."""
-        self._last_state = self._state
-        self._state = state
-        if self.hass is not None:
-            self.async_schedule_update_ha_state()
 
     async def async_added_to_hass(self) -> None:
         """Register event listeners when added to HA."""

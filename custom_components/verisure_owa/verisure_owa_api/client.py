@@ -859,6 +859,57 @@ class VerisureOwaClient:
 
         return result
 
+    async def _submit_and_poll(
+        self,
+        *,
+        installation: Installation,
+        submit_op: str,
+        submit_query: str,
+        submit_vars: dict[str, Any],
+        submit_envelope_cls: type,
+        submit_data_field: str,
+        status_op: str,
+        status_query: str,
+        status_data_field: str,
+        status_vars_builder: Callable[[str, int], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Submit a mutation, extract its referenceId, then poll status until done.
+
+        Common scaffold for arm/disarm/check_alarm/change_lock_mode. Returns
+        the raw status dict from the final poll response — callers handle
+        operation-specific error semantics and result-model validation.
+        """
+        submit_content = {
+            "operationName": submit_op,
+            "variables": submit_vars,
+            "query": submit_query,
+        }
+        envelope = await self._execute_graphql(
+            submit_content,
+            submit_op,
+            submit_envelope_cls,
+            installation=installation,
+        )
+        inner = getattr(envelope.data, submit_data_field)
+        reference_id: str = inner.reference_id
+
+        counter = 0
+
+        async def _check() -> dict[str, Any]:
+            nonlocal counter
+            counter += 1
+            poll_content = {
+                "operationName": status_op,
+                "variables": status_vars_builder(reference_id, counter),
+                "query": status_query,
+            }
+            response = await self._execute_raw(
+                poll_content, status_op, installation=installation
+            )
+            return self._extract_response_data(response, status_data_field)
+
+        return await self._poll_operation(_check)
+
     # ── Alarm operations ──────────────────────────────────────────────────
 
     async def arm(
@@ -887,8 +938,7 @@ class VerisureOwaClient:
             VerisureOwaError: If arming fails with a blocking error.
             OperationTimeoutError: If polling times out.
         """
-        # ── Submit arm request ──
-        variables: dict[str, Any] = {
+        submit_vars: dict[str, Any] = {
             "request": command,
             "numinst": installation.number,
             "panel": installation.panel,
@@ -896,48 +946,35 @@ class VerisureOwaClient:
             "armAndLock": False,
         }
         if force_id is not None:
-            variables["forceArmingRemoteId"] = force_id
+            submit_vars["forceArmingRemoteId"] = force_id
         if suid is not None:
-            variables["suid"] = suid
+            submit_vars["suid"] = suid
 
-        content = {
-            "operationName": "xSArmPanel",
-            "variables": variables,
-            "query": ARM_PANEL_MUTATION,
-        }
-        envelope = await self._execute_graphql(
-            content, "xSArmPanel", ArmPanelEnvelope, installation=installation
-        )
-        reference_id = envelope.data.xSArmPanel.reference_id
-
-        # ── Poll arm status ──
-        counter = 0
-
-        async def _check() -> dict[str, Any]:
-            nonlocal counter
-            counter += 1
+        def status_vars(ref_id: str, counter: int) -> dict[str, Any]:
             poll_vars: dict[str, Any] = {
                 "request": command,
                 "numinst": installation.number,
                 "panel": installation.panel,
-                "referenceId": reference_id,
+                "referenceId": ref_id,
                 "counter": counter,
                 "armAndLock": False,
             }
             if force_id is not None:
                 poll_vars["forceArmingRemoteId"] = force_id
+            return poll_vars
 
-            poll_content = {
-                "operationName": "ArmStatus",
-                "variables": poll_vars,
-                "query": ARM_STATUS_QUERY,
-            }
-            response = await self._execute_raw(
-                poll_content, "ArmStatus", installation=installation
-            )
-            return self._extract_response_data(response, "xSArmStatus")
-
-        raw = await self._poll_operation(_check)
+        raw = await self._submit_and_poll(
+            installation=installation,
+            submit_op="xSArmPanel",
+            submit_query=ARM_PANEL_MUTATION,
+            submit_vars=submit_vars,
+            submit_envelope_cls=ArmPanelEnvelope,
+            submit_data_field="xSArmPanel",
+            status_op="ArmStatus",
+            status_query=ARM_STATUS_QUERY,
+            status_data_field="xSArmStatus",
+            status_vars_builder=status_vars,
+        )
 
         # ── Process result ──
         error = raw.get("error")
@@ -986,46 +1023,33 @@ class VerisureOwaClient:
         # Capture current status at request time for consistent polling
         current_status = self.protom_response
 
-        # ── Submit disarm request ──
-        content = {
-            "operationName": "xSDisarmPanel",
-            "variables": {
+        def status_vars(ref_id: str, counter: int) -> dict[str, Any]:
+            return {
+                "request": command,
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "currentStatus": current_status,
+                "referenceId": ref_id,
+                "counter": counter,
+            }
+
+        raw = await self._submit_and_poll(
+            installation=installation,
+            submit_op="xSDisarmPanel",
+            submit_query=DISARM_PANEL_MUTATION,
+            submit_vars={
                 "request": command,
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "currentStatus": current_status,
             },
-            "query": DISARM_PANEL_MUTATION,
-        }
-        envelope = await self._execute_graphql(
-            content, "xSDisarmPanel", DisarmPanelEnvelope, installation=installation
+            submit_envelope_cls=DisarmPanelEnvelope,
+            submit_data_field="xSDisarmPanel",
+            status_op="DisarmStatus",
+            status_query=DISARM_STATUS_QUERY,
+            status_data_field="xSDisarmStatus",
+            status_vars_builder=status_vars,
         )
-        reference_id = envelope.data.xSDisarmPanel.reference_id
-
-        # ── Poll disarm status ──
-        counter = 0
-
-        async def _check() -> dict[str, Any]:
-            nonlocal counter
-            counter += 1
-            poll_content = {
-                "operationName": "DisarmStatus",
-                "variables": {
-                    "request": command,
-                    "numinst": installation.number,
-                    "panel": installation.panel,
-                    "currentStatus": current_status,
-                    "referenceId": reference_id,
-                    "counter": counter,
-                },
-                "query": DISARM_STATUS_QUERY,
-            }
-            response = await self._execute_raw(
-                poll_content, "DisarmStatus", installation=installation
-            )
-            return self._extract_response_data(response, "xSDisarmStatus")
-
-        raw = await self._poll_operation(_check)
 
         # ── Process result ──
         if raw.get("res") == "ERROR":
@@ -1050,38 +1074,30 @@ class VerisureOwaClient:
         Raises:
             OperationTimeoutError: If polling times out.
         """
-        # ── Submit check alarm request ──
-        content = {
-            "operationName": "CheckAlarm",
-            "variables": {
+
+        def status_vars(ref_id: str, _counter: int) -> dict[str, Any]:
+            return {
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": ref_id,
+                "idService": ALARM_STATUS_SERVICE_ID,
+            }
+
+        raw = await self._submit_and_poll(
+            installation=installation,
+            submit_op="CheckAlarm",
+            submit_query=CHECK_ALARM_QUERY,
+            submit_vars={
                 "numinst": installation.number,
                 "panel": installation.panel,
             },
-            "query": CHECK_ALARM_QUERY,
-        }
-        envelope = await self._execute_graphql(
-            content, "CheckAlarm", CheckAlarmEnvelope, installation=installation
+            submit_envelope_cls=CheckAlarmEnvelope,
+            submit_data_field="xSCheckAlarm",
+            status_op="CheckAlarmStatus",
+            status_query=CHECK_ALARM_STATUS_QUERY,
+            status_data_field="xSCheckAlarmStatus",
+            status_vars_builder=status_vars,
         )
-        reference_id = envelope.data.xSCheckAlarm.reference_id
-
-        # ── Poll check alarm status ──
-        async def _check() -> dict[str, Any]:
-            poll_content = {
-                "operationName": "CheckAlarmStatus",
-                "variables": {
-                    "numinst": installation.number,
-                    "panel": installation.panel,
-                    "referenceId": reference_id,
-                    "idService": ALARM_STATUS_SERVICE_ID,
-                },
-                "query": CHECK_ALARM_STATUS_QUERY,
-            }
-            response = await self._execute_raw(
-                poll_content, "CheckAlarmStatus", installation=installation
-            )
-            return self._extract_response_data(response, "xSCheckAlarmStatus")
-
-        raw = await self._poll_operation(_check)
 
         if raw.get("protomResponse"):
             self.protom_response = raw["protomResponse"]
@@ -1101,8 +1117,7 @@ class VerisureOwaClient:
         envelope = await self._execute_graphql(
             content, "Status", GeneralStatusEnvelope, installation=installation
         )
-        raw_data = envelope.data.xSStatus
-        return SStatus.model_validate(raw_data.model_dump(by_alias=True))
+        return envelope.data.xSStatus
 
     async def _get_exceptions(
         self,
@@ -1342,51 +1357,34 @@ class VerisureOwaClient:
         Raises:
             OperationTimeoutError: If polling times out.
         """
-        # ── Submit change lock mode request ──
-        submit_content = {
-            "operationName": "xSChangeSmartlockMode",
-            "variables": {
+
+        def status_vars(ref_id: str, counter: int) -> dict[str, Any]:
+            return {
+                "counter": counter,
+                "deviceId": device_id,
+                "numinst": installation.number,
+                "panel": installation.panel,
+                "referenceId": ref_id,
+            }
+
+        raw = await self._submit_and_poll(
+            installation=installation,
+            submit_op="xSChangeSmartlockMode",
+            submit_query=CHANGE_LOCK_MODE_MUTATION,
+            submit_vars={
                 "numinst": installation.number,
                 "panel": installation.panel,
                 "deviceType": SMARTLOCK_DEVICE_TYPE,
                 "deviceId": device_id,
                 "lock": lock,
             },
-            "query": CHANGE_LOCK_MODE_MUTATION,
-        }
-        envelope = await self._execute_graphql(
-            submit_content,
-            "xSChangeSmartlockMode",
-            ChangeLockModeEnvelope,
-            installation=installation,
+            submit_envelope_cls=ChangeLockModeEnvelope,
+            submit_data_field="xSChangeSmartlockMode",
+            status_op="xSChangeSmartlockModeStatus",
+            status_query=CHANGE_LOCK_MODE_STATUS_QUERY,
+            status_data_field="xSChangeSmartlockModeStatus",
+            status_vars_builder=status_vars,
         )
-        reference_id = envelope.data.xSChangeSmartlockMode.reference_id
-
-        # ── Poll change lock mode status ──
-        counter = 0
-
-        async def _check() -> dict[str, Any]:
-            nonlocal counter
-            counter += 1
-            poll_content = {
-                "operationName": "xSChangeSmartlockModeStatus",
-                "variables": {
-                    "counter": counter,
-                    "deviceId": device_id,
-                    "numinst": installation.number,
-                    "panel": installation.panel,
-                    "referenceId": reference_id,
-                },
-                "query": CHANGE_LOCK_MODE_STATUS_QUERY,
-            }
-            response = await self._execute_raw(
-                poll_content,
-                "xSChangeSmartlockModeStatus",
-                installation=installation,
-            )
-            return self._extract_response_data(response, "xSChangeSmartlockModeStatus")
-
-        raw = await self._poll_operation(_check)
 
         # ── Process result ──
         if raw.get("protomResponse"):

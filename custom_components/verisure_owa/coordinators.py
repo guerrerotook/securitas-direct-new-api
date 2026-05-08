@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -117,6 +118,31 @@ async def _handle_session_expired(client: VerisureOwaClient) -> None:
         await client.login()
     except VerisureOwaError as err:
         raise ConfigEntryAuthFailed(f"Re-authentication failed: {err}") from err
+
+
+async def _fetch_with_session_recovery[T](
+    client: VerisureOwaClient,
+    fetcher: Callable[[], Awaitable[T]],
+    label: str,
+) -> T:
+    """Run *fetcher* with one-shot session-expired recovery.
+
+    On SessionExpiredError, re-login then retry once. WAFBlockedError and any
+    remaining VerisureOwaError are wrapped as UpdateFailed messages keyed on
+    *label* — the human-readable subject for the failure.
+    """
+    try:
+        return await fetcher()
+    except SessionExpiredError:
+        await _handle_session_expired(client)
+        try:
+            return await fetcher()
+        except VerisureOwaError as err:
+            raise UpdateFailed(f"{label} update failed: {err}") from err
+    except WAFBlockedError as err:
+        raise UpdateFailed(f"WAF blocked {label.lower()} request: {err}") from err
+    except VerisureOwaError as err:
+        raise UpdateFailed(f"{label} update failed: {err}") from err
 
 
 # ── AlarmCoordinator ─────────────────────────────────────────────────────────
@@ -245,38 +271,23 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
             sorted(self._capabilities),
         )
 
+    async def _fetch(self) -> AlarmStatusData:
+        status = await self._queue.submit(
+            self._client.get_general_status,
+            self._installation,
+            priority=ApiQueue.BACKGROUND,
+        )
+        return AlarmStatusData(
+            status=status,
+            protom_response=self._client.protom_response,
+        )
+
     async def _async_update_data(self) -> AlarmStatusData:
         """Fetch alarm status via the API queue."""
         await self._populate_capabilities()
-        try:
-            status = await self._queue.submit(
-                self._client.get_general_status,
-                self._installation,
-                priority=ApiQueue.BACKGROUND,
-            )
-            return AlarmStatusData(
-                status=status,
-                protom_response=self._client.protom_response,
-            )
-        except SessionExpiredError:
-            await _handle_session_expired(self._client)
-            # Retry once after re-login
-            try:
-                status = await self._queue.submit(
-                    self._client.get_general_status,
-                    self._installation,
-                    priority=ApiQueue.BACKGROUND,
-                )
-                return AlarmStatusData(
-                    status=status,
-                    protom_response=self._client.protom_response,
-                )
-            except VerisureOwaError as err:
-                raise UpdateFailed(f"Alarm status update failed: {err}") from err
-        except WAFBlockedError as err:
-            raise UpdateFailed(f"WAF blocked alarm status request: {err}") from err
-        except VerisureOwaError as err:
-            raise UpdateFailed(f"Alarm status update failed: {err}") from err
+        return await _fetch_with_session_recovery(
+            self._client, self._fetch, "Alarm status"
+        )
 
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────
@@ -329,18 +340,9 @@ class SentinelCoordinator(DataUpdateCoordinator[SentinelData]):
 
     async def _async_update_data(self) -> SentinelData:
         """Fetch sentinel data via the API queue."""
-        try:
-            return await self._fetch_data()
-        except SessionExpiredError:
-            await _handle_session_expired(self._client)
-            try:
-                return await self._fetch_data()
-            except VerisureOwaError as err:
-                raise UpdateFailed(f"Sentinel update failed: {err}") from err
-        except WAFBlockedError as err:
-            raise UpdateFailed(f"WAF blocked sentinel request: {err}") from err
-        except VerisureOwaError as err:
-            raise UpdateFailed(f"Sentinel update failed: {err}") from err
+        return await _fetch_with_session_recovery(
+            self._client, self._fetch_data, "Sentinel"
+        )
 
 
 # ── LockCoordinator ──────────────────────────────────────────────────────────
@@ -370,30 +372,17 @@ class LockCoordinator(DataUpdateCoordinator[LockData]):
         self._queue = queue
         self._installation = installation
 
+    async def _fetch(self) -> LockData:
+        modes = await self._queue.submit(
+            self._client.get_lock_modes,
+            self._installation,
+            priority=ApiQueue.BACKGROUND,
+        )
+        return LockData(modes=modes)
+
     async def _async_update_data(self) -> LockData:
         """Fetch lock modes via the API queue."""
-        try:
-            modes = await self._queue.submit(
-                self._client.get_lock_modes,
-                self._installation,
-                priority=ApiQueue.BACKGROUND,
-            )
-            return LockData(modes=modes)
-        except SessionExpiredError:
-            await _handle_session_expired(self._client)
-            try:
-                modes = await self._queue.submit(
-                    self._client.get_lock_modes,
-                    self._installation,
-                    priority=ApiQueue.BACKGROUND,
-                )
-                return LockData(modes=modes)
-            except VerisureOwaError as err:
-                raise UpdateFailed(f"Lock update failed: {err}") from err
-        except WAFBlockedError as err:
-            raise UpdateFailed(f"WAF blocked lock request: {err}") from err
-        except VerisureOwaError as err:
-            raise UpdateFailed(f"Lock update failed: {err}") from err
+        return await _fetch_with_session_recovery(self._client, self._fetch, "Lock")
 
 
 # ── CameraCoordinator ────────────────────────────────────────────────────────

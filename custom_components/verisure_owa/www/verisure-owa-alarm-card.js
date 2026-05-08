@@ -21,6 +21,8 @@
  *   name: My Alarm          # optional — overrides friendly_name
  */
 
+import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
+
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 const FEATURE = {
   ARM_HOME: 1,
@@ -142,12 +144,7 @@ const TRANSLATIONS = {
 // pt-BR falls back to pt
 TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
 
-function _t(lang, key, vars) {
-  const l = TRANSLATIONS[lang] || TRANSLATIONS[lang?.split("-")[0]] || TRANSLATIONS.en;
-  let s = l[key] || TRANSLATIONS.en[key] || key;
-  if (vars) Object.entries(vars).forEach(([k, v]) => { s = s.replace(`{${k}}`, v); });
-  return s;
-}
+const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
 
 // ── Per-state visual config ───────────────────────────────────────────────────
 const STATE_CFG = {
@@ -443,15 +440,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
     }
   }
 
-  // ── HTML escaping — prevents XSS via user-controlled strings ───────────────
-  _esc(str) {
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
 
   // ── UI state helpers ────────────────────────────────────────────────────────
   _resetUI() {
@@ -490,7 +478,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     const lang = this._hass.language || "en";
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) {
-      this.shadowRoot.innerHTML = `<ha-card><div class="missing">${_t(lang, "entity_not_found", { entity: this._esc(this._config.entity) })}</div></ha-card>`;
+      this.shadowRoot.innerHTML = `<ha-card><div class="missing">${_t(lang, "entity_not_found", { entity: escHtml(this._config.entity) })}</div></ha-card>`;
       return;
     }
 
@@ -533,7 +521,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
               <ha-icon icon="${cfg.icon}"></ha-icon>
             </div>
             <div class="title-block">
-              <div class="entity-name">${this._esc(name)}</div>
+              <div class="entity-name">${escHtml(name)}</div>
               <div class="state-pill">${cfg.label}</div>
             </div>
             ${refreshEntity ? `<button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
@@ -604,7 +592,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
   // ── Force arm section ───────────────────────────────────────────────────────
   _renderForceArm(sensors, lang) {
     const list = sensors.length
-      ? `<ul class="sensor-list">${sensors.map(s => `<li>${this._esc(s)}</li>`).join("")}</ul>`
+      ? `<ul class="sensor-list">${sensors.map(s => `<li>${escHtml(s)}</li>`).join("")}</ul>`
       : "";
     return `
       <div class="force-section">
