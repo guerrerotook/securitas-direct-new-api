@@ -5047,3 +5047,70 @@ async def test_arming_exception_fires_both_legacy_and_new_events(hass):
     assert legacy_events[0].data == new_events[0].data
     # _event_id is present in the payload.
     assert "_event_id" in legacy_events[0].data
+
+
+class TestBuildPartialDisarmTarget:
+    """Tests for the partial-disarm target-state builder."""
+
+    def test_disarm_interior_only_keeps_perimeter_and_annex(self):
+        from custom_components.verisure_owa.alarm_control_panel import (
+            build_partial_disarm_target,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        current = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.ON,
+        )
+        target = build_partial_disarm_target(current, ["interior"])
+        assert target.interior == InteriorMode.OFF
+        assert target.perimeter == PerimeterMode.ON
+        assert target.annex == AnnexMode.ON
+
+    def test_disarm_multiple_circuits(self):
+        from custom_components.verisure_owa.alarm_control_panel import (
+            build_partial_disarm_target,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        current = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.ON,
+        )
+        target = build_partial_disarm_target(current, ["interior", "annex"])
+        assert target.interior == InteriorMode.OFF
+        assert target.perimeter == PerimeterMode.ON
+        assert target.annex == AnnexMode.OFF
+
+    def test_disarm_empty_list_returns_unchanged(self):
+        from custom_components.verisure_owa.alarm_control_panel import (
+            build_partial_disarm_target,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        current = AlarmState(
+            interior=InteriorMode.NIGHT,
+            perimeter=PerimeterMode.ON,
+            annex=AnnexMode.OFF,
+        )
+        target = build_partial_disarm_target(current, [])
+        assert target == current
+
+    def test_disarm_unknown_circuit_is_ignored(self):
+        from custom_components.verisure_owa.alarm_control_panel import (
+            build_partial_disarm_target,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode,
+        )
+        current = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.ON,
+        )
+        target = build_partial_disarm_target(current, ["bogus"])
+        assert target == current
