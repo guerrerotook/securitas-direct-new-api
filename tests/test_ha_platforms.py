@@ -1686,3 +1686,101 @@ class TestVerisureLockUnlockDisarmFailure:
             if c.args[:2] == ("persistent_notification", "create")
         ]
         assert notif_calls == []
+
+
+# ===========================================================================
+# TestVerisureLockSetupAndTeardown
+# ===========================================================================
+
+
+class TestVerisureLockSetupAndTeardown:
+    """Tests for async_added_to_hass / async_will_remove_from_hass wiring."""
+
+    async def test_loads_per_lock_options_and_subscribes(self):
+        from custom_components.verisure_owa.const import (
+            CONF_LOCK_AUTOMATIONS,
+        )
+        lock = make_lock(initial_status="2")
+        # Stand in for hass-managed plumbing.
+        unsub = MagicMock()
+        alarm_coord = MagicMock()
+        alarm_coord.async_add_listener = MagicMock(return_value=unsub)
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode,
+        )
+        alarm_coord.alarm_state = AlarmState(
+            interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
+        )
+        panel = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.options = {
+            CONF_LOCK_AUTOMATIONS: {
+                lock._device_id: {
+                    "lock_on_arm": ["interior", "perimeter"],
+                    "unlock_disarms": ["interior"],
+                }
+            }
+        }
+        from custom_components.verisure_owa import DOMAIN
+        lock.hass.data = {
+            DOMAIN: {
+                "entry-1": {
+                    "alarm_coordinator": alarm_coord,
+                    "combined_alarm_panels": {
+                        lock.installation.number: panel,
+                    },
+                    "config_entry": entry,
+                }
+            }
+        }
+        lock._entry_id = "entry-1"  # set by setup helper
+
+        await lock.async_added_to_hass()
+
+        assert lock._lock_on_arm_circuits == ["interior", "perimeter"]
+        assert lock._unlock_disarms_circuits == ["interior"]
+        assert lock._alarm_coordinator is alarm_coord
+        assert lock._combined_alarm_panel is panel
+        alarm_coord.async_add_listener.assert_called_once()
+        # Baseline established (no firing on first call).
+        assert lock._alarm_baseline is not None
+
+    async def test_defaults_to_empty_when_no_options(self):
+        lock = make_lock()
+        alarm_coord = MagicMock()
+        alarm_coord.async_add_listener = MagicMock(return_value=lambda: None)
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode,
+        )
+        alarm_coord.alarm_state = AlarmState(
+            interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF
+        )
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.options = {}
+        from custom_components.verisure_owa import DOMAIN
+        lock.hass.data = {
+            DOMAIN: {
+                "entry-1": {
+                    "alarm_coordinator": alarm_coord,
+                    "combined_alarm_panels": {
+                        lock.installation.number: MagicMock(),
+                    },
+                    "config_entry": entry,
+                }
+            }
+        }
+        lock._entry_id = "entry-1"
+
+        await lock.async_added_to_hass()
+
+        assert lock._lock_on_arm_circuits == []
+        assert lock._unlock_disarms_circuits == []
+
+    async def test_unsubscribe_called_on_removal(self):
+        lock = make_lock()
+        unsub = MagicMock()
+        lock._alarm_listener_unsub = unsub
+        await lock.async_will_remove_from_hass()
+        unsub.assert_called_once()

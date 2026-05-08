@@ -172,6 +172,7 @@ async def _discover_locks(
     hub: VerisureHub,
     installation: Installation,
     entry_data: dict[str, Any],
+    entry: ConfigEntry | None = None,
 ) -> None:
     """Discover lock devices for an installation and add entities."""
     from .lock import (
@@ -222,16 +223,17 @@ async def _discover_locks(
                     installation.number,
                     device_id,
                 )
-            locks.append(
-                VerisureLock(
-                    coordinator=lock_coordinator,
-                    installation=installation,
-                    client=hub,
-                    device_id=device_id,
-                    initial_status=mode.lock_status,
-                    lock_config=lock_config,
-                )
+            new_lock = VerisureLock(
+                coordinator=lock_coordinator,
+                installation=installation,
+                client=hub,
+                device_id=device_id,
+                initial_status=mode.lock_status,
+                lock_config=lock_config,
             )
+            if entry is not None:
+                new_lock._entry_id = entry.entry_id
+            locks.append(new_lock)
         lock_add(locks, False)
 
         # Schedule deferred config retry for locks without config.
@@ -252,4 +254,4 @@ async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> No
     for device in devices:
         installation = device.installation
         await _discover_cameras(hass, client, installation, entry_data, entry)
-        await _discover_locks(hass, client, installation, entry_data)
+        await _discover_locks(hass, client, installation, entry_data, entry)

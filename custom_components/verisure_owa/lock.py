@@ -139,6 +139,7 @@ class VerisureLock(  # type: ignore[override]
         self._config_retry_unsubs: list[Callable[[], None]] = []
 
         # Auto-lock state — populated when added to hass.
+        self._entry_id: str | None = None  # set externally before async_added_to_hass
         self._alarm_coordinator = None  # set by async_added_to_hass
         self._combined_alarm_panel = None  # set by async_added_to_hass
         self._alarm_listener_unsub: Callable[[], None] | None = None
@@ -287,9 +288,39 @@ class VerisureLock(  # type: ignore[override]
                 ),
             )
 
+    async def async_added_to_hass(self) -> None:
+        """Wire up auto-lock listener and load per-lock options."""
+        await super().async_added_to_hass()
+        if self.hass is None or self._entry_id is None:
+            return
+        entry_data = self.hass.data[DOMAIN].get(self._entry_id)
+        if not entry_data:
+            return
+        self._alarm_coordinator = entry_data.get("alarm_coordinator")
+        panels_by_inst = entry_data.get("combined_alarm_panels", {})
+        self._combined_alarm_panel = panels_by_inst.get(self._installation.number)
+        config_entry = entry_data.get("config_entry")
+        if config_entry is not None:
+            options = config_entry.options.get(CONF_LOCK_AUTOMATIONS, {})
+            per_lock = options.get(self._device_id, {})
+            self._lock_on_arm_circuits = list(per_lock.get("lock_on_arm", []))
+            self._unlock_disarms_circuits = list(per_lock.get("unlock_disarms", []))
+        # Establish baseline + subscribe.
+        if self._alarm_coordinator is not None:
+            # Read the current state to seed the baseline (no firing).
+            self._alarm_baseline = _armed_circuits(
+                self._alarm_coordinator.alarm_state
+            )
+            self._alarm_listener_unsub = self._alarm_coordinator.async_add_listener(
+                self._handle_alarm_coordinator_update
+            )
+
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""
         await super().async_will_remove_from_hass()
+        if self._alarm_listener_unsub is not None:
+            self._alarm_listener_unsub()
+            self._alarm_listener_unsub = None
         for unsub in self._config_retry_unsubs:
             unsub()
         self._config_retry_unsubs.clear()
