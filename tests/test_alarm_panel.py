@@ -5172,3 +5172,94 @@ class TestExecutePartialDisarm:
         ok = await panel.execute_partial_disarm([])
         assert ok is True
         panel._execute_transition.assert_not_awaited()
+
+
+# ===========================================================================
+# TestCombinedPanelRegistration
+# ===========================================================================
+
+
+class TestCombinedPanelRegistration:
+    """Tests that async_setup_entry stores the combined panel in entry_data."""
+
+    async def test_combined_panel_stored_in_entry_data(self):
+        """After platform setup, the combined panel must be in entry_data."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            CombinedVerisureOwaAlarmPanel,
+            async_setup_entry,
+        )
+        from custom_components.verisure_owa.hub import VerisureDevice
+        from custom_components.verisure_owa import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import Installation
+        from custom_components.verisure_owa.verisure_owa_api.const import STD_DEFAULTS
+        from custom_components.verisure_owa.coordinators import AlarmCoordinator
+
+        installation = Installation(
+            number="654321",
+            alias="Test Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="1 Test St",
+            city="Barcelona",
+        )
+        device = VerisureDevice(installation)
+
+        client = MagicMock()
+        client.config = {
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "map_custom": STD_DEFAULTS["map_custom"],
+            "map_vacation": STD_DEFAULTS["map_vacation"],
+            "scan_interval": 120,
+        }
+
+        coordinator = MagicMock(spec=AlarmCoordinator)
+        coordinator.has_peri = False
+        coordinator.has_annex = False
+
+        entry_data = {
+            "hub": client,
+            "alarm_coordinator": coordinator,
+            "devices": [device],
+        }
+
+        hass = MagicMock()
+        hass.data = {DOMAIN: {"test-entry-id": entry_data}}
+
+        entry = MagicMock()
+        entry.entry_id = "test-entry-id"
+        entry.options = {}
+
+        added_entities = []
+
+        def capture_entities(entities, update_before_add=False):
+            added_entities.extend(entities)
+
+        async_add_entities = MagicMock(side_effect=capture_entities)
+
+        with (
+            patch.object(
+                CombinedVerisureOwaAlarmPanel,
+                "async_schedule_update_ha_state",
+                MagicMock(),
+            ),
+            patch.object(
+                CombinedVerisureOwaAlarmPanel,
+                "async_write_ha_state",
+                MagicMock(),
+            ),
+            patch(
+                "custom_components.verisure_owa.alarm_control_panel"
+                ".async_get_current_platform",
+                return_value=MagicMock(),
+            ),
+        ):
+            await async_setup_entry(hass, entry, async_add_entities)
+
+        assert "combined_alarm_panel" in entry_data, (
+            "entry_data missing 'combined_alarm_panel' key after async_setup_entry"
+        )
+        assert isinstance(entry_data["combined_alarm_panel"], CombinedVerisureOwaAlarmPanel)
