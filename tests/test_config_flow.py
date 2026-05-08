@@ -938,6 +938,98 @@ async def test_options_get_falls_back_to_data(hass):
 
 
 # ===================================================================
+# TestInitialFlowPanelToggles
+#
+# When peri/annex is detected during the initial config flow, the
+# user should be able to enable the corresponding sub-panels right
+# there — without having to dig through Configure after CREATE_ENTRY.
+# ===================================================================
+
+
+def _hub_with_peri_capability():
+    """Mock hub that returns capabilities including PERI."""
+    mock_hub = _hub_factory()
+    mock_hub.client.get_supported_commands = MagicMock(return_value=frozenset({"PERI"}))
+    return mock_hub
+
+
+def _initial_options_form_keys(result) -> set[str]:
+    """Return the unwrapped key names of the rendered initial options form."""
+    keys: set[str] = set()
+    for key in result["data_schema"].schema:
+        name = getattr(key, "schema", key)
+        keys.add(name)
+    return keys
+
+
+async def test_initial_options_step_shows_perimeter_toggle_when_peri_detected(
+    hass,
+):
+    """The initial flow's options page must render the panel-enable toggles
+    when the underlying installation has the corresponding capability — same
+    surface as the post-setup Configure dialog.
+    """
+    mock_hub = _hub_with_peri_capability()
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "options"
+    keys = _initial_options_form_keys(result)
+    assert CONF_ENABLE_PERIMETER_PANEL in keys
+    assert CONF_ENABLE_INTERIOR_PANEL in keys
+
+
+async def test_initial_options_step_omits_toggles_when_no_capability(hass):
+    """Without peri/annex detected, the initial flow's options page must
+    NOT render the panel-enable toggles (matches Configure dialog behaviour).
+    """
+    mock_hub = _hub_factory()  # no PERI in capabilities
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "options"
+    keys = _initial_options_form_keys(result)
+    assert CONF_ENABLE_PERIMETER_PANEL not in keys
+    assert CONF_ENABLE_INTERIOR_PANEL not in keys
+    assert CONF_ENABLE_ANNEX_PANEL not in keys
+
+
+async def test_initial_flow_persists_panel_toggles_to_entry_options(hass):
+    """When user enables the panel toggles during initial setup, the
+    created entry's options dict must carry them — so the post-setup
+    OptionsFlow opens with them already enabled rather than defaulting
+    back to off.
+    """
+    mock_hub = _hub_with_peri_capability()
+
+    options_with_toggles = {
+        **USER_INPUT_OPTIONS,
+        CONF_ENABLE_PERIMETER_PANEL: True,
+        CONF_ENABLE_INTERIOR_PANEL: True,
+    }
+
+    result = await _complete_full_flow(
+        hass, mock_hub, options=options_with_toggles
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_ENABLE_PERIMETER_PANEL] is True
+    assert result["options"][CONF_ENABLE_INTERIOR_PANEL] is True
+    # And they should NOT pollute entry.data, where the OptionsFlow
+    # doesn't expect to find them.
+    assert CONF_ENABLE_PERIMETER_PANEL not in result["data"]
+    assert CONF_ENABLE_INTERIOR_PANEL not in result["data"]
+
+
+# ===================================================================
 # TestFlowCapabilitiesPublishResolve
 #
 # Race fix: when async_setup_entry hasn't yet stored the alarm
