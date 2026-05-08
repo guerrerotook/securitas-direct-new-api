@@ -1898,7 +1898,7 @@ def _make_entry_with_locks(
     )
 
     circuits = enabled_circuits if enabled_circuits is not None else {"interior"}
-    options = entry_options or {}
+    options = dict(entry_options) if entry_options else {}
     # Map circuit names to option keys
     options.setdefault(CONF_ENABLE_INTERIOR_PANEL, "interior" in circuits)
     options.setdefault(CONF_ENABLE_PERIMETER_PANEL, "perimeter" in circuits)
