@@ -135,7 +135,9 @@ class HttpTransport:
                 # could send Retry-After: 86400 and freeze the coordinator
                 # for a day. A 60s ceiling lets the rate limiter recover
                 # gracefully without blocking the event loop indefinitely.
-                delay = min(delay, _RETRY_AFTER_MAX_SECONDS)
+                # Negative values from a hostile server would crash
+                # asyncio.sleep; floor to 0 (retry immediately).
+                delay = max(0, min(delay, _RETRY_AFTER_MAX_SECONDS))
                 _LOGGER.warning("HTTP 403, retrying in %ds", delay)
                 await asyncio.sleep(delay)
                 continue
