@@ -115,3 +115,22 @@ async def test_shim_notification_lists_deprecated_surfaces(hass: HomeAssistant):
     assert "verisure_owa_arming_exception" in body
     assert "/verisure_owa_panel" in body
     assert "custom:verisure-owa-alarm-card" in body
+
+
+async def test_shim_migrates_via_ha_loader(
+    hass: HomeAssistant, enable_custom_integrations: None
+):
+    """Regression: migration runs via HA's full loader path (requires config_flow.py)."""
+    legacy = MockConfigEntry(
+        domain="securitas",
+        data={"username": "u@x", "password": "p", "country": "ES"},
+        title="Home",
+        unique_id="u@x:100001",
+        version=3,
+    )
+    legacy.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(legacy.entry_id)
+    await hass.async_block_till_done()
+
+    assert len(hass.config_entries.async_entries("verisure_owa")) == 1
