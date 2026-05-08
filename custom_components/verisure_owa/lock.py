@@ -14,6 +14,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureHub
+from .const import (
+    CONF_LOCK_AUTOMATIONS,
+    CIRCUIT_INTERIOR,
+    CIRCUIT_PERIMETER,
+    CIRCUIT_ANNEX,
+    LOCK_CIRCUITS,
+)
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity
 from .verisure_owa_api import (
@@ -23,11 +30,29 @@ from .verisure_owa_api import (
 )
 from .api_queue import ApiQueue
 from .verisure_owa_api.client import SMARTLOCK_DEVICE_ID
+from .verisure_owa_api.models import (
+    AlarmState,
+    InteriorMode,
+    PerimeterMode,
+    AnnexMode,
+)
 
 if TYPE_CHECKING:
     from .verisure_owa_api import SmartLockMode
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _armed_circuits(state: AlarmState) -> set[str]:
+    """Return the set of circuit labels currently armed (mode != OFF)."""
+    armed: set[str] = set()
+    if state.interior != InteriorMode.OFF:
+        armed.add(CIRCUIT_INTERIOR)
+    if state.perimeter != PerimeterMode.OFF:
+        armed.add(CIRCUIT_PERIMETER)
+    if state.annex != AnnexMode.OFF:
+        armed.add(CIRCUIT_ANNEX)
+    return armed
 
 # Service request name that identifies a smart-lock capability
 DOORLOCK_SERVICE = "DOORLOCK"
@@ -113,6 +138,13 @@ class VerisureLock(  # type: ignore[override]
         self._operation_in_progress: bool = False
         self._config_retry_unsubs: list[Callable[[], None]] = []
 
+        # Auto-lock state — populated when added to hass.
+        self._alarm_coordinator = None  # set by async_added_to_hass
+        self._alarm_listener_unsub: Callable[[], None] | None = None
+        self._alarm_baseline: set[str] | None = None  # armed circuits at last update
+        self._lock_on_arm_circuits: list[str] = []
+        self._unlock_disarms_circuits: list[str] = []
+
     # -- Properties ----------------------------------------------------------
 
     @property
@@ -177,6 +209,24 @@ class VerisureLock(  # type: ignore[override]
             self._state = mode.lock_status
 
         self.async_write_ha_state()
+
+    @callback
+    def _handle_alarm_coordinator_update(self) -> None:
+        """React to alarm-coordinator updates.
+
+        Establishes a baseline on first call (no firing). On subsequent
+        calls, detects disarmed→armed transitions for circuits in
+        ``self._lock_on_arm_circuits`` and fires the lock if needed.
+        """
+        if self._alarm_coordinator is None:
+            return
+        new_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
+        prev = self._alarm_baseline
+        self._alarm_baseline = new_armed
+        if prev is None:
+            # First update — establish baseline only.
+            return
+        # Transition detection deferred to Task 6.
 
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from Home Assistant."""

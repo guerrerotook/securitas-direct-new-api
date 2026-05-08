@@ -1262,3 +1262,58 @@ class TestHassNoneGuards:
 
         assert lock._state == "1"
         lock.async_schedule_update_ha_state.assert_not_called()  # type: ignore[attr-defined]
+
+
+class TestVerisureLockAlarmListener:
+    """Tests for the alarm-coordinator transition listener."""
+
+    def _make_alarm_coord(self, state):
+        coord = MagicMock()
+        coord.alarm_state = state
+        coord.async_add_listener = MagicMock(return_value=lambda: None)
+        return coord
+
+    def _state(self, *, i="OFF", p="OFF", a="OFF"):
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState, InteriorMode, PerimeterMode, AnnexMode,
+        )
+        return AlarmState(
+            interior=getattr(InteriorMode, i),
+            perimeter=getattr(PerimeterMode, p),
+            annex=getattr(AnnexMode, a),
+        )
+
+    async def test_baseline_recorded_on_first_update_and_no_action_taken(self):
+        # Lock starts up with alarm already armed; no auto-lock should fire.
+        lock = make_lock(initial_status="1")  # currently unlocked
+        alarm_coord = self._make_alarm_coord(self._state(i="TOTAL"))
+        lock._alarm_coordinator = alarm_coord
+        lock._alarm_baseline = None  # explicit
+        lock._lock_on_arm_circuits = ["interior"]
+
+        # Trigger first update.
+        lock._handle_alarm_coordinator_update()
+
+        # Baseline must be recorded as currently TOTAL.
+        from custom_components.verisure_owa.const import CIRCUIT_INTERIOR
+        assert CIRCUIT_INTERIOR in (lock._alarm_baseline or set())
+        # And no lock action was attempted.
+        # (verified more thoroughly in Task 6; here we just check no crash and
+        # state unchanged.)
+        assert lock._state == "1"
+
+    def test_armed_circuits_helper_excludes_off_modes(self):
+        from custom_components.verisure_owa.lock import _armed_circuits
+        from custom_components.verisure_owa.const import (
+            CIRCUIT_INTERIOR, CIRCUIT_PERIMETER, CIRCUIT_ANNEX,
+        )
+        s = self._state(i="OFF", p="ON", a="OFF")
+        assert _armed_circuits(s) == {CIRCUIT_PERIMETER}
+        s = self._state(i="DAY", p="OFF", a="ON")
+        assert _armed_circuits(s) == {CIRCUIT_INTERIOR, CIRCUIT_ANNEX}
+        s = self._state(i="TOTAL", p="ON", a="ON")
+        assert _armed_circuits(s) == {
+            CIRCUIT_INTERIOR, CIRCUIT_PERIMETER, CIRCUIT_ANNEX
+        }
+        s = self._state()  # all OFF
+        assert _armed_circuits(s) == set()
