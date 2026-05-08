@@ -4,7 +4,7 @@ Re-exports every public envelope so existing call sites that import from
 ``verisure_owa_api.responses`` keep working after the per-domain split.
 """
 
-from ._base import _OperationResult, _ResMsg, _ResMsgRef, PanelError
+from ._base import PanelError
 from .activity import ActivityEnvelope
 from .alarm import (
     ArmPanelEnvelope,
@@ -74,7 +74,4 @@ __all__ = [
     "SmartlockConfigEnvelope",
     "ThumbnailEnvelope",
     "ValidateDeviceEnvelope",
-    "_OperationResult",
-    "_ResMsg",
-    "_ResMsgRef",
 ]
