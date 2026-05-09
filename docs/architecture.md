@@ -9,28 +9,32 @@ The integration has three layers:
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Home Assistant Platform Layer                                       │
-│  alarm_control_panel.py  sensor.py  binary_sensor.py                 │
+│  alarm_control_panel/  sensor.py  binary_sensor.py                   │
 │  lock.py  button.py  camera.py                                       │
 │  entity.py  (VerisureEntity base class)                              │
 │  coordinators.py  (DataUpdateCoordinators)                           │
+│  events.py  (Activity log → bus event injection + dedup)             │
+│  discovery.py  (Background camera + lock discovery)                  │
+│  card_resources.py  (Lovelace static-path + resource registration)   │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Integration Hub Layer                                               │
 │  __init__.py  (setup functions)                                      │
 │  hub.py  (VerisureHub + VerisureDevice)                              │
 │  config_flow.py  (ConfigFlow + OptionsFlow + ReauthFlow)             │
 │  api_queue.py  (Priority-based rate limiting)                        │
-│  log_filter.py  (SensitiveDataFilter)                                │
+│  log_filter.py  (SensitiveDataFilter + TransientCoordinatorErrorFilter)│
+│  migrate.py  (v3→v4 + securitas→verisure_owa rebrand migration)      │
 ├──────────────────────────────────────────────────────────────────────┤
 │  API Client Layer                                                    │
 │  verisure_owa_api/                                                   │
-│  client.py  (VerisureOwaClient — auth, typed GraphQL, polling)       │
+│  client/  (VerisureOwaClient — per-domain mixins on a base)          │
 │  http_transport.py  (HttpTransport — raw HTTP with retries)          │
-│  graphql_queries.py  command_resolver.py  domains.py                 │
-│  models.py  responses.py  const.py  exceptions.py                    │
+│  graphql_queries.py  command_resolver.py  domains.py  capabilities.py│
+│  models/  responses/  const.py  exceptions.py                        │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client.py`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Four `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, and cameras. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
+Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client/`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). Operations are grouped into per-domain mixins (`_auth`, `_alarm`, `_lock`, `_camera`, `_sentinel`, `_installation`) that the public `VerisureOwaClient` class composes. The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Four `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, and cameras. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
 
 ## API client layer
 
@@ -51,11 +55,13 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 
 **Response log sanitization:** Before logging API responses at DEBUG level, `_sanitize_response_for_log()` replaces large fields (`hours`, `image`) with placeholder values (`["..."]` for lists, `"..."` for strings). This prevents base64-encoded camera images and hourly sensor arrays from flooding the debug log.
 
-### VerisureOwaClient (`client.py`)
+### VerisureOwaClient (`client/`)
 
-A standalone class (not inheritance-based) that composes an `HttpTransport` for the raw HTTP layer. It implements all business-level API operations: login, refresh, 2FA validation, arm/disarm, status checks, sentinel data, lock operations, camera operations, and service discovery. All GraphQL query and mutation strings are defined in `graphql_queries.py` and imported here.
+A composed class implementing all business-level API operations: login, refresh, 2FA validation, arm/disarm, status checks, sentinel data, lock operations, camera operations, and service discovery. All GraphQL query and mutation strings are defined in `graphql_queries.py` and imported here.
 
-**Architecture:** `VerisureOwaClient` takes an `HttpTransport` via its constructor (composition, not inheritance). This separation means the transport layer can be mocked independently of business logic in tests.
+The class is split across per-domain mixins under the `client/` package — `_base.py` carries the transport composition, GraphQL execution, auth lifecycle, polling, and sanitization; `_auth.py`, `_alarm.py`, `_lock.py`, `_camera.py`, `_sentinel.py`, `_installation.py` each contribute their domain's operations as mixins. `VerisureOwaClient` itself lives in `client/__init__.py` and inherits from the mixins. The split is purely organisational; consumers import `VerisureOwaClient` exactly as before.
+
+**Architecture:** `VerisureOwaClient` takes an `HttpTransport` via its constructor (composition, not inheritance, despite the mixin layout — the transport is held as `self._transport`). This separation means the transport layer can be mocked independently of business logic in tests.
 
 **Typed GraphQL execution:** `_execute_graphql()` is the central entry point for all installation-scoped operations. It:
 1. Calls `_ensure_auth()` (skipped for auth operations like `mkLoginToken`, `RefreshLogin`, `mkSendOTP`, `mkValidateDevice`)
@@ -99,17 +105,19 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Verisure mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
-### Response envelopes (`responses.py`)
+### Response envelopes (`responses/`)
 
-Every GraphQL operation has a typed Pydantic `BaseModel` envelope in `responses.py` that mirrors the exact shape of the API response. For example, `ArmPanelEnvelope` wraps `{"data": {"xSArmPanel": {res, msg, referenceId}}}`. This provides compile-time type safety and runtime validation — if the API response shape changes unexpectedly, `model_validate()` raises `ValidationError` which `_execute_graphql()` converts to `VerisureOwaError`.
+Every GraphQL operation has a typed Pydantic `BaseModel` envelope under the `responses/` package that mirrors the exact shape of the API response. For example, `ArmPanelEnvelope` wraps `{"data": {"xSArmPanel": {res, msg, referenceId}}}`. This provides compile-time type safety and runtime validation — if the API response shape changes unexpectedly, `model_validate()` raises `ValidationError` which `_execute_graphql()` converts to `VerisureOwaError`.
+
+The package is split per domain (`alarm.py`, `lock.py`, `camera.py`, `sentinel.py`, `auth.py`, `installation.py`, plus shared `_common.py` for `_ResMsg`, `_ResMsgRef`, `_OperationResult`, `_GeneralStatus`). All envelopes are re-exported from `responses/__init__.py`.
 
 Envelopes use a `_NullSafeBase` base class that coerces `None` to `""` for any `str` field with a default. This is necessary because the Verisure API returns `null` for string fields during polling or when fields are not applicable, and Pydantic rejects `None` for `str` fields even with a default.
 
 Shared inner models (`_ResMsg`, `_ResMsgRef`, `_OperationResult`, `_GeneralStatus`) are used across multiple envelopes to avoid duplication. `PanelError` carries force-arm context (allowForcing, referenceId, suid).
 
-### Domain models (`models.py`)
+### Domain models (`models/`)
 
-Pydantic models for API domain objects. All domain models inherit from `_NullSafeBase` (same null-coercion logic as response envelopes). The most important ones:
+Pydantic models for API domain objects, split per domain (`alarm.py`, `lock.py`, `camera.py`, `sentinel.py`, `installation.py`, `services.py`) and re-exported from `models/__init__.py`. All domain models inherit from `_NullSafeBase` (same null-coercion logic as response envelopes). The most important ones:
 
 - `Installation` — Represents a physical Verisure installation (number, alias, panel type, address, capabilities JWT, `alarm_partitions` list from services response). Uses `validation_alias` for API field name mapping (e.g. `numinst` -> `number`).
 - `OperationStatus` — Result of an alarm or lock operation (arm, disarm, check) with `protomResponse` (the single-letter state code) and `protomResponseData`
@@ -369,9 +377,13 @@ The module also provides `verisure_device_info()` and `camera_device_info()` hel
 
 ## Entity platforms
 
-### Alarm control panel (`alarm_control_panel.py`)
+### Alarm control panel (`alarm_control_panel/`)
 
-The main entity. One `CombinedVerisureOwaAlarmPanel` per installation. Inherits from `CoordinatorEntity[AlarmCoordinator]` and `AlarmControlPanelEntity`. The entity starts with `_state = None` (renders as "unknown" in HA) until the first successful coordinator update populates the real alarm state. This avoids showing a false "disarmed" state at startup.
+The alarm-panel platform is split into a package: `_base.py` carries `BaseVerisureOwaAlarmPanel` (state mapping, transition orchestration, force-arm context, PIN, WAF tracking) and the shared `build_partial_disarm_target` helper; `_panels.py` defines the four concrete entity classes (`CombinedVerisureOwaAlarmPanel` and the three axis sub-panels via `_AxisSubPanelMixin`); `alarm_control_panel/__init__.py` is the platform's `async_setup_entry` plus the entity-service registrations. All four classes are re-exported from the package root for backwards compatibility.
+
+The main entity is `CombinedVerisureOwaAlarmPanel` — one per installation. Inherits from `CoordinatorEntity[AlarmCoordinator]` and `AlarmControlPanelEntity`. The entity starts with `_state = None` (renders as "unknown" in HA) until the first successful coordinator update populates the real alarm state. This avoids showing a false "disarmed" state at startup.
+
+On `async_setup_entry`, the combined panel is stored in `entry_data["combined_alarm_panels"][installation_number]` and each enabled sub-panel is stored in `entry_data["axis_alarm_panels"][installation_number][axis]`. The lock platform reads these to drive `execute_partial_disarm` (auto-disarm before unlock).
 
 **Coordinator integration:** The `_handle_coordinator_update()` callback skips updates while `_operation_in_progress` is True (during arm/disarm) to prevent stale API responses from overwriting the transitional state. On each coordinator update, `_clear_force_context()` is called and `_update_from_coordinator()` maps the `SStatus.status` proto code to an HA state.
 
@@ -649,6 +661,16 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
 
 **Phantom entries:** Some lock models (e.g. SmartLock Tácito) return duplicate `smartlockInfo` entries in the `xSGetLockCurrentMode` response — a phantom entry with `lockStatus: null` and `statusTimestamp: "0"` alongside the real entry (see `docs/graphql_locks/smartlocktacito.json`). `get_lock_current_mode()` skips entries with `lockStatus: null` to prevent phantom lock entities and broken status detection.
 
+**Lock automations** (`CONF_LOCK_AUTOMATIONS`): per-lock, per-circuit booleans persisted as `entry.options[CONF_LOCK_AUTOMATIONS] = {device_id: {"lock_on_arm": [circuits...], "unlock_disarms": [circuits...]}}`. Each `VerisureLock` reads its own slice in `async_added_to_hass` into `_lock_on_arm_circuits` / `_unlock_disarms_circuits`.
+
+- **Auto-lock on arm**: the lock subscribes to the `AlarmCoordinator` via `async_add_listener`. On the first listener call it captures the currently-armed circuit set as a baseline (no firing). On each subsequent call it diffs the new armed set against the baseline; if any circuit in `_lock_on_arm_circuits` newly transitioned `disarmed → armed`, the lock fires `_auto_lock()` as a background task. Idempotency: skips if already locked, locking, or mid-operation. Failures fire a persistent notification with a stable per-lock ID so consecutive failures replace rather than stack.
+
+- **Auto-disarm before unlock**: HA-initiated `async_unlock` / `async_open` runs `_dispatch_unlock_disarm()` and `_change_lock_mode(unlock)` concurrently via `asyncio.gather`. The disarm reads `_unlock_disarms_circuits`, intersects with the currently-armed circuit set, and if non-empty calls `combined_alarm_panel.execute_partial_disarm(targets)`. That method drives the same optimistic-state lifecycle as a user-initiated disarm on the combined panel **and on every registered axis sub-panel** for the listed circuits (DISARMING during the transition, post-result state on success, rollback on failure), then triggers a coordinator refresh. Both the lock and any affected sub-panels animate immediately. After both branches complete, an "Unlock failed" notification fires only if the disarm succeeded but the lock state stayed LOCKED.
+
+The `axis_alarm_panels` registration in `entry_data` is what lets `execute_partial_disarm` find the affected sub-panels without leaking lock-platform knowledge into the alarm package. Only HA-initiated unlocks reach into the alarm — Verisure-app or physical-lock unlocks never trigger auto-disarm because they don't go through the entity.
+
+`async_update_options` reloads the config entry when `CONF_LOCK_AUTOMATIONS` changes (alongside the other listed keys) so each lock entity re-reads its slice in `async_added_to_hass`.
+
 **Lock features:** Lock features are fetched via `xSGetSmartlockConfig` and exposed as `extra_state_attributes`, including `holdBackLatchTime` (latch hold-back for door opening). When `holdBackLatchTime > 0`, the entity advertises `LockEntityFeature.OPEN` so users can trigger door unlatching from the UI even when the lock is already unlocked. The `async_open()` method sends the same `change_lock_mode(lock=False)` command — there is no separate API mutation for opening. Note: `is_open` always returns `False` because the API does not distinguish between "unlocked" and "open" (latch held back) — status `"1"` means unlocked. Reporting `is_open=True` would cause HA to grey out the "Open" button indefinitely since the API never transitions away from `"1"` after an unlock.
 
 ### Camera (`camera.py`)
@@ -730,16 +752,29 @@ Step 1 (user): Country (auto-detected from HA), username, password
 Step 2 (phone_list, if 2FA): Pick which phone to send OTP to
 Step 3 (otp_challenge, if 2FA): Enter the SMS code
   → Handles: invalid code, expired code (auto-resends), send failure
-  → Translated error messages in 6 languages (en, es, fr, it, pt, pt-BR)
+  → Translated error messages in 7 languages (en, es, fr, it, pt, pt-BR, ca)
 → finish_setup(): Login, list installations, get_services per installation
 Step 4 (select_installation, if multiple): Pick which installation to configure
-  → Auto-detection of perimeter support from service attributes (PERI attribute)
+  → Auto-detection of perimeter / annex from service attributes + JWT capabilities + alarm partitions
   → get_services uses FOREGROUND priority to avoid blocking behind background queue traffic
-Step 5 (options): PIN, code-required-to-arm, notify service
+  → Capabilities are published into hass.data so the options dialog opened
+    immediately after entry creation can read them before the coordinator
+    is stored under entry.entry_id (the published-cache fallback)
+Step 5 (options): Three sections + collapsed Advanced
+  - PIN code for disarming (PIN, require-PIN-to-arm)
+  - Force-arm notifications (notify service, built-in notifications toggle)
+  - Additional sub-panels (capability-gated Interior / Perimeter / Annex toggles —
+    only shown when peri or annex is detected; Interior offered as soon as
+    any sibling axis is supported)
+  - Advanced (collapsed): scan interval, delay between API requests
   → Title shows installation name ("Options for {installation_name}")
-  → Advanced section (collapsed): scan interval, delay between API requests
+  → Section payloads are flattened back to flat top-level keys before storage
 Step 6 (mappings): Map HA alarm buttons to Verisure OWA states
   Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
+  Description trailing sentence ("The optional ... panels do not use these
+  mappings.") is rendered conditionally via {subpanels_note} placeholder,
+  resolved server-side from translations into one of three pre-translated
+  variants (peri-only, annex-only, both); empty when neither axis exists.
 → Create config entry per installation
 ```
 
@@ -751,24 +786,30 @@ Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactor
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
-Step 1 (init): General settings
-  - PIN code (optional, for HA-side validation only)
-  - Code required to arm (bool)
-  - Notify service for arming exceptions
-  - Advanced section (collapsed): scan interval, delay between API requests
+Step 1 (init): General settings — same three-section + Advanced layout as
+  the initial flow's Step 5 above (PIN section, Force-arm notifications
+  section, capability-gated Sub-panels section, collapsed Advanced section).
+  Sub-panel toggles are gated on detected capabilities; the Interior toggle
+  is offered whenever any sibling axis is supported.
 
-Step 2 (mappings): Alarm state mappings
-  - Map Home button → Verisure OWA state
-  - Map Away button → Verisure OWA state
-  - Map Night button → Verisure OWA state
-  - Map Vacation button → Verisure OWA state
-  - Map Custom Bypass button → Verisure OWA state
-  Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
+Step 2 (mappings): Alarm state mappings — same five mapping dropdowns as
+  initial flow, with the same conditional {subpanels_note} placeholder.
+
+Step 3 (lock_automations): Per-lock automation settings (skipped entirely
+  when no locks are registered, going straight to CREATE_ENTRY).
+  Renders one section per discovered lock (section key lock__<device_id>,
+  section name substituted via {lock_alias_<did>} description placeholder).
+  Inside each section, two groups of per-circuit boolean checkboxes:
+  - lock_on_arm__<circuit> for each enabled circuit (Interior/Perimeter/Annex)
+  - unlock_disarms__<circuit> for each enabled circuit
+  On submit the booleans are compressed to circuit-name lists and stored
+  as entry.options[CONF_LOCK_AUTOMATIONS][device_id]. Disabled circuits are
+  omitted from the schema entirely.
 ```
 
-The Advanced section uses HA's `data_entry_flow.section()` with `collapsed: True` to hide rarely-changed timing fields. Section data is flattened back to top-level keys on submission for storage compatibility.
+All sections use HA's `data_entry_flow.section()` API. PIN, Force-arm notifications, and Sub-panels are open by default; Advanced is collapsed. Section payloads are flattened back to top-level keys via `_flatten_sections()` before storage so the persisted shape stays flat.
 
-Changing options triggers `async_update_options()`, which merges the new values into the config entry and reloads the integration.
+Changing options triggers `async_update_options()`, which compares each tracked option key (PIN, mappings, sub-panel toggles, lock automations, scan interval, etc.) against `entry.data` and reloads the integration if any has changed. The reload re-runs every entity's `async_added_to_hass`, which is how locks pick up their refreshed `_lock_on_arm_circuits` / `_unlock_disarms_circuits` slices.
 
 ## Key data flows
 
@@ -1033,4 +1074,4 @@ Three parallel jobs run on every PR and push to main:
 | `verisure_owa_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
 | `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Legacy filename `securitas-alarm-card.js` is a byte-identical copy retained as a deprecation shim served at the legacy `/securitas_panel/` URL prefix; both removed in v6.) |
 | `www/verisure-owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
-| `www/verisure-owa-events-card.js` | — | Custom Lovelace events card showing recent alarm-panel activity. (Same legacy-copy treatment.) |
+| `www/verisure-owa-activity-log-card.js` | — | Custom Lovelace **Activity Log** card showing recent alarm-panel activity. |
