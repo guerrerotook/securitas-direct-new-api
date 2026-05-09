@@ -389,7 +389,7 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
 
 **State mapping system:** During `__init__`, two dictionaries are built from the user's configuration:
 
-- `_command_map`: HA state -> API command string. E.g. `ARMED_AWAY` -> `"ARM1"`. Only includes states the user has mapped (not `NOT_USED`).
+- `_command_map`: HA state -> API command string. E.g. `ARMED_AWAY` -> `"ARM1"`. Only includes states the user has mapped (cleared/blank fields are skipped, as is the legacy `NOT_USED` value still found on pre-v5 saved configs). Annex-bearing target states get an empty placeholder — actual transitions go through `CommandResolver` (`ARMANNEX1` / `DARMANNEX1`), and `_command_map` is only consulted for `supported_features` membership.
 - `_status_map`: Protocol response code -> HA state. E.g. `"T"` -> `ARMED_AWAY`. Built by reverse-looking up `PROTO_TO_STATE` for each configured Verisure OWA state.
 
 **`supported_features`** is derived from `_command_map` — only buttons with a configured mapping are exposed.
@@ -770,7 +770,12 @@ Step 5 (options): Three sections + collapsed Advanced
   → Title shows installation name ("Options for {installation_name}")
   → Section payloads are flattened back to flat top-level keys before storage
 Step 6 (mappings): Map HA alarm buttons to Verisure OWA states
-  Available options change based on perimeter support (STD_OPTIONS vs PERI_OPTIONS)
+  Available options come from `dropdown_options(has_peri, has_annex)` —
+  the four interior modes always, plus peri-bearing variants when has_peri,
+  annex-bearing variants when has_annex, and peri+annex combinations when
+  both are set. Mapping fields use `description={"suggested_value": ...}`
+  rather than `default=`, so a cleared field persists as a missing key
+  ("not used") instead of being re-filled with the default on submit.
   Description trailing sentence ("The optional ... panels do not use these
   mappings.") is rendered conditionally via {subpanels_note} placeholder,
   resolved server-side from translations into one of three pre-translated

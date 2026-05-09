@@ -220,6 +220,15 @@ def make_config_entry_data(
     stored in entry data — capability detection is now runtime-only.
     """
     defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
+
+    def _mapping(key: str, override: str | None) -> dict[str, str]:
+        """Build {key: value} from explicit override → default → omit."""
+        if override is not None:
+            return {key: override}
+        if key in defaults:
+            return {key: defaults[key]}
+        return {}
+
     return {
         CONF_USERNAME: username,
         CONF_PASSWORD: password,
@@ -231,32 +240,11 @@ def make_config_entry_data(
         CONF_DEVICE_ID: device_id,
         CONF_UNIQUE_ID: unique_id,
         CONF_DEVICE_INDIGITALL: id_device_indigitall,
-        CONF_MAP_HOME: map_home if map_home is not None else defaults[CONF_MAP_HOME],
-        CONF_MAP_AWAY: map_away if map_away is not None else defaults[CONF_MAP_AWAY],
-        CONF_MAP_NIGHT: map_night
-        if map_night is not None
-        else defaults[CONF_MAP_NIGHT],
-        # Custom + Vacation mappings are blank by default (only present when
-        # the saved config explicitly sets them) — matching the post-v5
-        # behaviour where unmapped buttons render as cleared fields.
-        **(
-            {CONF_MAP_CUSTOM: map_custom}
-            if map_custom is not None
-            else (
-                {CONF_MAP_CUSTOM: defaults[CONF_MAP_CUSTOM]}
-                if CONF_MAP_CUSTOM in defaults
-                else {}
-            )
-        ),
-        **(
-            {CONF_MAP_VACATION: map_vacation}
-            if map_vacation is not None
-            else (
-                {CONF_MAP_VACATION: defaults[CONF_MAP_VACATION]}
-                if CONF_MAP_VACATION in defaults
-                else {}
-            )
-        ),
+        **_mapping(CONF_MAP_HOME, map_home),
+        **_mapping(CONF_MAP_AWAY, map_away),
+        **_mapping(CONF_MAP_NIGHT, map_night),
+        **_mapping(CONF_MAP_CUSTOM, map_custom),
+        **_mapping(CONF_MAP_VACATION, map_vacation),
         CONF_NOTIFY_GROUP: notify_group,
         CONF_FORCE_ARM_NOTIFICATIONS: force_arm_notifications,
     }
