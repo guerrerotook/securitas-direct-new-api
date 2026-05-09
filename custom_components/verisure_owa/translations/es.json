@@ -53,15 +53,6 @@
             "options": {
                 "title": "Opciones para {installation_name}",
                 "description": "Configurar opciones de alarma.",
-                "data": {
-                    "code": "Código PIN (dejar vacío si no hay PIN)",
-                    "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
-                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
-                    "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)",
-                    "enable_interior_panel": "Activar panel de control solo Interior",
-                    "enable_perimeter_panel": "Activar panel de control solo Perimetral",
-                    "enable_annex_panel": "Activar panel de control solo Anexo"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avanzado",
@@ -69,18 +60,45 @@
                             "scan_interval": "Intervalo de actualización en segundos (0 desactiva las actualizaciones automáticas)",
                             "delay_check_operation": "Retardo entre solicitudes de API (seg)"
                         }
+                    },
+                    "pin": {
+                        "name": "Código PIN para desarmar",
+                        "data": {
+                            "code": "Código PIN (dejar vacío si no hay PIN)",
+                            "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notificaciones de armado forzado",
+                        "data": {
+                            "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
+                            "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Subpaneles adicionales",
+                        "data": {
+                            "enable_perimeter_panel": "Activar panel de control solo Perimetral",
+                            "enable_annex_panel": "Activar panel de control solo Anexo",
+                            "enable_interior_panel": "Activar panel de control solo Interior"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Asignación de estados de alarma",
-                "description": "Estas asignaciones se aplican solo al panel principal. Asigna cada acción de alarma de Home Assistant a un modo de alarma Verisure; selecciona 'No usado' para desactivar un botón. Los paneles opcionales solo Interior, solo Perimetral y solo Anexo controlan cada uno un único eje directamente y no usan estas asignaciones.",
+                "description": "Estas asignaciones se aplican solo al panel principal. Asigna cada acción de alarma de Home Assistant a un modo de alarma Verisure; selecciona 'No usado' para desactivar un botón.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuera",
                     "map_night": "Noche",
                     "map_vacation": "Vacaciones",
                     "map_custom": "Personalizado"
+                },
+                "subpanels_notes": {
+                    "peri": "Los paneles opcionales solo Interior y solo Perimetral no usan estas asignaciones.",
+                    "annex": "Los paneles opcionales solo Interior y solo Anexo no usan estas asignaciones.",
+                    "both": "Los paneles opcionales solo Interior, solo Perimetral y solo Anexo no usan estas asignaciones."
                 }
             }
         }
@@ -88,15 +106,6 @@
     "options": {
         "step": {
             "init": {
-                "data": {
-                    "code": "Código PIN (dejar vacío si no hay PIN)",
-                    "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
-                    "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
-                    "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)",
-                    "enable_interior_panel": "Activar panel de control solo Interior",
-                    "enable_perimeter_panel": "Activar panel de control solo Perimetral",
-                    "enable_annex_panel": "Activar panel de control solo Anexo"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avanzado",
@@ -104,18 +113,45 @@
                             "scan_interval": "Intervalo de actualización en segundos (0 desactiva las actualizaciones automáticas)",
                             "delay_check_operation": "Retardo entre solicitudes de API (seg)"
                         }
+                    },
+                    "pin": {
+                        "name": "Código PIN para desarmar",
+                        "data": {
+                            "code": "Código PIN (dejar vacío si no hay PIN)",
+                            "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notificaciones de armado forzado",
+                        "data": {
+                            "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
+                            "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Subpaneles adicionales",
+                        "data": {
+                            "enable_perimeter_panel": "Activar panel de control solo Perimetral",
+                            "enable_annex_panel": "Activar panel de control solo Anexo",
+                            "enable_interior_panel": "Activar panel de control solo Interior"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Asignación de estados de alarma",
-                "description": "Estas asignaciones se aplican solo al panel principal. Asigna cada acción de alarma de Home Assistant a un modo de alarma Verisure; selecciona 'No usado' para desactivar un botón. Los paneles opcionales solo Interior, solo Perimetral y solo Anexo controlan cada uno un único eje directamente y no usan estas asignaciones.",
+                "description": "Estas asignaciones se aplican solo al panel principal. Asigna cada acción de alarma de Home Assistant a un modo de alarma Verisure; selecciona 'No usado' para desactivar un botón.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuera",
                     "map_night": "Noche",
                     "map_vacation": "Vacaciones",
                     "map_custom": "Personalizado"
+                },
+                "subpanels_notes": {
+                    "peri": "Los paneles opcionales solo Interior y solo Perimetral no usan estas asignaciones.",
+                    "annex": "Los paneles opcionales solo Interior y solo Anexo no usan estas asignaciones.",
+                    "both": "Los paneles opcionales solo Interior, solo Perimetral y solo Anexo no usan estas asignaciones."
                 }
             },
             "lock_automations": {
@@ -189,6 +225,20 @@
         },
         "no_supported_command": {
             "message": "No se encontró un comando compatible para este panel. Revisa las asignaciones de estado en las opciones de la integración (Configuración → Dispositivos y servicios → Verisure OWA → Configurar)."
+        }
+    },
+    "issues": {
+        "restart_required_after_migration": {
+            "title": "Reinicio necesario para completar la actualización a Verisure OWA",
+            "description": "Tu integración de Securitas Direct se ha migrado a Verisure OWA. Reinicia Home Assistant para que las entradas migradas se carguen. Consulta el enlace «Más información» para ver los servicios, eventos y tarjetas Lovelace renombrados.",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "¿Reiniciar Home Assistant?",
+                        "description": "Se reiniciará Home Assistant para que las entradas migradas a Verisure OWA se carguen. Tus dispositivos, entidades y personalizaciones se conservan."
+                    }
+                }
+            }
         }
     }
 }

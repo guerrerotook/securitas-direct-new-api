@@ -53,15 +53,6 @@
             "options": {
                 "title": "Opzioni per {installation_name}",
                 "description": "Configura le opzioni dell'allarme.",
-                "data": {
-                    "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
-                    "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
-                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
-                    "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)",
-                    "enable_interior_panel": "Attiva pannello di controllo solo Interno",
-                    "enable_perimeter_panel": "Attiva pannello di controllo solo Perimetrale",
-                    "enable_annex_panel": "Attiva pannello di controllo solo Annesso"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avanzato",
@@ -69,18 +60,45 @@
                             "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
                             "delay_check_operation": "Ritardo tra le richieste API (sec)"
                         }
+                    },
+                    "pin": {
+                        "name": "Codice PIN per disattivare",
+                        "data": {
+                            "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
+                            "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notifiche di attivazione forzata",
+                        "data": {
+                            "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
+                            "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Sotto-pannelli aggiuntivi",
+                        "data": {
+                            "enable_perimeter_panel": "Attiva pannello di controllo solo Perimetrale",
+                            "enable_annex_panel": "Attiva pannello di controllo solo Annesso",
+                            "enable_interior_panel": "Attiva pannello di controllo solo Interno"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Mappatura degli stati di allarme",
-                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; imposta su « Non utilizzato » per disattivare un pulsante. I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso controllano ciascuno un singolo asse direttamente e non usano queste associazioni.",
+                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; imposta su « Non utilizzato » per disattivare un pulsante.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuori casa",
                     "map_night": "Notte",
                     "map_vacation": "Vacanza",
                     "map_custom": "Personalizzato"
+                },
+                "subpanels_notes": {
+                    "peri": "I pannelli opzionali solo Interno e solo Perimetrale non usano queste associazioni.",
+                    "annex": "I pannelli opzionali solo Interno e solo Annesso non usano queste associazioni.",
+                    "both": "I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso non usano queste associazioni."
                 }
             }
         }
@@ -88,15 +106,6 @@
     "options": {
         "step": {
             "init": {
-                "data": {
-                    "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
-                    "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
-                    "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
-                    "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)",
-                    "enable_interior_panel": "Attiva pannello di controllo solo Interno",
-                    "enable_perimeter_panel": "Attiva pannello di controllo solo Perimetrale",
-                    "enable_annex_panel": "Attiva pannello di controllo solo Annesso"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avanzato",
@@ -104,18 +113,45 @@
                             "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
                             "delay_check_operation": "Ritardo tra le richieste API (sec)"
                         }
+                    },
+                    "pin": {
+                        "name": "Codice PIN per disattivare",
+                        "data": {
+                            "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
+                            "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notifiche di attivazione forzata",
+                        "data": {
+                            "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
+                            "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Sotto-pannelli aggiuntivi",
+                        "data": {
+                            "enable_perimeter_panel": "Attiva pannello di controllo solo Perimetrale",
+                            "enable_annex_panel": "Attiva pannello di controllo solo Annesso",
+                            "enable_interior_panel": "Attiva pannello di controllo solo Interno"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Mappatura degli stati di allarme",
-                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; imposta su « Non utilizzato » per disattivare un pulsante. I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso controllano ciascuno un singolo asse direttamente e non usano queste associazioni.",
+                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; imposta su « Non utilizzato » per disattivare un pulsante.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuori casa",
                     "map_night": "Notte",
                     "map_vacation": "Vacanza",
                     "map_custom": "Personalizzato"
+                },
+                "subpanels_notes": {
+                    "peri": "I pannelli opzionali solo Interno e solo Perimetrale non usano queste associazioni.",
+                    "annex": "I pannelli opzionali solo Interno e solo Annesso non usano queste associazioni.",
+                    "both": "I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso non usano queste associazioni."
                 }
             },
             "lock_automations": {
@@ -189,6 +225,20 @@
         },
         "no_supported_command": {
             "message": "Nessun comando compatibile trovato per questo pannello. Controlla le mappature degli stati nelle opzioni dell'integrazione (Impostazioni → Dispositivi e servizi → Verisure OWA → Configura)."
+        }
+    },
+    "issues": {
+        "restart_required_after_migration": {
+            "title": "Riavvio necessario per completare l'aggiornamento a Verisure OWA",
+            "description": "La tua integrazione Securitas Direct è stata migrata a Verisure OWA. Riavvia Home Assistant per attivare le voci migrate. Clicca su «Maggiori informazioni» per i servizi, gli eventi e le card Lovelace rinominati.",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "Riavviare Home Assistant?",
+                        "description": "Home Assistant verrà riavviato per attivare le voci migrate a Verisure OWA. Dispositivi, entità e personalizzazioni vengono conservati."
+                    }
+                }
+            }
         }
     }
 }

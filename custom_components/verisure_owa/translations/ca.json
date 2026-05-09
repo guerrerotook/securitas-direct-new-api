@@ -53,15 +53,6 @@
             "options": {
                 "title": "Opcions per a {installation_name}",
                 "description": "Configura les opcions de l'alarma.",
-                "data": {
-                    "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
-                    "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
-                    "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
-                    "enable_interior_panel": "Activar el panell de control només Interior",
-                    "enable_perimeter_panel": "Activar el panell de control només Perímetre",
-                    "enable_annex_panel": "Activar el panell de control només Annex"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avançat",
@@ -69,18 +60,45 @@
                             "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
                             "delay_check_operation": "Retard entre sol·licituds de l'API (s)"
                         }
+                    },
+                    "pin": {
+                        "name": "Codi PIN per desarmar",
+                        "data": {
+                            "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
+                            "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notificacions d'armat forçat",
+                        "data": {
+                            "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
+                            "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Sub-panells addicionals",
+                        "data": {
+                            "enable_perimeter_panel": "Activar el panell de control només Perímetre",
+                            "enable_annex_panel": "Activar el panell de control només Annex",
+                            "enable_interior_panel": "Activar el panell de control només Interior"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó. Els panells opcionals només Interior, només Perímetre i només Annex controlen cadascun un únic eix directament i no fan servir aquestes assignacions.",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",
                     "map_night": "Nit",
                     "map_vacation": "Vacances",
                     "map_custom": "Personalitzat"
+                },
+                "subpanels_notes": {
+                    "peri": "Els panells opcionals només Interior i només Perímetre no fan servir aquestes assignacions.",
+                    "annex": "Els panells opcionals només Interior i només Annex no fan servir aquestes assignacions.",
+                    "both": "Els panells opcionals només Interior, només Perímetre i només Annex no fan servir aquestes assignacions."
                 }
             }
         }
@@ -88,15 +106,6 @@
     "options": {
         "step": {
             "init": {
-                "data": {
-                    "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
-                    "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
-                    "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
-                    "enable_interior_panel": "Activar el panell de control només Interior",
-                    "enable_perimeter_panel": "Activar el panell de control només Perímetre",
-                    "enable_annex_panel": "Activar el panell de control només Annex"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avançat",
@@ -104,18 +113,45 @@
                             "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
                             "delay_check_operation": "Retard entre sol·licituds de l'API (s)"
                         }
+                    },
+                    "pin": {
+                        "name": "Codi PIN per desarmar",
+                        "data": {
+                            "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
+                            "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notificacions d'armat forçat",
+                        "data": {
+                            "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
+                            "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Sub-panells addicionals",
+                        "data": {
+                            "enable_perimeter_panel": "Activar el panell de control només Perímetre",
+                            "enable_annex_panel": "Activar el panell de control només Annex",
+                            "enable_interior_panel": "Activar el panell de control només Interior"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó. Els panells opcionals només Interior, només Perímetre i només Annex controlen cadascun un únic eix directament i no fan servir aquestes assignacions.",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",
                     "map_night": "Nit",
                     "map_vacation": "Vacances",
                     "map_custom": "Personalitzat"
+                },
+                "subpanels_notes": {
+                    "peri": "Els panells opcionals només Interior i només Perímetre no fan servir aquestes assignacions.",
+                    "annex": "Els panells opcionals només Interior i només Annex no fan servir aquestes assignacions.",
+                    "both": "Els panells opcionals només Interior, només Perímetre i només Annex no fan servir aquestes assignacions."
                 }
             },
             "lock_automations": {
@@ -189,6 +225,20 @@
         },
         "no_supported_command": {
             "message": "No s'ha trobat cap ordre compatible per a aquest panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
+        }
+    },
+    "issues": {
+        "restart_required_after_migration": {
+            "title": "Cal reiniciar per completar l'actualització a Verisure OWA",
+            "description": "La vostra integració de Securitas Direct s'ha migrat a Verisure OWA. Reinicieu Home Assistant per activar les entrades migrades. Consulteu l'enllaç «Més informació» per als serveis, esdeveniments i targetes Lovelace renombrats.",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "Reiniciar Home Assistant?",
+                        "description": "Es reiniciarà Home Assistant per activar les entrades migrades a Verisure OWA. Els vostres dispositius, entitats i personalitzacions es conserven."
+                    }
+                }
+            }
         }
     }
 }

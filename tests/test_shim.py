@@ -1,10 +1,8 @@
 """Tests for the legacy 'securitas' shim that triggers migration."""
 
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_get_persistent_notifications,
-)
+from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 async def test_shim_migrates_and_removes_self(hass: HomeAssistant):
@@ -59,8 +57,13 @@ async def test_shim_setup_idempotent_when_already_migrated(hass: HomeAssistant):
     assert len(hass.config_entries.async_entries("verisure_owa")) == 1
 
 
-async def test_shim_creates_restart_notification(hass: HomeAssistant):
-    """Successful migration creates a persistent notification asking the user to restart."""
+async def test_shim_creates_repairs_issue_pointing_at_breaking_changes(
+    hass: HomeAssistant,
+):
+    """Successful migration raises a fixable Repairs issue (replacing the
+    old persistent banner) whose Learn-more link points at the README's
+    breaking-changes section so users can review the renamed services,
+    events, and Lovelace cards at their pace."""
     from custom_components.securitas import async_setup_entry as shim_setup
 
     legacy = MockConfigEntry(
@@ -75,46 +78,15 @@ async def test_shim_creates_restart_notification(hass: HomeAssistant):
     await shim_setup(hass, legacy)
     await hass.async_block_till_done()
 
-    notifications = async_get_persistent_notifications(hass)
-    assert "verisure_owa_migration_complete" in notifications
-
-
-async def test_shim_notification_lists_deprecated_surfaces(hass: HomeAssistant):
-    """Notification body names every deprecated surface so users know what to update."""
-    from custom_components.securitas import async_setup_entry as shim_setup
-
-    legacy = MockConfigEntry(
-        domain="securitas",
-        data={"username": "u@x", "password": "p", "country": "ES"},
-        title="Home",
-        unique_id="u@x:100001",
-        version=3,
+    issue_reg = ir.async_get(hass)
+    issue = issue_reg.async_get_issue(
+        "verisure_owa", "restart_required_after_migration"
     )
-    legacy.add_to_hass(hass)
-
-    await shim_setup(hass, legacy)
-    await hass.async_block_till_done()
-
-    notifications = async_get_persistent_notifications(hass)
-    body = notifications["verisure_owa_migration_complete"]["message"]
-
-    # Restart guidance must be present.
-    assert "restart" in body.lower()
-
-    # v6 removal timing must be stated so users know they have a window.
-    assert "v6" in body
-
-    # Every deprecated surface is named so users can grep for them in their config.
-    assert "securitas.force_arm" in body
-    assert "securitas_arming_exception" in body
-    assert "/securitas_panel" in body
-    assert "custom:securitas-alarm-card" in body
-
-    # And each maps to the new identifier.
-    assert "verisure_owa.force_arm" in body
-    assert "verisure_owa_arming_exception" in body
-    assert "/verisure-owa-panel" in body
-    assert "custom:verisure-owa-alarm-card" in body
+    assert issue is not None
+    assert issue.is_fixable is True
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert issue.translation_key == "restart_required_after_migration"
+    assert "breaking-changes-in-v500" in (issue.learn_more_url or "")
 
 
 async def test_shim_migrates_via_ha_loader(
@@ -134,3 +106,49 @@ async def test_shim_migrates_via_ha_loader(
     await hass.async_block_till_done()
 
     assert len(hass.config_entries.async_entries("verisure_owa")) == 1
+
+
+async def test_repair_flow_confirm_clears_issue_and_restarts(hass: HomeAssistant):
+    """The Fix button on the restart-required issue clears the issue and
+    requests an HA restart. Order matters: the issue is deleted before the
+    stop call so it doesn't reappear on the next boot."""
+    from unittest.mock import AsyncMock, patch
+
+    from custom_components.verisure_owa.repairs import _RestartFlow
+
+    # Pre-create the issue so we can observe it being cleared.
+    ir.async_create_issue(
+        hass,
+        "verisure_owa",
+        "restart_required_after_migration",
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="restart_required_after_migration",
+    )
+    issue_reg = ir.async_get(hass)
+    assert (
+        issue_reg.async_get_issue(
+            "verisure_owa", "restart_required_after_migration"
+        )
+        is not None
+    )
+
+    flow = _RestartFlow()
+    flow.hass = hass
+
+    with patch.object(hass, "async_stop", AsyncMock()) as mock_stop:
+        # First call: show the confirm form.
+        result = await flow.async_step_init()
+        assert result["type"] == "form"
+        # Confirm: clear issue + dispatch restart.
+        result = await flow.async_step_confirm({"confirm": True})
+        assert result["type"] == "create_entry"
+        await hass.async_block_till_done()
+
+    assert (
+        issue_reg.async_get_issue(
+            "verisure_owa", "restart_required_after_migration"
+        )
+        is None
+    )
+    mock_stop.assert_awaited()

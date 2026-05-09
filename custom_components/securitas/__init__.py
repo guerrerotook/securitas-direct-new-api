@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,29 +43,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await migrate_legacy_entry(hass, entry)
 
-    # Inform the user they need to restart for the migrated integration to come up.
-    # Body lists every deprecated surface so users can grep their config and update
-    # at their pace within the v5 deprecation window.
-    persistent_notification.async_create(
+    # Surface the restart-required prompt as a fixable Repairs issue rather
+    # than a long persistent banner. The Fix button restarts HA; the issue's
+    # learn-more URL points to the breaking-changes section in the README so
+    # users can review the renamed services / events / Lovelace surfaces.
+    ir.async_create_issue(
         hass,
-        message=(
-            "Your Securitas Direct integration has been migrated to Verisure OWA. "
-            "**Please restart Home Assistant** to complete the upgrade. "
-            "All your devices, entities, and customizations are preserved.\n\n"
-            "**The following will be removed in v6.0.0. "
-            "Update your automations and dashboards at your pace:**\n\n"
-            "- Service calls: `securitas.force_arm` / `securitas.force_arm_cancel` "
-            "→ use `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel`\n"
-            "- Events: `securitas_arming_exception` "
-            "→ use `verisure_owa_arming_exception`\n"
-            "- Lovelace card URLs: `/securitas_panel/...` "
-            "→ use `/verisure-owa-panel/...`\n"
-            "- Lovelace card types: `custom:securitas-alarm-card` (and `-badge`, "
-            "`-chip`, `-camera-card`) "
-            "→ use `custom:verisure-owa-alarm-card` (and matching new names)"
+        "verisure_owa",
+        "restart_required_after_migration",
+        is_fixable=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="restart_required_after_migration",
+        learn_more_url=(
+            "https://github.com/guerrerotook/securitas-direct-new-api"
+            "#breaking-changes-in-v500"
         ),
-        title="Verisure OWA migration: restart required",
-        notification_id="verisure_owa_migration_complete",
     )
 
     # Remove the legacy entry now that its state has been moved.

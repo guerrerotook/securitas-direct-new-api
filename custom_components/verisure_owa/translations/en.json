@@ -53,16 +53,29 @@
             "options": {
                 "title": "Options for {installation_name}",
                 "description": "Configure alarm options.",
-                "data": {
-                    "code": "PIN Code (leave empty for no PIN)",
-                    "code_arm_required": "Also require PIN code (if any) to arm alarm",
-                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
-                    "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)",
-                    "enable_interior_panel": "Enable Interior-only control panel",
-                    "enable_perimeter_panel": "Enable Perimeter-only control panel",
-                    "enable_annex_panel": "Enable Annex-only control panel"
-                },
                 "sections": {
+                    "pin": {
+                        "name": "PIN code for disarming",
+                        "data": {
+                            "code": "PIN code (leave empty for no PIN)",
+                            "code_arm_required": "Also require PIN code (if any) to arm alarm"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Force-arm notifications",
+                        "data": {
+                            "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
+                            "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Additional sub-panels",
+                        "data": {
+                            "enable_perimeter_panel": "Enable Perimeter-only control panel",
+                            "enable_annex_panel": "Enable Annex-only control panel",
+                            "enable_interior_panel": "Enable Interior-only control panel"
+                        }
+                    },
                     "advanced": {
                         "name": "Advanced",
                         "data": {
@@ -74,13 +87,18 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; set to 'Not used' to disable a button. The optional Interior-only, Perimeter-only and Annex-only panels each drive a single axis directly and do not use these mappings.",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; set to 'Not used' to disable a button.{subpanels_note}",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",
                     "map_night": "Night",
                     "map_vacation": "Vacation",
                     "map_custom": "Custom"
+                },
+                "subpanels_notes": {
+                    "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
+                    "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
+                    "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings."
                 }
             }
         }
@@ -88,16 +106,29 @@
     "options": {
         "step": {
             "init": {
-                "data": {
-                    "code": "PIN Code (leave empty for no PIN)",
-                    "code_arm_required": "Also require PIN code (if any) to arm alarm",
-                    "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
-                    "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)",
-                    "enable_interior_panel": "Enable Interior-only control panel",
-                    "enable_perimeter_panel": "Enable Perimeter-only control panel",
-                    "enable_annex_panel": "Enable Annex-only control panel"
-                },
                 "sections": {
+                    "pin": {
+                        "name": "PIN code for disarming",
+                        "data": {
+                            "code": "PIN code (leave empty for no PIN)",
+                            "code_arm_required": "Also require PIN code (if any) to arm alarm"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Force-arm notifications",
+                        "data": {
+                            "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
+                            "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Additional sub-panels",
+                        "data": {
+                            "enable_perimeter_panel": "Enable Perimeter-only control panel",
+                            "enable_annex_panel": "Enable Annex-only control panel",
+                            "enable_interior_panel": "Enable Interior-only control panel"
+                        }
+                    },
                     "advanced": {
                         "name": "Advanced",
                         "data": {
@@ -109,13 +140,18 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; set to 'Not used' to disable a button. The optional Interior-only, Perimeter-only and Annex-only panels each drive a single axis directly and do not use these mappings.",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; set to 'Not used' to disable a button.{subpanels_note}",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",
                     "map_night": "Night",
                     "map_vacation": "Vacation",
                     "map_custom": "Custom"
+                },
+                "subpanels_notes": {
+                    "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
+                    "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
+                    "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings."
                 }
             },
             "lock_automations": {
@@ -173,7 +209,13 @@
     "services": {
         "force_arm": {
             "name": "Force arm",
-            "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt."
+            "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt.",
+            "fields": {
+                "code": {
+                    "name": "PIN code",
+                    "description": "Optional. If supplied, validated against the configured PIN before completing the force-arm. Most callers don't need this — the prior arm attempt that produced the force-arm context already validated the PIN."
+                }
+            }
         },
         "force_arm_cancel": {
             "name": "Cancel force arm",
@@ -189,6 +231,20 @@
         },
         "no_supported_command": {
             "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Verisure OWA → Configure)."
+        }
+    },
+    "issues": {
+        "restart_required_after_migration": {
+            "title": "Restart required to finish Verisure OWA upgrade",
+            "description": "Your Securitas Direct integration has been migrated to Verisure OWA. Restart Home Assistant to bring the migrated entries online. Click the Learn more link for the renamed services, events, and Lovelace cards.",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "Restart Home Assistant?",
+                        "description": "This will restart Home Assistant so the migrated Verisure OWA entries come up. All your devices, entities, and customisations are preserved."
+                    }
+                }
+            }
         }
     }
 }
