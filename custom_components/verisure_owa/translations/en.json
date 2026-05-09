@@ -94,11 +94,6 @@
                     "map_night": "Night",
                     "map_vacation": "Vacation",
                     "map_custom": "Custom"
-                },
-                "subpanels_notes": {
-                    "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
-                    "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
-                    "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings."
                 }
             }
         }
@@ -147,11 +142,6 @@
                     "map_night": "Night",
                     "map_vacation": "Vacation",
                     "map_custom": "Custom"
-                },
-                "subpanels_notes": {
-                    "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
-                    "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
-                    "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings."
                 }
             },
             "lock_automations": {
@@ -236,12 +226,11 @@
     "issues": {
         "restart_required_after_migration": {
             "title": "Restart required to finish Verisure OWA upgrade",
-            "description": "Your Securitas Direct integration has been migrated to Verisure OWA. Restart Home Assistant to bring the migrated entries online. Click the Learn more link for the renamed services, events, and Lovelace cards.",
             "fix_flow": {
                 "step": {
                     "confirm": {
                         "title": "Restart Home Assistant?",
-                        "description": "This will restart Home Assistant so the migrated Verisure OWA entries come up. All your devices, entities, and customisations are preserved."
+                        "description": "Your Securitas Direct integration has been migrated to Verisure OWA. Restarting brings the migrated entries online — your devices, entities, and customisations are preserved. Click the Learn more link for the renamed services, events, and Lovelace cards."
                     }
                 }
             }

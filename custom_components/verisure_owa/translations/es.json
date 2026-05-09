@@ -94,11 +94,6 @@
                     "map_night": "Noche",
                     "map_vacation": "Vacaciones",
                     "map_custom": "Personalizado"
-                },
-                "subpanels_notes": {
-                    "peri": "Los paneles opcionales solo Interior y solo Perimetral no usan estas asignaciones.",
-                    "annex": "Los paneles opcionales solo Interior y solo Anexo no usan estas asignaciones.",
-                    "both": "Los paneles opcionales solo Interior, solo Perimetral y solo Anexo no usan estas asignaciones."
                 }
             }
         }
@@ -147,11 +142,6 @@
                     "map_night": "Noche",
                     "map_vacation": "Vacaciones",
                     "map_custom": "Personalizado"
-                },
-                "subpanels_notes": {
-                    "peri": "Los paneles opcionales solo Interior y solo Perimetral no usan estas asignaciones.",
-                    "annex": "Los paneles opcionales solo Interior y solo Anexo no usan estas asignaciones.",
-                    "both": "Los paneles opcionales solo Interior, solo Perimetral y solo Anexo no usan estas asignaciones."
                 }
             },
             "lock_automations": {
@@ -230,7 +220,6 @@
     "issues": {
         "restart_required_after_migration": {
             "title": "Reinicio necesario para completar la actualización a Verisure OWA",
-            "description": "Tu integración de Securitas Direct se ha migrado a Verisure OWA. Reinicia Home Assistant para que las entradas migradas se carguen. Consulta el enlace «Más información» para ver los servicios, eventos y tarjetas Lovelace renombrados.",
             "fix_flow": {
                 "step": {
                     "confirm": {

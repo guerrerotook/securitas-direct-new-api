@@ -94,11 +94,6 @@
                     "map_night": "Nuit",
                     "map_vacation": "Vacances",
                     "map_custom": "Personnalisé"
-                },
-                "subpanels_notes": {
-                    "peri": "Les panneaux optionnels Intérieur uniquement et Périmètre uniquement n'utilisent pas ces associations.",
-                    "annex": "Les panneaux optionnels Intérieur uniquement et Annexe uniquement n'utilisent pas ces associations.",
-                    "both": "Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement n'utilisent pas ces associations."
                 }
             }
         }
@@ -147,11 +142,6 @@
                     "map_night": "Nuit",
                     "map_vacation": "Vacances",
                     "map_custom": "Personnalisé"
-                },
-                "subpanels_notes": {
-                    "peri": "Les panneaux optionnels Intérieur uniquement et Périmètre uniquement n'utilisent pas ces associations.",
-                    "annex": "Les panneaux optionnels Intérieur uniquement et Annexe uniquement n'utilisent pas ces associations.",
-                    "both": "Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement n'utilisent pas ces associations."
                 }
             },
             "lock_automations": {
@@ -230,7 +220,6 @@
     "issues": {
         "restart_required_after_migration": {
             "title": "Redémarrage nécessaire pour terminer la mise à niveau Verisure OWA",
-            "description": "Votre intégration Securitas Direct a été migrée vers Verisure OWA. Redémarrez Home Assistant pour activer les entrées migrées. Cliquez sur « En savoir plus » pour consulter les services, événements et cartes Lovelace renommés.",
             "fix_flow": {
                 "step": {
                     "confirm": {

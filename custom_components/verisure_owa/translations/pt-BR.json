@@ -94,11 +94,6 @@
                     "map_night": "Noite",
                     "map_vacation": "Férias",
                     "map_custom": "Personalizado"
-                },
-                "subpanels_notes": {
-                    "peri": "Os painéis opcionais apenas Interior e apenas Perímetro não usam estas associações.",
-                    "annex": "Os painéis opcionais apenas Interior e apenas Anexo não usam estas associações.",
-                    "both": "Os painéis opcionais apenas Interior, apenas Perímetro e apenas Anexo não usam estas associações."
                 }
             }
         }
@@ -147,11 +142,6 @@
                     "map_night": "Noite",
                     "map_vacation": "Férias",
                     "map_custom": "Personalizado"
-                },
-                "subpanels_notes": {
-                    "peri": "Os painéis opcionais apenas Interior e apenas Perímetro não usam estas associações.",
-                    "annex": "Os painéis opcionais apenas Interior e apenas Anexo não usam estas associações.",
-                    "both": "Os painéis opcionais apenas Interior, apenas Perímetro e apenas Anexo não usam estas associações."
                 }
             },
             "lock_automations": {
@@ -230,7 +220,6 @@
     "issues": {
         "restart_required_after_migration": {
             "title": "Reinício necessário para concluir a atualização para Verisure OWA",
-            "description": "Sua integração Securitas Direct foi migrada para Verisure OWA. Reinicie o Home Assistant para ativar as entradas migradas. Consulte o link «Saiba mais» para os serviços, eventos e cards Lovelace renomeados.",
             "fix_flow": {
                 "step": {
                     "confirm": {
