@@ -67,16 +67,15 @@ from .const import (
 from .api_queue import ApiQueue
 from .verisure_owa_api import (
     PERI_DEFAULTS,
-    PERI_OPTIONS,
     STATE_LABELS,
     STD_DEFAULTS,
-    STD_OPTIONS,
     AccountBlockedError,
     AuthenticationError,
     Installation,
     OtpPhone,
     VerisureOwaError,
     TwoFactorRequiredError,
+    dropdown_options,
 )
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
 
@@ -144,6 +143,19 @@ async def _subpanels_note(
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # translation lookup must not break the flow
         pass
     return f" {sentence}"
+
+
+def _mapping_field(key: str, suggestion: str | None) -> vol.Optional:
+    """Build a vol.Optional marker for a state-mapping field.
+
+    Uses ``description={"suggested_value": ...}`` rather than ``default=`` so
+    that clearing the field in the UI persists as a missing key (= "not used")
+    instead of being silently re-filled with the default on submit. When the
+    suggestion is None the field renders blank.
+    """
+    if suggestion is None:
+        return vol.Optional(key)
+    return vol.Optional(key, description={"suggested_value": suggestion})
 
 
 def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -828,7 +840,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         defaults = PERI_DEFAULTS if self._has_peri else STD_DEFAULTS
-        options = PERI_OPTIONS if self._has_peri else STD_OPTIONS
+        options = dropdown_options(has_peri=self._has_peri, has_annex=self._has_annex)
         select_options = [
             {"value": state.value, "label": STATE_LABELS[state]} for state in options
         ]
@@ -836,20 +848,20 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_MAP_HOME, default=defaults[CONF_MAP_HOME]): selector(
+                _mapping_field(CONF_MAP_HOME, defaults.get(CONF_MAP_HOME)): selector(
                     select_cfg
                 ),
-                vol.Optional(CONF_MAP_AWAY, default=defaults[CONF_MAP_AWAY]): selector(
+                _mapping_field(CONF_MAP_AWAY, defaults.get(CONF_MAP_AWAY)): selector(
                     select_cfg
                 ),
-                vol.Optional(
-                    CONF_MAP_NIGHT, default=defaults[CONF_MAP_NIGHT]
+                _mapping_field(CONF_MAP_NIGHT, defaults.get(CONF_MAP_NIGHT)): selector(
+                    select_cfg
+                ),
+                _mapping_field(
+                    CONF_MAP_VACATION, defaults.get(CONF_MAP_VACATION)
                 ): selector(select_cfg),
-                vol.Optional(
-                    CONF_MAP_VACATION, default=defaults[CONF_MAP_VACATION]
-                ): selector(select_cfg),
-                vol.Optional(
-                    CONF_MAP_CUSTOM, default=defaults[CONF_MAP_CUSTOM]
+                _mapping_field(
+                    CONF_MAP_CUSTOM, defaults.get(CONF_MAP_CUSTOM)
                 ): selector(select_cfg),
             }
         )
@@ -965,19 +977,22 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
 
         # Determine defaults for mapping dropdowns
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
-        options = PERI_OPTIONS if has_peri else STD_OPTIONS
+        options = dropdown_options(has_peri=has_peri, has_annex=has_annex)
         valid_values = {state.value for state in options}
 
-        def _valid_map(key: str) -> str:
-            """Return saved mapping if valid for current options, else default."""
-            val = self._get(key, defaults[key])
-            return val if val in valid_values else defaults[key]
+        def _suggested_map(key: str) -> str | None:
+            """Return the value to pre-fill in the form, or None for blank.
 
-        map_home = _valid_map(CONF_MAP_HOME)
-        map_away = _valid_map(CONF_MAP_AWAY)
-        map_night = _valid_map(CONF_MAP_NIGHT)
-        map_vacation = _valid_map(CONF_MAP_VACATION)
-        map_custom = _valid_map(CONF_MAP_CUSTOM)
+            Saved value wins when it's still in the current option set;
+            otherwise falls back to the default. Pre-v5 saved values of
+            ``"not_used"`` (or anything else outside the dropdown) collapse
+            to blank, so the user sees a cleared field instead of a stale
+            unselectable choice.
+            """
+            val = self._get(key)
+            if val and val in valid_values:
+                return val
+            return defaults.get(key)
 
         # Build dropdown options
         select_options = [
@@ -987,13 +1002,21 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_MAP_HOME, default=map_home): selector(select_cfg),
-                vol.Optional(CONF_MAP_AWAY, default=map_away): selector(select_cfg),
-                vol.Optional(CONF_MAP_NIGHT, default=map_night): selector(select_cfg),
-                vol.Optional(CONF_MAP_VACATION, default=map_vacation): selector(
+                _mapping_field(CONF_MAP_HOME, _suggested_map(CONF_MAP_HOME)): selector(
                     select_cfg
                 ),
-                vol.Optional(CONF_MAP_CUSTOM, default=map_custom): selector(select_cfg),
+                _mapping_field(CONF_MAP_AWAY, _suggested_map(CONF_MAP_AWAY)): selector(
+                    select_cfg
+                ),
+                _mapping_field(
+                    CONF_MAP_NIGHT, _suggested_map(CONF_MAP_NIGHT)
+                ): selector(select_cfg),
+                _mapping_field(
+                    CONF_MAP_VACATION, _suggested_map(CONF_MAP_VACATION)
+                ): selector(select_cfg),
+                _mapping_field(
+                    CONF_MAP_CUSTOM, _suggested_map(CONF_MAP_CUSTOM)
+                ): selector(select_cfg),
             }
         )
         return self.async_show_form(

@@ -236,12 +236,27 @@ def make_config_entry_data(
         CONF_MAP_NIGHT: map_night
         if map_night is not None
         else defaults[CONF_MAP_NIGHT],
-        CONF_MAP_CUSTOM: map_custom
-        if map_custom is not None
-        else defaults[CONF_MAP_CUSTOM],
-        CONF_MAP_VACATION: map_vacation
-        if map_vacation is not None
-        else defaults[CONF_MAP_VACATION],
+        # Custom + Vacation mappings are blank by default (only present when
+        # the saved config explicitly sets them) — matching the post-v5
+        # behaviour where unmapped buttons render as cleared fields.
+        **(
+            {CONF_MAP_CUSTOM: map_custom}
+            if map_custom is not None
+            else (
+                {CONF_MAP_CUSTOM: defaults[CONF_MAP_CUSTOM]}
+                if CONF_MAP_CUSTOM in defaults
+                else {}
+            )
+        ),
+        **(
+            {CONF_MAP_VACATION: map_vacation}
+            if map_vacation is not None
+            else (
+                {CONF_MAP_VACATION: defaults[CONF_MAP_VACATION]}
+                if CONF_MAP_VACATION in defaults
+                else {}
+            )
+        ),
         CONF_NOTIFY_GROUP: notify_group,
         CONF_FORCE_ARM_NOTIFICATIONS: force_arm_notifications,
     }

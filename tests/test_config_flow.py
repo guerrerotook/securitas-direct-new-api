@@ -94,8 +94,9 @@ USER_INPUT_MAPPINGS_STD = {
     CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
     CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
     CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-    CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
-    CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
+    # CONF_MAP_VACATION and CONF_MAP_CUSTOM are intentionally absent —
+    # they're left blank in the form ("not used") so the submitted
+    # user_input simply omits them, matching what the UI sends.
 }
 
 
@@ -903,8 +904,7 @@ async def test_options_mappings_std_options_when_peri_false(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+            # CUSTOM/VACATION cleared (= "not used" — fields omitted)
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -935,7 +935,7 @@ async def test_options_mappings_peri_options_when_peri_true(hass):
             CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
             CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: PERI_DEFAULTS[CONF_MAP_VACATION],
+            # VACATION cleared
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -960,8 +960,7 @@ async def test_options_mappings_invalid_mapping_falls_back(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+            # CUSTOM/VACATION cleared
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -984,8 +983,7 @@ async def test_options_mappings_submitting_creates_entry(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+            # CUSTOM/VACATION cleared (= "not used")
         },
     )
 
@@ -993,8 +991,8 @@ async def test_options_mappings_submitting_creates_entry(hass):
     assert result["data"][CONF_MAP_HOME] == STD_DEFAULTS[CONF_MAP_HOME]
     assert result["data"][CONF_MAP_AWAY] == STD_DEFAULTS[CONF_MAP_AWAY]
     assert result["data"][CONF_MAP_NIGHT] == STD_DEFAULTS[CONF_MAP_NIGHT]
-    assert result["data"][CONF_MAP_CUSTOM] == STD_DEFAULTS[CONF_MAP_CUSTOM]
-    assert result["data"][CONF_MAP_VACATION] == STD_DEFAULTS[CONF_MAP_VACATION]
+    assert CONF_MAP_CUSTOM not in result["data"]
+    assert CONF_MAP_VACATION not in result["data"]
 
 
 async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
@@ -1014,8 +1012,7 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
             CONF_MAP_HOME: VerisureOwaState.TOTAL.value,
             CONF_MAP_AWAY: VerisureOwaState.TOTAL.value,
             CONF_MAP_NIGHT: VerisureOwaState.PARTIAL_NIGHT.value,
-            CONF_MAP_CUSTOM: VerisureOwaState.NOT_USED.value,
-            CONF_MAP_VACATION: VerisureOwaState.NOT_USED.value,
+            # CUSTOM/VACATION cleared — fields omitted = "not used"
         },
     )
 
@@ -1025,6 +1022,8 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
     assert CONF_SCAN_INTERVAL in result["data"]
     # Mapping data should be present
     assert result["data"][CONF_MAP_HOME] == VerisureOwaState.TOTAL.value
+    assert CONF_MAP_CUSTOM not in result["data"]
+    assert CONF_MAP_VACATION not in result["data"]
 
 
 # ===================================================================
@@ -2055,8 +2054,7 @@ async def _advance_to_lock_automations(hass, entry):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+            # CUSTOM/VACATION cleared (= "not used")
         },
     )
     assert result["step_id"] == "lock_automations", (
@@ -2253,8 +2251,7 @@ async def test_lock_automations_skipped_when_no_locks_discovered(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: STD_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: STD_DEFAULTS[CONF_MAP_VACATION],
+            # CUSTOM/VACATION cleared (= "not used")
         },
     )
 

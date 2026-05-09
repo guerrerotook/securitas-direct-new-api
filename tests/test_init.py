@@ -1055,8 +1055,16 @@ class TestAsyncUpdateOptions:
                 CONF_MAP_HOME: data[CONF_MAP_HOME],
                 CONF_MAP_AWAY: data[CONF_MAP_AWAY],
                 CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
-                CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
-                CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+                **(
+                    {CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM]}
+                    if CONF_MAP_CUSTOM in data
+                    else {}
+                ),
+                **(
+                    {CONF_MAP_VACATION: data[CONF_MAP_VACATION]}
+                    if CONF_MAP_VACATION in data
+                    else {}
+                ),
                 CONF_NOTIFY_GROUP: "",
                 CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
             },
@@ -1142,8 +1150,16 @@ class TestAsyncUpdateOptions:
             CONF_MAP_HOME: data[CONF_MAP_HOME],
             CONF_MAP_AWAY: data[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            **(
+                {CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM]}
+                if CONF_MAP_CUSTOM in data
+                else {}
+            ),
+            **(
+                {CONF_MAP_VACATION: data[CONF_MAP_VACATION]}
+                if CONF_MAP_VACATION in data
+                else {}
+            ),
             CONF_NOTIFY_GROUP: "",
             CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
             CONF_LOCK_AUTOMATIONS: {
@@ -1180,8 +1196,16 @@ class TestAsyncUpdateOptions:
             CONF_MAP_HOME: data[CONF_MAP_HOME],
             CONF_MAP_AWAY: data[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
-            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            **(
+                {CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM]}
+                if CONF_MAP_CUSTOM in data
+                else {}
+            ),
+            **(
+                {CONF_MAP_VACATION: data[CONF_MAP_VACATION]}
+                if CONF_MAP_VACATION in data
+                else {}
+            ),
             CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
             CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
             toggle_key: True,
