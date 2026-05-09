@@ -86,7 +86,7 @@ async def test_shim_creates_repairs_issue_pointing_at_breaking_changes(
     assert issue.is_fixable is True
     assert issue.severity == ir.IssueSeverity.WARNING
     assert issue.translation_key == "restart_required_after_migration"
-    assert "breaking-changes-in-v500" in (issue.learn_more_url or "")
+    assert "CHANGES.md#breaking-changes" in (issue.learn_more_url or "")
 
 
 async def test_shim_migrates_via_ha_loader(

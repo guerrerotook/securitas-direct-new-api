@@ -2,7 +2,7 @@
 
 A Home Assistant custom integration for **Verisure** (formerly Securitas Direct in some markets), supporting Argentina, Brazil, Chile, France, Ireland, Italy, Peru, Portugal, Spain, and the United Kingdom.
 
-Renamed from `securitas` to `verisure_owa` in v5.0.0. The legacy domain shim, service aliases, event aliases, and panel URL aliases remain available until v6.0.0. See [Breaking Changes in v5.0.0](#breaking-changes-in-v500) for migration details, or [CHANGES.md](./CHANGES.md) for the full history.
+> **Upgrading from a previous version?** See [CHANGES.md](./CHANGES.md) for what's new and the breaking changes in this release.
 
 ## Features
 
@@ -53,38 +53,6 @@ Custom cards bundled with the integration:
 - **Two-factor authentication** — handled automatically via SMS during setup if your account needs it.
 - **No password on disk** — your password is used once to mint a long-lived refresh token, then discarded. If the token is revoked or expires, HA shows a reauth dialog.
 - **Local PIN protection** — optional PIN for arming and/or disarming from HA, separate from your Verisure account.
-
-## What's new in v5.0.0
-
-- **Rebrand to `verisure_owa`.** Domain, services, events, and the side-panel URL are all renamed. Legacy aliases stay until v6.0.0 — see [Breaking Changes](#breaking-changes-in-v500).
-- **Peru.** Verisure customers in Peru are now supported.
-- **Per-axis sub-panels.** Opt in to Interior-only, Perimeter-only, or Annex-only alarm panels alongside the main panel.
-- **Lock automations.** Auto-lock the door when a circuit arms; auto-disarm before unlocking from HA.
-- **Activity log.** Verisure event history is surfaced via a Lovelace card, a sensor, and the `verisure_owa_activity` event. Actions taken in HA are tagged with the user and de-duplicated against the panel's echo.
-- **Refresh-token authentication.** Your password is no longer persisted; first login mints a long-lived refresh token. After upgrade you may see a one-time reauth dialog so the token can be minted.
-
-## Breaking Changes in v5.0.0
-
-> **Warning:** v5.0.0 renames the integration from `securitas` to `verisure_owa`. Most users won't have to touch anything — every legacy reference keeps working through transparent shims until **v6.0.0**, at which point the aliases are removed. Plan to migrate any references before then.
-
-- **Domain renamed `securitas` → `verisure_owa`.** New installs use `verisure_owa` everywhere. Existing installs are migrated automatically and their entity IDs are rewritten in the registry.
-- **Service rename.** `securitas.force_arm` / `securitas.force_arm_cancel` are now `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel`. The legacy names continue to dispatch to the new ones until v6.0.0.
-- **Event rename.** `securitas_arming_exception` → `verisure_owa_arming_exception`. The legacy event still fires alongside the new one until v6.0.0 — automations triggered on either name keep working. The activity-log event is `verisure_owa_activity` (new in v5.0.0; no legacy alias).
-- **Side-panel URL rename.** `/securitas_panel` → `/verisure-owa-panel`. The legacy URL is kept available until v6.0.0 so existing dashboards don't break mid-migration.
-- **Lovelace card type rename.** Existing dashboards keep working — the legacy type names continue to render until v6.0.0 — but new installs and visual-editor pickers use the `verisure-owa-*` names. To migrate dashboards manually, edit the YAML and update each card type:
-
-  | Old type                          | New type                              |
-  | --------------------------------- | ------------------------------------- |
-  | `custom:securitas-alarm-card`     | `custom:verisure-owa-alarm-card`      |
-  | `custom:securitas-alarm-badge`    | `custom:verisure-owa-alarm-badge`     |
-  | `custom:securitas-camera-card`    | `custom:verisure-owa-camera-card`     |
-
-  Inside a Mushroom Chips Card, change `type: securitas-alarm` to `type: verisure-owa-alarm`.
-- **Mobile-notification action IDs.** The force-arm push notification's action IDs (`SECURITAS_FORCE_ARM_<num>` / `SECURITAS_CANCEL_FORCE_ARM_<num>`) become `VERISURE_OWA_*` in v6.0.0. The built-in flow keeps working — this only matters if you wrote a custom HA automation listening on `mobile_app_notification_action` for the old strings.
-- **Password is no longer persisted.** Login now mints a ~180-day refresh token; the password is discarded and only the refresh token lives in the config entry. After upgrade, the integration may show a one-time reauth dialog so you can mint a refresh token from your existing password — enter it once and you're done.
-- **`set_authentication_token` service removed.** The previous workaround for stuck logins is no longer needed; the refresh-token flow handles renewal automatically.
-
-If you're upgrading from v3.x or earlier, the breaking changes from v4.0.0 still apply on top of the above — see the v4.0.0 release notes.
 
 ## Supported Countries
 

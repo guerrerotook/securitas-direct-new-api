@@ -56,7 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         translation_key="restart_required_after_migration",
         learn_more_url=(
             "https://github.com/guerrerotook/securitas-direct-new-api"
-            "#breaking-changes-in-v500"
+            "/blob/main/CHANGES.md#breaking-changes"
         ),
     )
 

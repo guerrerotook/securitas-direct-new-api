@@ -1,8 +1,6 @@
 # Changelog
 
-All notable changes to this integration are recorded here. The most recent release is at the top; append new entries above the previous one with each release.
-
-The README's "What's new" and "Breaking Changes" sections cover the **current** release; this file is the long-running record.
+The most recent release is at the top; append new entries above the previous one with each release.
 
 ## v5.0.0
 

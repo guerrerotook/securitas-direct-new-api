@@ -73,7 +73,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "The Securitas Direct integration has been migrated. "
                 "[Review breaking changes →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Services, events, and Lovelace cards have been renamed; legacy "
                 "aliases keep working until v6.0.0."
@@ -141,7 +141,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "La integración Securitas Direct se ha migrado. "
                 "[Revisar cambios incompatibles →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Los servicios, eventos y tarjetas Lovelace se han renombrado; los alias "
                 "antiguos siguen funcionando hasta la v6.0.0."
@@ -209,7 +209,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "L'intégration Securitas Direct a été migrée. "
                 "[Voir les changements incompatibles →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Les services, événements et cartes Lovelace ont été renommés ; les alias "
                 "hérités fonctionnent jusqu'à la v6.0.0."
@@ -277,7 +277,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "L'integrazione Securitas Direct è stata migrata. "
                 "[Vedi le modifiche di rottura →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Servizi, eventi e card Lovelace sono stati rinominati; gli alias legacy "
                 "continuano a funzionare fino alla v6.0.0."
@@ -344,7 +344,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "A integração Securitas Direct foi migrada. "
                 "[Ver alterações incompatíveis →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Os serviços, eventos e cartões Lovelace foram renomeados; os aliases "
                 "antigos continuam a funcionar até à v6.0.0."
@@ -412,7 +412,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "A integração Securitas Direct foi migrada. "
                 "[Ver mudanças incompatíveis →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Serviços, eventos e cards Lovelace foram renomeados; os aliases antigos "
                 "continuam funcionando até a v6.0.0."
@@ -479,7 +479,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "La integració Securitas Direct s'ha migrat. "
                 "[Reviseu els canvis incompatibles →]("
-                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "https://github.com/guerrerotook/securitas-direct-new-api/blob/main/CHANGES.md#breaking-changes)"
                 "\n\n"
                 "Els serveis, esdeveniments i targetes Lovelace s'han reanomenat; els àlies "
                 "antics continuen funcionant fins a la v6.0.0."
