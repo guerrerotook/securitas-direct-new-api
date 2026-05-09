@@ -87,7 +87,7 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; set to 'Not used' to disable a button.{subpanels_note}",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; leave a field blank to hide that button.{subpanels_note}",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",
@@ -135,7 +135,7 @@
             },
             "mappings": {
                 "title": "Alarm State Mappings",
-                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; set to 'Not used' to disable a button.{subpanels_note}",
+                "description": "These mappings apply to the main panel only. Map each Home Assistant alarm action to a Verisure alarm mode; leave a field blank to hide that button.{subpanels_note}",
                 "data": {
                     "map_home": "Home",
                     "map_away": "Away",

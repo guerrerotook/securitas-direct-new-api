@@ -87,7 +87,7 @@
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; sélectionnez « Non utilisé » pour désactiver un bouton.{subpanels_note}",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; videz un champ pour masquer ce bouton.{subpanels_note}",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",
@@ -135,7 +135,7 @@
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; sélectionnez « Non utilisé » pour désactiver un bouton.{subpanels_note}",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; videz un champ pour masquer ce bouton.{subpanels_note}",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",

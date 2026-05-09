@@ -29,7 +29,10 @@ export function formatTranslation(lang, translations, key, vars) {
   if (v == null) v = lookup(enTable) || key;
   if (vars) {
     for (const [name, val] of Object.entries(vars)) {
-      v = v.replace(new RegExp(`\\{${name}\\}`, "g"), val);
+      // Use a function replacement so "$" sequences in the value (e.g. "$&", "$1")
+      // aren't interpreted as special replacement patterns by String.replace.
+      const safe = String(val);
+      v = v.replace(new RegExp(`\\{${name}\\}`, "g"), () => safe);
     }
   }
   return v;

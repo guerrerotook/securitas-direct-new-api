@@ -87,7 +87,7 @@
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó.{subpanels_note}",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; deixeu un camp en blanc per amagar aquest botó.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",
@@ -135,7 +135,7 @@
             },
             "mappings": {
                 "title": "Assignació d'estats de l'alarma",
-                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; seleccioneu 'No utilitzat' per desactivar un botó.{subpanels_note}",
+                "description": "Aquestes assignacions s'apliquen només al panell principal. Assigneu cada acció d'alarma de Home Assistant a un mode d'alarma de Verisure; deixeu un camp en blanc per amagar aquest botó.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fora",

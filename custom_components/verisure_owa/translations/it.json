@@ -87,7 +87,7 @@
             },
             "mappings": {
                 "title": "Mappatura degli stati di allarme",
-                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; imposta su « Non utilizzato » per disattivare un pulsante.{subpanels_note}",
+                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; lascia un campo vuoto per nascondere quel pulsante.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuori casa",
@@ -135,7 +135,7 @@
             },
             "mappings": {
                 "title": "Mappatura degli stati di allarme",
-                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; imposta su « Non utilizzato » per disattivare un pulsante.{subpanels_note}",
+                "description": "Queste associazioni si applicano solo al pannello principale. Associa ogni azione di allarme di Home Assistant a una modalità di allarme Verisure; lascia un campo vuoto per nascondere quel pulsante.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Fuori casa",
