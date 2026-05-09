@@ -15,6 +15,7 @@ from .const import (  # noqa: F401
     STATE_LABELS,
     STATE_TO_COMMAND,
     VerisureOwaState,
+    dropdown_options,
 )
 from .models import (  # noqa: F401
     AirQuality,

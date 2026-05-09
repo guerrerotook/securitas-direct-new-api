@@ -68,8 +68,6 @@ class TestForceArmNotificationsConfig:
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
-                "map_custom": STD_DEFAULTS["map_custom"],
-                "map_vacation": STD_DEFAULTS["map_vacation"],
                 "scan_interval": 120,
                 "force_arm_notifications": False,
             }
@@ -269,14 +267,10 @@ def make_alarm(
 
     if config is None:
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
-        config = {
-            "map_home": defaults["map_home"],
-            "map_away": defaults["map_away"],
-            "map_night": defaults["map_night"],
-            "map_custom": defaults["map_custom"],
-            "map_vacation": defaults["map_vacation"],
-            "scan_interval": 120,
-        }
+        # map_custom and map_vacation default to blank (= "not used") so
+        # only include keys that the defaults dict actually carries.
+        config = {key: value for key, value in defaults.items()}
+        config["scan_interval"] = 120
 
     if code is not None:
         config["code"] = code
@@ -657,7 +651,6 @@ class TestSupportedFeatures:
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
             "map_vacation": VerisureOwaState.TOTAL.value,
             "scan_interval": 120,
         }
@@ -1662,7 +1655,6 @@ class TestArmMethods:
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": VerisureOwaState.NOT_USED.value,
             "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
             "map_vacation": VerisureOwaState.TOTAL.value,
             "scan_interval": 120,
         }
@@ -2103,8 +2095,6 @@ class TestUnmappedProtoCodeLogging:
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": VerisureOwaState.PARTIAL_DAY.value,
             "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": STD_DEFAULTS["map_vacation"],
             "scan_interval": 120,
         }
 
@@ -2236,13 +2226,8 @@ class TestForceArmCodeGate:
     @staticmethod
     def _make_alarm_with_code(code_required: bool):
         """make_alarm with a configured PIN, optionally requiring code on arm."""
-        defaults = STD_DEFAULTS
         config = {
-            "map_home": defaults["map_home"],
-            "map_away": defaults["map_away"],
-            "map_night": defaults["map_night"],
-            "map_custom": defaults["map_custom"],
-            "map_vacation": defaults["map_vacation"],
+            **STD_DEFAULTS,
             "scan_interval": 120,
             "code": "1234",
             "code_arm_required": code_required,
@@ -3774,8 +3759,6 @@ class TestAsyncAddedToHass:
                 "map_home": STD_DEFAULTS["map_home"],
                 "map_away": STD_DEFAULTS["map_away"],
                 "map_night": STD_DEFAULTS["map_night"],
-                "map_custom": STD_DEFAULTS["map_custom"],
-                "map_vacation": STD_DEFAULTS["map_vacation"],
                 "scan_interval": 120,
                 "force_arm_notifications": False,
             }
@@ -4798,8 +4781,6 @@ class TestSubPanelSetup:
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": STD_DEFAULTS["map_vacation"],
             "scan_interval": 120,
         }
 
@@ -5654,8 +5635,6 @@ class TestCombinedPanelRegistration:
             "map_home": STD_DEFAULTS["map_home"],
             "map_away": STD_DEFAULTS["map_away"],
             "map_night": STD_DEFAULTS["map_night"],
-            "map_custom": STD_DEFAULTS["map_custom"],
-            "map_vacation": STD_DEFAULTS["map_vacation"],
             "scan_interval": 120,
         }
         return client

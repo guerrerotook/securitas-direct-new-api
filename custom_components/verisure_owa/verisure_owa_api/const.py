@@ -96,9 +96,12 @@ STATE_LABELS: dict[VerisureOwaState, str] = {
     VerisureOwaState.TOTAL_PERI_ANNEX: "Total + Perimeter + Annex",
 }
 
-# Options available when perimeter is NOT configured
+# Options available when perimeter is NOT configured.
+# NOT_USED is intentionally absent — the mapping form represents "not used"
+# as a cleared field rather than a dropdown choice. Pre-v5 saved values of
+# "not_used" are still accepted on read (panel skips them) for backwards
+# compatibility with existing config entries.
 STD_OPTIONS: list[VerisureOwaState] = [
-    VerisureOwaState.NOT_USED,
     VerisureOwaState.PARTIAL_DAY,
     VerisureOwaState.PARTIAL_NIGHT,
     VerisureOwaState.TOTAL,
@@ -106,7 +109,6 @@ STD_OPTIONS: list[VerisureOwaState] = [
 
 # Options available when perimeter IS configured
 PERI_OPTIONS: list[VerisureOwaState] = [
-    VerisureOwaState.NOT_USED,
     VerisureOwaState.PARTIAL_DAY,
     VerisureOwaState.PARTIAL_NIGHT,
     VerisureOwaState.TOTAL,
@@ -116,13 +118,50 @@ PERI_OPTIONS: list[VerisureOwaState] = [
     VerisureOwaState.TOTAL_PERI,
 ]
 
-# Default mappings matching current behavior (keyed by HA button name)
+# Annex variants offered when annex is configured (no perimeter)
+_ANNEX_ONLY_OPTIONS: list[VerisureOwaState] = [
+    VerisureOwaState.ANNEX_ONLY,
+    VerisureOwaState.PARTIAL_DAY_ANNEX,
+    VerisureOwaState.PARTIAL_NIGHT_ANNEX,
+    VerisureOwaState.TOTAL_ANNEX,
+]
+
+# Annex+perimeter combinations offered when both are configured
+_PERI_ANNEX_OPTIONS: list[VerisureOwaState] = [
+    VerisureOwaState.PERI_ANNEX,
+    VerisureOwaState.PARTIAL_DAY_PERI_ANNEX,
+    VerisureOwaState.PARTIAL_NIGHT_PERI_ANNEX,
+    VerisureOwaState.TOTAL_PERI_ANNEX,
+]
+
+
+def dropdown_options(*, has_peri: bool, has_annex: bool) -> list[VerisureOwaState]:
+    """Return the alarm-mode options offered in the state-mappings dropdown.
+
+    Always offers the four interior modes. Adds peri-bearing variants when
+    has_peri, annex-bearing variants when has_annex, and peri+annex variants
+    when both are set. The combined-panel mappings cover every interior ×
+    perimeter × annex combination the panel can sit in, so users can map
+    any HA button to any reachable state.
+    """
+    options: list[VerisureOwaState] = list(STD_OPTIONS)
+    if has_peri:
+        options.extend(s for s in PERI_OPTIONS if s not in STD_OPTIONS)
+    if has_annex:
+        options.extend(_ANNEX_ONLY_OPTIONS)
+    if has_peri and has_annex:
+        options.extend(_PERI_ANNEX_OPTIONS)
+    return options
+
+
+# Default mappings keyed by HA button name. Entries are present only for
+# buttons that should arrive pre-filled in the form; map_custom and
+# map_vacation are intentionally absent on standard installations so they
+# render as blank ("not used") and the user opts in.
 STD_DEFAULTS: dict[str, str] = {
     "map_home": VerisureOwaState.PARTIAL_DAY.value,
     "map_away": VerisureOwaState.TOTAL.value,
     "map_night": VerisureOwaState.PARTIAL_NIGHT.value,
-    "map_custom": VerisureOwaState.NOT_USED.value,
-    "map_vacation": VerisureOwaState.NOT_USED.value,
 }
 
 PERI_DEFAULTS: dict[str, str] = {
@@ -130,5 +169,4 @@ PERI_DEFAULTS: dict[str, str] = {
     "map_away": VerisureOwaState.TOTAL_PERI.value,
     "map_night": VerisureOwaState.PARTIAL_NIGHT.value,
     "map_custom": VerisureOwaState.PERI_ONLY.value,
-    "map_vacation": VerisureOwaState.NOT_USED.value,
 }

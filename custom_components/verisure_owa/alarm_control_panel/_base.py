@@ -142,7 +142,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             sec_state = VerisureOwaState(sec_state_str)
             if sec_state == VerisureOwaState.NOT_USED:
                 continue
-            self._command_map[ha_state] = STATE_TO_COMMAND[sec_state]
+            # Annex-bearing targets reach the panel via the multi-step
+            # CommandResolver (ARMANNEX1/DARMANNEX1 + interior/peri commands)
+            # rather than the flat STATE_TO_COMMAND wire mapping. The map is
+            # only consulted for supported_features membership, so an empty
+            # placeholder for annex targets is enough.
+            self._command_map[ha_state] = STATE_TO_COMMAND.get(sec_state, "")
             self._securitas_state_map[ha_state] = sec_state
             for code, proto_state in PROTO_TO_STATE.items():
                 if proto_state == sec_state and code not in self._status_map:

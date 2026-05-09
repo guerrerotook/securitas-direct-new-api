@@ -13,6 +13,7 @@ from custom_components.verisure_owa.verisure_owa_api.const import (
     STD_DEFAULTS,
     STD_OPTIONS,
     VerisureOwaState,
+    dropdown_options,
 )
 
 
@@ -230,7 +231,6 @@ class TestStdOptions:
 
     def test_contains_expected_states(self):
         assert set(STD_OPTIONS) == {
-            VerisureOwaState.NOT_USED,
             VerisureOwaState.PARTIAL_DAY,
             VerisureOwaState.PARTIAL_NIGHT,
             VerisureOwaState.TOTAL,
@@ -248,9 +248,11 @@ class TestStdOptions:
         }
         assert set(STD_OPTIONS).isdisjoint(peri_only_states)
 
-    def test_does_not_contain_disarmed_states(self):
+    def test_does_not_contain_disarmed_or_not_used(self):
+        # NOT_USED is represented as a cleared field, not a dropdown option.
         assert VerisureOwaState.DISARMED not in STD_OPTIONS
         assert VerisureOwaState.DISARMED_PERI not in STD_OPTIONS
+        assert VerisureOwaState.NOT_USED not in STD_OPTIONS
 
 
 class TestPeriOptions:
@@ -258,7 +260,6 @@ class TestPeriOptions:
 
     def test_contains_expected_states(self):
         assert set(PERI_OPTIONS) == {
-            VerisureOwaState.NOT_USED,
             VerisureOwaState.PARTIAL_DAY,
             VerisureOwaState.PARTIAL_NIGHT,
             VerisureOwaState.TOTAL,
@@ -278,28 +279,86 @@ class TestPeriOptions:
         assert VerisureOwaState.PARTIAL_NIGHT_PERI in PERI_OPTIONS
         assert VerisureOwaState.TOTAL_PERI in PERI_OPTIONS
 
-    def test_does_not_contain_disarmed_states(self):
+    def test_does_not_contain_disarmed_or_not_used(self):
         assert VerisureOwaState.DISARMED not in PERI_OPTIONS
         assert VerisureOwaState.DISARMED_PERI not in PERI_OPTIONS
+        assert VerisureOwaState.NOT_USED not in PERI_OPTIONS
+
+
+# ── dropdown_options ────────────────────────────────────────────────────────
+
+
+class TestDropdownOptions:
+    """Tests for capability-driven dropdown_options helper."""
+
+    def test_no_capabilities_matches_std_options(self):
+        assert dropdown_options(has_peri=False, has_annex=False) == STD_OPTIONS
+
+    def test_peri_only_matches_peri_options(self):
+        assert dropdown_options(has_peri=True, has_annex=False) == PERI_OPTIONS
+
+    def test_annex_only_extends_std_with_annex_variants(self):
+        result = dropdown_options(has_peri=False, has_annex=True)
+        assert set(result) == set(STD_OPTIONS) | {
+            VerisureOwaState.ANNEX_ONLY,
+            VerisureOwaState.PARTIAL_DAY_ANNEX,
+            VerisureOwaState.PARTIAL_NIGHT_ANNEX,
+            VerisureOwaState.TOTAL_ANNEX,
+        }
+
+    def test_peri_and_annex_includes_all_combinations(self):
+        result = dropdown_options(has_peri=True, has_annex=True)
+        assert set(result) == set(PERI_OPTIONS) | {
+            VerisureOwaState.ANNEX_ONLY,
+            VerisureOwaState.PARTIAL_DAY_ANNEX,
+            VerisureOwaState.PARTIAL_NIGHT_ANNEX,
+            VerisureOwaState.TOTAL_ANNEX,
+            VerisureOwaState.PERI_ANNEX,
+            VerisureOwaState.PARTIAL_DAY_PERI_ANNEX,
+            VerisureOwaState.PARTIAL_NIGHT_PERI_ANNEX,
+            VerisureOwaState.TOTAL_PERI_ANNEX,
+        }
+
+    def test_peri_annex_combinations_only_when_both_set(self):
+        peri_annex_states = {
+            VerisureOwaState.PERI_ANNEX,
+            VerisureOwaState.PARTIAL_DAY_PERI_ANNEX,
+            VerisureOwaState.PARTIAL_NIGHT_PERI_ANNEX,
+            VerisureOwaState.TOTAL_PERI_ANNEX,
+        }
+        for has_peri, has_annex in [(False, False), (True, False), (False, True)]:
+            result = set(dropdown_options(has_peri=has_peri, has_annex=has_annex))
+            assert result.isdisjoint(peri_annex_states), (
+                f"peri+annex states leaked into has_peri={has_peri}, "
+                f"has_annex={has_annex}"
+            )
+
+    def test_no_disarmed_states_in_any_combination(self):
+        for has_peri, has_annex in [
+            (False, False),
+            (True, False),
+            (False, True),
+            (True, True),
+        ]:
+            result = dropdown_options(has_peri=has_peri, has_annex=has_annex)
+            assert VerisureOwaState.DISARMED not in result
+            assert VerisureOwaState.DISARMED_PERI not in result
 
 
 # ── STD_DEFAULTS / PERI_DEFAULTS ────────────────────────────────────────────
 
 
-EXPECTED_DEFAULT_KEYS = {
-    "map_home",
-    "map_away",
-    "map_night",
-    "map_custom",
-    "map_vacation",
-}
+_PRE_FILLED_KEYS_STD = {"map_home", "map_away", "map_night"}
+_PRE_FILLED_KEYS_PERI = _PRE_FILLED_KEYS_STD | {"map_custom"}
 
 
 class TestStdDefaults:
     """Tests for STD_DEFAULTS mapping."""
 
-    def test_has_correct_keys(self):
-        assert set(STD_DEFAULTS.keys()) == EXPECTED_DEFAULT_KEYS
+    def test_has_only_pre_filled_keys(self):
+        # map_custom and map_vacation are intentionally absent: the form
+        # renders them blank so the user opts in.
+        assert set(STD_DEFAULTS.keys()) == _PRE_FILLED_KEYS_STD
 
     def test_values_are_valid_verisure_owa_state_values(self):
         valid_values = {s.value for s in VerisureOwaState}
@@ -310,15 +369,15 @@ class TestStdDefaults:
         assert STD_DEFAULTS["map_home"] == "partial_day"
         assert STD_DEFAULTS["map_away"] == "total"
         assert STD_DEFAULTS["map_night"] == "partial_night"
-        assert STD_DEFAULTS["map_custom"] == "not_used"
-        assert STD_DEFAULTS["map_vacation"] == "not_used"
 
 
 class TestPeriDefaults:
     """Tests for PERI_DEFAULTS mapping."""
 
-    def test_has_correct_keys(self):
-        assert set(PERI_DEFAULTS.keys()) == EXPECTED_DEFAULT_KEYS
+    def test_has_only_pre_filled_keys(self):
+        # map_vacation is intentionally absent — perimeter installs default
+        # to peri_only on map_custom, but vacation stays blank for opt-in.
+        assert set(PERI_DEFAULTS.keys()) == _PRE_FILLED_KEYS_PERI
 
     def test_values_are_valid_verisure_owa_state_values(self):
         valid_values = {s.value for s in VerisureOwaState}
@@ -330,12 +389,13 @@ class TestPeriDefaults:
         assert PERI_DEFAULTS["map_away"] == "total_peri"
         assert PERI_DEFAULTS["map_night"] == "partial_night"
         assert PERI_DEFAULTS["map_custom"] == "peri_only"
-        assert PERI_DEFAULTS["map_vacation"] == "not_used"
 
     def test_peri_defaults_differ_from_std_for_peri_states(self):
         """PERI_DEFAULTS should use peri-enhanced states for away and custom."""
         assert PERI_DEFAULTS["map_away"] != STD_DEFAULTS["map_away"]
-        assert PERI_DEFAULTS["map_custom"] != STD_DEFAULTS["map_custom"]
+        # STD has no map_custom (pre-filled blank), PERI does — they differ.
+        assert "map_custom" not in STD_DEFAULTS
+        assert PERI_DEFAULTS["map_custom"] == "peri_only"
 
     def test_home_mapping_is_same_as_std(self):
         """map_home is the same in both STD and PERI defaults."""
