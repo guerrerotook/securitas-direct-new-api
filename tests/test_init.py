@@ -1065,6 +1065,45 @@ class TestAsyncUpdateOptions:
             await async_update_options(hass, entry)
             mock_reload.assert_awaited_once_with(entry.entry_id)
 
+    async def test_reload_when_lock_automations_changes(self, hass):
+        """Adding per-lock automation config (with all other settings matching)
+        must trigger a config-entry reload so the lock entity's
+        async_added_to_hass re-reads CONF_LOCK_AUTOMATIONS. Without the reload,
+        the auto-lock listener keeps its stale empty circuit lists from the
+        original load and never fires.
+        """
+        from custom_components.verisure_owa.const import CONF_LOCK_AUTOMATIONS
+
+        data = make_config_entry_data()
+        # All non-lock options match data so the existing trigger keys don't
+        # spuriously cause a reload — isolating CONF_LOCK_AUTOMATIONS as the
+        # only differing setting.
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: data[CONF_MAP_VACATION],
+            CONF_NOTIFY_GROUP: "",
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+            CONF_LOCK_AUTOMATIONS: {
+                "01": {"lock_on_arm": ["interior"], "unlock_disarms": ["interior"]}
+            },
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+            mock_reload.assert_awaited_once_with(entry.entry_id)
+
     @pytest.mark.parametrize(
         "toggle_key",
         [

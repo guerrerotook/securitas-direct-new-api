@@ -56,6 +56,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_ENABLE_ANNEX_PANEL,
+    CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
@@ -208,6 +209,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
             CONF_ENABLE_ANNEX_PANEL,
+            CONF_LOCK_AUTOMATIONS,
         )
     ):
         # update entry replacing data with new options
