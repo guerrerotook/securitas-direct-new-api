@@ -1,5 +1,5 @@
 /**
- * Verisure OWA Events Card
+ * Verisure OWA Activity Log Card
  *
  * Renders the alarm panel's activity timeline (xSActV2) as a clickable list.
  *
@@ -12,7 +12,7 @@
  *   - click to expand and show every populated field
  *
  * Card config:
- *   type: custom:verisure-owa-events-card
+ *   type: custom:verisure-owa-activity-log-card
  *   entity: sensor.home_activity_log    # required
  *   limit: 10                           # default 10, max 30
  *   title: "Recent activity"            # optional
@@ -37,6 +37,7 @@ const TRANSLATIONS = {
       power_cut: "Power cut",
       power_restored: "Power restored",
       status_check: "Status check",
+      communication_failed: "Communication failed",
       unknown: "Unknown event",
     },
     exception_status: {
@@ -69,6 +70,7 @@ const TRANSLATIONS = {
       power_cut: "Corte de energía",
       power_restored: "Energía restablecida",
       status_check: "Comprobación de estado",
+      communication_failed: "Fallo de comunicación",
       unknown: "Evento desconocido",
     },
     exception_status: {
@@ -101,6 +103,7 @@ const TRANSLATIONS = {
       power_cut: "Interruzione di corrente",
       power_restored: "Corrente ripristinata",
       status_check: "Verifica di stato",
+      communication_failed: "Errore di comunicazione",
       unknown: "Evento sconosciuto",
     },
     exception_status: {
@@ -133,6 +136,7 @@ const TRANSLATIONS = {
       power_cut: "Coupure de courant",
       power_restored: "Courant rétabli",
       status_check: "Vérification de l'état",
+      communication_failed: "Échec de communication",
       unknown: "Événement inconnu",
     },
     exception_status: {
@@ -165,6 +169,7 @@ const TRANSLATIONS = {
       power_cut: "Corte de energia",
       power_restored: "Energia restaurada",
       status_check: "Verificação de estado",
+      communication_failed: "Falha de comunicação",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -197,6 +202,7 @@ const TRANSLATIONS = {
       power_cut: "Corte de energia",
       power_restored: "Energia restaurada",
       status_check: "Verificação de status",
+      communication_failed: "Falha de comunicação",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -229,6 +235,7 @@ const TRANSLATIONS = {
       power_cut: "Tall de corrent",
       power_restored: "Corrent restablert",
       status_check: "Comprovació d'estat",
+      communication_failed: "Error de comunicació",
       unknown: "Esdeveniment desconegut",
     },
     exception_status: {
@@ -266,6 +273,7 @@ const CATEGORY_ICONS = {
   power_cut: "mdi:power-plug-off",
   power_restored: "mdi:power-plug",
   status_check: "mdi:lan-check",
+  communication_failed: "mdi:lan-disconnect",
   unknown: "mdi:help-circle",
 };
 
@@ -282,6 +290,7 @@ const CATEGORY_COLORS = {
   power_cut: "var(--warning-color, #ff9800)",
   power_restored: "var(--success-color, #43a047)",
   status_check: "var(--secondary-text-color)",
+  communication_failed: "var(--error-color, #db4437)",
   unknown: "var(--secondary-text-color)",
 };
 
@@ -384,7 +393,7 @@ function _renderRows(event, lang) {
 
 // ── Card ─────────────────────────────────────────────────────────────────────
 
-class VerisureOwaEventsCard extends HTMLElement {
+class VerisureOwaActivityLogCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -516,7 +525,7 @@ class VerisureOwaEventsCard extends HTMLElement {
   }
 
   static getConfigElement() {
-    return document.createElement("verisure-owa-events-card-editor");
+    return document.createElement("verisure-owa-activity-log-card-editor");
   }
 
   static getStubConfig(hass) {
@@ -647,14 +656,14 @@ class VerisureOwaEventsCard extends HTMLElement {
       } else {
         // eslint-disable-next-line no-console
         console.warn(
-          "[verisure-owa-events-card] fetch_activity_image returned no image_b64; result:",
+          "[verisure-owa-activity-log-card] fetch_activity_image returned no image_b64; result:",
           result,
         );
         this._imageCache.set(id, { state: "error" });
       }
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.warn("[verisure-owa-events-card] fetch_activity_image threw:", e);
+      console.warn("[verisure-owa-activity-log-card] fetch_activity_image threw:", e);
       this._imageCache.set(id, { state: "error" });
     }
     this._lastRenderedState = null;
@@ -923,7 +932,7 @@ class VerisureOwaEventsCard extends HTMLElement {
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
-class VerisureOwaEventsCardEditor extends HTMLElement {
+class VerisureOwaActivityLogCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -1025,17 +1034,17 @@ class VerisureOwaEventsCardEditor extends HTMLElement {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
-if (!customElements.get("verisure-owa-events-card"))
-  customElements.define("verisure-owa-events-card", VerisureOwaEventsCard);
-if (!customElements.get("verisure-owa-events-card-editor"))
-  customElements.define("verisure-owa-events-card-editor", VerisureOwaEventsCardEditor);
+if (!customElements.get("verisure-owa-activity-log-card"))
+  customElements.define("verisure-owa-activity-log-card", VerisureOwaActivityLogCard);
+if (!customElements.get("verisure-owa-activity-log-card-editor"))
+  customElements.define("verisure-owa-activity-log-card-editor", VerisureOwaActivityLogCardEditor);
 
 window.customCards = window.customCards || [];
-if (!window.customCards.find((c) => c.type === "verisure-owa-events-card")) {
+if (!window.customCards.find((c) => c.type === "verisure-owa-activity-log-card")) {
   window.customCards.push({
-    type: "verisure-owa-events-card",
-    name: "Verisure OWA Events Card",
-    description: "Shows recent alarm-panel events from a Verisure OWA activity log entity.",
+    type: "verisure-owa-activity-log-card",
+    name: "Verisure OWA Activity Log Card",
+    description: "Shows recent activity log entries from a Verisure OWA installation.",
     preview: false,
     documentationURL:
       "https://github.com/guerrerotook/securitas-direct-new-api",

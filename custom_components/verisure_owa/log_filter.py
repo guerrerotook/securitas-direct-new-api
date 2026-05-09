@@ -5,6 +5,46 @@ from __future__ import annotations
 import logging
 
 
+_COORDINATORS_LOGGER = "custom_components.verisure_owa.coordinators"
+
+# Phrases identifying transient backend conditions that HA's DataUpdateCoordinator
+# already retries automatically. We demote these from ERROR to WARNING so a
+# brief network or WAF hiccup at startup doesn't look like a real fault.
+_TRANSIENT_PHRASES = (
+    "operation timed out",
+    "WAF blocked",
+)
+
+
+class TransientCoordinatorErrorFilter(logging.Filter):
+    """Demote known-transient coordinator ERROR records to WARNING.
+
+    HA's DataUpdateCoordinator wraps a failed update as ``UpdateFailed`` and
+    logs it at ERROR. For genuine faults (auth failure, schema mismatch) ERROR
+    is right — but for transient backend conditions like Verisure's polling
+    timeouts or WAF rate-limit responses, the coordinator simply retries on
+    the next interval. WARNING is the right level for those.
+
+    Scoped to the coordinators logger so unrelated ERROR records elsewhere
+    (e.g. hub.py) keep their original level.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Adjust ``record.levelno`` in place; always returns True."""
+        if record.levelno != logging.ERROR:
+            return True
+        if record.name != _COORDINATORS_LOGGER:
+            return True
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # filter must never crash
+            return True
+        if any(phrase in message for phrase in _TRANSIENT_PHRASES):
+            record.levelno = logging.WARNING
+            record.levelname = "WARNING"
+        return True
+
+
 # Map secret keys to their redaction labels
 _REDACTION_LABELS: dict[str, str] = {
     "auth_token": "[AUTH_TOKEN]",

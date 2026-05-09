@@ -1108,6 +1108,16 @@ class TestActivityEventCategory:
     def test_status_check(self):
         assert self._ev(27).category == ActivityCategory.STATUS_CHECK
 
+    def test_communication_failed(self):
+        """501 (panel communication failure during arm/disarm) and 502
+        (failure during status refresh) both surface as COMMUNICATION_FAILED.
+
+        Verisure's own UI labels these as "Error processing alarm
+        deactivation" — i.e. the panel couldn't talk to the alarm — distinct
+        from ARMING_FAILED which is an exception-based rejection."""
+        assert self._ev(501).category == ActivityCategory.COMMUNICATION_FAILED
+        assert self._ev(502).category == ActivityCategory.COMMUNICATION_FAILED
+
     def test_unknown_codes(self):
         """Codes we haven't seen fall through to UNKNOWN — future-proofing."""
         assert self._ev(99999).category == ActivityCategory.UNKNOWN

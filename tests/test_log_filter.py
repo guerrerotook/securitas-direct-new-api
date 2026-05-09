@@ -2,7 +2,75 @@
 
 import logging
 
-from custom_components.verisure_owa.log_filter import SensitiveDataFilter
+from custom_components.verisure_owa.log_filter import (
+    SensitiveDataFilter,
+    TransientCoordinatorErrorFilter,
+)
+
+
+def _coord_record(msg: str, *, level: int = logging.ERROR) -> logging.LogRecord:
+    return logging.LogRecord(
+        name="custom_components.verisure_owa.coordinators",
+        level=level,
+        pathname="",
+        lineno=0,
+        msg=msg,
+        args=(),
+        exc_info=None,
+    )
+
+
+def test_transient_filter_demotes_operation_timed_out():
+    """ERROR-level coordinator records carrying 'operation timed out' should
+    be demoted to WARNING — these are transient backend slowness, HA will
+    retry, no need to scream in the log."""
+    f = TransientCoordinatorErrorFilter()
+    record = _coord_record("Sentinel update failed: operation timed out")
+    assert f.filter(record) is True
+    assert record.levelno == logging.WARNING
+    assert record.levelname == "WARNING"
+
+
+def test_transient_filter_demotes_waf_blocked():
+    """ERROR-level coordinator records about WAF rate-limiting should also
+    drop to WARNING — WAF blocks are transient and self-recover."""
+    f = TransientCoordinatorErrorFilter()
+    record = _coord_record("WAF blocked sentinel request: 429 Too Many Requests")
+    assert f.filter(record) is True
+    assert record.levelno == logging.WARNING
+
+
+def test_transient_filter_leaves_unknown_errors_alone():
+    """A real error message (not in the transient list) keeps its ERROR level."""
+    f = TransientCoordinatorErrorFilter()
+    record = _coord_record("Sentinel update failed: 500 Internal Server Error")
+    assert f.filter(record) is True
+    assert record.levelno == logging.ERROR
+
+
+def test_transient_filter_ignores_non_coordinator_logger():
+    """Demotion only applies to the coordinators logger — a hub error keeps
+    its ERROR level so we don't accidentally suppress unrelated messages."""
+    f = TransientCoordinatorErrorFilter()
+    record = logging.LogRecord(
+        name="custom_components.verisure_owa.hub",
+        level=logging.ERROR,
+        pathname="",
+        lineno=0,
+        msg="operation timed out",
+        args=(),
+        exc_info=None,
+    )
+    f.filter(record)
+    assert record.levelno == logging.ERROR
+
+
+def test_transient_filter_ignores_non_error_records():
+    """A WARNING already at WARNING shouldn't get further changed."""
+    f = TransientCoordinatorErrorFilter()
+    record = _coord_record("operation timed out", level=logging.WARNING)
+    f.filter(record)
+    assert record.levelno == logging.WARNING
 
 
 def test_redacts_secret_in_message():

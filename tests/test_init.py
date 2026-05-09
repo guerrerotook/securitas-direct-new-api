@@ -405,6 +405,55 @@ class TestAsyncSetupEntry:
         assert "hub" in hass.data[DOMAIN][entry.entry_id]
         assert "devices" in hass.data[DOMAIN][entry.entry_id]
 
+    async def test_setup_post_migration_fires_one_shot_notification(self, hass, mock_hub):
+        """First successful setup after the legacy migration shows a persistent
+        notification linking to the README breaking-changes section, then clears
+        the migrated_from_securitas flag so reloads don't re-pop it."""
+        data = make_config_entry_data()
+        data["migrated_from_securitas"] = True
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch("custom_components.verisure_owa._notify") as mock_notify,
+        ):
+            await async_setup_entry(hass, entry)
+
+        # Notice fired with the migration_complete translation key.
+        notify_calls = [c for c in mock_notify.call_args_list if c.args[1] == "migration_complete"]
+        assert len(notify_calls) == 1
+        # Flag cleared so a subsequent reload would not re-fire.
+        assert "migrated_from_securitas" not in entry.data
+        # Per-boot dedup recorded so multi-installation upgrades only show once.
+        assert hass.data[DOMAIN]["post_migration_notice_shown"] is True
+
+    async def test_setup_without_migration_flag_does_not_fire_notice(self, hass, mock_hub):
+        """A normal (non-migrated) setup must not surface the migration notice."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.verisure_owa.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch("custom_components.verisure_owa._notify") as mock_notify,
+        ):
+            await async_setup_entry(hass, entry)
+
+        notify_calls = [c for c in mock_notify.call_args_list if c.args[1] == "migration_complete"]
+        assert len(notify_calls) == 0
+
     async def test_setup_succeeds_with_refresh_token_only_entry(self, hass, mock_hub):
         """Refresh-token-shape entries (no CONF_PASSWORD) must set up cleanly."""
         from custom_components.verisure_owa.const import CONF_REFRESH_TOKEN
@@ -672,7 +721,7 @@ class TestAsyncSetupEntry:
             for u in js_urls
         )
         assert any(
-            u.startswith("/verisure-owa-panel/verisure-owa-events-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
             for u in js_urls
         )
 
@@ -742,7 +791,7 @@ class TestAsyncSetupEntry:
             for u in js_urls
         )
         assert any(
-            u.startswith("/verisure-owa-panel/verisure-owa-events-card.js?v=")
+            u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
             for u in js_urls
         )
 

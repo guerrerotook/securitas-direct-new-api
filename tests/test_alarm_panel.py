@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 from homeassistant.components.alarm_control_panel import AlarmControlPanelEntityFeature  # type: ignore[attr-defined]
 from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelState,
@@ -3327,6 +3329,63 @@ class TestExecuteTransitionRefusesUnknownState:
         assert args[2] == "arm_failed"
         assert "'Z'" in args[3]["error"]
 
+    async def test_arm_failure_injects_communication_failed_event(self):
+        """When the API rejects an arm, inject a HA-side COMMUNICATION_FAILED
+        event so the activity log surfaces it with HA-user attribution
+        (instead of the panel's later polled type-501 'Sorry' message)."""
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            ActivityCategory,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._last_proto_code = "D"
+        alarm._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
+
+        with (
+            patch(
+                "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            ),
+            patch(
+                "custom_components.verisure_owa.alarm_control_panel._base.inject_ha_event"
+            ) as mock_inject,
+        ):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        mock_inject.assert_awaited_once()
+        kwargs = mock_inject.await_args.kwargs
+        assert kwargs["category"] == ActivityCategory.COMMUNICATION_FAILED
+        assert "Arm failed" in kwargs["alias"]
+
+    async def test_disarm_failure_injects_communication_failed_event(self):
+        """A failed disarm round-trip (panel-side comms error) injects
+        COMMUNICATION_FAILED so the timeline picks up the failure with HA
+        context."""
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            ActivityCategory,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm._last_proto_code = "T"
+        alarm._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
+
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.inject_ha_event"
+        ) as mock_inject:
+            await alarm.async_alarm_disarm()
+
+        mock_inject.assert_awaited_once()
+        kwargs = mock_inject.await_args.kwargs
+        assert kwargs["category"] == ActivityCategory.COMMUNICATION_FAILED
+        assert "Disarm failed" in kwargs["alias"]
+
 
 # ===========================================================================
 # _last_proto_code tracking
@@ -5323,6 +5382,264 @@ class TestExecutePartialDisarm:
 
 
 # ===========================================================================
+# TestCombinedPanelEntityId
+# ===========================================================================
+
+
+class TestCombinedPanelEntityId:
+    """The combined panel must suggest `<alias>` as its entity-id slug.
+
+    Without this, HA would use the friendly-name 'Main - <alias>' to slugify
+    the entity_id and end up with `alarm_control_panel.main_<alias>` (or, in
+    the documented breakage from registry collision recovery,
+    `<alias>_main_<alias>`). Forcing the slug to `<alias>` matches the v4
+    entity_id and means dashboards keep working through a fresh v5 setup.
+    """
+
+    def test_combined_panel_suggested_object_id_is_alias(self):
+        alarm = make_alarm()
+        # Reach into the combined panel and check the slug source HA uses
+        # when generating the entity_id for a fresh install.
+        assert alarm.suggested_object_id == alarm.installation.alias
+
+    def test_combined_panel_friendly_name_keeps_main_prefix(self):
+        alarm = make_alarm()
+        assert alarm.name.startswith("Main - ")
+
+
+# ===========================================================================
+# TestCombinedPanelEntityIdHealer
+# ===========================================================================
+
+
+class TestCombinedPanelEntityIdHealer:
+    """Healer for upgrade-path-broken entity_ids.
+
+    Earlier v5 builds slugified the friendly name `Main - <alias>` and ended up
+    with `alarm_control_panel.<alias>_main_<alias>`. Restoring an old version
+    and re-upgrading leaves a stale entity squatting on the canonical slot,
+    pushing the new entity to `_2`. The healer reclaims the slot at setup.
+    """
+
+    async def test_renames_non_canonical_to_alias(self, hass):
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}",
+            suggested_object_id="corso_vittorio_emanuele_252_roma_main_corso_vittorio_emanuele_252_roma",
+            config_entry=entry,
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation)
+
+        canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}",
+            )
+            == canonical
+        )
+
+    async def test_no_op_when_already_canonical(self, hass):
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}",
+            suggested_object_id=slugify(installation.alias),
+            config_entry=entry,
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation)
+
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}",
+            )
+            == canonical
+        )
+
+    async def test_evicts_squatting_orphan_in_our_domain(self, hass):
+        """When a stale verisure_owa entity holds the canonical slot and ours
+        is languishing at `_2`, the healer removes the squatter and renames
+        ours into the freed slot.
+        """
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+        # Stale verisure_owa entity squatting on the canonical slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            "v5_verisure_owa.legacy-stub",
+            suggested_object_id=slugify(installation.alias),
+            config_entry=entry,
+        )
+        # Ours, pushed to `_2`.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}",
+            suggested_object_id=slugify(installation.alias),
+            config_entry=entry,
+        )
+        # Sanity: HA assigned `_2` to ours.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}",
+            )
+            == f"{canonical}_2"
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation)
+
+        # Squatter gone; ours reclaimed the canonical slot.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel", DOMAIN, "v5_verisure_owa.legacy-stub"
+            )
+            is None
+        )
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}",
+            )
+            == canonical
+        )
+
+    async def test_skips_when_slot_held_by_other_domain(self, hass):
+        """If a non-verisure entity owns the slot, leave ours alone."""
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+        # An unrelated integration's entity occupies the slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            "manual_alarm",
+            "manual-alarm-unique-id",
+            suggested_object_id=slugify(installation.alias),
+            config_entry=entry,
+        )
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}",
+            suggested_object_id=slugify(installation.alias),
+            config_entry=entry,
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation)
+
+        # Other-domain entity still there; ours stays at `_2`.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel", "manual_alarm", "manual-alarm-unique-id"
+            )
+            == canonical
+        )
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}",
+            )
+            == f"{canonical}_2"
+        )
+
+
+# ===========================================================================
 # TestCombinedPanelRegistration
 # ===========================================================================
 
@@ -5381,6 +5698,11 @@ class TestCombinedPanelRegistration:
                 "custom_components.verisure_owa.alarm_control_panel"
                 ".async_get_current_platform",
                 return_value=MagicMock(),
+            ),
+            patch(
+                "custom_components.verisure_owa.alarm_control_panel"
+                "._heal_combined_panel_entity_id",
+                AsyncMock(),
             ),
         ):
             await async_setup_entry(hass, entry, async_add_entities)
