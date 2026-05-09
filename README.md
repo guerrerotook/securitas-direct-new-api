@@ -1,54 +1,96 @@
 # Verisure OWA
 
-A Home Assistant custom integration for **Verisure** (formerly Securitas Direct in some markets), supporting Argentina, Brazil, Chile, France, Ireland, Italy, Peru, Portugal, Spain, and the United Kingdom.
+A Home Assistant custom integration for **Verisure** (formerly Securitas Direct in some markets), supporting Argentina, Brazil, Chile, France, Ireland, Italy, Portugal, Spain, and the United Kingdom.
 
-Renamed from `securitas` to `verisure_owa` in v5.0.0. The legacy domain shim, service aliases, event aliases, and panel URL aliases remain available until v6.0.0. See the v5 release notes for migration details.
+Renamed from `securitas` to `verisure_owa` in v5.0.0. The legacy domain shim, service aliases, event aliases, and panel URL aliases remain available until v6.0.0. See [Breaking Changes in v5.0.0](#breaking-changes-in-v500) for migration details.
 
 ## Features
 
-- **Multiple installations** — accounts with multiple installations (e.g. home + office) are fully supported. Each installation gets its own config entry and entities, with a shared API session to minimize login requests.
-- **Alarm control panel** — arm, disarm, and monitor your alarm from Home Assistant.
-- **Configurable alarm state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Verisure alarm mode.
-- **Force arming** — when arming is blocked by an exception (e.g. an open window), the integration fires a `verisure_owa_arming_exception` event and (optionally) notifies you. Force-arm via mobile notification, the `verisure_owa.force_arm` service, the custom alarm card, or your own automations.
-- **Custom alarm card** — a purpose-built Lovelace card with dynamic arm buttons, PIN keypad, and built-in force-arm UI, plus a badge.
-- **Refresh button** — manually trigger an alarm status check.
-- **Perimeter alarm support** — full support for installations with external/outdoor sensors.
-- **Sentinel sensors** — temperature, humidity, and air quality sensors for each Sentinel device.
-- **Smart locks** — lock and unlock smart door locks. Multiple locks per installation supported, with door-open (latch hold-back) and auto-lock configuration.
-- **Cameras** — view the latest captured image from Verisure cameras, with a capture button to request new images on demand, and a custom camera card for easy display
-- **Custom camera card** — a purpose-built Lovelace card to show photographs from the cameras with a refresh button to request a new photograph
-- **PIN code protection** — optional local PIN code for arming and/or disarming the alarm from Home Assistant (independent of your Verisure account).
-- **Two-factor authentication** — login via SMS verification code.
+### Alarm control
 
-## Breaking Changes in v4.0.0
+- **Main panel** — arm, disarm, and monitor your alarm from Home Assistant. One per installation.
+- **Configurable state mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to any Verisure alarm mode.
+- **Per-axis sub-panels** — for installations with perimeter or annex alarms, optional dedicated Interior-only / Perimeter-only / Annex-only control panels alongside the main panel.
+- **Force arming** — when arming is blocked by an open sensor, the integration fires `verisure_owa_arming_exception` and (optionally) notifies you. Force-arm via mobile notification, the `verisure_owa.force_arm` service, the custom alarm card, or your own automations.
+- **Refresh button** — trigger a manual alarm status check.
 
-> **Warning:** This release includes breaking changes. Please read before upgrading.
+### Smart locks
 
-**You will need to delete your existing installations and to re-add them after upgrading.**
+- **Lock / unlock / open** — multi-lock installations supported. Both Smartlock and Danalock-type locks work, with auto-detection. When the lock supports latch hold-back, an "Open" action is exposed.
+- **Auto-lock on arm** — per lock, pick which circuits should automatically lock the door when they arm.
+- **Auto-disarm before unlock** — per lock, pick which circuits should be disarmed when the lock is unlocked from HA. Disarm and unlock dispatch in parallel; sub-panels animate the disarm in real time.
+- **Failure notifications** — persistent notifications when an auto-lock, auto-disarm, or post-disarm unlock fails.
 
-- **Entity IDs** have changed. Locks and cameras are listed as sub-devices alongside the alarm control panel, and sensors and are now listed as entities under the installation, rather than as top-level devices.
-- **"Check alarm panel" option removed** — The integration now always uses the lightweight server-side status check for periodic polling. The more expensive panel query is still used for arm/disarm operations and the manual refresh button. If you had automations or scripts referencing this option, they will need to be updated.
-- **"Use 2FA" checkbox removed** — 2FA is now handled automatically during setup. If your account requires 2FA, you will be prompted; if not, the step is skipped.
-- **Per-installation config entries** — The integration now creates one config entry per installation instead of one per account. If your account has multiple installations, you add each one separately via the setup wizard (which now includes an installation picker step). Accounts with multiple installations previously had all installations bundled into a single config entry — this is no longer supported.
-- **Perimeter alarm auto-detection** — The "Perimetral alarm" checkbox has been replaced by automatic detection from the installation's service attributes. Your existing perimeter setting is preserved during migration.
-- **Scan interval and API delay moved to Advanced section** — These options are now in a collapsible "Advanced" section in the options flow. The "Delay to check arming and disarming operations" has been renamed to "Delay between API requests" and now applies to all API calls (not just arm/disarm polling).
-- **WiFi diagnostic sensor added** — A new `wifi_connected` sensor is created per installation, showing the panel's WiFi connection status.
+### Cameras
+
+- **Live thumbnails + full-resolution images** — one thumbnail entity and one full-resolution entity per camera.
+- **On-demand capture** — a Capture button triggers a fresh image; a `capturing` attribute is exposed for automations.
+
+### Sensors
+
+- **Sentinel** — temperature, humidity, and air quality (numeric and categorical) for each Sentinel device.
+- **WiFi connectivity** — diagnostic binary sensor showing the panel's connection status.
+- **Activity log sensor** — the most recent Verisure event as state, with the last 30 entries available as an attribute.
+
+### Activity log
+
+- **Verisure event history in HA** — arm/disarm, the Verisure user who did it, intrusions, image requests, power cuts, and more — surfaced via: an activity log card, the activity log sensor, and a `verisure_owa_activity` event you can trigger automations on.
+- **HA action enrichment** — actions taken from within Home Assistant are tagged with the actual HA user and replace the events coming from Verisure so that automations only fire once.
+
+### Lovelace cards
+
+The integration ships three purpose-built cards, registered automatically when the integration loads:
+
+- **Alarm card** — dynamic arm buttons (only the modes you've mapped), PIN keypad, force-arm UI, and a companion badge.
+- **Camera card** — latest thumbnail with a capture button, timestamp overlay, and click-to-open full-resolution image.
+- **Activity log card** — viewer for the activity log with a refresh button and click-through to entry details (including images for image-request entries).
+
+### Multi-installation & authentication
+
+- **Multiple installations per account** — each installation gets its own config entry and entities, with a shared API session.
+- **Two-factor authentication** — login via SMS verification code; if your account requires 2FA you'll be prompted automatically during setup.
+- **Refresh-token authentication** — your password is never persisted; first login mints a ~180-day refresh token, and the integration uses that for the rest of the session lifetime. If the token is revoked or expires, HA shows a one-time reauth dialog.
+- **Local PIN protection** — optional PIN code for arming and/or disarming from HA, independent of your Verisure account.
+
+## What's new in v5.0.0
+
+- **Rebrand to `verisure_owa`.** Domain, services, events, and the side-panel URL are all renamed. Legacy aliases stay until v6.0.0 — see [Breaking Changes in v5.0.0](#breaking-changes-in-v500).
+- **Refresh-token authentication.** Passwords are no longer persisted to disk; logins now mint a long-lived refresh token. After upgrade you may see a one-time reauth dialog so the token can be minted from your existing password.
+- **Per-axis sub-panels.** Opt in to Interior-only, Perimeter-only, and Annex-only control panels for installations with multiple axes. Capability-gated — toggles only appear when supported.
+- **Lock automations.** Configure each lock to auto-lock when a circuit arms, and to auto-disarm circuits before an HA-initiated unlock. Disarm and unlock run in parallel for snappy UX.
+- **Activity log.** Verisure event history is now a first-class HA citizen — Lovelace card, sensor, and `verisure_owa_activity` event bus entries. HA actions are enriched and de-duplicated against polled echoes.
+- **Sectioned options flow.** Settings are grouped into PIN, force-arm notifications, sub-panels, and Advanced sections. The Sub-panels section appears only when peri or annex is detected.
+- **Custom alarm and camera cards** are now bundled with the integration — no separate install. The activity log card joins them.
+
+## Breaking Changes in v5.0.0
+
+> **Warning:** v5.0.0 renames the integration from `securitas` to `verisure_owa`. Most users won't have to touch anything — every legacy reference (entity IDs, services, events, the side-panel URL) keeps working through transparent shims until **v6.0.0**, at which point the aliases are removed. Plan to migrate any references before then.
+
+- **Domain renamed `securitas` → `verisure_owa`.** New installs use `verisure_owa` everywhere. Existing installs are migrated automatically and their entity IDs are rewritten in the registry.
+- **Service rename.** `securitas.force_arm` / `securitas.force_arm_cancel` are now `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel`. The legacy names continue to dispatch to the new ones until v6.0.0.
+- **Event rename.** `securitas_arming_exception` → `verisure_owa_arming_exception`, and `securitas_activity` → `verisure_owa_activity`. The legacy events still fire alongside the new ones until v6.0.0 — automations triggered on either name keep working.
+- **Side-panel URL rename.** `/securitas_panel` → `/verisure-owa-panel`. The legacy URL is kept available until v6.0.0 so existing dashboards don't break mid-migration.
+- **Password is no longer persisted.** Login now mints a ~180-day refresh token; the password is discarded and only the refresh token lives in the config entry. After upgrade, the integration may show a one-time reauth dialog so you can mint a refresh token from your existing password — enter it once and you're done.
+- **`set_authentication_token` service removed.** The previous workaround for stuck logins is no longer needed; the refresh-token flow handles renewal automatically.
+
+If you're upgrading from v3.x or earlier, the breaking changes from v4.0.0 still apply on top of the above — see the v4.0.0 release notes.
 
 ## Supported Countries
 
-| Code | Country       | Brand            |
-| ---- | ------------- | ---------------- |
-| AR   | Argentina     | Verisure         |
-| BR   | Brazil        | Verisure         |
-| CL   | Chile         | Verisure         |
-| ES   | Spain         | Verisure         |
-| FR   | France        | Verisure         |
-| GB   | Great Britain | Verisure         |
-| IE   | Ireland       | Verisure         |
-| IT   | Italy         | Verisure         |
-| PT   | Portugal      | Verisure         |
+| Code | Country       | 
+| ---- | ------------- | 
+| AR   | Argentina     | 
+| BR   | Brazil        | 
+| CL   | Chile         | 
+| ES   | Spain         | 
+| FR   | France        | 
+| GB   | United Kingdom| 
+| IE   | Ireland       | 
+| IT   | Italy         | 
+| PE   | Peru.         | 
+| PT   | Portugal      | 
 
-If your country is not listed, try `default`. If that doesn't work, [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues).
+If your country is not listed, [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues).
 
 ## Installation
 
@@ -70,9 +112,11 @@ Go to **Settings → Integrations → Add Integration** and search for **Verisur
 The setup flow is a multi-step wizard:
 
 1. **Login** — Enter your country, username, and password. 2FA is handled automatically if your account requires it.
-2. **Installation** — If your account has multiple installations, pick which one to configure. Repeat the setup flow to add additional installations. Perimeter support is auto-detected from the installation's services.
-3. **Options** — Set your PIN code, notification service, and optionally expand the **Advanced** section for scan interval and API delay settings.
-4. **Mappings** — Map each HA alarm button to a Verisure alarm mode.
+2. **Installation** — If your account has multiple installations, pick which one to configure. Repeat the setup flow to add the others. Perimeter and annex support is auto-detected from the installation's services and capabilities.
+3. **Options** — PIN code, force-arm notifications, optional per-axis sub-panel toggles (only shown when supported), and a collapsed Advanced section for scan interval / API delay.
+4. **Mappings** — Map each HA alarm button (Home, Away, Night, Vacation, Custom) to a Verisure alarm mode.
+
+Once setup completes, locks and cameras are discovered in the background. The **Lock automation** screen for configuring auto-lock and auto-disarm appears in the Configure dialog (**Settings → Devices & Services → Verisure OWA → Configure**) once locks have been registered.
 
 ### Login
 
@@ -96,18 +140,31 @@ Your password is **not** persisted to disk. After the initial login the integrat
 
 ## Options
 
-After setup, you can change most settings via **Settings → Integrations → Verisure OWA → Configure**.
+After setup, change most settings via **Settings → Integrations → Verisure OWA → Configure**. The Configure dialog walks you through three (or four, with locks) screens.
 
 ![Options](./docs/images/options.png)
 
-| Option                                  | Default   | Description                                                                                                                                                                            |
-| --------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PIN Code                                | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Can be numeric or alphanumeric.                        |
-| Require PIN to arm                      | No        | When enabled, the PIN is also required to arm the alarm (not just to disarm). Has no effect if no PIN is set.                                                                          |
-| Notify service                          | _(none)_  | A `notify` service to call when arming is blocked by an exception. Select a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
-| Built-in force-arm notifications        | Yes       | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable this to handle the `verisure_owa_arming_exception` event with your own automations instead. See [Force Arming](#force-arming). |
-| Update interval _(Advanced)_            | 120s      | How often (in seconds) the integration checks the alarm status. Set to 0 to disable automatic polling.                                                                                 |
-| Delay between API requests _(Advanced)_ | 2s        | Minimum delay between consecutive API requests. Higher values reduce the risk of WAF rate limiting.                                                                                    |
+### Screen 1 — Options
+
+| Section | Option | Default | Description |
+| ------- | ------ | ------- | ----------- |
+| **PIN code for disarming** | PIN code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Numeric or alphanumeric. |
+| | Require PIN to arm | No | When enabled, the PIN is also required to arm (not just disarm). No effect if no PIN is set. |
+| **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
+| | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming](#force-arming). |
+| **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter axis only. Visible only on installations with perimeter sensors. |
+| | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex axis only. Visible only on installations with an annex zone. |
+| | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior axis only. Visible whenever any sibling axis is supported. |
+| **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
+| | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
+
+### Screen 2 — Alarm State Mappings
+
+See [Alarm State Mappings](#alarm-state-mappings) for the full reference.
+
+### Screen 3 — Lock automation _(only shown when locks are discovered)_
+
+See [Lock automations](#lock-automations) for the full reference.
 
 ## Alarm State Mappings
 
@@ -441,6 +498,23 @@ Lock features (latch hold-back time, auto-lock settings) are fetched from the lo
 
 If the lock configuration cannot be fetched during startup (e.g. due to a temporary API outage), the lock entity is still created and works for lock/unlock operations. The integration retries the configuration fetch in the background, and the "Open" button will appear once the configuration is successfully retrieved.
 
+### Lock automations
+
+Each lock can be wired to two optional behaviours. Configure them under **Settings → Devices & Services → Verisure OWA → Configure**, in the **Lock automation** step (one section per discovered lock):
+
+- **Auto-lock on arm** — pick which circuits (Interior, Perimeter, Annex) should trigger this lock to lock when they arm. With the Interior box ticked, arming Interior anywhere — main panel, Interior sub-panel, the Verisure app, the physical panel — automatically locks the door. Multi-axis transitions only fire the lock once.
+- **Auto-disarm on unlock** — pick which circuits should be disarmed automatically when this lock is unlocked from HA. The disarm and the unlock dispatch in parallel, so both finish in roughly the time of one operation, and any sub-panels you've enabled show their normal "Disarming" → "Disarmed" animation while it's in flight.
+
+Both automations are off by default — leaving every box unchecked preserves the old behaviour (the lock locks/unlocks only when you tell it to, and never touches the alarm). Failures surface as persistent notifications:
+
+| Notification | When it fires |
+| ------------ | ------------- |
+| **Auto-lock failed** | An arm transition fired the auto-lock but the lock couldn't reach the locked state. Notification ID is stable per lock, so consecutive failures replace rather than stack. |
+| **Auto-disarm failed** | The pre-unlock disarm couldn't disarm the configured circuits. The unlock still proceeds. |
+| **Unlock failed** | The disarm succeeded but the lock didn't unlock — the alarm is now disarmed but the door is still locked. |
+
+Auto-disarm only triggers an HA-initiated unlock (via the lock entity, the dashboard, an automation calling `lock.unlock`, etc.). Unlocking from outside HA — the Verisure app, the physical lock — never reaches into the alarm.
+
 ## Cameras
 
 If your installation includes Verisure cameras, the integration creates two camera entities per physical camera:
@@ -487,7 +561,7 @@ The Activity Log shows the same history of events as the Verisure app: when the 
 
 ### Where to find it
 
-- **A Lovelace card.** When editing your dashboard, click **Add Card** and pick **Verisure OWA Events Card**. The card shows the most recent events; click any row to see details, including images for image-request events. There's a refresh button in the top-right corner.
+- **A Lovelace card.** When editing your dashboard, click **Add Card** and pick **Verisure OWA Activity Log Card**. It shows the most recent entries; click any row for details, including images for image-request entries. There's a refresh button in the top-right corner.
 - **A sensor.** `sensor.<alias>_activity_log` shows the most recent event as its state. Its `events` attribute holds the last 30 entries — useful for templates, custom cards, or anything that needs to read the history programmatically.
 - **The event bus.** Each new entry fires a `securitas_activity` event you can use as an automation trigger (see below).
 
