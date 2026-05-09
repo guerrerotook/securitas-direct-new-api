@@ -16,6 +16,12 @@ from homeassistant.components.alarm_control_panel import (
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 
+from ..const import (
+    CIRCUIT_ANNEX,
+    CIRCUIT_INTERIOR,
+    CIRCUIT_PERIMETER,
+    DOMAIN,
+)
 from ..coordinators import AlarmStatusData
 from ..verisure_owa_api import (
     OperationStatus,
@@ -68,6 +74,13 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
 
         Returns True on success, False on VerisureOwaError. Empty
         ``circuits`` is a no-op success.
+
+        Drives the same optimistic-state lifecycle as a user-initiated disarm
+        on each affected entity (this combined panel + any registered axis
+        sub-panel for the listed circuits): DISARMING during the transition,
+        post-result state on success, rollback on failure. Concludes with a
+        coordinator refresh so other observers don't have to wait for the
+        next poll to see the change.
         """
         if not circuits:
             return True
@@ -75,10 +88,19 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         target = build_partial_disarm_target(current, circuits)
         if target == current:
             return True
+
+        affected = [self, *self._affected_axis_subpanels(circuits)]
+        for entity in affected:
+            entity._operation_in_progress = True  # noqa: SLF001
+            entity._operation_epoch += 1  # noqa: SLF001
+            entity._force_state(AlarmControlPanelState.DISARMING)  # noqa: SLF001
         try:
-            await self._execute_transition(target)
-            return True
+            result = await self._execute_transition(target)
         except VerisureOwaError as err:
+            for entity in affected:
+                entity._state = entity._last_state  # noqa: SLF001
+                entity._operation_in_progress = False  # noqa: SLF001
+                entity.async_write_ha_state()
             _LOGGER.error(
                 "Partial disarm failed for %s circuits %s: %s",
                 self._installation.number,
@@ -86,6 +108,35 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 err.log_detail(),
             )
             return False
+        for entity in affected:
+            entity.update_status_alarm(result)
+            entity._operation_in_progress = False  # noqa: SLF001
+            entity.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
+        return True
+
+    def _affected_axis_subpanels(
+        self, circuits: list[str]
+    ) -> list[BaseVerisureOwaAlarmPanel]:
+        """Look up registered sub-panel entities matching the given circuits.
+
+        Returns an empty list when there is no entry_data registration (test
+        contexts) or when the circuits don't map to any active sub-panel.
+        """
+        if self.hass is None:
+            return []
+        config_entry = getattr(self._client, "config_entry", None)
+        entry_id = getattr(config_entry, "entry_id", None)
+        if entry_id is None:
+            return []
+        domain_data = self.hass.data.get(DOMAIN, {})
+        entry_data = domain_data.get(entry_id)
+        if not isinstance(entry_data, dict):
+            return []
+        axis_panels = entry_data.get("axis_alarm_panels", {}).get(
+            self._installation.number, {}
+        )
+        return [axis_panels[c] for c in circuits if c in axis_panels]
 
 
 class _AxisSubPanelMixin:
@@ -150,6 +201,7 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
     """
 
     _SUFFIX = "_interior"
+    _AXIS = CIRCUIT_INTERIOR
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -214,6 +266,7 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
     """
 
     _SUFFIX = "_perimeter"
+    _AXIS = CIRCUIT_PERIMETER
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -259,6 +312,7 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
     """
 
     _SUFFIX = "_annex"
+    _AXIS = CIRCUIT_ANNEX
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
