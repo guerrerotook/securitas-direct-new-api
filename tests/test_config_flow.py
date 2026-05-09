@@ -904,7 +904,6 @@ async def test_options_mappings_std_options_when_peri_false(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            # CUSTOM/VACATION cleared (= "not used" — fields omitted)
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -960,7 +959,6 @@ async def test_options_mappings_invalid_mapping_falls_back(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            # CUSTOM/VACATION cleared
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -983,7 +981,6 @@ async def test_options_mappings_submitting_creates_entry(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            # CUSTOM/VACATION cleared (= "not used")
         },
     )
 
@@ -1012,7 +1009,6 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
             CONF_MAP_HOME: VerisureOwaState.TOTAL.value,
             CONF_MAP_AWAY: VerisureOwaState.TOTAL.value,
             CONF_MAP_NIGHT: VerisureOwaState.PARTIAL_NIGHT.value,
-            # CUSTOM/VACATION cleared — fields omitted = "not used"
         },
     )
 
@@ -2054,7 +2050,6 @@ async def _advance_to_lock_automations(hass, entry):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            # CUSTOM/VACATION cleared (= "not used")
         },
     )
     assert result["step_id"] == "lock_automations", (
@@ -2251,7 +2246,6 @@ async def test_lock_automations_skipped_when_no_locks_discovered(hass):
             CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
             CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
-            # CUSTOM/VACATION cleared (= "not used")
         },
     )
 
