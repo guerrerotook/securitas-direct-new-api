@@ -61,9 +61,9 @@ async def test_shim_creates_repairs_issue_pointing_at_breaking_changes(
     hass: HomeAssistant,
 ):
     """Successful migration raises a fixable Repairs issue (replacing the
-    old persistent banner) whose Learn-more link points at the README's
-    breaking-changes section so users can review the renamed services,
-    events, and Lovelace cards at their pace."""
+    old persistent banner) whose Learn-more link points at the
+    breaking-changes section in CHANGES.md so users can review the
+    renamed services, events, and Lovelace cards at their pace."""
     from custom_components.securitas import async_setup_entry as shim_setup
 
     legacy = MockConfigEntry(

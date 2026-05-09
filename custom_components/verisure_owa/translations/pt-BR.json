@@ -87,7 +87,7 @@
             },
             "mappings": {
                 "title": "Mapeamento dos estados do alarme",
-                "description": "Estas associações se aplicam apenas ao painel principal. Associe cada ação de alarme do Home Assistant a um modo de alarme Verisure; selecione « Não utilizado » para desativar um botão.{subpanels_note}",
+                "description": "Estas associações se aplicam apenas ao painel principal. Associe cada ação de alarme do Home Assistant a um modo de alarme Verisure; deixe um campo em branco para ocultar esse botão.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Ausente",
@@ -135,7 +135,7 @@
             },
             "mappings": {
                 "title": "Mapeamento dos estados do alarme",
-                "description": "Estas associações se aplicam apenas ao painel principal. Associe cada ação de alarme do Home Assistant a um modo de alarme Verisure; selecione « Não utilizado » para desativar um botão.{subpanels_note}",
+                "description": "Estas associações se aplicam apenas ao painel principal. Associe cada ação de alarme do Home Assistant a um modo de alarme Verisure; deixe um campo em branco para ocultar esse botão.{subpanels_note}",
                 "data": {
                     "map_home": "Casa",
                     "map_away": "Ausente",

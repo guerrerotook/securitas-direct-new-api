@@ -45,8 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Surface the restart-required prompt as a fixable Repairs issue rather
     # than a long persistent banner. The Fix button restarts HA; the issue's
-    # learn-more URL points to the breaking-changes section in the README so
-    # users can review the renamed services / events / Lovelace surfaces.
+    # learn-more URL points to CHANGES.md#breaking-changes so users can review
+    # the renamed services / events / Lovelace surfaces.
     ir.async_create_issue(
         hass,
         "verisure_owa",
