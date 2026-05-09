@@ -127,9 +127,7 @@ async def test_repair_flow_confirm_clears_issue_and_restarts(hass: HomeAssistant
     )
     issue_reg = ir.async_get(hass)
     assert (
-        issue_reg.async_get_issue(
-            "verisure_owa", "restart_required_after_migration"
-        )
+        issue_reg.async_get_issue("verisure_owa", "restart_required_after_migration")
         is not None
     )
 
@@ -146,9 +144,7 @@ async def test_repair_flow_confirm_clears_issue_and_restarts(hass: HomeAssistant
         await hass.async_block_till_done()
 
     assert (
-        issue_reg.async_get_issue(
-            "verisure_owa", "restart_required_after_migration"
-        )
+        issue_reg.async_get_issue("verisure_owa", "restart_required_after_migration")
         is None
     )
     mock_stop.assert_awaited()

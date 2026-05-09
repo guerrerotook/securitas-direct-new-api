@@ -116,9 +116,7 @@ async def _heal_combined_panel_entity_id(
             )
             return
 
-    _LOGGER.info(
-        "Renaming alarm-panel entity_id: %s -> %s", our_entity_id, canonical
-    )
+    _LOGGER.info("Renaming alarm-panel entity_id: %s -> %s", our_entity_id, canonical)
     ent_reg.async_update_entity(our_entity_id, new_entity_id=canonical)
 
 
