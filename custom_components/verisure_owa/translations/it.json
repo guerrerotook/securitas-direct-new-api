@@ -94,11 +94,6 @@
                     "map_night": "Notte",
                     "map_vacation": "Vacanza",
                     "map_custom": "Personalizzato"
-                },
-                "subpanels_notes": {
-                    "peri": "I pannelli opzionali solo Interno e solo Perimetrale non usano queste associazioni.",
-                    "annex": "I pannelli opzionali solo Interno e solo Annesso non usano queste associazioni.",
-                    "both": "I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso non usano queste associazioni."
                 }
             }
         }
@@ -147,11 +142,6 @@
                     "map_night": "Notte",
                     "map_vacation": "Vacanza",
                     "map_custom": "Personalizzato"
-                },
-                "subpanels_notes": {
-                    "peri": "I pannelli opzionali solo Interno e solo Perimetrale non usano queste associazioni.",
-                    "annex": "I pannelli opzionali solo Interno e solo Annesso non usano queste associazioni.",
-                    "both": "I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso non usano queste associazioni."
                 }
             },
             "lock_automations": {
@@ -230,7 +220,6 @@
     "issues": {
         "restart_required_after_migration": {
             "title": "Riavvio necessario per completare l'aggiornamento a Verisure OWA",
-            "description": "La tua integrazione Securitas Direct è stata migrata a Verisure OWA. Riavvia Home Assistant per attivare le voci migrate. Clicca su «Maggiori informazioni» per i servizi, gli eventi e le card Lovelace rinominati.",
             "fix_flow": {
                 "step": {
                     "confirm": {

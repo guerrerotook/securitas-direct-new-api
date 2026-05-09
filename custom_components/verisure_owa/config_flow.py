@@ -18,7 +18,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers import translation as ha_translation
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
@@ -99,50 +98,64 @@ SECTION_SUBPANELS = "subpanels"
 _ALL_SECTIONS = (SECTION_PIN, SECTION_NOTIFICATIONS, SECTION_SUBPANELS, CONF_ADVANCED)
 
 
-# English fallbacks used when the translation lookup fails (e.g. tests that
-# don't load the integration's translation pack). Keep in sync with the
-# translation keys under options.step.mappings.subpanels_notes.{key}.
-_SUBPANELS_NOTE_FALLBACK: dict[str, str] = {
-    "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
-    "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
-    "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings.",
+# Localized notes appended to the mappings step's description when
+# perimeter and/or annex sub-panels are available. Hassfest doesn't allow
+# arbitrary nested keys in strings.json (the form-step schema is strict),
+# so we keep these in Python and look them up by hass.config.language.
+# Falls back to English when the locale isn't covered.
+# pylint: disable=line-too-long
+_SUBPANELS_NOTES: dict[str, dict[str, str]] = {
+    "en": {
+        "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
+        "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
+        "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings.",
+    },
+    "es": {
+        "peri": "Los paneles opcionales solo Interior y solo Perimetral no usan estas asignaciones.",
+        "annex": "Los paneles opcionales solo Interior y solo Anexo no usan estas asignaciones.",
+        "both": "Los paneles opcionales solo Interior, solo Perimetral y solo Anexo no usan estas asignaciones.",
+    },
+    "fr": {
+        "peri": "Les panneaux optionnels Intérieur uniquement et Périmètre uniquement n'utilisent pas ces associations.",
+        "annex": "Les panneaux optionnels Intérieur uniquement et Annexe uniquement n'utilisent pas ces associations.",
+        "both": "Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement n'utilisent pas ces associations.",
+    },
+    "it": {
+        "peri": "I pannelli opzionali solo Interno e solo Perimetrale non usano queste associazioni.",
+        "annex": "I pannelli opzionali solo Interno e solo Annesso non usano queste associazioni.",
+        "both": "I pannelli opzionali solo Interno, solo Perimetrale e solo Annesso non usano queste associazioni.",
+    },
+    "pt": {
+        "peri": "Os painéis opcionais apenas Interior e apenas Perímetro não usam estas associações.",
+        "annex": "Os painéis opcionais apenas Interior e apenas Anexo não usam estas associações.",
+        "both": "Os painéis opcionais apenas Interior, apenas Perímetro e apenas Anexo não usam estas associações.",
+    },
+    "pt-BR": {
+        "peri": "Os painéis opcionais apenas Interior e apenas Perímetro não usam estas associações.",
+        "annex": "Os painéis opcionais apenas Interior e apenas Anexo não usam estas associações.",
+        "both": "Os painéis opcionais apenas Interior, apenas Perímetro e apenas Anexo não usam estas associações.",
+    },
+    "ca": {
+        "peri": "Els panells opcionals només Interior i només Perímetre no fan servir aquestes assignacions.",
+        "annex": "Els panells opcionals només Interior i només Annex no fan servir aquestes assignacions.",
+        "both": "Els panells opcionals només Interior, només Perímetre i només Annex no fan servir aquestes assignacions.",
+    },
 }
+# pylint: enable=line-too-long
 
 
-async def _subpanels_note(
-    hass: HomeAssistant, *, has_peri: bool, has_annex: bool
-) -> str:
-    """Return the localized sentence describing which optional sub-panels
-    skip these mappings, or empty if no peri/annex capability exists.
+def _subpanels_note(hass: HomeAssistant, *, has_peri: bool, has_annex: bool) -> str:
+    """Return the localized sub-panels note for the mappings step.
 
-    Picks one of three pre-translated sentences (peri-only, annex-only, both)
-    based on capability. Interior is always offered whenever any sibling axis
-    is supported, so each sentence already names Interior alongside its
-    relevant siblings — no dynamic assembly, hence easy to localize as fixed
-    strings in each locale's translation pack.
+    Empty string when neither perimeter nor annex is supported. Otherwise
+    picks one of three sentences (peri-only, annex-only, both) based on
+    capability.
     """
     if not (has_peri or has_annex):
         return ""
-    if has_peri and has_annex:
-        key = "both"
-    elif has_peri:
-        key = "peri"
-    else:
-        key = "annex"
-
-    sentence = _SUBPANELS_NOTE_FALLBACK[key]
-    try:
-        translations = await ha_translation.async_get_translations(
-            hass, hass.config.language, "options", {DOMAIN}
-        )
-        translated = translations.get(
-            f"component.{DOMAIN}.options.step.mappings.subpanels_notes.{key}"
-        )
-        if translated:
-            sentence = translated
-    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # translation lookup must not break the flow
-        pass
-    return f" {sentence}"
+    key = "both" if has_peri and has_annex else "peri" if has_peri else "annex"
+    locale = _SUBPANELS_NOTES.get(hass.config.language, _SUBPANELS_NOTES["en"])
+    return f" {locale.get(key, _SUBPANELS_NOTES['en'][key])}"
 
 
 def _mapping_field(key: str, suggestion: str | None) -> vol.Optional:
@@ -869,7 +882,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="mappings",
             data_schema=schema,
             description_placeholders={
-                "subpanels_note": await _subpanels_note(
+                "subpanels_note": _subpanels_note(
                     self.hass, has_peri=self._has_peri, has_annex=self._has_annex
                 )
             },
@@ -1023,7 +1036,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="mappings",
             data_schema=schema,
             description_placeholders={
-                "subpanels_note": await _subpanels_note(
+                "subpanels_note": _subpanels_note(
                     self.hass, has_peri=has_peri, has_annex=has_annex
                 )
             },

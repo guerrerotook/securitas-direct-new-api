@@ -779,70 +779,54 @@ async def test_options_init_reads_from_options_first(hass):
 # ===================================================================
 
 
-async def test_subpanels_note_empty_when_no_capability(hass):
+def test_subpanels_note_empty_when_no_capability(hass):
     """No peri/annex → no note."""
     from custom_components.verisure_owa.config_flow import _subpanels_note
 
-    assert await _subpanels_note(hass, has_peri=False, has_annex=False) == ""
+    assert _subpanels_note(hass, has_peri=False, has_annex=False) == ""
 
 
-async def test_subpanels_note_peri_only_lists_interior_and_perimeter(hass):
+def test_subpanels_note_peri_only_lists_interior_and_perimeter(hass):
     from custom_components.verisure_owa.config_flow import _subpanels_note
 
-    note = await _subpanels_note(hass, has_peri=True, has_annex=False)
+    note = _subpanels_note(hass, has_peri=True, has_annex=False)
     assert "Interior-only" in note
     assert "Perimeter-only" in note
     assert "Annex-only" not in note
     assert note.endswith("do not use these mappings.")
 
 
-async def test_subpanels_note_annex_only_lists_interior_and_annex(hass):
+def test_subpanels_note_annex_only_lists_interior_and_annex(hass):
     from custom_components.verisure_owa.config_flow import _subpanels_note
 
-    note = await _subpanels_note(hass, has_peri=False, has_annex=True)
+    note = _subpanels_note(hass, has_peri=False, has_annex=True)
     assert "Interior-only" in note
     assert "Annex-only" in note
     assert "Perimeter-only" not in note
 
 
-async def test_subpanels_note_both_lists_all_three(hass):
+def test_subpanels_note_both_lists_all_three(hass):
     from custom_components.verisure_owa.config_flow import _subpanels_note
 
-    note = await _subpanels_note(hass, has_peri=True, has_annex=True)
+    note = _subpanels_note(hass, has_peri=True, has_annex=True)
     assert "Interior-only" in note
     assert "Perimeter-only" in note
     assert "Annex-only" in note
 
 
-async def test_subpanels_note_uses_localized_string_when_available(hass):
-    """When translations expose subpanels_notes.peri/annex/both, the helper
-    picks the localized sentence over the English fallback."""
+def test_subpanels_note_picks_locale_from_hass_config_language(hass):
+    """The helper looks up by hass.config.language and falls back to English."""
     from custom_components.verisure_owa.config_flow import _subpanels_note
-    from custom_components.verisure_owa.const import DOMAIN as _DOMAIN
 
-    fake_translations = {
-        f"component.{_DOMAIN}.options.step.mappings.subpanels_notes.peri": (
-            "LOCALIZED-PERI"
-        ),
-        f"component.{_DOMAIN}.options.step.mappings.subpanels_notes.annex": (
-            "LOCALIZED-ANNEX"
-        ),
-        f"component.{_DOMAIN}.options.step.mappings.subpanels_notes.both": (
-            "LOCALIZED-BOTH"
-        ),
-    }
+    hass.config.language = "es"
+    note = _subpanels_note(hass, has_peri=True, has_annex=False)
+    assert "Interior" in note  # Spanish: "solo Interior"
+    assert "Perimetral" in note
 
-    with patch(
-        "custom_components.verisure_owa.config_flow.ha_translation.async_get_translations",
-        AsyncMock(return_value=fake_translations),
-    ):
-        peri = await _subpanels_note(hass, has_peri=True, has_annex=False)
-        annex = await _subpanels_note(hass, has_peri=False, has_annex=True)
-        both = await _subpanels_note(hass, has_peri=True, has_annex=True)
-
-    assert "LOCALIZED-PERI" in peri
-    assert "LOCALIZED-ANNEX" in annex
-    assert "LOCALIZED-BOTH" in both
+    hass.config.language = "xx"  # unknown locale → English fallback
+    note = _subpanels_note(hass, has_peri=True, has_annex=False)
+    assert "Interior-only" in note
+    assert "Perimeter-only" in note
 
 
 async def test_options_mappings_step_includes_subpanels_note_when_peri(hass):
