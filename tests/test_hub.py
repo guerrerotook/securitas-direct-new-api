@@ -36,6 +36,10 @@ def make_hub(*, mock_client: bool = True, **config_overrides) -> VerisureHub:
     """
     hass = MagicMock()
     hass.data = {}
+    # Forward async_create_task to asyncio.create_task so coroutines actually
+    # run inside the loop (the production hub uses hass.async_create_task for
+    # tracked task lifecycles).
+    hass.async_create_task = lambda coro, **_kwargs: asyncio.create_task(coro)
     config = {
         "username": "test@example.com",
         "password": "pass",
@@ -590,7 +594,7 @@ class TestFullImageCapture:
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
 
         _tasks = []
-        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+        hub.hass.async_create_task = lambda coro, **_: _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
 
         with patch(
             "custom_components.verisure_owa.hub.async_dispatcher_send",
@@ -647,7 +651,7 @@ class TestFullImageCapture:
         hub._update_camera_coordinator_full_image = MagicMock()
 
         _tasks = []
-        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+        hub.hass.async_create_task = lambda coro, **_: _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
 
         with patch(
             "custom_components.verisure_owa.hub.async_dispatcher_send",
@@ -676,7 +680,7 @@ class TestFullImageCapture:
         hub._update_camera_coordinator_full_image = MagicMock()
 
         _tasks = []
-        hub.hass.async_create_task = lambda coro: _tasks.append(coro)
+        hub.hass.async_create_task = lambda coro, **_: _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
 
         with patch(
             "custom_components.verisure_owa.hub.async_dispatcher_send",

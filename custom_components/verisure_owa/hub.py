@@ -359,14 +359,15 @@ class VerisureHub:
             # the shared task that other awaiters still depend on.
             return await asyncio.shield(inflight)
 
-        task = asyncio.create_task(
+        task = self.hass.async_create_task(
             self._api_queue.submit(
                 self.client.get_full_image,
                 installation,
                 id_signal,
                 signal_type,
                 priority=priority,
-            )
+            ),
+            name=f"verisure_owa_full_image_{key}",
         )
         self._full_image_inflight[key] = task
         task.add_done_callback(lambda _t: self._full_image_inflight.pop(key, None))
