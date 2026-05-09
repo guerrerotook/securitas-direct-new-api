@@ -5194,6 +5194,133 @@ class TestExecutePartialDisarm:
         assert ok is True
         panel._execute_transition.assert_not_awaited()
 
+    async def test_combined_panel_shows_disarming_during_transition(self):
+        """Combined panel should briefly enter DISARMING before the API call resolves
+        so the UI reflects an in-flight auto-disarm instead of jumping silently
+        from armed to disarmed when the next coordinator poll arrives.
+        """
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
+        )
+        from homeassistant.components.alarm_control_panel.const import (
+            AlarmControlPanelState,
+        )
+
+        panel = make_alarm()
+        panel.coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+        observed: list[str | None] = []
+
+        async def _slow_transition(*_args, **_kwargs):
+            observed.append(panel._state)  # state during the transition
+            return MagicMock(protom_response="D", message="ok", protom_response_date="")
+
+        panel._execute_transition = AsyncMock(side_effect=_slow_transition)
+
+        ok = await panel.execute_partial_disarm(["interior"])
+
+        assert ok is True
+        assert observed == [AlarmControlPanelState.DISARMING]
+
+    async def test_partial_disarm_refreshes_coordinator(self):
+        """After a successful partial disarm we trigger a coordinator refresh so
+        any other entity (sub-panel, lock) sees the new state immediately
+        rather than waiting for the next poll."""
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
+        )
+
+        panel = make_alarm()
+        panel.coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        panel._execute_transition = AsyncMock(
+            return_value=MagicMock(
+                protom_response="D", message="ok", protom_response_date=""
+            )
+        )
+
+        await panel.execute_partial_disarm(["interior"])
+
+        panel.coordinator.async_request_refresh.assert_awaited_once()
+
+    async def test_partial_disarm_drives_affected_axis_subpanels(self):
+        """When a sub-panel for the affected axis is registered in entry_data,
+        execute_partial_disarm should drive its state through DISARMING and into
+        the post-result state too — so users see the same animation as a direct
+        sub-panel disarm."""
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AlarmState,
+            InteriorMode,
+            PerimeterMode,
+            AnnexMode,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from homeassistant.components.alarm_control_panel.const import (
+            AlarmControlPanelState,
+        )
+
+        panel = make_alarm()
+        panel.coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.TOTAL,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+
+        # A lightweight stand-in for a real Interior sub-panel — verifies the
+        # combined-panel orchestration without dragging in HA's entity loader.
+        interior = MagicMock()
+        interior._state = AlarmControlPanelState.ARMED_AWAY
+        interior._last_state = AlarmControlPanelState.ARMED_AWAY
+        interior._operation_in_progress = False
+        interior._operation_epoch = 0
+
+        def _force_state(state):
+            interior._last_state = interior._state
+            interior._state = state
+
+        interior._force_state.side_effect = _force_state
+
+        # Wire entry_data so the combined panel can find the sub-panel.
+        entry_id = "entry-test"
+        panel._client.config_entry = MagicMock(entry_id=entry_id)
+        panel.hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "axis_alarm_panels": {
+                        panel._installation.number: {"interior": interior}
+                    }
+                }
+            }
+        }
+
+        observed_interior: list[str | None] = []
+
+        async def _slow_transition(*_args, **_kwargs):
+            observed_interior.append(interior._state)
+            return MagicMock(protom_response="D", message="ok", protom_response_date="")
+
+        panel._execute_transition = AsyncMock(side_effect=_slow_transition)
+
+        await panel.execute_partial_disarm(["interior"])
+
+        assert observed_interior == [AlarmControlPanelState.DISARMING]
+        # Sub-panel was also driven through the post-result update + state write.
+        interior.update_status_alarm.assert_called_once()
+        interior.async_write_ha_state.assert_called()
+
 
 # ===========================================================================
 # TestCombinedPanelRegistration

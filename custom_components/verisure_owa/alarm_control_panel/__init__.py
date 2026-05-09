@@ -89,35 +89,38 @@ async def async_setup_entry(
         # detection failure at startup (e.g. get_services 5xx) would otherwise
         # permanently hide opted-in entities until the user reloads, even
         # after the coordinator's later background refresh succeeds.
+        axis_panels = entry_data.setdefault("axis_alarm_panels", {}).setdefault(
+            devices.installation.number, {}
+        )
         if enable_peri:
-            all_entities.append(
-                PerimeterVerisureOwaAlarmPanel(
-                    devices.installation,
-                    client=client,
-                    hass=hass,
-                    coordinator=coordinator,
-                )
+            peri_panel = PerimeterVerisureOwaAlarmPanel(
+                devices.installation,
+                client=client,
+                hass=hass,
+                coordinator=coordinator,
             )
+            all_entities.append(peri_panel)
+            axis_panels[peri_panel._AXIS] = peri_panel  # noqa: SLF001
 
         if enable_annex:
-            all_entities.append(
-                AnnexVerisureOwaAlarmPanel(
-                    devices.installation,
-                    client=client,
-                    hass=hass,
-                    coordinator=coordinator,
-                )
+            annex_panel = AnnexVerisureOwaAlarmPanel(
+                devices.installation,
+                client=client,
+                hass=hass,
+                coordinator=coordinator,
             )
+            all_entities.append(annex_panel)
+            axis_panels[annex_panel._AXIS] = annex_panel  # noqa: SLF001
 
         if enable_interior:
-            all_entities.append(
-                InteriorVerisureOwaAlarmPanel(
-                    devices.installation,
-                    client=client,
-                    hass=hass,
-                    coordinator=coordinator,
-                )
+            interior_panel = InteriorVerisureOwaAlarmPanel(
+                devices.installation,
+                client=client,
+                hass=hass,
+                coordinator=coordinator,
             )
+            all_entities.append(interior_panel)
+            axis_panels[interior_panel._AXIS] = interior_panel  # noqa: SLF001
 
     async_add_entities(all_entities, False)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
