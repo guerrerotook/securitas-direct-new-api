@@ -8,7 +8,7 @@ The most recent release is at the top; append new entries above the previous one
 
 - **Rebrand to `verisure_owa`.** The domain, services, events, and side-panel URL all change from `securitas` to `verisure_owa`. Legacy aliases keep working until v6.0.0.
 - **Peru support.** Verisure customers in Peru can now use the integration.
-- **Per-axis sub-panels.** Optional Interior-only, Perimeter-only, and Annex-only alarm panels alongside the main one, on installations with the corresponding sensors.
+- **Per-circuit sub-panels.** Optional Interior-only, Perimeter-only, and Annex-only alarm panels alongside the main one, on installations with the corresponding sensors.
 - **Lock automations.** Auto-lock the door when a circuit arms, and auto-disarm before unlocking from HA. Disarm and unlock dispatch in parallel.
 - **Activity log.** A first-class activity timeline — Lovelace card, sensor, and `verisure_owa_activity` event. Actions taken in HA are tagged with the user and de-duplicated against the panel's polled echo.
 - **Alarm badge and Mushroom chip.** Compact alternatives to the alarm card for tighter dashboards.

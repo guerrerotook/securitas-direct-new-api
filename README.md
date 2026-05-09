@@ -10,7 +10,7 @@ A Home Assistant custom integration for **Verisure** (formerly Securitas Direct 
 
 - **Main panel** — arm, disarm, and monitor your alarm from HA, one per installation.
 - **Configurable mappings** — choose which Verisure mode each HA button (Home, Away, Night, Vacation, Custom) activates.
-- **Per-axis sub-panels** — optional Interior-only, Perimeter-only, and Annex-only panels alongside the main one, for installations with the corresponding sensors.
+- **Per-circuit sub-panels** — optional Interior-only, Perimeter-only, and Annex-only panels alongside the main one, for installations with the corresponding sensors.
 - **Force arming** — when arming is blocked by an open sensor, you can force-arm from a mobile notification, the custom alarm card, an automation, or the `verisure_owa.force_arm` service.
 - **Refresh button** — request an immediate alarm status check.
 
@@ -97,8 +97,6 @@ The wizard takes you through:
 
 Locks and cameras are discovered in the background after setup. The **Lock automation** screen for auto-lock and auto-disarm appears under **Configure** once locks are registered.
 
-Your password is not stored. After login the integration keeps a long-lived refresh token in the config entry; if it expires or is revoked (e.g. you change your password elsewhere), HA shows a reauth dialog and entering the password once mints a new token.
-
 ## Options
 
 After setup, change settings via **Settings → Integrations → Verisure OWA → Configure**. The dialog walks you through three screens — or four if you have locks: a settings page, the [alarm state mappings](#alarm-state-mappings), and (when locks are present) the [lock automation](#lock-automations) page.
@@ -113,9 +111,9 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | | Require PIN to arm | No | When enabled, the PIN is also required to arm (not just disarm). No effect if no PIN is set. |
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 | | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming (advanced)](#force-arming-advanced). |
-| **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter axis only. Visible only on installations with perimeter sensors. |
-| | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex axis only. Visible only on installations with an annex zone. |
-| | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior axis only. Visible whenever any sibling axis is supported. |
+| **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
+| | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
+| | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 
@@ -145,9 +143,9 @@ Verisure supports several alarm modes, but Home Assistant's alarm panel only has
 | Partial Night + Perimeter + Annex | Nighttime interior + external sensors + annex            |
 | Total + Perimeter + Annex         | All interior + external sensors + annex                  |
 
-The available modes depend on which axes are detected on your installation: standard installations see only the four interior modes; perimeter installations add the four perimeter combinations; annex installations add the four annex combinations; installations with both add the four perimeter+annex combinations on top.
+The available modes depend on which circuits are detected on your installation: standard installations see only the four interior modes; perimeter installations add the four perimeter combinations; annex installations add the four annex combinations; installations with both add the four perimeter+annex combinations on top.
 
-To hide a button from the alarm panel, leave its mapping field blank — clearing the field counts as "not used" and the button won't appear.
+To hide a button from the alarm panel, leave its mapping field blank.
 
 > **Note:** Your country may only support a single Partial mode, rather than a Partial Day and a Partial Night. In this case, use just Partial Day.
 
@@ -167,17 +165,17 @@ The mapping is bidirectional: when Verisure reports "Total + Perimeter" and you'
 
 If the alarm enters a Verisure state you haven't mapped (e.g. perimeter is armed from a physical keypad but you haven't mapped a HA button to it), the entity shows as **Custom Bypass**. To resolve, add a mapping or enable the relevant capability. To check which status code is being reported, [enable debug logging](#reporting-issues).
 
-## Sub-panels (advanced)
+## Sub-panels
 
 The default setup gives you one alarm panel per installation: `Main - <alias>`, driven by the Home / Away / Night / Vacation / Custom mappings. That works for almost everyone.
 
-If your installation has more than one alarm axis (interior, perimeter, annex), you can opt into a dedicated panel for each axis under **Configure**:
+If your installation has more than one alarm circuit (interior, perimeter, annex), you can opt into a dedicated panel for each circuit under **Configure**:
 
 - **Interior-only** (`Interior - <alias>`) — Home / Away / Night / Disarmed.
 - **Perimeter-only** (`Perimeter - <alias>`) — Armed Away / Disarmed. Only offered when perimeter sensors are detected.
 - **Annex-only** (`Annex - <alias>`) — Armed Away / Disarmed. Only offered when an annex zone is detected.
 
-The Interior toggle appears whenever any sibling axis exists; otherwise the main panel already does the same job. If perimeter or annex isn't detected automatically, [enable debug logging](#reporting-issues) and share the `capability detection for ...` line in a bug report.
+The Interior toggle appears whenever any sibling circuit exists; otherwise the main panel already does the same job. If perimeter or annex isn't detected automatically, [enable debug logging](#reporting-issues) and share the `capability detection for ...` line in a bug report.
 
 If you expose entities to a voice assistant, remember each new sub-panel is a separate entity — exposing all of them to voice tends to make commands ambiguous. A common pattern is to enable all sub-panels for dashboards but expose only the main panel to voice.
 
