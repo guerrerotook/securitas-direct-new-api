@@ -117,6 +117,56 @@
                     "map_vacation": "Férias",
                     "map_custom": "Personalizado"
                 }
+            },
+            "lock_automations": {
+                "title": "Automação de fechaduras",
+                "description": "Configure o comportamento automático de bloqueio e desarmar para cada fechadura.",
+                "sections": {
+                    "lock__01": {
+                        "name": "{lock_alias_01}",
+                        "data": {
+                            "lock_on_arm__interior": "Bloquear automaticamente ao armar o alarme Interior",
+                            "lock_on_arm__perimeter": "Bloquear automaticamente ao armar o alarme Perímetro",
+                            "lock_on_arm__annex": "Bloquear automaticamente ao armar o alarme Anexo",
+                            "unlock_disarms__interior": "Desarmar o alarme Interior antes de desbloquear",
+                            "unlock_disarms__perimeter": "Desarmar o alarme Perímetro antes de desbloquear",
+                            "unlock_disarms__annex": "Desarmar o alarme Anexo antes de desbloquear"
+                        }
+                    },
+                    "lock__02": {
+                        "name": "{lock_alias_02}",
+                        "data": {
+                            "lock_on_arm__interior": "Bloquear automaticamente ao armar o alarme Interior",
+                            "lock_on_arm__perimeter": "Bloquear automaticamente ao armar o alarme Perímetro",
+                            "lock_on_arm__annex": "Bloquear automaticamente ao armar o alarme Anexo",
+                            "unlock_disarms__interior": "Desarmar o alarme Interior antes de desbloquear",
+                            "unlock_disarms__perimeter": "Desarmar o alarme Perímetro antes de desbloquear",
+                            "unlock_disarms__annex": "Desarmar o alarme Anexo antes de desbloquear"
+                        }
+                    },
+                    "lock__03": {
+                        "name": "{lock_alias_03}",
+                        "data": {
+                            "lock_on_arm__interior": "Bloquear automaticamente ao armar o alarme Interior",
+                            "lock_on_arm__perimeter": "Bloquear automaticamente ao armar o alarme Perímetro",
+                            "lock_on_arm__annex": "Bloquear automaticamente ao armar o alarme Anexo",
+                            "unlock_disarms__interior": "Desarmar o alarme Interior antes de desbloquear",
+                            "unlock_disarms__perimeter": "Desarmar o alarme Perímetro antes de desbloquear",
+                            "unlock_disarms__annex": "Desarmar o alarme Anexo antes de desbloquear"
+                        }
+                    },
+                    "lock__04": {
+                        "name": "{lock_alias_04}",
+                        "data": {
+                            "lock_on_arm__interior": "Bloquear automaticamente ao armar o alarme Interior",
+                            "lock_on_arm__perimeter": "Bloquear automaticamente ao armar o alarme Perímetro",
+                            "lock_on_arm__annex": "Bloquear automaticamente ao armar o alarme Anexo",
+                            "unlock_disarms__interior": "Desarmar o alarme Interior antes de desbloquear",
+                            "unlock_disarms__perimeter": "Desarmar o alarme Perímetro antes de desbloquear",
+                            "unlock_disarms__annex": "Desarmar o alarme Anexo antes de desbloquear"
+                        }
+                    }
+                }
             }
         }
     },

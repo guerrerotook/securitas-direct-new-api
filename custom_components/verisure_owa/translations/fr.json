@@ -117,6 +117,56 @@
                     "map_vacation": "Vacances",
                     "map_custom": "Personnalisé"
                 }
+            },
+            "lock_automations": {
+                "title": "Automatisation des serrures",
+                "description": "Configurez le comportement automatique de verrouillage et de désarmement pour chaque serrure.",
+                "sections": {
+                    "lock__01": {
+                        "name": "{lock_alias_01}",
+                        "data": {
+                            "lock_on_arm__interior": "Verrouiller automatiquement lors de l'armement de l'alarme Intérieur",
+                            "lock_on_arm__perimeter": "Verrouiller automatiquement lors de l'armement de l'alarme Périmètre",
+                            "lock_on_arm__annex": "Verrouiller automatiquement lors de l'armement de l'alarme Annexe",
+                            "unlock_disarms__interior": "Désarmer l'alarme Intérieur avant le déverrouillage",
+                            "unlock_disarms__perimeter": "Désarmer l'alarme Périmètre avant le déverrouillage",
+                            "unlock_disarms__annex": "Désarmer l'alarme Annexe avant le déverrouillage"
+                        }
+                    },
+                    "lock__02": {
+                        "name": "{lock_alias_02}",
+                        "data": {
+                            "lock_on_arm__interior": "Verrouiller automatiquement lors de l'armement de l'alarme Intérieur",
+                            "lock_on_arm__perimeter": "Verrouiller automatiquement lors de l'armement de l'alarme Périmètre",
+                            "lock_on_arm__annex": "Verrouiller automatiquement lors de l'armement de l'alarme Annexe",
+                            "unlock_disarms__interior": "Désarmer l'alarme Intérieur avant le déverrouillage",
+                            "unlock_disarms__perimeter": "Désarmer l'alarme Périmètre avant le déverrouillage",
+                            "unlock_disarms__annex": "Désarmer l'alarme Annexe avant le déverrouillage"
+                        }
+                    },
+                    "lock__03": {
+                        "name": "{lock_alias_03}",
+                        "data": {
+                            "lock_on_arm__interior": "Verrouiller automatiquement lors de l'armement de l'alarme Intérieur",
+                            "lock_on_arm__perimeter": "Verrouiller automatiquement lors de l'armement de l'alarme Périmètre",
+                            "lock_on_arm__annex": "Verrouiller automatiquement lors de l'armement de l'alarme Annexe",
+                            "unlock_disarms__interior": "Désarmer l'alarme Intérieur avant le déverrouillage",
+                            "unlock_disarms__perimeter": "Désarmer l'alarme Périmètre avant le déverrouillage",
+                            "unlock_disarms__annex": "Désarmer l'alarme Annexe avant le déverrouillage"
+                        }
+                    },
+                    "lock__04": {
+                        "name": "{lock_alias_04}",
+                        "data": {
+                            "lock_on_arm__interior": "Verrouiller automatiquement lors de l'armement de l'alarme Intérieur",
+                            "lock_on_arm__perimeter": "Verrouiller automatiquement lors de l'armement de l'alarme Périmètre",
+                            "lock_on_arm__annex": "Verrouiller automatiquement lors de l'armement de l'alarme Annexe",
+                            "unlock_disarms__interior": "Désarmer l'alarme Intérieur avant le déverrouillage",
+                            "unlock_disarms__perimeter": "Désarmer l'alarme Périmètre avant le déverrouillage",
+                            "unlock_disarms__annex": "Désarmer l'alarme Annexe avant le déverrouillage"
+                        }
+                    }
+                }
             }
         }
     },
