@@ -69,8 +69,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Cancel",
         },
         "migration_complete": {
-            "title": 'Verisure OWA upgrade complete',
-            "message": 'The Securitas Direct integration has been migrated. [Review breaking changes →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nServices, events, and Lovelace cards have been renamed; legacy aliases keep working until v6.0.0.',
+            "title": "Verisure OWA upgrade complete",
+            "message": (
+                "The Securitas Direct integration has been migrated. "
+                "[Review breaking changes →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Services, events, and Lovelace cards have been renamed; legacy "
+                "aliases keep working until v6.0.0."
+            ),
         },
     },
     "es": {
@@ -130,8 +137,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Cancelar",
         },
         "migration_complete": {
-            "title": 'Actualización a Verisure OWA completa',
-            "message": 'La integración Securitas Direct se ha migrado. [Revisar cambios incompatibles →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nLos servicios, eventos y tarjetas Lovelace se han renombrado; los alias antiguos siguen funcionando hasta la v6.0.0.',
+            "title": "Actualización a Verisure OWA completa",
+            "message": (
+                "La integración Securitas Direct se ha migrado. "
+                "[Revisar cambios incompatibles →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Los servicios, eventos y tarjetas Lovelace se han renombrado; los alias "
+                "antiguos siguen funcionando hasta la v6.0.0."
+            ),
         },
     },
     "fr": {
@@ -191,8 +205,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Annuler",
         },
         "migration_complete": {
-            "title": 'Mise à niveau vers Verisure OWA terminée',
-            "message": "L'intégration Securitas Direct a été migrée. [Voir les changements incompatibles →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nLes services, événements et cartes Lovelace ont été renommés ; les alias hérités fonctionnent jusqu'à la v6.0.0.",
+            "title": "Mise à niveau vers Verisure OWA terminée",
+            "message": (
+                "L'intégration Securitas Direct a été migrée. "
+                "[Voir les changements incompatibles →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Les services, événements et cartes Lovelace ont été renommés ; les alias "
+                "hérités fonctionnent jusqu'à la v6.0.0."
+            ),
         },
     },
     "it": {
@@ -252,8 +273,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Annulla",
         },
         "migration_complete": {
-            "title": 'Aggiornamento a Verisure OWA completato',
-            "message": "L'integrazione Securitas Direct è stata migrata. [Vedi le modifiche di rottura →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nServizi, eventi e card Lovelace sono stati rinominati; gli alias legacy continuano a funzionare fino alla v6.0.0.",
+            "title": "Aggiornamento a Verisure OWA completato",
+            "message": (
+                "L'integrazione Securitas Direct è stata migrata. "
+                "[Vedi le modifiche di rottura →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Servizi, eventi e card Lovelace sono stati rinominati; gli alias legacy "
+                "continuano a funzionare fino alla v6.0.0."
+            ),
         },
     },
     "pt": {
@@ -312,8 +340,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Cancelar",
         },
         "migration_complete": {
-            "title": 'Atualização para Verisure OWA concluída',
-            "message": 'A integração Securitas Direct foi migrada. [Ver alterações incompatíveis →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nOs serviços, eventos e cartões Lovelace foram renomeados; os aliases antigos continuam a funcionar até à v6.0.0.',
+            "title": "Atualização para Verisure OWA concluída",
+            "message": (
+                "A integração Securitas Direct foi migrada. "
+                "[Ver alterações incompatíveis →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Os serviços, eventos e cartões Lovelace foram renomeados; os aliases "
+                "antigos continuam a funcionar até à v6.0.0."
+            ),
         },
     },
     "pt-BR": {
@@ -373,8 +408,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Cancelar",
         },
         "migration_complete": {
-            "title": 'Atualização para Verisure OWA concluída',
-            "message": 'A integração Securitas Direct foi migrada. [Ver mudanças incompatíveis →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nServiços, eventos e cards Lovelace foram renomeados; os aliases antigos continuam funcionando até a v6.0.0.',
+            "title": "Atualização para Verisure OWA concluída",
+            "message": (
+                "A integração Securitas Direct foi migrada. "
+                "[Ver mudanças incompatíveis →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Serviços, eventos e cards Lovelace foram renomeados; os aliases antigos "
+                "continuam funcionando até a v6.0.0."
+            ),
         },
     },
     "ca": {
@@ -433,8 +475,15 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "cancel_action": "Cancel·lar",
         },
         "migration_complete": {
-            "title": 'Actualització a Verisure OWA completa',
-            "message": "La integració Securitas Direct s'ha migrat. [Reviseu els canvis incompatibles →](https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)\n\nEls serveis, esdeveniments i targetes Lovelace s'han reanomenat; els àlies antics continuen funcionant fins a la v6.0.0.",
+            "title": "Actualització a Verisure OWA completa",
+            "message": (
+                "La integració Securitas Direct s'ha migrat. "
+                "[Reviseu els canvis incompatibles →]("
+                "https://github.com/guerrerotook/securitas-direct-new-api#breaking-changes-in-v500)"
+                "\n\n"
+                "Els serveis, esdeveniments i targetes Lovelace s'han reanomenat; els àlies "
+                "antics continuen funcionant fins a la v6.0.0."
+            ),
         },
     },
 }

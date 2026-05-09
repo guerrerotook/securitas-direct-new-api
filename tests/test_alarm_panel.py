@@ -3346,9 +3346,7 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
 
         with (
-            patch(
-                "custom_components.verisure_owa.alarm_control_panel._base._notify"
-            ),
+            patch("custom_components.verisure_owa.alarm_control_panel._base._notify"),
             patch(
                 "custom_components.verisure_owa.alarm_control_panel._base.inject_ha_event"
             ) as mock_inject,

@@ -30,13 +30,16 @@ class _RestartFlow(RepairsFlow):
     """
 
     async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
+        self,
+        user_input: dict[str, Any] | None = None,  # noqa: ARG002  # pylint: disable=unused-argument
     ) -> FlowResult:
+        """Forward to the confirm step — there is no preliminary state to gather."""
         return await self.async_step_confirm()
 
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        """Show the confirmation form, then clear the issue and restart HA."""
         if user_input is not None:
             ir.async_delete_issue(self.hass, "verisure_owa", ISSUE_RESTART_REQUIRED)
             self.hass.async_create_task(self.hass.async_stop(RESTART_EXIT_CODE))
