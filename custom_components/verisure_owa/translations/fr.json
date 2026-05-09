@@ -53,15 +53,6 @@
             "options": {
                 "title": "Options pour {installation_name}",
                 "description": "Configurer les options de l'alarme.",
-                "data": {
-                    "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
-                    "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
-                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
-                    "enable_interior_panel": "Activer le panneau de contrôle Intérieur uniquement",
-                    "enable_perimeter_panel": "Activer le panneau de contrôle Périmètre uniquement",
-                    "enable_annex_panel": "Activer le panneau de contrôle Annexe uniquement"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avancé",
@@ -69,18 +60,45 @@
                             "scan_interval": "Intervalle de mise à jour en secondes (0 désactive les mises à jour automatiques)",
                             "delay_check_operation": "Délai entre les requêtes API (sec)"
                         }
+                    },
+                    "pin": {
+                        "name": "Code PIN pour désarmer",
+                        "data": {
+                            "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
+                            "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notifications d'armement forcé",
+                        "data": {
+                            "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
+                            "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Sous-panneaux supplémentaires",
+                        "data": {
+                            "enable_perimeter_panel": "Activer le panneau de contrôle Périmètre uniquement",
+                            "enable_annex_panel": "Activer le panneau de contrôle Annexe uniquement",
+                            "enable_interior_panel": "Activer le panneau de contrôle Intérieur uniquement"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; sélectionnez « Non utilisé » pour désactiver un bouton. Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement contrôlent chacun un seul axe directement et n'utilisent pas ces associations.",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; sélectionnez « Non utilisé » pour désactiver un bouton.{subpanels_note}",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",
                     "map_night": "Nuit",
                     "map_vacation": "Vacances",
                     "map_custom": "Personnalisé"
+                },
+                "subpanels_notes": {
+                    "peri": "Les panneaux optionnels Intérieur uniquement et Périmètre uniquement n'utilisent pas ces associations.",
+                    "annex": "Les panneaux optionnels Intérieur uniquement et Annexe uniquement n'utilisent pas ces associations.",
+                    "both": "Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement n'utilisent pas ces associations."
                 }
             }
         }
@@ -88,15 +106,6 @@
     "options": {
         "step": {
             "init": {
-                "data": {
-                    "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
-                    "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
-                    "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
-                    "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
-                    "enable_interior_panel": "Activer le panneau de contrôle Intérieur uniquement",
-                    "enable_perimeter_panel": "Activer le panneau de contrôle Périmètre uniquement",
-                    "enable_annex_panel": "Activer le panneau de contrôle Annexe uniquement"
-                },
                 "sections": {
                     "advanced": {
                         "name": "Avancé",
@@ -104,18 +113,45 @@
                             "scan_interval": "Intervalle de mise à jour en secondes (0 désactive les mises à jour automatiques)",
                             "delay_check_operation": "Délai entre les requêtes API (sec)"
                         }
+                    },
+                    "pin": {
+                        "name": "Code PIN pour désarmer",
+                        "data": {
+                            "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
+                            "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme"
+                        }
+                    },
+                    "notifications": {
+                        "name": "Notifications d'armement forcé",
+                        "data": {
+                            "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
+                            "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
+                        }
+                    },
+                    "subpanels": {
+                        "name": "Sous-panneaux supplémentaires",
+                        "data": {
+                            "enable_perimeter_panel": "Activer le panneau de contrôle Périmètre uniquement",
+                            "enable_annex_panel": "Activer le panneau de contrôle Annexe uniquement",
+                            "enable_interior_panel": "Activer le panneau de contrôle Intérieur uniquement"
+                        }
                     }
                 }
             },
             "mappings": {
                 "title": "Correspondance des états d'alarme",
-                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; sélectionnez « Non utilisé » pour désactiver un bouton. Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement contrôlent chacun un seul axe directement et n'utilisent pas ces associations.",
+                "description": "Ces associations ne concernent que le panneau principal. Associez chaque action d'alarme Home Assistant à un mode d'alarme Verisure ; sélectionnez « Non utilisé » pour désactiver un bouton.{subpanels_note}",
                 "data": {
                     "map_home": "Maison",
                     "map_away": "Absent",
                     "map_night": "Nuit",
                     "map_vacation": "Vacances",
                     "map_custom": "Personnalisé"
+                },
+                "subpanels_notes": {
+                    "peri": "Les panneaux optionnels Intérieur uniquement et Périmètre uniquement n'utilisent pas ces associations.",
+                    "annex": "Les panneaux optionnels Intérieur uniquement et Annexe uniquement n'utilisent pas ces associations.",
+                    "both": "Les panneaux optionnels Intérieur uniquement, Périmètre uniquement et Annexe uniquement n'utilisent pas ces associations."
                 }
             },
             "lock_automations": {
@@ -189,6 +225,20 @@
         },
         "no_supported_command": {
             "message": "Aucune commande compatible trouvée pour ce panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Verisure OWA → Configurer)."
+        }
+    },
+    "issues": {
+        "restart_required_after_migration": {
+            "title": "Redémarrage nécessaire pour terminer la mise à niveau Verisure OWA",
+            "description": "Votre intégration Securitas Direct a été migrée vers Verisure OWA. Redémarrez Home Assistant pour activer les entrées migrées. Cliquez sur « En savoir plus » pour consulter les services, événements et cartes Lovelace renommés.",
+            "fix_flow": {
+                "step": {
+                    "confirm": {
+                        "title": "Redémarrer Home Assistant ?",
+                        "description": "Home Assistant va redémarrer pour activer les entrées migrées vers Verisure OWA. Vos appareils, entités et personnalisations sont préservés."
+                    }
+                }
+            }
         }
     }
 }

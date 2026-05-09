@@ -18,6 +18,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers import translation as ha_translation
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
@@ -91,6 +92,70 @@ PANEL_OPTION_KEYS = (
     CONF_ENABLE_ANNEX_PANEL,
 )
 
+# Section keys for the grouped settings schema. Persisted-data shape stays
+# flat — the handlers flatten these section payloads back to top-level keys.
+SECTION_PIN = "pin"
+SECTION_NOTIFICATIONS = "notifications"
+SECTION_SUBPANELS = "subpanels"
+_ALL_SECTIONS = (SECTION_PIN, SECTION_NOTIFICATIONS, SECTION_SUBPANELS, CONF_ADVANCED)
+
+
+# English fallbacks used when the translation lookup fails (e.g. tests that
+# don't load the integration's translation pack). Keep in sync with the
+# translation keys under options.step.mappings.subpanels_notes.{key}.
+_SUBPANELS_NOTE_FALLBACK: dict[str, str] = {
+    "peri": "The optional Interior-only and Perimeter-only panels do not use these mappings.",
+    "annex": "The optional Interior-only and Annex-only panels do not use these mappings.",
+    "both": "The optional Interior-only, Perimeter-only and Annex-only panels do not use these mappings.",
+}
+
+
+async def _subpanels_note(
+    hass: HomeAssistant, *, has_peri: bool, has_annex: bool
+) -> str:
+    """Return the localized sentence describing which optional sub-panels
+    skip these mappings, or empty if no peri/annex capability exists.
+
+    Picks one of three pre-translated sentences (peri-only, annex-only, both)
+    based on capability. Interior is always offered whenever any sibling axis
+    is supported, so each sentence already names Interior alongside its
+    relevant siblings — no dynamic assembly, hence easy to localize as fixed
+    strings in each locale's translation pack.
+    """
+    if not (has_peri or has_annex):
+        return ""
+    if has_peri and has_annex:
+        key = "both"
+    elif has_peri:
+        key = "peri"
+    else:
+        key = "annex"
+
+    sentence = _SUBPANELS_NOTE_FALLBACK[key]
+    try:
+        translations = await ha_translation.async_get_translations(
+            hass, hass.config.language, "options", {DOMAIN}
+        )
+        translated = translations.get(
+            f"component.{DOMAIN}.options.step.mappings.subpanels_notes.{key}"
+        )
+        if translated:
+            sentence = translated
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # translation lookup must not break the flow
+        pass
+    return f" {sentence}"
+
+
+def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Flatten all known section payloads back to top-level keys."""
+    flat: dict[str, Any] = {}
+    for key, value in user_input.items():
+        if key in _ALL_SECTIONS and isinstance(value, dict):
+            flat.update(value)
+        else:
+            flat[key] = value
+    return flat
+
 
 def _build_panel_extra_fields(
     *,
@@ -100,12 +165,15 @@ def _build_panel_extra_fields(
     annex_default: bool = False,
     interior_default: bool = False,
 ) -> dict[Any, Any]:
-    """Build the capability-gated panel-toggle entries for a settings schema.
+    """Build the capability-gated panel-toggle entries for the sub-panels section.
 
     The interior toggle appears whenever any sibling axis is supported; this
     matches the post-setup options behaviour so users on any peri- or annex-
     capable installation can carve a separate interior sub-panel even after
     flipping the sibling off.
+
+    The returned dict is the *contents* of the SECTION_SUBPANELS section; the
+    caller wraps it in a `section()` only when non-empty.
     """
     fields: dict[Any, Any] = {}
     if has_peri:
@@ -138,7 +206,14 @@ def _build_settings_schema(
     use_suggested: bool = False,
     extra_fields: dict[Any, Any] | None = None,
 ) -> vol.Schema:
-    """Build the shared settings schema for config and options flows."""
+    """Build the shared sectioned settings schema for config and options flows.
+
+    Layout: a PIN section, a Force-arm-notifications section, an optional
+    Sub-panels section (only present when ``extra_fields`` is non-empty),
+    and a collapsed Advanced section. Section payloads are flattened back
+    to top-level keys by ``_flatten_sections`` before persistence — the
+    saved data shape is unchanged.
+    """
     code_val = defaults.get(CONF_CODE, DEFAULT_CODE)
     code_field = (
         vol.Optional(CONF_CODE, description={"suggested_value": code_val})
@@ -146,34 +221,48 @@ def _build_settings_schema(
         else vol.Optional(CONF_CODE, default=code_val)
     )
 
-    schema_dict: dict[Any, Any] = {
-        code_field: str,
-        vol.Optional(
-            CONF_CODE_ARM_REQUIRED,
-            default=defaults.get(CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED),
-        ): bool,
-        vol.Optional(
-            CONF_NOTIFY_GROUP,
-            default=defaults.get(CONF_NOTIFY_GROUP, ""),
-        ): selector(
+    pin_section = section(
+        vol.Schema(
             {
-                "select": {
-                    "options": notify_options,
-                    "custom_value": True,
-                    "mode": "dropdown",
-                }
+                code_field: str,
+                vol.Optional(
+                    CONF_CODE_ARM_REQUIRED,
+                    default=defaults.get(
+                        CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
+                    ),
+                ): bool,
             }
         ),
-        vol.Optional(
-            CONF_FORCE_ARM_NOTIFICATIONS,
-            default=defaults.get(
-                CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
-            ),
-        ): bool,
-    }
-    if extra_fields:
-        schema_dict.update(extra_fields)
-    schema_dict[vol.Optional(CONF_ADVANCED)] = section(
+        {"collapsed": False},
+    )
+
+    notifications_section = section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_NOTIFY_GROUP,
+                    default=defaults.get(CONF_NOTIFY_GROUP, ""),
+                ): selector(
+                    {
+                        "select": {
+                            "options": notify_options,
+                            "custom_value": True,
+                            "mode": "dropdown",
+                        }
+                    }
+                ),
+                vol.Optional(
+                    CONF_FORCE_ARM_NOTIFICATIONS,
+                    default=defaults.get(
+                        CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
+                    ),
+                ): bool,
+            }
+        ),
+        {"collapsed": False},
+    )
+
+    advanced_section = section(
         vol.Schema(
             {
                 vol.Optional(
@@ -191,6 +280,17 @@ def _build_settings_schema(
         ),
         {"collapsed": True},
     )
+
+    schema_dict: dict[Any, Any] = {
+        vol.Required(SECTION_PIN): pin_section,
+        vol.Required(SECTION_NOTIFICATIONS): notifications_section,
+    }
+    if extra_fields:
+        schema_dict[vol.Required(SECTION_SUBPANELS)] = section(
+            vol.Schema(extra_fields),
+            {"collapsed": False},
+        )
+    schema_dict[vol.Optional(CONF_ADVANCED)] = advanced_section
     return vol.Schema(schema_dict)
 
 
@@ -684,10 +784,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Step 3: PIN, scan interval, notifications, sub-panel toggles."""
         if user_input is not None:
+            user_input = _flatten_sections(user_input)
             user_input.setdefault(CONF_CODE, DEFAULT_CODE)
-            # Flatten the advanced section back to top-level keys
-            advanced = user_input.pop(CONF_ADVANCED, {})
-            user_input.update(advanced)
             # Toggles belong on entry.options, not entry.data.
             for key in PANEL_OPTION_KEYS:
                 if key in user_input:
@@ -755,7 +853,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector(select_cfg),
             }
         )
-        return self.async_show_form(step_id="mappings", data_schema=schema)
+        return self.async_show_form(
+            step_id="mappings",
+            data_schema=schema,
+            description_placeholders={
+                "subpanels_note": await _subpanels_note(
+                    self.hass, has_peri=self._has_peri, has_annex=self._has_annex
+                )
+            },
+        )
 
     async def async_step_abort(
         self, reason: str | None = None
@@ -800,10 +906,8 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Step 1: General settings."""
         if user_input is not None:
+            user_input = _flatten_sections(user_input)
             user_input.setdefault(CONF_CODE, DEFAULT_CODE)
-            # Flatten the advanced section back to top-level keys
-            advanced = user_input.pop(CONF_ADVANCED, {})
-            user_input.update(advanced)
             self._general_data = user_input
             return await self.async_step_mappings()
 
@@ -857,7 +961,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         # Resolve via the helper so we read coordinator → published cache →
         # False, matching the init step. Avoids the race where the user
         # opens the dialog before async_setup_entry has stored the coord.
-        has_peri, _ = _resolve_flow_capabilities(self.hass, self.config_entry)
+        has_peri, has_annex = _resolve_flow_capabilities(self.hass, self.config_entry)
 
         # Determine defaults for mapping dropdowns
         defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
@@ -892,7 +996,15 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_MAP_CUSTOM, default=map_custom): selector(select_cfg),
             }
         )
-        return self.async_show_form(step_id="mappings", data_schema=schema)
+        return self.async_show_form(
+            step_id="mappings",
+            data_schema=schema,
+            description_placeholders={
+                "subpanels_note": await _subpanels_note(
+                    self.hass, has_peri=has_peri, has_annex=has_annex
+                )
+            },
+        )
 
     async def async_step_lock_automations(
         self, user_input: dict[str, Any] | None = None

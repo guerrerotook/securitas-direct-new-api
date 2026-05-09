@@ -47,7 +47,7 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, section
 
 from tests.conftest import (
     FAKE_JWT,
@@ -79,8 +79,11 @@ USER_INPUT_CREDENTIALS = {
 }
 
 USER_INPUT_OPTIONS = {
-    CONF_CODE: "",
-    CONF_CODE_ARM_REQUIRED: False,
+    "pin": {
+        CONF_CODE: "",
+        CONF_CODE_ARM_REQUIRED: False,
+    },
+    "notifications": {},
     CONF_ADVANCED: {
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
         CONF_DELAY_CHECK_OPERATION: float(DEFAULT_DELAY_CHECK_OPERATION),
@@ -177,6 +180,16 @@ def _patches(mock_hub, uuid=FAKE_UUID):
     return _ctx()
 
 
+def _fill_optional_sections(result, base: dict) -> dict:
+    """Add empty payloads for any sections present in the rendered schema but
+    missing from ``base``. Lets test helpers stay agnostic about whether the
+    sub-panels section was rendered for this installation's capabilities."""
+    out = dict(base)
+    for section_key in _section_keys(result["data_schema"]):
+        out.setdefault(section_key, {})
+    return out
+
+
 async def _complete_full_flow(
     hass, mock_hub, credentials=None, options=None, mappings=None
 ):
@@ -193,7 +206,7 @@ async def _complete_full_flow(
     if result["type"] == FlowResultType.FORM and result["step_id"] == "options":
         flow_id = result["flow_id"]
         result = await hass.config_entries.flow.async_configure(
-            flow_id, user_input=opts
+            flow_id, user_input=_fill_optional_sections(result, opts)
         )
 
     if result["type"] == FlowResultType.FORM and result["step_id"] == "mappings":
@@ -226,22 +239,32 @@ async def _get_to_otp_step(hass, mock_hub):
     return flow_id
 
 
-async def _advance_to_mappings(hass, entry):
-    """Helper to get to the mappings step of options flow."""
+async def _show_mappings(hass, entry):
+    """Advance the options flow to the mappings step and return the form result."""
     result = await hass.config_entries.options.async_init(entry.entry_id)
     flow_id = result["flow_id"]
 
-    result = await hass.config_entries.options.async_configure(
-        flow_id,
-        user_input={
-            CONF_CODE: "1234",
-            CONF_CODE_ARM_REQUIRED: False,
+    user_input = _fill_optional_sections(
+        result,
+        {
+            "pin": {CONF_CODE: "1234", CONF_CODE_ARM_REQUIRED: False},
+            "notifications": {},
             CONF_ADVANCED: {
                 CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
                 CONF_DELAY_CHECK_OPERATION: float(DEFAULT_DELAY_CHECK_OPERATION),
             },
         },
     )
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input=user_input,
+    )
+    return result
+
+
+async def _advance_to_mappings(hass, entry):
+    """Helper to get to the mappings step of options flow."""
+    result = await _show_mappings(hass, entry)
     assert result["step_id"] == "mappings"
     return result["flow_id"]
 
@@ -704,8 +727,8 @@ async def test_options_init_submitting_advances_to_mappings(hass):
     result = await hass.config_entries.options.async_configure(
         flow_id,
         user_input={
-            CONF_CODE: "1234",
-            CONF_CODE_ARM_REQUIRED: True,
+            "pin": {CONF_CODE: "1234", CONF_CODE_ARM_REQUIRED: True},
+            "notifications": {},
             CONF_ADVANCED: {
                 CONF_SCAN_INTERVAL: 60,
                 CONF_DELAY_CHECK_OPERATION: 3.0,
@@ -748,6 +771,115 @@ async def test_options_init_reads_from_options_first(hass):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "init"
+
+
+# ===================================================================
+# TestSubpanelsNote
+# ===================================================================
+
+
+async def test_subpanels_note_empty_when_no_capability(hass):
+    """No peri/annex → no note."""
+    from custom_components.verisure_owa.config_flow import _subpanels_note
+
+    assert await _subpanels_note(hass, has_peri=False, has_annex=False) == ""
+
+
+async def test_subpanels_note_peri_only_lists_interior_and_perimeter(hass):
+    from custom_components.verisure_owa.config_flow import _subpanels_note
+
+    note = await _subpanels_note(hass, has_peri=True, has_annex=False)
+    assert "Interior-only" in note
+    assert "Perimeter-only" in note
+    assert "Annex-only" not in note
+    assert note.endswith("do not use these mappings.")
+
+
+async def test_subpanels_note_annex_only_lists_interior_and_annex(hass):
+    from custom_components.verisure_owa.config_flow import _subpanels_note
+
+    note = await _subpanels_note(hass, has_peri=False, has_annex=True)
+    assert "Interior-only" in note
+    assert "Annex-only" in note
+    assert "Perimeter-only" not in note
+
+
+async def test_subpanels_note_both_lists_all_three(hass):
+    from custom_components.verisure_owa.config_flow import _subpanels_note
+
+    note = await _subpanels_note(hass, has_peri=True, has_annex=True)
+    assert "Interior-only" in note
+    assert "Perimeter-only" in note
+    assert "Annex-only" in note
+
+
+async def test_subpanels_note_uses_localized_string_when_available(hass):
+    """When translations expose subpanels_notes.peri/annex/both, the helper
+    picks the localized sentence over the English fallback."""
+    from custom_components.verisure_owa.config_flow import _subpanels_note
+    from custom_components.verisure_owa.const import DOMAIN as _DOMAIN
+
+    fake_translations = {
+        f"component.{_DOMAIN}.options.step.mappings.subpanels_notes.peri": (
+            "LOCALIZED-PERI"
+        ),
+        f"component.{_DOMAIN}.options.step.mappings.subpanels_notes.annex": (
+            "LOCALIZED-ANNEX"
+        ),
+        f"component.{_DOMAIN}.options.step.mappings.subpanels_notes.both": (
+            "LOCALIZED-BOTH"
+        ),
+    }
+
+    with patch(
+        "custom_components.verisure_owa.config_flow.ha_translation.async_get_translations",
+        AsyncMock(return_value=fake_translations),
+    ):
+        peri = await _subpanels_note(hass, has_peri=True, has_annex=False)
+        annex = await _subpanels_note(hass, has_peri=False, has_annex=True)
+        both = await _subpanels_note(hass, has_peri=True, has_annex=True)
+
+    assert "LOCALIZED-PERI" in peri
+    assert "LOCALIZED-ANNEX" in annex
+    assert "LOCALIZED-BOTH" in both
+
+
+async def test_options_mappings_step_includes_subpanels_note_when_peri(hass):
+    """Mappings step renders the optional-panels note via description_placeholders
+    when peri capability is present."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(has_peri=True),
+        options={},
+    )
+    entry.add_to_hass(hass)
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = True
+    mock_coordinator.has_annex = False
+    mock_coordinator.capabilities_populated = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
+
+    result = await _show_mappings(hass, entry)
+    placeholders = result.get("description_placeholders") or {}
+    note = placeholders.get("subpanels_note", "")
+    assert "Perimeter-only" in note
+    assert "Interior-only" in note
+
+
+async def test_options_mappings_step_omits_subpanels_note_when_no_capability(hass):
+    """Mappings step's note placeholder is empty when neither peri nor annex."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(has_peri=False),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await _show_mappings(hass, entry)
+    placeholders = result.get("description_placeholders") or {}
+    assert placeholders.get("subpanels_note", "") == ""
 
 
 # ===================================================================
@@ -954,11 +1086,19 @@ def _hub_with_peri_capability():
 
 
 def _initial_options_form_keys(result) -> set[str]:
-    """Return the unwrapped key names of the rendered initial options form."""
+    """Return all field keys (top-level + inside any section)."""
+    return _all_form_keys(result["data_schema"])
+
+
+def _all_form_keys(data_schema) -> set[str]:
+    """Walk a (possibly sectioned) voluptuous schema and return every leaf field key."""
     keys: set[str] = set()
-    for key in result["data_schema"].schema:
-        name = getattr(key, "schema", key)
-        keys.add(name)
+    for marker, value in data_schema.schema.items():
+        name = getattr(marker, "schema", marker)
+        if isinstance(value, section):
+            keys.update(_all_form_keys(value.schema))
+        else:
+            keys.add(name)
     return keys
 
 
@@ -1012,8 +1152,10 @@ async def test_initial_flow_persists_panel_toggles_to_entry_options(hass):
 
     options_with_toggles = {
         **USER_INPUT_OPTIONS,
-        CONF_ENABLE_PERIMETER_PANEL: True,
-        CONF_ENABLE_INTERIOR_PANEL: True,
+        "subpanels": {
+            CONF_ENABLE_PERIMETER_PANEL: True,
+            CONF_ENABLE_INTERIOR_PANEL: True,
+        },
     }
 
     result = await _complete_full_flow(hass, mock_hub, options=options_with_toggles)
@@ -1119,14 +1261,8 @@ async def test_resolve_flow_capabilities_returns_false_when_nothing_known(hass):
 
 
 def _form_has_field(result, field_name: str) -> bool:
-    """Return True if the rendered form schema contains a key with this name."""
-    schema = result["data_schema"].schema
-    for key in schema:
-        # vol.Required / vol.Optional wrap the key — unwrap with `.schema`.
-        name = getattr(key, "schema", key)
-        if name == field_name:
-            return True
-    return False
+    """Return True if the rendered form contains a key with this name (in any section)."""
+    return field_name in _all_form_keys(result["data_schema"])
 
 
 async def test_options_init_renders_peri_toggle_via_published_cache(hass):
@@ -1792,14 +1928,8 @@ async def test_reauth_preserves_username_from_entry(hass):
 
 
 def _schema_keys(data_schema) -> set[str]:
-    """Extract the string keys from a voluptuous Schema's top-level dict."""
-    keys = set()
-    for marker in data_schema.schema.keys():
-        if hasattr(marker, "schema"):
-            keys.add(marker.schema)
-        else:
-            keys.add(marker)
-    return keys
+    """Extract every leaf field key from a (possibly sectioned) voluptuous Schema."""
+    return _all_form_keys(data_schema)
 
 
 def _make_entry_with_coordinator(
@@ -1935,21 +2065,8 @@ async def _advance_to_lock_automations(hass, entry):
     return result["flow_id"]
 
 
-def _section_keys(data_schema) -> set[str]:
-    """Return the set of section names in a sectioned schema."""
-    from homeassistant.data_entry_flow import section
-
-    return {
-        getattr(marker, "schema", marker)
-        for marker, value in data_schema.schema.items()
-        if isinstance(value, section)
-    }
-
-
 def _section_inner_keys(data_schema, section_key: str) -> set[str]:
     """Return the field keys inside the named section() of a schema."""
-    from homeassistant.data_entry_flow import section
-
     for marker, value in data_schema.schema.items():
         name = getattr(marker, "schema", marker)
         if name != section_key or not isinstance(value, section):
@@ -1960,8 +2077,6 @@ def _section_inner_keys(data_schema, section_key: str) -> set[str]:
 
 def _section_inner_marker(data_schema, section_key: str, field_key: str):
     """Return the voluptuous marker for a field inside a named section."""
-    from homeassistant.data_entry_flow import section
-
     for marker, value in data_schema.schema.items():
         name = getattr(marker, "schema", marker)
         if name != section_key or not isinstance(value, section):
@@ -1970,6 +2085,15 @@ def _section_inner_marker(data_schema, section_key: str, field_key: str):
             if getattr(inner_marker, "schema", inner_marker) == field_key:
                 return inner_marker
     return None
+
+
+def _section_keys(data_schema) -> set[str]:
+    """Return the set of section names in a sectioned schema."""
+    return {
+        getattr(marker, "schema", marker)
+        for marker, value in data_schema.schema.items()
+        if isinstance(value, section)
+    }
 
 
 async def test_lock_automations_renders_one_section_per_lock(hass):
@@ -1994,7 +2118,11 @@ async def test_lock_automations_renders_one_section_per_lock(hass):
 
 
 def _circuit_options_from_schema(schema, lock_id: str = "lockA") -> set[str]:
-    """Extract circuit labels offered for a lock by inspecting its section's bool fields."""
+    """Extract circuit labels offered for a lock by inspecting its section's bool fields.
+
+    Returns the set of circuit names mentioned in either `lock_on_arm__<circuit>`
+    or `unlock_disarms__<circuit>` field keys inside the lock's section.
+    """
     inner = _section_inner_keys(schema, f"lock__{lock_id}")
     circuits: set[str] = set()
     for key in inner:
