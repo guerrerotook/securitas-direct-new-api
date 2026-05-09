@@ -117,6 +117,56 @@
                     "map_vacation": "Vacanza",
                     "map_custom": "Personalizzato"
                 }
+            },
+            "lock_automations": {
+                "title": "Automazione delle serrature",
+                "description": "Configura il comportamento automatico di blocco e disattivazione per ciascuna serratura.",
+                "sections": {
+                    "lock__01": {
+                        "name": "{lock_alias_01}",
+                        "data": {
+                            "lock_on_arm__interior": "Blocca automaticamente all'attivazione dell'allarme Interno",
+                            "lock_on_arm__perimeter": "Blocca automaticamente all'attivazione dell'allarme Perimetrale",
+                            "lock_on_arm__annex": "Blocca automaticamente all'attivazione dell'allarme Annesso",
+                            "unlock_disarms__interior": "Disattiva l'allarme Interno prima di sbloccare",
+                            "unlock_disarms__perimeter": "Disattiva l'allarme Perimetrale prima di sbloccare",
+                            "unlock_disarms__annex": "Disattiva l'allarme Annesso prima di sbloccare"
+                        }
+                    },
+                    "lock__02": {
+                        "name": "{lock_alias_02}",
+                        "data": {
+                            "lock_on_arm__interior": "Blocca automaticamente all'attivazione dell'allarme Interno",
+                            "lock_on_arm__perimeter": "Blocca automaticamente all'attivazione dell'allarme Perimetrale",
+                            "lock_on_arm__annex": "Blocca automaticamente all'attivazione dell'allarme Annesso",
+                            "unlock_disarms__interior": "Disattiva l'allarme Interno prima di sbloccare",
+                            "unlock_disarms__perimeter": "Disattiva l'allarme Perimetrale prima di sbloccare",
+                            "unlock_disarms__annex": "Disattiva l'allarme Annesso prima di sbloccare"
+                        }
+                    },
+                    "lock__03": {
+                        "name": "{lock_alias_03}",
+                        "data": {
+                            "lock_on_arm__interior": "Blocca automaticamente all'attivazione dell'allarme Interno",
+                            "lock_on_arm__perimeter": "Blocca automaticamente all'attivazione dell'allarme Perimetrale",
+                            "lock_on_arm__annex": "Blocca automaticamente all'attivazione dell'allarme Annesso",
+                            "unlock_disarms__interior": "Disattiva l'allarme Interno prima di sbloccare",
+                            "unlock_disarms__perimeter": "Disattiva l'allarme Perimetrale prima di sbloccare",
+                            "unlock_disarms__annex": "Disattiva l'allarme Annesso prima di sbloccare"
+                        }
+                    },
+                    "lock__04": {
+                        "name": "{lock_alias_04}",
+                        "data": {
+                            "lock_on_arm__interior": "Blocca automaticamente all'attivazione dell'allarme Interno",
+                            "lock_on_arm__perimeter": "Blocca automaticamente all'attivazione dell'allarme Perimetrale",
+                            "lock_on_arm__annex": "Blocca automaticamente all'attivazione dell'allarme Annesso",
+                            "unlock_disarms__interior": "Disattiva l'allarme Interno prima di sbloccare",
+                            "unlock_disarms__perimeter": "Disattiva l'allarme Perimetrale prima di sbloccare",
+                            "unlock_disarms__annex": "Disattiva l'allarme Annesso prima di sbloccare"
+                        }
+                    }
+                }
             }
         }
     },

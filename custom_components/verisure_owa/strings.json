@@ -117,6 +117,56 @@
                     "map_vacation": "Vacation",
                     "map_custom": "Custom"
                 }
+            },
+            "lock_automations": {
+                "title": "Lock automation",
+                "description": "Configure each lock's automatic locking and panel-disarming behaviour.",
+                "sections": {
+                    "lock__01": {
+                        "name": "{lock_alias_01}",
+                        "data": {
+                            "lock_on_arm__interior": "Lock automatically when arming Interior alarm",
+                            "lock_on_arm__perimeter": "Lock automatically when arming Perimeter alarm",
+                            "lock_on_arm__annex": "Lock automatically when arming Annex alarm",
+                            "unlock_disarms__interior": "Disarm Interior alarm before unlocking",
+                            "unlock_disarms__perimeter": "Disarm Perimeter alarm before unlocking",
+                            "unlock_disarms__annex": "Disarm Annex alarm before unlocking"
+                        }
+                    },
+                    "lock__02": {
+                        "name": "{lock_alias_02}",
+                        "data": {
+                            "lock_on_arm__interior": "Lock automatically when arming Interior alarm",
+                            "lock_on_arm__perimeter": "Lock automatically when arming Perimeter alarm",
+                            "lock_on_arm__annex": "Lock automatically when arming Annex alarm",
+                            "unlock_disarms__interior": "Disarm Interior alarm before unlocking",
+                            "unlock_disarms__perimeter": "Disarm Perimeter alarm before unlocking",
+                            "unlock_disarms__annex": "Disarm Annex alarm before unlocking"
+                        }
+                    },
+                    "lock__03": {
+                        "name": "{lock_alias_03}",
+                        "data": {
+                            "lock_on_arm__interior": "Lock automatically when arming Interior alarm",
+                            "lock_on_arm__perimeter": "Lock automatically when arming Perimeter alarm",
+                            "lock_on_arm__annex": "Lock automatically when arming Annex alarm",
+                            "unlock_disarms__interior": "Disarm Interior alarm before unlocking",
+                            "unlock_disarms__perimeter": "Disarm Perimeter alarm before unlocking",
+                            "unlock_disarms__annex": "Disarm Annex alarm before unlocking"
+                        }
+                    },
+                    "lock__04": {
+                        "name": "{lock_alias_04}",
+                        "data": {
+                            "lock_on_arm__interior": "Lock automatically when arming Interior alarm",
+                            "lock_on_arm__perimeter": "Lock automatically when arming Perimeter alarm",
+                            "lock_on_arm__annex": "Lock automatically when arming Annex alarm",
+                            "unlock_disarms__interior": "Disarm Interior alarm before unlocking",
+                            "unlock_disarms__perimeter": "Disarm Perimeter alarm before unlocking",
+                            "unlock_disarms__annex": "Disarm Annex alarm before unlocking"
+                        }
+                    }
+                }
             }
         }
     },

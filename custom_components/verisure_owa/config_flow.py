@@ -18,7 +18,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
@@ -898,22 +897,38 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_lock_automations(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Step 3: Per-lock automation settings (lock-on-arm / disarm-on-unlock)."""
+        """Step 3: Per-lock automation settings (lock-on-arm / disarm-on-unlock).
+
+        Renders one collapsible section per registered lock, each containing
+        per-circuit boolean checkboxes for the two automations. The persisted
+        shape (CONF_LOCK_AUTOMATIONS = {device_id: {lock_on_arm: [...],
+        unlock_disarms: [...]}}) is unchanged — the handler converts between
+        per-circuit booleans (UI) and circuit-name lists (storage).
+        """
         registered_locks = self._get_registered_locks()
         if not registered_locks:
             return self.async_create_entry(title="", data=self._general_data)
 
         enabled_circuits = self._get_enabled_circuits()
+        # Preserve LOCK_CIRCUITS ordering so the UI is consistent.
+        enabled_circuit_list = [c for c in LOCK_CIRCUITS if c in enabled_circuits]
 
         if user_input is not None:
             new_map: dict[str, dict[str, list[str]]] = {}
             for lk in registered_locks:
                 did = lk["device_id"]
+                section_data = user_input.get(f"lock__{did}", {}) or {}
                 new_map[did] = {
-                    "lock_on_arm": list(user_input.get(f"{did}__lock_on_arm", [])),
-                    "unlock_disarms": list(
-                        user_input.get(f"{did}__unlock_disarms", [])
-                    ),
+                    "lock_on_arm": [
+                        c
+                        for c in enabled_circuit_list
+                        if section_data.get(f"lock_on_arm__{c}", False)
+                    ],
+                    "unlock_disarms": [
+                        c
+                        for c in enabled_circuit_list
+                        if section_data.get(f"unlock_disarms__{c}", False)
+                    ],
                 }
             return self.async_create_entry(
                 title="",
@@ -921,28 +936,35 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         existing = self.config_entry.options.get(CONF_LOCK_AUTOMATIONS, {})
-        circuit_options = {c: c.title() for c in LOCK_CIRCUITS if c in enabled_circuits}
 
-        fields: dict[Any, Any] = {}
+        schema_dict: dict[Any, Any] = {}
+        placeholders: dict[str, str] = {}
         for lk in registered_locks:
             did = lk["device_id"]
             saved = existing.get(did, {})
-            fields[
-                vol.Optional(
-                    f"{did}__lock_on_arm",
-                    default=saved.get("lock_on_arm", []),
-                )
-            ] = cv.multi_select(circuit_options)
-            fields[
-                vol.Optional(
-                    f"{did}__unlock_disarms",
-                    default=saved.get("unlock_disarms", []),
-                )
-            ] = cv.multi_select(circuit_options)
+            saved_arm = set(saved.get("lock_on_arm", []))
+            saved_unlock = set(saved.get("unlock_disarms", []))
+
+            section_fields: dict[Any, Any] = {}
+            for c in enabled_circuit_list:
+                section_fields[
+                    vol.Optional(f"lock_on_arm__{c}", default=c in saved_arm)
+                ] = bool
+            for c in enabled_circuit_list:
+                section_fields[
+                    vol.Optional(f"unlock_disarms__{c}", default=c in saved_unlock)
+                ] = bool
+
+            schema_dict[vol.Required(f"lock__{did}")] = section(
+                vol.Schema(section_fields),
+                {"collapsed": False},
+            )
+            placeholders[f"lock_alias_{did}"] = lk.get("alias") or did
 
         return self.async_show_form(
             step_id="lock_automations",
-            data_schema=vol.Schema(fields),
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders=placeholders,
         )
 
     def _get_registered_locks(self) -> list[dict[str, str]]:

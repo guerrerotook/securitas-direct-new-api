@@ -117,6 +117,56 @@
                     "map_vacation": "Vacances",
                     "map_custom": "Personalitzat"
                 }
+            },
+            "lock_automations": {
+                "title": "Automatització del pany",
+                "description": "Configureu el comportament automàtic de tancament i desarmament per a cada pany.",
+                "sections": {
+                    "lock__01": {
+                        "name": "{lock_alias_01}",
+                        "data": {
+                            "lock_on_arm__interior": "Tanca automàticament en armar l'alarma Interior",
+                            "lock_on_arm__perimeter": "Tanca automàticament en armar l'alarma Perímetre",
+                            "lock_on_arm__annex": "Tanca automàticament en armar l'alarma Annex",
+                            "unlock_disarms__interior": "Desarma l'alarma Interior abans de tornar a obrir",
+                            "unlock_disarms__perimeter": "Desarma l'alarma Perímetre abans de tornar a obrir",
+                            "unlock_disarms__annex": "Desarma l'alarma Annex abans de tornar a obrir"
+                        }
+                    },
+                    "lock__02": {
+                        "name": "{lock_alias_02}",
+                        "data": {
+                            "lock_on_arm__interior": "Tanca automàticament en armar l'alarma Interior",
+                            "lock_on_arm__perimeter": "Tanca automàticament en armar l'alarma Perímetre",
+                            "lock_on_arm__annex": "Tanca automàticament en armar l'alarma Annex",
+                            "unlock_disarms__interior": "Desarma l'alarma Interior abans de tornar a obrir",
+                            "unlock_disarms__perimeter": "Desarma l'alarma Perímetre abans de tornar a obrir",
+                            "unlock_disarms__annex": "Desarma l'alarma Annex abans de tornar a obrir"
+                        }
+                    },
+                    "lock__03": {
+                        "name": "{lock_alias_03}",
+                        "data": {
+                            "lock_on_arm__interior": "Tanca automàticament en armar l'alarma Interior",
+                            "lock_on_arm__perimeter": "Tanca automàticament en armar l'alarma Perímetre",
+                            "lock_on_arm__annex": "Tanca automàticament en armar l'alarma Annex",
+                            "unlock_disarms__interior": "Desarma l'alarma Interior abans de tornar a obrir",
+                            "unlock_disarms__perimeter": "Desarma l'alarma Perímetre abans de tornar a obrir",
+                            "unlock_disarms__annex": "Desarma l'alarma Annex abans de tornar a obrir"
+                        }
+                    },
+                    "lock__04": {
+                        "name": "{lock_alias_04}",
+                        "data": {
+                            "lock_on_arm__interior": "Tanca automàticament en armar l'alarma Interior",
+                            "lock_on_arm__perimeter": "Tanca automàticament en armar l'alarma Perímetre",
+                            "lock_on_arm__annex": "Tanca automàticament en armar l'alarma Annex",
+                            "unlock_disarms__interior": "Desarma l'alarma Interior abans de tornar a obrir",
+                            "unlock_disarms__perimeter": "Desarma l'alarma Perímetre abans de tornar a obrir",
+                            "unlock_disarms__annex": "Desarma l'alarma Annex abans de tornar a obrir"
+                        }
+                    }
+                }
             }
         }
     },

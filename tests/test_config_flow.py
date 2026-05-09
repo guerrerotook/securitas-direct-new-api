@@ -1935,8 +1935,45 @@ async def _advance_to_lock_automations(hass, entry):
     return result["flow_id"]
 
 
+def _section_keys(data_schema) -> set[str]:
+    """Return the set of section names in a sectioned schema."""
+    from homeassistant.data_entry_flow import section
+
+    return {
+        getattr(marker, "schema", marker)
+        for marker, value in data_schema.schema.items()
+        if isinstance(value, section)
+    }
+
+
+def _section_inner_keys(data_schema, section_key: str) -> set[str]:
+    """Return the field keys inside the named section() of a schema."""
+    from homeassistant.data_entry_flow import section
+
+    for marker, value in data_schema.schema.items():
+        name = getattr(marker, "schema", marker)
+        if name != section_key or not isinstance(value, section):
+            continue
+        return {getattr(m, "schema", m) for m in value.schema.schema}
+    return set()
+
+
+def _section_inner_marker(data_schema, section_key: str, field_key: str):
+    """Return the voluptuous marker for a field inside a named section."""
+    from homeassistant.data_entry_flow import section
+
+    for marker, value in data_schema.schema.items():
+        name = getattr(marker, "schema", marker)
+        if name != section_key or not isinstance(value, section):
+            continue
+        for inner_marker in value.schema.schema:
+            if getattr(inner_marker, "schema", inner_marker) == field_key:
+                return inner_marker
+    return None
+
+
 async def test_lock_automations_renders_one_section_per_lock(hass):
-    """Form should have two fields per registered lock (lock_on_arm, unlock_disarms)."""
+    """Form should have one section per registered lock with per-circuit bools inside."""
     entry = _make_entry_with_locks(
         hass,
         registered_locks=[
@@ -1951,17 +1988,19 @@ async def test_lock_automations_renders_one_section_per_lock(hass):
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "lock_automations"
-    keys = {str(k) for k in result["data_schema"].schema.keys()}
-    assert any("lockA" in k for k in keys)
-    assert any("lockB" in k for k in keys)
+    sections = _section_keys(result["data_schema"])
+    assert "lock__lockA" in sections
+    assert "lock__lockB" in sections
 
 
-def _circuit_options_from_schema(schema) -> set[str]:
-    """Extract circuit labels from all multi_select values in a lock-automations schema."""
+def _circuit_options_from_schema(schema, lock_id: str = "lockA") -> set[str]:
+    """Extract circuit labels offered for a lock by inspecting its section's bool fields."""
+    inner = _section_inner_keys(schema, f"lock__{lock_id}")
     circuits: set[str] = set()
-    for v in schema.schema.values():
-        if hasattr(v, "options"):
-            circuits.update(v.options.keys())
+    for key in inner:
+        for prefix in ("lock_on_arm__", "unlock_disarms__"):
+            if key.startswith(prefix):
+                circuits.add(key[len(prefix) :])
     return circuits
 
 
@@ -2016,17 +2055,22 @@ async def test_lock_automations_submission_persists_per_lock_config(hass):
     result = await hass.config_entries.options.async_configure(
         flow_id,
         user_input={
-            "lockA__lock_on_arm": ["interior", "perimeter"],
-            "lockA__unlock_disarms": ["interior"],
+            "lock__lockA": {
+                "lock_on_arm__interior": True,
+                "lock_on_arm__perimeter": True,
+                "lock_on_arm__annex": False,
+                "unlock_disarms__interior": True,
+                "unlock_disarms__perimeter": False,
+                "unlock_disarms__annex": False,
+            },
         },
     )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert CONF_LOCK_AUTOMATIONS in result["data"]
-    assert result["data"][CONF_LOCK_AUTOMATIONS]["lockA"] == {
-        "lock_on_arm": ["interior", "perimeter"],
-        "unlock_disarms": ["interior"],
-    }
+    saved = result["data"][CONF_LOCK_AUTOMATIONS]["lockA"]
+    assert sorted(saved["lock_on_arm"]) == ["interior", "perimeter"]
+    assert saved["unlock_disarms"] == ["interior"]
 
 
 async def test_lock_automations_re_edit_prefills_existing_values(hass):
@@ -2051,13 +2095,19 @@ async def test_lock_automations_re_edit_prefills_existing_values(hass):
     result = await hass.config_entries.options.async_configure(flow_id)
 
     assert result["type"] == FlowResultType.FORM
-    schema = result["data_schema"].schema
-    for k, _v in schema.items():
-        key_str = str(k)
-        if "lockA__lock_on_arm" in key_str:
-            assert k.default() == ["perimeter"]
-        if "lockA__unlock_disarms" in key_str:
-            assert k.default() == ["interior", "annex"]
+    schema = result["data_schema"]
+
+    def _bool_default(field_key: str) -> bool:
+        marker = _section_inner_marker(schema, "lock__lockA", field_key)
+        assert marker is not None, f"missing field {field_key}"
+        return marker.default()
+
+    assert _bool_default("lock_on_arm__interior") is False
+    assert _bool_default("lock_on_arm__perimeter") is True
+    assert _bool_default("lock_on_arm__annex") is False
+    assert _bool_default("unlock_disarms__interior") is True
+    assert _bool_default("unlock_disarms__perimeter") is False
+    assert _bool_default("unlock_disarms__annex") is True
 
 
 async def test_lock_automations_skipped_when_no_locks_discovered(hass):
