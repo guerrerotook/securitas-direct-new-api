@@ -100,7 +100,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
             )
             all_entities.append(peri_panel)
-            axis_panels[peri_panel._AXIS] = peri_panel  # noqa: SLF001
+            axis_panels[peri_panel._AXIS] = peri_panel  # noqa: SLF001  # pylint: disable=protected-access
 
         if enable_annex:
             annex_panel = AnnexVerisureOwaAlarmPanel(
@@ -110,7 +110,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
             )
             all_entities.append(annex_panel)
-            axis_panels[annex_panel._AXIS] = annex_panel  # noqa: SLF001
+            axis_panels[annex_panel._AXIS] = annex_panel  # noqa: SLF001  # pylint: disable=protected-access
 
         if enable_interior:
             interior_panel = InteriorVerisureOwaAlarmPanel(
@@ -120,7 +120,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
             )
             all_entities.append(interior_panel)
-            axis_panels[interior_panel._AXIS] = interior_panel  # noqa: SLF001
+            axis_panels[interior_panel._AXIS] = interior_panel  # noqa: SLF001  # pylint: disable=protected-access
 
     async_add_entities(all_entities, False)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}

@@ -91,15 +91,15 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
 
         affected = [self, *self._affected_axis_subpanels(circuits)]
         for entity in affected:
-            entity._operation_in_progress = True  # noqa: SLF001
-            entity._operation_epoch += 1  # noqa: SLF001
-            entity._force_state(AlarmControlPanelState.DISARMING)  # noqa: SLF001
+            entity._operation_in_progress = True  # noqa: SLF001  # pylint: disable=protected-access
+            entity._operation_epoch += 1  # noqa: SLF001  # pylint: disable=protected-access
+            entity._force_state(AlarmControlPanelState.DISARMING)  # noqa: SLF001  # pylint: disable=protected-access
         try:
             result = await self._execute_transition(target)
         except VerisureOwaError as err:
             for entity in affected:
-                entity._state = entity._last_state  # noqa: SLF001
-                entity._operation_in_progress = False  # noqa: SLF001
+                entity._state = entity._last_state  # noqa: SLF001  # pylint: disable=protected-access
+                entity._operation_in_progress = False  # noqa: SLF001  # pylint: disable=protected-access
                 entity.async_write_ha_state()
             _LOGGER.error(
                 "Partial disarm failed for %s circuits %s: %s",
@@ -110,7 +110,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             return False
         for entity in affected:
             entity.update_status_alarm(result)
-            entity._operation_in_progress = False  # noqa: SLF001
+            entity._operation_in_progress = False  # noqa: SLF001  # pylint: disable=protected-access
             entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True
