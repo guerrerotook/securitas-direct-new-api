@@ -594,7 +594,9 @@ class TestFullImageCapture:
         hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
 
         _tasks = []
-        hub.hass.async_create_task = lambda coro, **_: _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
+        hub.hass.async_create_task = lambda coro, **_: (
+            _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
+        )
 
         with patch(
             "custom_components.verisure_owa.hub.async_dispatcher_send",
@@ -651,7 +653,9 @@ class TestFullImageCapture:
         hub._update_camera_coordinator_full_image = MagicMock()
 
         _tasks = []
-        hub.hass.async_create_task = lambda coro, **_: _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
+        hub.hass.async_create_task = lambda coro, **_: (
+            _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
+        )
 
         with patch(
             "custom_components.verisure_owa.hub.async_dispatcher_send",
@@ -680,7 +684,9 @@ class TestFullImageCapture:
         hub._update_camera_coordinator_full_image = MagicMock()
 
         _tasks = []
-        hub.hass.async_create_task = lambda coro, **_: _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
+        hub.hass.async_create_task = lambda coro, **_: (
+            _tasks.append(asyncio.create_task(coro)) or _tasks[-1]
+        )
 
         with patch(
             "custom_components.verisure_owa.hub.async_dispatcher_send",
