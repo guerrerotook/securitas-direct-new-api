@@ -1556,22 +1556,31 @@ class TestVerisureLockUnlockDisarm:
         coord.alarm_state = state
         return coord
 
-    async def test_disarm_runs_before_unlock_when_configured(self):
+    async def test_disarm_and_unlock_run_in_parallel(self):
+        """Disarm and unlock dispatch concurrently — neither blocks on the other.
+
+        Verified via cross-coupled events: each fake awaits the other's "started"
+        event before completing. Sequential execution (in either order) would
+        deadlock; parallel execution lets both progress and the test completes.
+        """
+        import asyncio
+
         lock = make_lock(initial_status="2", poll_status="1")
-        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = ["interior"]
         lock._combined_alarm_panel = self._make_alarm_panel(success=True)
         lock._alarm_coordinator = self._make_alarm_coord(self._state(i="TOTAL"))
 
-        # Capture call order.
-        order: list[str] = []
+        disarm_started = asyncio.Event()
+        unlock_started = asyncio.Event()
 
-        async def fake_disarm(circuits):
-            order.append("disarm")
+        async def fake_disarm(_circuits):
+            disarm_started.set()
+            await asyncio.wait_for(unlock_started.wait(), timeout=1.0)
             return True
 
-        async def fake_change(installation, lock_state, device_id=None):
-            order.append("unlock")
+        async def fake_change(_installation, _lock_state, _device_id=None):
+            unlock_started.set()
+            await asyncio.wait_for(disarm_started.wait(), timeout=1.0)
             return MagicMock()
 
         lock._combined_alarm_panel.execute_partial_disarm = AsyncMock(
@@ -1581,10 +1590,12 @@ class TestVerisureLockUnlockDisarm:
 
         await lock.async_unlock()
 
-        assert order == ["disarm", "unlock"]
+        assert disarm_started.is_set()
+        assert unlock_started.is_set()
         lock._combined_alarm_panel.execute_partial_disarm.assert_awaited_once_with(
             ["interior"]
         )
+        lock._client.change_lock_mode.assert_awaited_once()
 
     async def test_disarm_skipped_when_alarm_already_disarmed(self):
         lock = make_lock(initial_status="2", poll_status="1")

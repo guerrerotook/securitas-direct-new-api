@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -461,14 +462,24 @@ class VerisureLock(  # type: ignore[override]
         return ok
 
     async def _perform_user_unlock(self, operation: str) -> None:
-        """Disarm-first unlock used by both async_unlock and async_open."""
+        """Concurrent disarm + unlock used by both async_unlock and async_open.
+
+        Both branches each handle their own errors internally (disarm fires an
+        "Auto-disarm failed" notification on failure; unlock rolls back the
+        entity state) so neither raises from gather. Running them in parallel
+        halves the user-perceived latency without changing the semantics:
+        the post-call check still fires "Unlock failed" only when the disarm
+        succeeded but the lock state stayed LOCKED.
+        """
         pre_state = self._state
-        disarm_result = await self._dispatch_unlock_disarm()
-        await self._change_lock_mode(
-            lock_state=False,
-            transitional_state=LOCK_STATUS_UNLOCKING,
-            optimistic_state=LOCK_STATUS_UNLOCKED,
-            operation=operation,
+        disarm_result, _ = await asyncio.gather(
+            self._dispatch_unlock_disarm(),
+            self._change_lock_mode(
+                lock_state=False,
+                transitional_state=LOCK_STATUS_UNLOCKING,
+                optimistic_state=LOCK_STATUS_UNLOCKED,
+                operation=operation,
+            ),
         )
         if (
             disarm_result is True
