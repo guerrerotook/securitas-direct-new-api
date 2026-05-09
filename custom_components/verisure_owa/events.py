@@ -47,6 +47,7 @@ HA_INJECTABLE_CATEGORIES: frozenset[ActivityCategory] = frozenset(
         ActivityCategory.ARMED,
         ActivityCategory.ARMED_WITH_EXCEPTIONS,
         ActivityCategory.ARMING_FAILED,
+        ActivityCategory.COMMUNICATION_FAILED,
         ActivityCategory.DISARMED,
         ActivityCategory.IMAGE_REQUEST,
     }

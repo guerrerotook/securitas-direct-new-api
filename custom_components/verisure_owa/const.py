@@ -21,9 +21,9 @@ CAMERA_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-camera-card.js"
 CAMERA_CARD_URL = (
     f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-camera-card.js')}"
 )
-EVENTS_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-events-card.js"
-EVENTS_CARD_URL = (
-    f"{EVENTS_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-events-card.js')}"
+ACTIVITY_LOG_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-activity-log-card.js"
+ACTIVITY_LOG_CARD_URL = (
+    f"{ACTIVITY_LOG_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-activity-log-card.js')}"
 )
 
 CONF_ADVANCED = "advanced"

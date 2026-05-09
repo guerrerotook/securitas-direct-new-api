@@ -609,6 +609,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
             self._handle_arm_disarm_error(err, "disarm_failed")
             self.async_write_ha_state()
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.COMMUNICATION_FAILED,
+                alias=f"Disarm failed: {err}",
+                context=user_context,
+            )
         except HomeAssistantError:
             self._state = self._last_state
             self.async_write_ha_state()
@@ -694,6 +701,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
             self._handle_arm_disarm_error(err, "arm_failed")
             self.async_write_ha_state()
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.COMMUNICATION_FAILED,
+                alias=f"Arm failed: {err}",
+                context=user_context,
+            )
         except HomeAssistantError:
             self._state = self._last_state
             self.async_write_ha_state()

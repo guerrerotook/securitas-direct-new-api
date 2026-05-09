@@ -87,12 +87,19 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
                 alarm_entity.async_write_ha_state()
                 alarm_entity.async_schedule_update_ha_state(force_refresh=True)
 
-        except OperationTimeoutError:
+        except OperationTimeoutError as err:
             _LOGGER.warning("Refresh timed out for %s", self._installation.number)
             alarm_entity = self._get_alarm_entity()
             if alarm_entity is not None:
                 alarm_entity._set_refresh_failed(True)  # noqa: SLF001  # pylint: disable=protected-access
                 alarm_entity.async_write_ha_state()
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.COMMUNICATION_FAILED,
+                alias=f"Refresh timed out: {err}",
+                context=self._context,
+            )
 
         except VerisureOwaError as err:
             _LOGGER.error(
@@ -110,6 +117,13 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
                 if alarm_entity is not None:
                     alarm_entity._set_waf_blocked(True)  # noqa: SLF001  # pylint: disable=protected-access
                     alarm_entity.async_write_ha_state()
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.COMMUNICATION_FAILED,
+                alias=f"Refresh failed: {err}",
+                context=self._context,
+            )
 
 
 class VerisureCaptureButton(VerisureEntity, ButtonEntity):

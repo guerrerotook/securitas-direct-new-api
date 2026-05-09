@@ -37,8 +37,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CAMERA_CARD_URL,
     CARD_BASE_URL,
     CARD_URL,
-    EVENTS_CARD_BASE_URL,
-    EVENTS_CARD_URL,
+    ACTIVITY_LOG_CARD_BASE_URL,
+    ACTIVITY_LOG_CARD_URL,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
@@ -96,7 +96,7 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     _async_notify,
     _notify,
 )
-from .log_filter import SensitiveDataFilter
+from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .verisure_owa_api import (
     ApiDomains,
     AuthenticationError,
@@ -510,7 +510,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
         )
         await _register_card_resource(
-            hass, EVENTS_CARD_BASE_URL, EVENTS_CARD_URL, "events_card_resource_id"
+            hass,
+            ACTIVITY_LOG_CARD_BASE_URL,
+            ACTIVITY_LOG_CARD_URL,
+            "activity_log_card_resource_id",
         )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
@@ -519,13 +522,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
 
-    # Set up log sanitization filter — must be on handlers, not the logger,
-    # because logger-level filters don't apply to child logger records.
+    # Set up log filters — must be on handlers, not the logger, because
+    # logger-level filters don't apply to child logger records.
     if "log_filter" not in hass.data[DOMAIN]:
         log_filter = SensitiveDataFilter()
+        transient_filter = TransientCoordinatorErrorFilter()
         for handler in logging.getLogger().handlers:
             handler.addFilter(log_filter)
+            handler.addFilter(transient_filter)
         hass.data[DOMAIN]["log_filter"] = log_filter
+        hass.data[DOMAIN]["transient_log_filter"] = transient_filter
     else:
         log_filter = hass.data[DOMAIN]["log_filter"]
 
@@ -673,6 +679,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_discover_devices(hass, entry),
             f"verisure_owa_discover_{entry.entry_id}",
         )
+
+        # First successful load after the legacy securitas → verisure_owa
+        # migration: surface a one-shot persistent notification with a link
+        # to the breaking-changes section in the README. Cleared once shown
+        # so reloads / future restarts don't re-pop it.
+        if entry.data.get("migrated_from_securitas"):
+            domain_data = hass.data.setdefault(DOMAIN, {})
+            if not domain_data.get("post_migration_notice_shown"):
+                _notify(hass, "migration_complete", "migration_complete")
+                domain_data["post_migration_notice_shown"] = True
+            hass.config_entries.async_update_entry(
+                entry,
+                data={
+                    k: v
+                    for k, v in entry.data.items()
+                    if k != "migrated_from_securitas"
+                },
+            )
         return True
     raise ConfigEntryNotReady(
         "Config entry missing device IDs. Delete and re-add the integration."
@@ -720,16 +744,19 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not remaining_sessions:
         # Last entry unloaded — full cleanup
         log_filter = hass.data[DOMAIN].get("log_filter")
-        if log_filter:
-            for handler in logging.getLogger().handlers:
+        transient_log_filter = hass.data[DOMAIN].get("transient_log_filter")
+        for handler in logging.getLogger().handlers:
+            if log_filter:
                 handler.removeFilter(log_filter)
+            if transient_log_filter:
+                handler.removeFilter(transient_log_filter)
 
         await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
         await _unregister_card_resource(
             hass, CAMERA_CARD_URL, "camera_card_resource_id"
         )
         await _unregister_card_resource(
-            hass, EVENTS_CARD_URL, "events_card_resource_id"
+            hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
         )
 
         # Tear down the deprecation-window service aliases that

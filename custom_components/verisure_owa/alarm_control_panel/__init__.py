@@ -12,16 +12,19 @@ file is easier to navigate:
 
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     async_get_current_platform,
 )
+from homeassistant.util import slugify
 
 from .. import DOMAIN, VerisureDevice, VerisureHub
 from ..const import (
@@ -30,6 +33,7 @@ from ..const import (
     CONF_ENABLE_PERIMETER_PANEL,
 )
 from ..coordinators import AlarmCoordinator
+from ..verisure_owa_api.models import Installation
 from ._base import BaseVerisureOwaAlarmPanel, build_partial_disarm_target
 from ._panels import (
     AnnexVerisureOwaAlarmPanel,
@@ -38,15 +42,84 @@ from ._panels import (
     PerimeterVerisureOwaAlarmPanel,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 __all__ = [
     "AnnexVerisureOwaAlarmPanel",
     "BaseVerisureOwaAlarmPanel",
     "CombinedVerisureOwaAlarmPanel",
     "InteriorVerisureOwaAlarmPanel",
     "PerimeterVerisureOwaAlarmPanel",
+    "_heal_combined_panel_entity_id",
     "async_setup_entry",
     "build_partial_disarm_target",
 ]
+
+
+async def _heal_combined_panel_entity_id(
+    hass: HomeAssistant, installation: Installation
+) -> None:
+    """Move the combined alarm panel onto its canonical entity_id slot.
+
+    The canonical slot is ``alarm_control_panel.<slugified-alias>`` (matching
+    the v4 layout). Earlier v5 builds slugified the friendly name
+    ``Main - <alias>`` and ended up at ``alarm_control_panel.<alias>_main_<alias>``;
+    a downgrade-then-re-upgrade leaves a stale entity squatting on the
+    canonical slot which pushes the new entity to ``_2``. This helper:
+
+    1. Finds the entity registered under our v5 unique_id for this installation.
+    2. If it is already at the canonical slot, returns.
+    3. If the canonical slot is held by another verisure_owa entity (an orphan
+       from a previous setup), removes the orphan to free the slot.
+    4. Renames our entity into the canonical slot.
+
+    A non-verisure_owa entity holding the slot is left untouched (we log a
+    warning and skip the rename).
+    """
+    try:
+        ent_reg = er.async_get(hass)
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
+        return
+    our_unique_id = f"v5_verisure_owa.{installation.number}"
+    try:
+        our_entity_id = ent_reg.async_get_entity_id(
+            "alarm_control_panel", DOMAIN, our_unique_id
+        )
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        return
+    if our_entity_id is None:
+        return
+    canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+    if our_entity_id == canonical:
+        return
+
+    occupant = ent_reg.async_get(canonical)
+    if occupant is not None and occupant.entity_id != our_entity_id:
+        if occupant.platform == DOMAIN:
+            _LOGGER.warning(
+                "Removing stale alarm-panel entity %s (unique_id=%s) so "
+                "installation %s can reclaim its canonical entity_id",
+                canonical,
+                occupant.unique_id,
+                installation.number,
+            )
+            ent_reg.async_remove(canonical)
+        else:
+            _LOGGER.warning(
+                "Cannot reclaim %s for installation %s: slot held by %s "
+                "(domain %s); the alarm panel will stay at %s",
+                canonical,
+                installation.number,
+                occupant.unique_id,
+                occupant.platform,
+                our_entity_id,
+            )
+            return
+
+    _LOGGER.info(
+        "Renaming alarm-panel entity_id: %s -> %s", our_entity_id, canonical
+    )
+    ent_reg.async_update_entity(our_entity_id, new_entity_id=canonical)
 
 
 async def async_setup_entry(
@@ -69,6 +142,13 @@ async def async_setup_entry(
     alarms: list[CombinedVerisureOwaAlarmPanel] = []
     all_entities: list[BaseVerisureOwaAlarmPanel] = []
     securitas_devices: list[VerisureDevice] = entry_data["devices"]
+    # Reclaim the canonical alarm_control_panel.<alias> entity_id for the
+    # combined panel before the platform creates its entities, so an upgrade
+    # path that left a stale `<alias>_main_<alias>` or `_2`-suffixed slug in
+    # the registry is healed transparently.
+    for devices in securitas_devices:
+        await _heal_combined_panel_entity_id(hass, devices.installation)
+
     for devices in securitas_devices:
         combined = CombinedVerisureOwaAlarmPanel(
             devices.installation,

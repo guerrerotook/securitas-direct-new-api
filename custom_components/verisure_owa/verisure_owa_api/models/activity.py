@@ -60,6 +60,12 @@ class ActivityCategory(StrEnum):
     POWER_CUT = "power_cut"
     POWER_RESTORED = "power_restored"
     STATUS_CHECK = "status_check"
+    # Communication problem with the panel — distinct from ARMING_FAILED
+    # (an arm rejected because of exceptions). Verisure's own UI uses labels
+    # like "Error processing alarm deactivation" for these; the panel emits
+    # type 501 on a failed arm/disarm round-trip and 502 on a failed status
+    # refresh.
+    COMMUNICATION_FAILED = "communication_failed"
     UNKNOWN = "unknown"
 
 
@@ -106,6 +112,11 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     25: ActivityCategory.POWER_CUT,
     26: ActivityCategory.POWER_RESTORED,
     27: ActivityCategory.STATUS_CHECK,
+    # Panel-side communication failure (arm/disarm couldn't reach the panel
+    # in 501; status-check refresh failed in 502). Surfaced alongside the
+    # localised "Sorry, action couldn't be performed" alias by the panel.
+    501: ActivityCategory.COMMUNICATION_FAILED,
+    502: ActivityCategory.COMMUNICATION_FAILED,
 }
 
 

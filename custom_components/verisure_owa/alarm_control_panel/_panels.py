@@ -50,6 +50,19 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         super().__init__(*args, **kwargs)
         self._attr_name = f"Main - {self._installation.alias}"
 
+    @property
+    def suggested_object_id(self) -> str:
+        """Force the entity_id slug to ``<alias>``, matching the v4 layout.
+
+        With ``has_entity_name = False`` the default would slugify the friendly
+        name ``Main - <alias>`` and produce ``main_<alias>``, which both
+        breaks v4 dashboards and (when an old entity already occupies that
+        name) lands on the doubled-alias collision form. Returning the bare
+        installation alias here is what HA seeds the entity_id from on first
+        registration.
+        """
+        return self._installation.alias
+
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Convert an HA alarm mode to an AlarmState using the verisure state map."""
         if ha_state == AlarmControlPanelState.DISARMED:
