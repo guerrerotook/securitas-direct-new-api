@@ -1093,6 +1093,7 @@ class TestActivityEventCategory:
         802 (Main partial), 5824 maps to 824 (Exterior + Main partial), etc.
         """
         assert self._ev(5802).category == ActivityCategory.ARMING_FAILED
+        assert self._ev(5823).category == ActivityCategory.ARMING_FAILED
         assert self._ev(5824).category == ActivityCategory.ARMING_FAILED
 
     def test_alarm_resolved(self):

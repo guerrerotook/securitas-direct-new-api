@@ -94,6 +94,7 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # partial; 5824 → 824 Exterior + Main partial).  Add more codes here as
     # they're observed.
     5802: ActivityCategory.ARMING_FAILED,
+    5823: ActivityCategory.ARMING_FAILED,  # 823 mirror — Exterior + Main total
     5824: ActivityCategory.ARMING_FAILED,
     # Disarmed — user-initiated disarm commands and the panel-emitted disarm signal
     1: ActivityCategory.DISARMED,
