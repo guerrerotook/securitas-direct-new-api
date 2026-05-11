@@ -616,8 +616,26 @@ class VerisureOwaActivityLogCard extends HTMLElement {
         }
       }
     };
+    // Drag threshold (px) for distinguishing a click from a text-selection drag.
+    // Pointer travel beyond this between mousedown and click means the user was
+    // selecting text, not tapping the row — leave the row state alone.
+    const DRAG_THRESHOLD = 4;
     this.shadowRoot.querySelectorAll(".event").forEach((row) => {
-      row.addEventListener("click", () => toggleRow(row));
+      let downX = 0;
+      let downY = 0;
+      row.addEventListener("pointerdown", (e) => {
+        downX = e.clientX;
+        downY = e.clientY;
+      });
+      row.addEventListener("click", (e) => {
+        if (
+          Math.abs(e.clientX - downX) > DRAG_THRESHOLD ||
+          Math.abs(e.clientY - downY) > DRAG_THRESHOLD
+        ) {
+          return;
+        }
+        toggleRow(row);
+      });
       row.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
