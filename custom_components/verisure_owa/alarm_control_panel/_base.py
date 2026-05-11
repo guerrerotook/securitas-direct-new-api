@@ -111,6 +111,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     """Representation of a Verisure alarm status."""
 
     _attr_has_entity_name = False
+    # The combined Main panel exposes a user-editable mapping per HA alarm
+    # state, so a panel-rejected command is a config issue — the rejection
+    # notification points the user at the mappings UI. Sub-panels override
+    # this to False (no mapping; the right action is to drop the feature).
+    _is_mappable: bool = True
 
     def __init__(
         self,
@@ -134,7 +139,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._last_proto_code: str | None = None
         # Last proto code we warned about; dedupes the per-poll spam.
         self._last_unmapped_logged: str | None = None
-        self._resolver = CommandResolver(has_peri=self._has_peri)
+        self._resolver = CommandResolver(
+            has_peri=self._has_peri,
+            unsupported=self._client.config.get("unsupported_commands", []),
+        )
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
@@ -544,6 +552,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                         err.log_detail(),
                     )
                     self._resolver.mark_unsupported(command)
+                    self._persist_unsupported()
                 else:
                     # 5xx server error or panel-level error (e.g.
                     # TECHNICAL_ERROR after polling) — transient/communication
@@ -553,9 +562,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 last_err = err
 
         if last_err and last_err.http_status == 400:
+            # Sub-panels have no user-editable mapping — point the user at
+            # the auto-disabled feature; mappable Main panel still points
+            # them at the mappings UI.
+            key = (
+                "unsupported_alarm_mode"
+                if self._is_mappable
+                else "unsupported_alarm_mode_subpanel"
+            )
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="unsupported_alarm_mode",
+                translation_key=key,
                 translation_placeholders={"tried": ", ".join(step.commands)},
             ) from last_err
         if last_err:
@@ -574,6 +591,29 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if command.startswith("D"):
             return await self.client.disarm_alarm(self.installation, command)
         return await self.client.arm_alarm(self.installation, command, **force_params)
+
+    def _persist_unsupported(self) -> None:
+        """Write the resolver's unsupported set to entry.data and refresh state.
+
+        Persisting means the resolver starts pre-loaded on the next setup, so
+        a sub-panel mode disabled by a 400 stays disabled across HA restarts.
+        Writing to entry.data via async_update_entry also triggers the update
+        listener; CONF_UNSUPPORTED_COMMANDS isn't options-managed so the
+        listener no-ops there. The async_write_ha_state call forces HA to
+        re-read supported_features so the now-unreachable button drops out
+        of the UI immediately.
+        """
+        entry = getattr(self._client, "config_entry", None)
+        if entry is None:
+            return
+        current: list[str] = list(entry.data.get("unsupported_commands", []))
+        new = sorted(self._resolver.unsupported)
+        if current == new:
+            return
+        self.hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "unsupported_commands": new}
+        )
+        self.async_write_ha_state()
 
     def _set_refresh_failed(self, failed: bool) -> None:
         """Track whether the last manual refresh timed out."""

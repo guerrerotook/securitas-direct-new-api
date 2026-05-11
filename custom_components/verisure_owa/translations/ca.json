@@ -213,6 +213,9 @@
         "unsupported_alarm_mode": {
             "message": "Aquest mode d'alarma no és compatible amb el teu panell (rebutjat: {tried}). Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
         },
+        "unsupported_alarm_mode_subpanel": {
+            "message": "Aquest mode d'alarma no és compatible amb el teu panell (rebutjat: {tried}). S'ha desactivat en aquest subpanell i no es tornarà a oferir."
+        },
         "no_supported_command": {
             "message": "No s'ha trobat cap ordre compatible per a aquest panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
         }

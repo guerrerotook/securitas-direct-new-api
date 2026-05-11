@@ -161,6 +161,13 @@ class _AxisSubPanelMixin:
     which is wrong for axis sub-panels.  This mixin replaces both paths.
     """
 
+    # Sub-panels don't expose user-editable state mappings, so a
+    # panel-rejected command can't be worked around in options — the
+    # right action is to drop the feature and tell the user it's been
+    # disabled. The Main panel keeps the default (True) and points users
+    # at the mappings UI instead.
+    _is_mappable: bool = False
+
     @property
     def suggested_object_id(self) -> str:
         """Force the entity_id slug to ``<alias>_<circuit>`` on fresh installs.
@@ -255,7 +262,7 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return all interior arming features.
+        """Return interior arming features, minus any the panel has rejected.
 
         We deliberately do NOT gate on the JWT capability set: empirically (Italian
         SDVECU OWNER) the JWT 'cap' claim can be both incomplete and wrong about
@@ -263,15 +270,21 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
         the panel rejects ARMNIGHT1 with "not valid for Central Unit", and
         omitting ARMDAY while the panel happily accepts ARMDAY1. Gating on the
         cap set therefore hides modes that work and exposes modes that don't.
-        Instead, surface all three interior modes; the resolver's mark_unsupported
-        runtime-fallback catches genuinely-rejected commands and the user gets a
-        clear notification naming the failed command.
+
+        Instead we start with all three interior modes and remove ones whose
+        underlying command has been rejected at runtime (via
+        ``resolver.mark_unsupported``). The rejection set is hydrated from
+        persisted state on setup, so a mode disabled once stays disabled
+        across HA restarts.
         """
-        return (
-            AlarmControlPanelEntityFeature.ARM_HOME
-            | AlarmControlPanelEntityFeature.ARM_NIGHT
-            | AlarmControlPanelEntityFeature.ARM_AWAY
-        )
+        features = AlarmControlPanelEntityFeature(0)
+        if self._resolver.can_reach_interior(InteriorMode.DAY):
+            features |= AlarmControlPanelEntityFeature.ARM_HOME
+        if self._resolver.can_reach_interior(InteriorMode.NIGHT):
+            features |= AlarmControlPanelEntityFeature.ARM_NIGHT
+        if self._resolver.can_reach_interior(InteriorMode.TOTAL):
+            features |= AlarmControlPanelEntityFeature.ARM_AWAY
+        return features
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""

@@ -7,6 +7,7 @@ fallback discovery.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .const import VerisureOwaState
@@ -97,9 +98,13 @@ class CommandResolver:
     resets on HA restart) and skips them in future resolutions.
     """
 
-    def __init__(self, has_peri: bool) -> None:
+    def __init__(
+        self,
+        has_peri: bool,
+        unsupported: Iterable[str] = (),
+    ) -> None:
         self._has_peri = has_peri
-        self._unsupported: set[str] = set()
+        self._unsupported: set[str] = set(unsupported)
 
     def update_capabilities(self, *, has_peri: bool) -> None:
         """Refresh capability flags after late capability detection.
@@ -119,6 +124,24 @@ class CommandResolver:
     def unsupported(self) -> frozenset[str]:
         """Return the set of unsupported commands."""
         return frozenset(self._unsupported)
+
+    def can_reach_interior(self, mode: InteriorMode) -> bool:
+        """Return True if some known command path can reach ``mode``.
+
+        Used by the Interior sub-panel to drop a feature (e.g. ARM_NIGHT)
+        once the underlying command (ARMNIGHT1) has been rejected by the
+        panel — there's no fallback for a pure-interior transition, so the
+        button would otherwise stay clickable but always fail.
+        """
+        if mode == InteriorMode.OFF:
+            return True  # disarm always available
+        if _INTERIOR_ARM[mode] not in self._unsupported:
+            return True
+        if self._has_peri:
+            combined = _COMBINED_ARM.get(mode, [])
+            if any(c not in self._unsupported for c in combined):
+                return True
+        return False
 
     def _resolve_annex(
         self, current_annex: AnnexMode, target_annex: AnnexMode

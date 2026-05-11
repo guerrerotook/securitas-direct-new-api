@@ -113,6 +113,12 @@ class TestCommandResolverDisarm:
         assert len(steps) == 1
         assert steps[0].commands == ["DARM1"]
 
+    def test_initial_unsupported_seeds_the_set(self):
+        """Constructor accepts a seed of already-known unsupported commands so
+        the resolver can be hydrated from persisted state after restart."""
+        resolver = CommandResolver(has_peri=False, unsupported=("ARMNIGHT1",))
+        assert "ARMNIGHT1" in resolver.unsupported
+
     def test_disarm_skips_unsupported_command(self):
         resolver = CommandResolver(has_peri=True)
         resolver.mark_unsupported("DARM1DARMPERI")

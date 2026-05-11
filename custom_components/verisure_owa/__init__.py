@@ -58,6 +58,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENABLE_ANNEX_PANEL,
     CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
+    CONF_UNSUPPORTED_COMMANDS,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
@@ -299,6 +300,10 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_MAP_NIGHT] = _opt(CONF_MAP_NIGHT)
     config[CONF_MAP_CUSTOM] = _opt(CONF_MAP_CUSTOM)
     config[CONF_MAP_VACATION] = _opt(CONF_MAP_VACATION)
+    # Runtime-learned unsupported commands (data-only — not user-editable).
+    config[CONF_UNSUPPORTED_COMMANDS] = list(
+        entry.data.get(CONF_UNSUPPORTED_COMMANDS, [])
+    )
 
     need_sign_in = False
     if CONF_DEVICE_ID in entry.data:

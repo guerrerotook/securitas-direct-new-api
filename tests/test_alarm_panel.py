@@ -3771,6 +3771,38 @@ class TestCompoundArmCommands:
         assert "ARMNIGHT1PERI1" in alarm._resolver.unsupported
         assert alarm._state == AlarmControlPanelState.DISARMED
 
+    async def test_unsupported_command_is_persisted_to_entry_data(self):
+        """After a 400 marks a command unsupported, the entry's data must
+        gain the command in CONF_UNSUPPORTED_COMMANDS so the next setup
+        starts with the resolver pre-loaded — sub-panels otherwise expose
+        the failing mode again on restart and the user pays the same
+        rejection over and over.
+        """
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        entry = MagicMock()
+        entry.data = {"username": "u", "country": "IT"}
+        alarm._client.config_entry = entry
+        alarm.hass.config_entries = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("API error", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        assert alarm.hass.config_entries.async_update_entry.called, (
+            "Expected entry data to be persisted after mark_unsupported"
+        )
+        kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
+        persisted = kwargs.get("data", {}).get("unsupported_commands", [])
+        assert "ARMNIGHT1PERI1" in persisted, (
+            f"Persisted unsupported list missing ARMNIGHT1PERI1, got {persisted!r}"
+        )
+
     async def test_disarm_preserves_protom_response_date_in_state_attrs(self):
         """OperationStatus fields beyond protom_response (notably
         protom_response_date) must survive the disarm path. _build_operation_status
@@ -5286,7 +5318,10 @@ def _make_interior_panel(
             InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        return InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+    panel.async_schedule_update_ha_state = MagicMock()
+    panel.async_write_ha_state = MagicMock()
+    return panel
 
 
 def _make_perimeter_panel(
@@ -5432,8 +5467,8 @@ class TestSubPanelSuggestedObjectId:
 
 
 class TestInteriorSubPanel:
-    def test_supported_features_always_all_three(self):
-        """Interior sub-panel always exposes ARM_HOME + ARM_NIGHT + ARM_AWAY.
+    def test_supported_features_all_three_when_nothing_unsupported(self):
+        """Interior sub-panel exposes ARM_HOME + ARM_NIGHT + ARM_AWAY by default.
 
         We deliberately do not gate on JWT capabilities: the cap set is
         empirically unreliable (e.g. Italian SDVECU advertises ARMNIGHT but
@@ -5454,6 +5489,116 @@ class TestInteriorSubPanel:
             assert feats & F.ARM_HOME, f"ARM_HOME missing for caps={caps}"
             assert feats & F.ARM_NIGHT, f"ARM_NIGHT missing for caps={caps}"
             assert feats & F.ARM_AWAY, f"ARM_AWAY missing for caps={caps}"
+
+    def test_supported_features_drops_arm_night_when_armnight1_unsupported(self):
+        """Once the panel has rejected ARMNIGHT1 (typical Italian SDVECU
+        behaviour), the Interior sub-panel must stop offering ARM_NIGHT —
+        otherwise the user keeps pressing a button that's known to fail.
+        """
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_interior_panel()
+        panel._resolver.mark_unsupported("ARMNIGHT1")
+
+        feats = panel.supported_features
+        assert feats & F.ARM_HOME, "ARM_HOME should still be available"
+        assert not (feats & F.ARM_NIGHT), (
+            "ARM_NIGHT must be dropped after ARMNIGHT1 was rejected"
+        )
+        assert feats & F.ARM_AWAY, "ARM_AWAY should still be available"
+
+    def test_supported_features_drops_arm_home_when_armday1_unsupported(self):
+        """Symmetric: ARMDAY1 rejected ⇒ no ARM_HOME on the sub-panel."""
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_interior_panel()
+        panel._resolver.mark_unsupported("ARMDAY1")
+
+        feats = panel.supported_features
+        assert not (feats & F.ARM_HOME)
+        assert feats & F.ARM_NIGHT
+        assert feats & F.ARM_AWAY
+
+    def test_supported_features_drops_arm_away_when_arm1_unsupported(self):
+        """Symmetric: ARM1 rejected ⇒ no ARM_AWAY on the sub-panel."""
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_interior_panel()
+        panel._resolver.mark_unsupported("ARM1")
+
+        feats = panel.supported_features
+        assert feats & F.ARM_HOME
+        assert feats & F.ARM_NIGHT
+        assert not (feats & F.ARM_AWAY)
+
+    def test_hydrates_unsupported_from_client_config(self):
+        """Resolver starts pre-loaded with the persisted unsupported list so
+        a previously-rejected command stays rejected across HA restarts."""
+        from custom_components.verisure_owa.alarm_control_panel import (
+            InteriorVerisureOwaAlarmPanel,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        coordinator = MagicMock()
+        coordinator.has_peri = False
+        coordinator.has_annex = False
+        coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        installation = MagicMock(number="1", alias="A", address="x")
+        client = MagicMock()
+        # Persisted from a previous session — must hydrate the resolver.
+        client.config = {"unsupported_commands": ["ARMNIGHT1"]}
+        hass = MagicMock()
+        with (
+            patch.object(
+                InteriorVerisureOwaAlarmPanel,
+                "async_schedule_update_ha_state",
+                MagicMock(),
+            ),
+            patch.object(
+                InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+            ),
+        ):
+            panel = InteriorVerisureOwaAlarmPanel(
+                installation, client, hass, coordinator
+            )
+
+        assert "ARMNIGHT1" in panel._resolver.unsupported
+
+    async def test_subpanel_raises_subpanel_error_when_command_unsupported(self):
+        """Sub-panels have no user-editable mappings, so the rejection
+        notification must use a sub-panel-specific translation key — not
+        the main-panel one that points the user at the (non-existent)
+        mappings UI."""
+        from custom_components.verisure_owa.verisure_owa_api import (
+            VerisureOwaError,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
+            CommandStep,
+        )
+
+        panel = _make_interior_panel()
+        panel.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("rejected", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await panel._execute_step(CommandStep(commands=["ARMNIGHT1"]))
+
+        assert excinfo.value.translation_key == "unsupported_alarm_mode_subpanel"
 
     def test_resolve_target_state_armed_away(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (
