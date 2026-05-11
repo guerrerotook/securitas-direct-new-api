@@ -7037,6 +7037,78 @@ class TestSubPanelEntityIdHealer:
             == canonical
         )
 
+    async def test_does_not_evict_another_installation_with_same_alias(self, hass):
+        """Two installations sharing the alias must not clobber each other.
+
+        Installation A (broken at <alias>_interior_<alias>) and installation B
+        (correctly at <alias>_interior) collide on the canonical slot. Heal
+        for A must leave B's entity alone and skip the rename rather than
+        evicting a valid sub-panel from another installation.
+        """
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation_a = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        installation_b_number = "100002"
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation_a.alias)
+        canonical = f"alarm_control_panel.{alias_slug}_interior"
+        # Installation B is correctly registered at the canonical slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation_b_number}_interior",
+            suggested_object_id=f"{alias_slug}_interior",
+            config_entry=entry,
+        )
+        # Installation A landed on the broken doubled-alias slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation_a.number}_interior",
+            suggested_object_id=f"{alias_slug}_interior_{alias_slug}",
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation_a, "_interior")
+
+        # Installation B's entity must still exist at the canonical slot.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation_b_number}_interior",
+            )
+            == canonical
+        )
+        # Installation A's entity stays at the broken slot — manual intervention
+        # is required to disambiguate.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation_a.number}_interior",
+            )
+            == f"alarm_control_panel.{alias_slug}_interior_{alias_slug}"
+        )
+
 
 # ===========================================================================
 # TestCombinedPanelRegistration

@@ -156,26 +156,22 @@ async def _heal_subpanel_entity_id(
 
     occupant = ent_reg.async_get(canonical)
     if occupant is not None and occupant.entity_id != our_entity_id:
-        if occupant.platform == DOMAIN:
-            _LOGGER.warning(
-                "Removing stale alarm-subpanel entity %s (unique_id=%s) so "
-                "installation %s can reclaim its canonical entity_id",
-                canonical,
-                occupant.unique_id,
-                installation.number,
-            )
-            ent_reg.async_remove(canonical)
-        else:
-            _LOGGER.warning(
-                "Cannot reclaim %s for installation %s: slot held by %s "
-                "(domain %s); the sub-panel will stay at %s",
-                canonical,
-                installation.number,
-                occupant.unique_id,
-                occupant.platform,
-                our_entity_id,
-            )
-            return
+        # Skip rather than evict: unlike the combined panel (which has a
+        # v4 legacy to displace), sub-panels are v5-only and there is no
+        # known stale-squatter scenario worth evicting for. The occupant
+        # is most likely another installation that happens to share the
+        # alias slug, and removing it would silently delete that
+        # installation's sub-panel.
+        _LOGGER.warning(
+            "Cannot reclaim %s for installation %s: slot held by %s "
+            "(domain %s); the sub-panel will stay at %s",
+            canonical,
+            installation.number,
+            occupant.unique_id,
+            occupant.platform,
+            our_entity_id,
+        )
+        return
 
     _LOGGER.info(
         "Renaming alarm-subpanel entity_id: %s -> %s", our_entity_id, canonical
