@@ -5339,6 +5339,98 @@ def _make_perimeter_panel(
         return PerimeterVerisureOwaAlarmPanel(installation, client, hass, coordinator)
 
 
+class TestSubPanelSuggestedObjectId:
+    """Sub-panels must seed a single-alias entity_id slot.
+
+    HA's entity_platform routes ``entity.suggested_object_id`` into the
+    registry's ``object_id_base`` parameter, and HA 2026.5+ unconditionally
+    prepends the device name onto ``object_id_base`` (for entities with
+    ``has_entity_name=False``) — running a strip-prefix heuristic first to
+    avoid doubling the name. That heuristic only recognises space, dash, or
+    colon as the separator following the matched prefix; an underscore
+    between ``<alias>`` and ``_<circuit>`` is NOT stripped, so the device
+    name ends up prepended twice and the entity_id comes out as
+    ``alarm_control_panel.<alias>_<alias>_<circuit>`` (the "doubled-alias
+    collision form").
+
+    The sub-panel mixin therefore returns ``"<alias> <circuit>"`` (space
+    separator) from ``suggested_object_id`` — the space satisfies the
+    strip-prefix heuristic on HA 2026.5+ and slugify still maps to the
+    canonical ``<alias>_<circuit>`` slot in every supported HA version.
+    """
+
+    def test_interior(self):
+        panel = _make_interior_panel()
+        assert panel.suggested_object_id == "TestHome interior"
+
+    def test_perimeter(self):
+        panel = _make_perimeter_panel()
+        assert panel.suggested_object_id == "TestHome perimeter"
+
+    def test_annex(self):
+        panel = _make_annex_panel()
+        assert panel.suggested_object_id == "TestHome annex"
+
+    @pytest.mark.parametrize(
+        "suffix,panel_factory",
+        [
+            ("_interior", _make_interior_panel),
+            ("_perimeter", _make_perimeter_panel),
+        ],
+    )
+    async def test_subpanel_entity_id_canonical_through_real_registry(
+        self, hass, suffix, panel_factory
+    ):
+        """End-to-end regression: the mixin's ``suggested_object_id`` must
+        produce ``alarm_control_panel.<alias>_<circuit>`` after going through
+        HA's real ``async_get_or_create`` path with a device attached.
+
+        Mirrors the call entity_platform makes for a fresh install: the
+        property value lands in ``object_id_base``, HA prepends the device
+        name and runs strip-prefix to undo the doubling. A space separator
+        in the property's return value is what lets strip-prefix succeed on
+        HA 2026.5+.
+
+        Reproduces the doubled-alias bug regression if the separator regresses
+        to an underscore (HA 2026.5+); also locks in the right outcome on HA
+        < 2026.5 where the device name isn't prepended at all.
+        """
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.verisure_owa.const import DOMAIN
+
+        entry = MockConfigEntry(domain=DOMAIN, data={"unsupported_commands": []})
+        entry.add_to_hass(hass)
+
+        # Device name == installation.alias — this is the prefix HA 2026.5+
+        # would otherwise prepend onto object_id_base, doubling the alias.
+        dev_reg = dr.async_get(hass)
+        device = dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "v5_verisure_owa.12345")},
+            name="TestHome",
+            manufacturer="Verisure",
+        )
+
+        panel = panel_factory()
+        # entity_platform routes entity.suggested_object_id into object_id_base
+        # (because the entity doesn't set internal_integration_suggested_object_id).
+        ent_reg = er.async_get(hass)
+        registered = ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            panel.unique_id,
+            object_id_base=panel.suggested_object_id,
+            suggested_object_id=None,
+            has_entity_name=panel.has_entity_name,
+            original_name=panel.name,
+            device_id=device.id,
+            config_entry=entry,
+        )
+        assert registered.entity_id == f"alarm_control_panel.testhome{suffix}"
+
+
 class TestInteriorSubPanel:
     def test_supported_features_always_all_three(self):
         """Interior sub-panel always exposes ARM_HOME + ARM_NIGHT + ARM_AWAY.
@@ -6835,6 +6927,114 @@ class TestCombinedPanelEntityIdHealer:
                 f"v5_verisure_owa.{installation.number}",
             )
             == f"{canonical}_2"
+        )
+
+
+# ===========================================================================
+# TestSubPanelEntityIdHealer
+# ===========================================================================
+
+
+class TestSubPanelEntityIdHealer:
+    """Healer for upgrade-path-broken sub-panel entity_ids.
+
+    Mirrors the combined-panel healer for the Interior/Perimeter/Annex axis
+    panels. A broken sub-panel sits at ``<alias>_<circuit>_<alias>`` (the
+    doubled-alias collision form); the healer relocates it to the canonical
+    ``<alias>_<circuit>`` slot, evicting any verisure_owa squatter holding
+    that slot.
+    """
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["_interior", "_perimeter", "_annex"],
+    )
+    async def test_renames_non_canonical_to_alias_suffix(self, hass, suffix):
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation.alias)
+        broken = f"{alias_slug}{suffix}_{alias_slug}"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}{suffix}",
+            suggested_object_id=broken,
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, suffix)
+
+        canonical = f"alarm_control_panel.{alias_slug}{suffix}"
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}{suffix}",
+            )
+            == canonical
+        )
+
+    async def test_no_op_when_already_canonical(self, hass):
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        canonical = f"alarm_control_panel.{slugify(installation.alias)}_interior"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}_interior",
+            suggested_object_id=f"{slugify(installation.alias)}_interior",
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, "_interior")
+
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}_interior",
+            )
+            == canonical
         )
 
 

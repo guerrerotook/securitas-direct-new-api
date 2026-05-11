@@ -161,6 +161,38 @@ class _AxisSubPanelMixin:
     which is wrong for axis sub-panels.  This mixin replaces both paths.
     """
 
+    @property
+    def suggested_object_id(self) -> str:
+        """Force the entity_id slug to ``<alias>_<circuit>`` on fresh installs.
+
+        ``_SUFFIX`` is the *unique-id* suffix (``_interior`` / ``_perimeter``
+        / ``_annex``) — kept as-is so existing registry entries keep the same
+        unique_id. The *display* slug returned here uses a **space**
+        separator (``"<alias> interior"``), not the unique-id underscore, for
+        the HA 2026.5+ entity-registry path:
+
+        HA 2026.5 unconditionally prepends the device name onto the
+        registry's ``object_id_base`` for entities with
+        ``has_entity_name=False``, then runs a strip-prefix heuristic to
+        avoid doubling. That heuristic only recognises space/dash/colon as
+        the separator following the matched prefix — an underscore between
+        ``<alias>`` and ``_<circuit>`` is not stripped, so the device name
+        ends up prepended twice and the entity_id comes out as
+        ``alarm_control_panel.<alias>_<alias>_<circuit>`` (the
+        "doubled-alias collision form"). Returning a space-separated value
+        here keeps the heuristic happy and produces the canonical
+        ``alarm_control_panel.<alias>_<circuit>`` after HA's own slugify
+        pass. The same value still works on HA < 2026.5 (which never
+        prepends the device name when ``has_entity_name=False``) because
+        slugify maps space → ``_`` in either case.
+
+        The ``_heal_subpanel_entity_id`` helper relocates already-broken
+        entries on existing installs that got the underscore-form slug
+        before this fix landed.
+        """
+        circuit = self._SUFFIX.lstrip("_")  # type: ignore[attr-defined]
+        return f"{self._installation.alias} {circuit}"  # type: ignore[attr-defined]
+
     def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
         """Project the coordinator's joint state onto this panel's axis.
 

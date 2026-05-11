@@ -51,6 +51,7 @@ __all__ = [
     "InteriorVerisureOwaAlarmPanel",
     "PerimeterVerisureOwaAlarmPanel",
     "_heal_combined_panel_entity_id",
+    "_heal_subpanel_entity_id",
     "async_setup_entry",
     "build_partial_disarm_target",
 ]
@@ -120,6 +121,68 @@ async def _heal_combined_panel_entity_id(
     ent_reg.async_update_entity(our_entity_id, new_entity_id=canonical)
 
 
+async def _heal_subpanel_entity_id(
+    hass: HomeAssistant, installation: Installation, suffix: str
+) -> None:
+    """Move a sub-panel onto its canonical ``<alias>_<circuit>`` slot.
+
+    Counterpart to ``_heal_combined_panel_entity_id`` for the axis sub-panels.
+    Without the ``suggested_object_id`` override now defined on each sub-panel,
+    HA slugified the friendly name ``<circuit> - <alias>`` with the device
+    name prepended and ended up at ``<alias>_<circuit>_<alias>``. Existing
+    installs that enabled a sub-panel before the fix carry the broken slot in
+    their registry; this helper relocates them to ``<alias>_<circuit>``.
+
+    ``suffix`` is the unique_id suffix used by the sub-panel (e.g.
+    ``"_interior"``); the canonical entity_id slug is the bare alias slug with
+    the same suffix appended.
+    """
+    try:
+        ent_reg = er.async_get(hass)
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
+        return
+    our_unique_id = f"v5_verisure_owa.{installation.number}{suffix}"
+    try:
+        our_entity_id = ent_reg.async_get_entity_id(
+            "alarm_control_panel", DOMAIN, our_unique_id
+        )
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        return
+    if our_entity_id is None:
+        return
+    canonical = f"alarm_control_panel.{slugify(installation.alias)}{suffix}"
+    if our_entity_id == canonical:
+        return
+
+    occupant = ent_reg.async_get(canonical)
+    if occupant is not None and occupant.entity_id != our_entity_id:
+        if occupant.platform == DOMAIN:
+            _LOGGER.warning(
+                "Removing stale alarm-subpanel entity %s (unique_id=%s) so "
+                "installation %s can reclaim its canonical entity_id",
+                canonical,
+                occupant.unique_id,
+                installation.number,
+            )
+            ent_reg.async_remove(canonical)
+        else:
+            _LOGGER.warning(
+                "Cannot reclaim %s for installation %s: slot held by %s "
+                "(domain %s); the sub-panel will stay at %s",
+                canonical,
+                installation.number,
+                occupant.unique_id,
+                occupant.platform,
+                our_entity_id,
+            )
+            return
+
+    _LOGGER.info(
+        "Renaming alarm-subpanel entity_id: %s -> %s", our_entity_id, canonical
+    )
+    ent_reg.async_update_entity(our_entity_id, new_entity_id=canonical)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -146,6 +209,12 @@ async def async_setup_entry(
     # the registry is healed transparently.
     for devices in securitas_devices:
         await _heal_combined_panel_entity_id(hass, devices.installation)
+        # Sub-panels carry the same bug: ``<alias>_<circuit>_<alias>`` from
+        # builds that registered them before the suggested_object_id fix.
+        # Run unconditionally — if no broken (or any) entity exists for a
+        # circuit the helper returns immediately.
+        for suffix in ("_interior", "_perimeter", "_annex"):
+            await _heal_subpanel_entity_id(hass, devices.installation, suffix)
 
     for devices in securitas_devices:
         combined = CombinedVerisureOwaAlarmPanel(
