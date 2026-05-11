@@ -181,6 +181,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._mobile_action_unsub = None
         self._arming_event_unsub_new = None
         self._arming_event_unsub_legacy = None
+        self._force_arm_expired_event_unsub = None
         self._last_handled_event_id: str | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -217,6 +218,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._arming_event_unsub_new()
         if self._arming_event_unsub_legacy:
             self._arming_event_unsub_legacy()
+        if self._force_arm_expired_event_unsub:
+            self._force_arm_expired_event_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
         await super().async_will_remove_from_hass()
@@ -826,10 +829,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     def _register_arming_exception_handler(self) -> None:
         """Register event listeners for built-in arming exception notifications.
 
-        Listens to both the new verisure_owa_arming_exception and the legacy
-        securitas_arming_exception events. Deduplicates via _event_id so the
-        handler fires at most once per arming exception even though both events
-        carry the same payload.
+        Listens to:
+        - ``verisure_owa_arming_exception`` (canonical) — sends initial
+          persistent + mobile notifications with action buttons.
+        - ``securitas_arming_exception`` — deprecated alias of the above,
+          removed in v6.0.0. Deduplicated via _event_id so the handler
+          fires at most once per arming exception even though both events
+          carry the same payload.
+        - ``verisure_owa_force_arm_expired`` — replaces the mobile
+          notification with a button-less informational card on TTL
+          expiry. The persistent side is updated by `_notify_force_arm_expired`
+          directly from `_clear_force_context`.
         """
 
         @callback
@@ -843,6 +853,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._last_handled_event_id = eid
             self._notify_arm_exceptions_from_event(event)
 
+        @callback
+        def _handle_force_arm_expired_event(event: Event) -> None:
+            """Handle force-arm-expired event for this entity."""
+            if event.data.get("entity_id") != self.entity_id:
+                return
+            eid = event.data.get("_event_id")
+            # Reuse the same dedup slot — the same event_id can only ever
+            # describe one transition, never both an arming exception AND
+            # an expiry, so collisions are not possible in practice.
+            if eid is not None and eid == self._last_handled_event_id:
+                return
+            self._last_handled_event_id = eid
+            self._notify_force_arm_expired_mobile_from_event(event)
+
         self._arming_event_unsub_new = self.hass.bus.async_listen(
             ARMING_EXCEPTION_EVENT_TYPE,
             _handle_arming_exception_event,
@@ -850,6 +874,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._arming_event_unsub_legacy = self.hass.bus.async_listen(
             LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
             _handle_arming_exception_event,
+        )
+        self._force_arm_expired_event_unsub = self.hass.bus.async_listen(
+            FORCE_ARM_EXPIRED_EVENT_TYPE,
+            _handle_force_arm_expired_event,
         )
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
@@ -915,6 +943,48 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     },
                 },
             )
+
+    async def _async_notify_force_arm_expired_mobile(self, event: Event) -> None:
+        """Replace the mobile arming-exception notification with a button-less
+        informational card when the force-arm window expires.
+
+        Same `tag` as the original notification (so iOS/Android updates the
+        existing card in place rather than stacking a new one). No `actions`
+        array — the buttons are removed.
+
+        No-ops when notifications are disabled or no notify_group is configured.
+        Per-entity scoped: ignores events whose entity_id is not ours.
+        """
+        if event.data.get("entity_id") != self.entity_id:
+            return
+        if not self._notifications_enabled:
+            return
+        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        if not notify_group:
+            return
+
+        entry = get_notification_strings(self.hass, "force_arm_expired")
+        title = entry.get("title", "")
+        # Fall back to message if mobile_message is missing — defensive against
+        # partial translation data; existing tests assert mobile_message is
+        # present in every locale we ship, but a future locale might lag.
+        mobile_message = entry.get("mobile_message") or entry.get("message", "")
+
+        await self.hass.services.async_call(
+            domain="notify",
+            service=notify_group,
+            service_data={
+                "title": title,
+                "message": mobile_message,
+                "data": {
+                    "tag": self._arming_exception_notification_id,
+                },
+            },
+        )
+
+    def _notify_force_arm_expired_mobile_from_event(self, event: Event) -> None:
+        """Schedule the async expiry-mobile-notify on the HA loop."""
+        self.hass.async_create_task(self._async_notify_force_arm_expired_mobile(event))
 
     def _dismiss_arming_exception_notification(self) -> None:
         """Dismiss the persistent and mobile arming-exception notifications."""

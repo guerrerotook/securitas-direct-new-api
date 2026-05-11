@@ -2270,6 +2270,148 @@ class TestForceArmExpiredEventFire:
         assert len(force_expired) == 1
 
 
+class TestForceArmExpiredMobileNotification:
+    """The button-less informational mobile notification sent on expiry."""
+
+    @staticmethod
+    def _make_event(entity_id="alarm_control_panel.home"):
+        """Build a mock event matching the FORCE_ARM_EXPIRED payload."""
+        from uuid import uuid4
+
+        ev = MagicMock()
+        ev.data = {
+            "entity_id": entity_id,
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "zones": ["Front door"],
+            "details": {
+                "installation": "123456",
+                "exceptions": [{"alias": "Front door"}],
+            },
+            "_event_id": str(uuid4()),
+        }
+        return ev
+
+    async def test_handler_sends_buttonless_mobile_with_same_tag(self):
+        """With notify_group + notifications enabled, expiry handler sends a
+        notify call with the same tag and no actions array."""
+        alarm = make_alarm()
+        alarm.hass.services.async_call = AsyncMock()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        # Make entity_id match the event payload
+        ev = self._make_event(entity_id=alarm.entity_id)
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert len(notify_calls) == 1
+        sd = notify_calls[0][1]["service_data"]
+        # Same tag as the original arming-exception notification (so the
+        # mobile OS replaces the existing card in place).
+        assert (
+            sd["data"]["tag"]
+            == f"verisure_owa.arming_exception_{alarm.installation.number}"
+        )
+        # No actions array — buttons removed.
+        assert "actions" not in sd["data"]
+        # Body is the mobile_message from the force_arm_expired translation.
+        from custom_components.verisure_owa.notification_translations import (
+            get_notification_strings,
+        )
+
+        expected = get_notification_strings(alarm.hass, "force_arm_expired")
+        assert sd["message"] == expected["mobile_message"]
+        assert sd["title"] == expected["title"]
+
+    async def test_handler_no_op_without_notify_group(self):
+        """Without a notify_group configured, no mobile notify call fires."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        # Explicitly no notify_group set
+        ev = self._make_event(entity_id=alarm.entity_id)
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert notify_calls == []
+
+    async def test_handler_no_op_when_notifications_disabled(self):
+        """force_arm_notifications=False suppresses the mobile call."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        ev = self._make_event(entity_id=alarm.entity_id)
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert notify_calls == []
+
+    async def test_handler_skips_event_for_other_entity(self):
+        """Handler ignores events whose entity_id does not match self."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        ev = self._make_event(entity_id="alarm_control_panel.different")
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert notify_calls == []
+
+
+class TestForceArmExpiredHandlerRegistration:
+    """The expiry-event handler is registered alongside the arming-exception one."""
+
+    def test_register_subscribes_to_force_arm_expired(self):
+        alarm = make_alarm()
+
+        alarm._register_arming_exception_handler()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        expired_calls = [
+            c for c in listen_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(expired_calls) == 1
+
+    async def test_handler_dedupes_via_event_id(self):
+        """A repeated _event_id triggers the handler at most once."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._register_arming_exception_handler()
+
+        # Capture the registered callback.
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        expired_cb = next(
+            c[0][1] for c in listen_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        )
+
+        ev = MagicMock()
+        ev.data = {
+            "entity_id": alarm.entity_id,
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "zones": ["Front door"],
+            "details": {"installation": "123456", "exceptions": []},
+            "_event_id": "same-id",
+        }
+        expired_cb(ev)
+        # Same event id again — must be ignored.
+        expired_cb(ev)
+
+        # Only one async_create_task scheduled across the two calls.
+        first_count = alarm.hass.async_create_task.call_count
+        # second call is idempotent — no growth
+        # But MagicMock keeps the count, so re-invoke to confirm:
+        expired_cb(ev)
+        assert alarm.hass.async_create_task.call_count == first_count
+
+
 # ===========================================================================
 # force_arm_cancel service
 # ===========================================================================
