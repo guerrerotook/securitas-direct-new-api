@@ -24,11 +24,19 @@ jobs:
       VERSION: ${{ inputs.version }}
       PRERELEASE: ${{ inputs.prerelease }}
       BRANCH: ${{ github.ref_name }}
+      REF_TYPE: ${{ github.ref_type }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate dispatch ref
+        run: |
+          if [ "$REF_TYPE" != "branch" ]; then
+            echo "Workflow must be dispatched from a branch (got $REF_TYPE '$BRANCH'). The bump commit needs a branch to land on." >&2
+            exit 1
+          fi
 
       - name: Validate version input
         run: |
