@@ -598,17 +598,19 @@ class VerisureOwaActivityLogCard extends HTMLElement {
         row.classList.add("expanded");
         row.setAttribute("aria-expanded", "true");
         if (details) details.classList.add("expanded");
-        // Lazy-fetch the historical image for image-request events.
-        // Skip synthetic ids (prefix `ha-`) — those are HA-side
-        // placeholders the Verisure server can't resolve.  Injected
-        // events from the capture button use the real server id, so
-        // the fetch works for them too.
+        // Lazy-fetch the historical image for any event the panel
+        // tagged with an image (img=1) — image-request events as well
+        // as photo-detector alarms ("Allarme Foto", type 14).  Skip
+        // synthetic ids (prefix `ha-`) — those are HA-side placeholders
+        // the Verisure server can't resolve.  Injected events from the
+        // capture button use the real server id, so the fetch works
+        // for them too.
         const event = this._latestEvents.find(
           (e) => String(e.id_signal || "") === id
         );
         if (
           event &&
-          event.category === "image_request" &&
+          event.img === 1 &&
           !id.startsWith("ha-") &&
           !this._imageCache.has(id)
         ) {
@@ -720,8 +722,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
   }
 
   _renderDetails(event, lang) {
-    const imageBlock =
-      event.category === "image_request" ? this._renderImageBlock(event) : "";
+    const imageBlock = event.img === 1 ? this._renderImageBlock(event) : "";
     const prompt =
       event.category === "unknown"
         ? `<div class="unknown-prompt">${escHtml(_t(lang, "unknown_event_prompt"))}</div>`
