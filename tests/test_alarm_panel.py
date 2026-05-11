@@ -124,6 +124,28 @@ class TestNotificationTranslationsPersistentMessageTrim:
             )
 
 
+class TestForceArmExpiredMobileMessageTranslation:
+    """force_arm_expired entry must carry a mobile_message string per locale
+    for the button-less informational mobile notification on expiry."""
+
+    LOCALES = ("en", "es", "fr", "it", "pt", "pt-BR", "ca")
+
+    def test_mobile_message_present_for_all_locales(self):
+        from custom_components.verisure_owa.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["force_arm_expired"]
+            assert "mobile_message" in entry, (
+                f"Locale {locale!r} force_arm_expired entry missing mobile_message"
+            )
+            mobile = entry["mobile_message"]
+            assert isinstance(mobile, str) and mobile.strip(), (
+                f"Locale {locale!r} force_arm_expired.mobile_message is empty"
+            )
+
+
 class TestForceArmNotificationsConfig:
     """Tests for the force_arm_notifications config toggle."""
 
