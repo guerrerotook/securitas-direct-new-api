@@ -191,31 +191,43 @@ def add_device_information[T: dict](config: T) -> T:
     return config
 
 
+# Fields owned by the options flow. When syncing options into entry.data
+# we *replace* these rather than merge, so a key cleared in options (e.g.
+# CONF_MAP_VACATION) doesn't leave a stale value lingering in entry.data.
+_OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
+    CONF_CODE,
+    CONF_CODE_ARM_REQUIRED,
+    CONF_SCAN_INTERVAL,
+    CONF_MAP_HOME,
+    CONF_MAP_AWAY,
+    CONF_MAP_NIGHT,
+    CONF_MAP_CUSTOM,
+    CONF_MAP_VACATION,
+    CONF_NOTIFY_GROUP,
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_LOCK_AUTOMATIONS,
+)
+
+
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
     if any(
         entry.data.get(attrib) != entry.options.get(attrib)
-        for attrib in (
-            CONF_CODE,
-            CONF_CODE_ARM_REQUIRED,
-            CONF_SCAN_INTERVAL,
-            CONF_MAP_HOME,
-            CONF_MAP_AWAY,
-            CONF_MAP_NIGHT,
-            CONF_MAP_CUSTOM,
-            CONF_MAP_VACATION,
-            CONF_NOTIFY_GROUP,
-            CONF_FORCE_ARM_NOTIFICATIONS,
-            CONF_ENABLE_INTERIOR_PANEL,
-            CONF_ENABLE_PERIMETER_PANEL,
-            CONF_ENABLE_ANNEX_PANEL,
-            CONF_LOCK_AUTOMATIONS,
-        )
+        for attrib in _OPTIONS_MANAGED_FIELDS
     ):
-        # update entry replacing data with new options
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, **entry.options}
-        )
+        # Drop options-managed keys from data before applying the new options
+        # so a cleared field (key absent or empty in options) doesn't keep its
+        # previous data value. Merging via {**data, **options} preserved stale
+        # values for keys the user cleared, which left e.g. map_vacation
+        # "stuck" — the form would re-render with the old value next time.
+        new_data = {
+            k: v for k, v in entry.data.items() if k not in _OPTIONS_MANAGED_FIELDS
+        }
+        new_data.update(entry.options)
+        hass.config_entries.async_update_entry(entry, data=new_data)
         await hass.config_entries.async_reload(entry.entry_id)
 
 

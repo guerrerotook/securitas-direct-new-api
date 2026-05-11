@@ -178,6 +178,22 @@ def _mapping_field(key: str, suggestion: str | None) -> vol.Optional:
     return vol.Optional(key, description={"suggested_value": suggestion})
 
 
+def _mapping_select_options(*, has_peri: bool, has_annex: bool) -> list[dict[str, str]]:
+    """Build the dropdown options for a state-mapping field.
+
+    Prepends an explicit empty-value "(Not used)" choice so the user can
+    actually clear the field from the UI — HA's select selector rejects
+    empty strings unless they appear in the options list. The empty value
+    flows through as ``map_xxx=""`` in entry data; the alarm panel treats
+    that as "no mapping" (see ``BaseVerisureOwaAlarmPanel.__init__``:
+    ``if not sec_state_str: continue``).
+    """
+    return [{"value": "", "label": "(Not used)"}] + [
+        {"value": s.value, "label": STATE_LABELS[s]}
+        for s in dropdown_options(has_peri=has_peri, has_annex=has_annex)
+    ]
+
+
 def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
     """Flatten all known section payloads back to top-level keys."""
     flat: dict[str, Any] = {}
@@ -860,10 +876,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         defaults = PERI_DEFAULTS if self._has_peri else STD_DEFAULTS
-        options = dropdown_options(has_peri=self._has_peri, has_annex=self._has_annex)
-        select_options = [
-            {"value": state.value, "label": STATE_LABELS[state]} for state in options
-        ]
+        select_options = _mapping_select_options(
+            has_peri=self._has_peri, has_annex=self._has_annex
+        )
         select_cfg = {"select": {"options": select_options, "mode": "dropdown"}}
 
         schema = vol.Schema(
@@ -1014,10 +1029,8 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 return val
             return defaults.get(key)
 
-        # Build dropdown options
-        select_options = [
-            {"value": state.value, "label": STATE_LABELS[state]} for state in options
-        ]
+        # Build dropdown options (with an explicit empty entry for clearing)
+        select_options = _mapping_select_options(has_peri=has_peri, has_annex=has_annex)
         select_cfg = {"select": {"options": select_options, "mode": "dropdown"}}
 
         schema = vol.Schema(

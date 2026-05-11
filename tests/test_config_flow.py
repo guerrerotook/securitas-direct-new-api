@@ -976,6 +976,52 @@ async def test_options_mappings_submitting_creates_entry(hass):
     assert CONF_MAP_VACATION not in result["data"]
 
 
+async def test_options_mappings_empty_string_clears_saved_value(hass):
+    """User picks the '(Not used)' option in the UI (which submits empty
+    string). The form must accept it and persist the field as cleared.
+
+    Regression: PR 463 dropped the in-list "Not used" option but didn't add
+    a clearing affordance, so the select selector rejected empty strings —
+    users couldn't unset a previously-saved mapping from the UI at all.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(
+            has_peri=True,
+            map_vacation=VerisureOwaState.PARTIAL_NIGHT_PERI.value,
+        ),
+        options={CONF_MAP_VACATION: VerisureOwaState.PARTIAL_NIGHT_PERI.value},
+    )
+    entry.add_to_hass(hass)
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
+
+    flow_id = await _advance_to_mappings(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: PERI_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: "",
+        },
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY, (
+        f"Empty value should be accepted, got {result['type']} "
+        f"with errors={result.get('errors')}"
+    )
+    assert not result["data"].get(CONF_MAP_VACATION), (
+        f"Empty value should resolve to falsy, "
+        f"got {result['data'].get(CONF_MAP_VACATION)!r}"
+    )
+
+
 async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
     """Created entry should merge general settings with mappings."""
     entry = MockConfigEntry(

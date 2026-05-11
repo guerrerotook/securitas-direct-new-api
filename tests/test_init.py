@@ -1163,6 +1163,80 @@ class TestAsyncUpdateOptions:
             await async_update_options(hass, entry)
             mock_reload.assert_awaited_once_with(entry.entry_id)
 
+    async def test_clearing_map_vacation_removes_stale_data_value(self, hass):
+        """Clearing CONF_MAP_VACATION via options must clear it from entry.data too.
+
+        Regression: the listener used to merge `{**entry.data, **entry.options}`,
+        which preserved the prior value in entry.data when the user cleared the
+        field. _opt() then resurrected the stale value, so the form pre-filled
+        again on the next open — the field appeared "stuck".
+        """
+        data = make_config_entry_data(
+            has_peri=True,
+            map_vacation="partial_night_peri",
+        )
+        # User just saved new options that omit CONF_MAP_VACATION (cleared).
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            # CONF_MAP_VACATION intentionally absent — user cleared the field.
+            CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ):
+            await async_update_options(hass, entry)
+
+        assert CONF_MAP_VACATION not in entry.data, (
+            f"Stale CONF_MAP_VACATION should be cleared from entry.data, "
+            f"got {entry.data.get(CONF_MAP_VACATION)!r}"
+        )
+
+    async def test_clearing_map_vacation_with_empty_string_clears_data(self, hass):
+        """An empty-string vacation in options (UI 'Not used' selection) must
+        propagate to entry.data, not leave a stale prior value behind."""
+        data = make_config_entry_data(
+            has_peri=True,
+            map_vacation="partial_night_peri",
+        )
+        options = {
+            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
+            CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
+            CONF_MAP_HOME: data[CONF_MAP_HOME],
+            CONF_MAP_AWAY: data[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: data[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: data[CONF_MAP_CUSTOM],
+            CONF_MAP_VACATION: "",
+            CONF_NOTIFY_GROUP: data[CONF_NOTIFY_GROUP],
+            CONF_FORCE_ARM_NOTIFICATIONS: data[CONF_FORCE_ARM_NOTIFICATIONS],
+        }
+        entry = MockConfigEntry(domain=DOMAIN, data=data, options=options)
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries,
+            "async_reload",
+            new_callable=AsyncMock,
+        ):
+            await async_update_options(hass, entry)
+
+        assert not entry.data.get(CONF_MAP_VACATION), (
+            f"Cleared vacation should resolve to falsy in entry.data, "
+            f"got {entry.data.get(CONF_MAP_VACATION)!r}"
+        )
+
     @pytest.mark.parametrize(
         "toggle_key",
         [
