@@ -7254,6 +7254,91 @@ class TestSubPanelEntityIdHealer:
             == f"alarm_control_panel.{alias_slug}_interior_{alias_slug}"
         )
 
+    @pytest.mark.parametrize(
+        "suffix",
+        ["_interior", "_perimeter", "_annex"],
+    )
+    async def test_heals_doubled_alias_in_deleted_entities_tombstone(
+        self, hass, suffix
+    ):
+        """When a user removes the installation (or upgrades from a build that
+        slugified to the doubled-alias form) and re-adds it later, HA pops the
+        tombstone in ``async_get_or_create`` and restores its ``entity_id`` —
+        bypassing the entity's ``suggested_object_id``. So a freshly-readded
+        sub-panel lands back on ``<alias>_<circuit>_<alias>`` even though the
+        canonical slug would otherwise be picked.
+
+        The healer must rewrite the tombstone's ``entity_id`` to the canonical
+        slot so the next async_get_or_create restores onto the correct slug.
+        """
+        from datetime import datetime, timezone
+
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.helpers.entity_registry import DeletedRegistryEntry
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation.alias)
+        unique_id = f"v5_verisure_owa.{installation.number}{suffix}"
+        broken = f"alarm_control_panel.{alias_slug}{suffix}_{alias_slug}"
+        canonical = f"alarm_control_panel.{alias_slug}{suffix}"
+
+        # Seed the tombstone HA would have left behind after the user
+        # deleted the config entry from the UI.
+        now = datetime.now(timezone.utc)
+        ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
+            DeletedRegistryEntry(
+                entity_id=broken,
+                unique_id=unique_id,
+                platform=DOMAIN,
+                aliases=set(),
+                area_id=None,
+                categories={},
+                config_entry_id=None,
+                config_subentry_id=None,
+                created_at=now,
+                device_class=None,
+                disabled_by=None,
+                hidden_by=None,
+                icon=None,
+                id="some-id",
+                labels=set(),
+                modified_at=now,
+                name=None,
+                options={},
+                orphaned_timestamp=None,
+            )
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, suffix)
+
+        # The tombstone's entity_id should now be canonical so that when
+        # async_get_or_create pops it on re-add, the restored entity_id is
+        # canonical too.
+        tombstone = ent_reg.deleted_entities.get(
+            ("alarm_control_panel", DOMAIN, unique_id)
+        )
+        assert tombstone is not None, "tombstone unexpectedly removed"
+        assert tombstone.entity_id == canonical, (
+            f"tombstone still has broken entity_id {tombstone.entity_id!r}"
+        )
+
 
 # ===========================================================================
 # TestCombinedPanelRegistration
