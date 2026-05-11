@@ -259,23 +259,48 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Interior - {self._installation.alias}"
+        # Seed _attr_supported_features so HA's cached_property mechanism
+        # (and the entity registry's cached supported_features) start from
+        # the current resolver state. The @property below stays authoritative
+        # for live reads, but the cached_property is what HA's
+        # __async_calculate_state compares against the registry — keeping
+        # _attr in sync ensures the registry-update path sees the change.
+        self._recompute_supported_features()
+
+    def _recompute_supported_features(self) -> None:
+        """Update ``_attr_supported_features`` from the resolver.
+
+        Setting ``_attr_supported_features`` goes through HA's wrapped setter,
+        which invalidates the ``supported_features`` cached_property entry —
+        so any code that reads the property after a mark_unsupported sees
+        the filtered set, and the entity registry's stored supported_features
+        gets updated on the next state write.
+        """
+        features = AlarmControlPanelEntityFeature(0)
+        if self._resolver.can_reach_interior(InteriorMode.DAY):
+            features |= AlarmControlPanelEntityFeature.ARM_HOME
+        if self._resolver.can_reach_interior(InteriorMode.NIGHT):
+            features |= AlarmControlPanelEntityFeature.ARM_NIGHT
+        if self._resolver.can_reach_interior(InteriorMode.TOTAL):
+            features |= AlarmControlPanelEntityFeature.ARM_AWAY
+        self._attr_supported_features = features
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
         """Return interior arming features, minus any the panel has rejected.
 
-        We deliberately do NOT gate on the JWT capability set: empirically (Italian
-        SDVECU OWNER) the JWT 'cap' claim can be both incomplete and wrong about
-        which arming commands the panel accepts — e.g. claiming ARMNIGHT while
-        the panel rejects ARMNIGHT1 with "not valid for Central Unit", and
-        omitting ARMDAY while the panel happily accepts ARMDAY1. Gating on the
-        cap set therefore hides modes that work and exposes modes that don't.
+        We deliberately do NOT gate on the JWT capability set: empirically
+        (Italian SDVECU OWNER) the JWT 'cap' claim can be both incomplete
+        and wrong about which arming commands the panel accepts — e.g.
+        claiming ARMNIGHT while the panel rejects ARMNIGHT1 with "not valid
+        for Central Unit", and omitting ARMDAY while the panel happily
+        accepts ARMDAY1. Gating on the cap set therefore hides modes that
+        work and exposes modes that don't.
 
-        Instead we start with all three interior modes and remove ones whose
-        underlying command has been rejected at runtime (via
-        ``resolver.mark_unsupported``). The rejection set is hydrated from
-        persisted state on setup, so a mode disabled once stays disabled
-        across HA restarts.
+        Instead start with all three interior modes and drop ones whose
+        underlying command has been rejected at runtime. The rejection set
+        is hydrated from persisted state on setup, so a mode disabled once
+        stays disabled across HA restarts.
         """
         features = AlarmControlPanelEntityFeature(0)
         if self._resolver.can_reach_interior(InteriorMode.DAY):

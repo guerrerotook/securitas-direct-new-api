@@ -577,9 +577,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             ) from last_err
         if last_err:
             raise last_err
+        # All step.commands were already in resolver.unsupported (e.g. a
+        # second click on a mode whose only command we rejected last time).
+        # On sub-panels this normally shouldn't happen — the button should
+        # already be hidden by supported_features — but if the UI still
+        # offered it, surface the same "disabled on this sub-panel" message
+        # rather than pointing at the (missing) mappings UI.
         raise HomeAssistantError(
             translation_domain=DOMAIN,
-            translation_key="no_supported_command",
+            translation_key=(
+                "no_supported_command"
+                if self._is_mappable
+                else "unsupported_alarm_mode_subpanel"
+            ),
+            translation_placeholders={"tried": ", ".join(step.commands)},
         )
 
     async def _send_single_command(
@@ -599,9 +610,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         a sub-panel mode disabled by a 400 stays disabled across HA restarts.
         Writing to entry.data via async_update_entry also triggers the update
         listener; CONF_UNSUPPORTED_COMMANDS isn't options-managed so the
-        listener no-ops there. The async_write_ha_state call forces HA to
-        re-read supported_features so the now-unreachable button drops out
-        of the UI immediately.
+        listener no-ops there. The recompute + async_write_ha_state call
+        forces HA's cached supported_features (and the entity registry's
+        cached value) to refresh so the now-unreachable button drops out of
+        the UI immediately.
         """
         entry = getattr(self._client, "config_entry", None)
         if entry is None:
@@ -613,7 +625,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self.hass.config_entries.async_update_entry(
             entry, data={**entry.data, "unsupported_commands": new}
         )
+        self._recompute_supported_features()
         self.async_write_ha_state()
+
+    def _recompute_supported_features(self) -> None:
+        """Override in sub-panels to refresh ``_attr_supported_features`` from
+        the resolver. No-op on the Combined Main panel where features are
+        driven by the user's state mapping rather than panel capabilities.
+        """
 
     def _set_refresh_failed(self, failed: bool) -> None:
         """Track whether the last manual refresh timed out."""
