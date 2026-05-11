@@ -2492,6 +2492,40 @@ class TestSiblingPanelLookup:
 
         assert siblings == [alarm]
 
+    def test_lookup_walks_multiple_config_entries(self):
+        """Helper iterates ALL config entries — a panel in entry-2 is found
+        even when self lives in entry-1's registry.
+
+        Real-world scenario: multiple Verisure accounts (one config entry per
+        account), each with its own installation. The helper walks every
+        entry's bucket so cross-installation arm/disarm coordination works.
+        """
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        # A second installation living in a different config entry.
+        other = MagicMock()
+        other.installation = MagicMock(number="999999")
+        other_sub = MagicMock()
+        other_sub._AXIS = "interior"
+
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {alarm.installation.number: alarm},
+            "axis_alarm_panels": {alarm.installation.number: {}},
+        }
+        alarm.hass.data[DOMAIN]["entry-id-2"] = {
+            "combined_alarm_panels": {"999999": other},
+            "axis_alarm_panels": {"999999": {"interior": other_sub}},
+        }
+
+        siblings = alarm._siblings_on_installation()
+
+        # Only this installation's panels, drawn from entry-id-1.
+        assert siblings == [alarm]
+        assert other not in siblings
+        assert other_sub not in siblings
+
 
 # ===========================================================================
 # force_arm_cancel service
