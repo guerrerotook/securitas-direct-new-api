@@ -815,6 +815,13 @@ class VerisureOwaActivityLogCard extends HTMLElement {
           padding: 8px 16px;
           cursor: pointer;
           border-top: 1px solid var(--divider-color, rgba(0,0,0,.06));
+          /* HA's Lovelace shell inherits user-select: none into our shadow
+             tree; explicitly opt back in so users can highlight the alias
+             / actor text on the row. The pointerdown/click handler in
+             setupEventListeners filters out drags so selection doesn't
+             also toggle the row. */
+          user-select: text;
+          -webkit-user-select: text;
         }
         .event:first-of-type { border-top: 0; }
         .event:hover { background: var(--secondary-background-color, rgba(0,0,0,.03)); }
