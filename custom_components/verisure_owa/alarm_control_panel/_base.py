@@ -957,12 +957,19 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 continue
             # Fire the public event first (panel attribution), then wipe
             # the panel's context. The integration's own dismissed-event
-            # handler (added in Task 9) clears the shared notification.
+            # handler clears the shared notification.
             panel._fire_arming_exception_dismissed_event(  # noqa: SLF001  # pylint: disable=protected-access
                 reason=reason,
                 new_mode=new_mode,
             )
             panel._clear_force_context()  # noqa: SLF001  # pylint: disable=protected-access
+            # Push the wiped `force_arm_available` / `arm_exceptions`
+            # attributes to HA's state machine on every cleared panel.
+            # `self` will be re-written by the caller's downstream
+            # `set_arm_state` / disarm flow, but siblings have no other
+            # path to refresh and would otherwise display stale
+            # attributes until the next coordinator update.
+            panel.async_write_ha_state()
 
     @property
     def _notifications_enabled(self) -> bool:
@@ -981,8 +988,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
           carry the same payload.
         - ``verisure_owa_force_arm_expired`` — replaces the mobile
           notification with a button-less informational card on TTL
-          expiry. The persistent side is updated by `_notify_force_arm_expired`
-          directly from `_clear_force_context`.
+          expiry. The persistent side is updated directly by
+          `_async_handle_force_arm_expiry` (the TTL timer callback),
+          which fires the event AND calls `_notify_force_arm_expired()`
+          in the same tick.
         - ``verisure_owa_arming_exception_dismissed`` — clears the shared
           installation-scoped persistent + mobile notifications when the
           stale force-arm context is dismissed (e.g. by a new arm/disarm

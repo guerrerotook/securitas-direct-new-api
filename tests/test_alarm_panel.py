@@ -2873,6 +2873,36 @@ class TestDismissPendingForceContextOnSiblings:
         # Self's context cleared
         assert alarm._force_context is None
         assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        # State was written so HA sees the cleared attributes immediately.
+        alarm.async_write_ha_state.assert_called()
+
+    async def test_writes_ha_state_on_cleared_sibling(self):
+        """When a sibling's force-context is cleared, its async_write_ha_state
+        must fire so HA sees the wiped force_arm_available / arm_exceptions
+        attributes without waiting for the next coordinator update."""
+        combined = make_alarm()
+        sub = _make_interior_panel()
+        sub.entity_id = "alarm_control_panel.home_interior"
+        sub.hass = combined.hass
+        sub._installation = combined.installation
+        sub.async_write_ha_state = MagicMock()
+        sub._force_context = {
+            "reference_id": "ref-sub",
+            "suid": "suid-sub",
+            "mode": AlarmControlPanelState.ARMED_NIGHT,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        setup_alarm_entry_data(combined, sub_panels=(sub,))
+
+        await combined._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_AWAY,
+        )
+
+        # The sibling panel got its context cleared AND its state written.
+        assert sub._force_context is None
+        sub.async_write_ha_state.assert_called()
 
     async def test_fires_for_sibling_with_context_attributing_to_sibling(self):
         """If Combined holds context and Interior triggered the dismissal,
@@ -2934,6 +2964,9 @@ class TestDismissPendingForceContextOnSiblings:
         # `installation` is a read-only @property — assign via the underlying
         # attribute used by VerisureEntity.__init__.
         sub._installation = combined.installation
+        # Stub out async_write_ha_state — the real method needs HA's loaded-
+        # integrations cache, which the MagicMock'd hass doesn't have.
+        sub.async_write_ha_state = MagicMock()
         sub._force_context = {
             "reference_id": "ref-sub",
             "suid": "suid-sub",
