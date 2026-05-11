@@ -2669,10 +2669,15 @@ class TestDismissPendingForceContextOnSiblings:
         """If multiple siblings hold contexts (theoretically possible),
         each gets its own dismissed event."""
         combined = make_alarm()
-        # Build a sibling with its own context.
-        sub = MagicMock()
-        sub._AXIS = "interior"
+        # Build a real sub-panel sibling so the helper's delegation to
+        # panel._fire_arming_exception_dismissed_event actually executes
+        # the production method (a MagicMock auto-attribute would no-op).
+        sub = _make_interior_panel()
         sub.entity_id = "alarm_control_panel.home_interior"
+        sub.hass = combined.hass  # share the bus mock
+        # `installation` is a read-only @property — assign via the underlying
+        # attribute used by VerisureEntity.__init__.
+        sub._installation = combined.installation
         sub._force_context = {
             "reference_id": "ref-sub",
             "suid": "suid-sub",
@@ -2680,9 +2685,6 @@ class TestDismissPendingForceContextOnSiblings:
             "exceptions": [{"alias": "Window"}],
             "created_at": datetime.now(),
         }
-        sub._clear_force_context = MagicMock()
-        sub.installation = combined.installation
-        sub.hass = combined.hass
 
         combined._force_context = {
             "reference_id": "ref-comb",
@@ -2708,9 +2710,9 @@ class TestDismissPendingForceContextOnSiblings:
         assert len(dismissed) == 2
         attributed_ids = {c[0][1]["entity_id"] for c in dismissed}
         assert attributed_ids == {combined.entity_id, sub.entity_id}
-        # Both contexts cleared.
+        # Both contexts cleared via the real _clear_force_context method.
         assert combined._force_context is None
-        sub._clear_force_context.assert_called_once_with(force=True)
+        assert sub._force_context is None
 
 
 # ===========================================================================

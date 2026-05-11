@@ -879,11 +879,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         Each panel that held a context is attributed in its own dismissed
         event with its own entity_id; typically only zero or one panel
-        holds context at any time. Events are fired via the shared
-        ``hass.bus`` directly (rather than delegating through each panel's
-        ``_fire_arming_exception_dismissed_event``) so that the helper
-        works against sibling panels regardless of how they're wired —
-        the per-panel ``entity_id`` in the payload carries the attribution.
+        holds context at any time.
         """
         for panel in self._siblings_on_installation():
             if panel._force_context is None:  # noqa: SLF001  # pylint: disable=protected-access
@@ -891,14 +887,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             # Fire the public event first (panel attribution), then wipe
             # the panel's context. The integration's own dismissed-event
             # handler (added in Task 9) clears the shared notification.
-            payload = {
-                "entity_id": panel.entity_id,
-                "reason": reason,
-                "new_mode": new_mode,
-                "details": {"installation": panel.installation.number},
-                "_event_id": str(uuid.uuid4()),
-            }
-            panel.hass.bus.async_fire(ARMING_EXCEPTION_DISMISSED_EVENT_TYPE, payload)
+            panel._fire_arming_exception_dismissed_event(  # noqa: SLF001  # pylint: disable=protected-access
+                reason=reason,
+                new_mode=new_mode,
+            )
             panel._clear_force_context(force=True)  # noqa: SLF001  # pylint: disable=protected-access
 
     @property
