@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from homeassistant.core import Context, HomeAssistant
 
@@ -37,6 +37,14 @@ FORCE_ARM_EXPIRED_EVENT_TYPE = "verisure_owa_force_arm_expired"
 # those are the canonical resolutions). Built-in handler dismisses the
 # persistent + mobile notifications.
 ARMING_EXCEPTION_DISMISSED_EVENT_TYPE = "verisure_owa_arming_exception_dismissed"
+
+# Closed set of `reason` values for the dismissed event. Kept as
+# constants so callers can't typo a string and silently break user
+# automations that match the documented values.
+DISMISSAL_REASON_USER_ARM = "user_arm"
+DISMISSAL_REASON_USER_DISARM = "user_disarm"
+DISMISSAL_REASON_INTEGRATION_RELOAD = "integration_reload"
+DismissalReason = Literal["user_arm", "user_disarm", "integration_reload"]
 
 # Display name attributed to synthetic events when the triggering HA call
 # carries no user_id (automation/script-driven actions).

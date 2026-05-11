@@ -429,6 +429,25 @@ def make_alarm(
     return alarm
 
 
+def setup_alarm_entry_data(alarm, *, sub_panels=()):
+    """Populate alarm.hass.data[DOMAIN] mirroring alarm_control_panel.__init__.
+
+    Registers ``alarm`` as the combined panel and any provided ``sub_panels``
+    in the axis-panel registry, keyed by their ``_AXIS`` attribute. Used by
+    tests that exercise `_siblings_on_installation` and the cross-panel
+    dismissal helper, both of which walk these registries.
+    """
+    from custom_components.verisure_owa import DOMAIN
+
+    alarm.hass.data = {DOMAIN: {}}
+    alarm.hass.data[DOMAIN]["entry-id-1"] = {
+        "combined_alarm_panels": {alarm.installation.number: alarm},
+        "axis_alarm_panels": {
+            alarm.installation.number: {p._AXIS: p for p in sub_panels}
+        },
+    }
+
+
 # ===========================================================================
 # update_status_alarm  (STD defaults)
 # ===========================================================================
@@ -2679,24 +2698,9 @@ class TestForceArmExpiredHandlerRegistration:
 class TestSiblingPanelLookup:
     """The cross-panel sibling-lookup helper for installation-wide coordination."""
 
-    def _setup_entry_data(self, alarm, *, sub_panels=()):
-        """Populate hass.data[DOMAIN] mirroring alarm_control_panel.__init__'s setup."""
-        from custom_components.verisure_owa import DOMAIN
-
-        # Real dict, not MagicMock, so .get/.setdefault behave correctly.
-        alarm.hass.data = {DOMAIN: {}}
-        entry_data = {
-            "combined_alarm_panels": {alarm.installation.number: alarm},
-            "axis_alarm_panels": {
-                alarm.installation.number: {panel._AXIS: panel for panel in sub_panels}
-            },
-        }
-        # Real entry id is irrelevant — the helper iterates all entries.
-        alarm.hass.data[DOMAIN]["entry-id-1"] = entry_data
-
     def test_lookup_returns_self_only_when_no_sub_panels(self):
         alarm = make_alarm()
-        self._setup_entry_data(alarm, sub_panels=())
+        setup_alarm_entry_data(alarm)
 
         siblings = alarm._siblings_on_installation()
 
@@ -2708,7 +2712,7 @@ class TestSiblingPanelLookup:
         sub1._AXIS = "interior"
         sub2 = MagicMock()
         sub2._AXIS = "perimeter"
-        self._setup_entry_data(alarm, sub_panels=(sub1, sub2))
+        setup_alarm_entry_data(alarm, sub_panels=(sub1, sub2))
 
         siblings = alarm._siblings_on_installation()
 
@@ -2820,21 +2824,10 @@ class TestFireArmingExceptionDismissedEvent:
 class TestDismissPendingForceContextOnSiblings:
     """The cross-panel dismissal helper called by _async_arm / async_alarm_disarm."""
 
-    def _setup(self, alarm, sub_panels=()):
-        from custom_components.verisure_owa import DOMAIN
-
-        alarm.hass.data = {DOMAIN: {}}
-        alarm.hass.data[DOMAIN]["entry-id-1"] = {
-            "combined_alarm_panels": {alarm.installation.number: alarm},
-            "axis_alarm_panels": {
-                alarm.installation.number: {p._AXIS: p for p in sub_panels}
-            },
-        }
-
     async def test_no_op_when_no_panel_has_context(self):
         """No siblings hold a force context — nothing fires, nothing clears."""
         alarm = make_alarm()
-        self._setup(alarm)
+        setup_alarm_entry_data(alarm)
 
         await alarm._dismiss_pending_force_context_on_siblings(
             reason="user_arm",
@@ -2851,7 +2844,7 @@ class TestDismissPendingForceContextOnSiblings:
 
     async def test_fires_for_self_when_self_has_context(self):
         alarm = make_alarm()
-        self._setup(alarm)
+        setup_alarm_entry_data(alarm)
         alarm._force_context = {
             "reference_id": "ref-1",
             "suid": "suid-1",
@@ -2901,7 +2894,7 @@ class TestDismissPendingForceContextOnSiblings:
             "exceptions": [{"alias": "Door"}],
             "created_at": datetime.now(),
         }
-        self._setup(combined, sub_panels=(sub,))
+        setup_alarm_entry_data(combined, sub_panels=(sub,))
 
         # Interior triggers dismissal.
         # Use combined's helper but invoke from sub's perspective by
@@ -2957,7 +2950,7 @@ class TestDismissPendingForceContextOnSiblings:
             "created_at": datetime.now(),
         }
 
-        self._setup(combined, sub_panels=(sub,))
+        setup_alarm_entry_data(combined, sub_panels=(sub,))
 
         await combined._dismiss_pending_force_context_on_siblings(
             reason="user_disarm",
@@ -2982,18 +2975,9 @@ class TestArmDisarmDismissesPendingForceContext:
     """Regular arm/disarm entry points must clear stale force contexts
     BEFORE dispatching, so the user sees notifications vanish immediately."""
 
-    def _setup_lone_panel(self, alarm):
-        from custom_components.verisure_owa import DOMAIN
-
-        alarm.hass.data = {DOMAIN: {}}
-        alarm.hass.data[DOMAIN]["entry-id-1"] = {
-            "combined_alarm_panels": {alarm.installation.number: alarm},
-            "axis_alarm_panels": {alarm.installation.number: {}},
-        }
-
     async def test_async_arm_fires_dismissed_when_context_present(self):
         alarm = make_alarm()
-        self._setup_lone_panel(alarm)
+        setup_alarm_entry_data(alarm)
         alarm._force_context = {
             "reference_id": "ref-1",
             "suid": "suid-1",
@@ -3027,7 +3011,7 @@ class TestArmDisarmDismissesPendingForceContext:
 
     async def test_async_arm_no_event_when_no_context(self):
         alarm = make_alarm()
-        self._setup_lone_panel(alarm)
+        setup_alarm_entry_data(alarm)
         assert alarm._force_context is None
         alarm.client.arm_alarm = AsyncMock(
             return_value=OperationStatus(
@@ -3052,7 +3036,7 @@ class TestArmDisarmDismissesPendingForceContext:
 
     async def test_async_alarm_disarm_fires_dismissed_when_context_present(self):
         alarm = make_alarm()
-        self._setup_lone_panel(alarm)
+        setup_alarm_entry_data(alarm)
         alarm._force_context = {
             "reference_id": "ref-1",
             "suid": "suid-1",
@@ -3101,7 +3085,7 @@ class TestArmDisarmDismissesPendingForceContext:
         so the user sees notifications vanish immediately even if the new
         arm itself fails or hangs."""
         alarm = make_alarm()
-        self._setup_lone_panel(alarm)
+        setup_alarm_entry_data(alarm)
         alarm._force_context = {
             "reference_id": "ref-1",
             "suid": "suid-1",
@@ -3125,7 +3109,7 @@ class TestArmDisarmDismissesPendingForceContext:
     async def test_force_arm_does_not_fire_dismissed_event(self):
         """async_force_arm is the canonical resolution — must not fire dismissed."""
         alarm = make_alarm()
-        self._setup_lone_panel(alarm)
+        setup_alarm_entry_data(alarm)
         alarm._state = AlarmControlPanelState.DISARMED
         alarm._force_context = {
             "reference_id": "ref-1",
@@ -3158,7 +3142,7 @@ class TestArmDisarmDismissesPendingForceContext:
     async def test_force_arm_cancel_does_not_fire_dismissed_event(self):
         """async_force_arm_cancel is the canonical resolution — must not fire."""
         alarm = make_alarm()
-        self._setup_lone_panel(alarm)
+        setup_alarm_entry_data(alarm)
         alarm._force_context = {
             "reference_id": "ref-1",
             "suid": "suid-1",

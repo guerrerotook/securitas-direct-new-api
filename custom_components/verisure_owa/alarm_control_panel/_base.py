@@ -41,8 +41,12 @@ from ..entity import VerisureEntity
 from ..events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     ARMING_EXCEPTION_EVENT_TYPE,
+    DISMISSAL_REASON_INTEGRATION_RELOAD,
+    DISMISSAL_REASON_USER_ARM,
+    DISMISSAL_REASON_USER_DISARM,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
     LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
+    DismissalReason,
     inject_ha_event,
 )
 from ..notification_translations import get_notification_strings
@@ -224,7 +228,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # context. Fire dismissed event so user automations see the loss.
         if self._force_context is not None:
             self._fire_arming_exception_dismissed_event(
-                reason="integration_reload",
+                reason=DISMISSAL_REASON_INTEGRATION_RELOAD,
                 new_mode=None,
             )
         # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
@@ -413,7 +417,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Arm the alarm in the specified mode."""
         if self._check_code_for_arm_if_required(code):
             await self._dismiss_pending_force_context_on_siblings(
-                reason="user_arm",
+                reason=DISMISSAL_REASON_USER_ARM,
                 new_mode=state,
             )
             self._force_state(AlarmControlPanelState.ARMING)
@@ -611,7 +615,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if not self._check_code(code):
             return
         await self._dismiss_pending_force_context_on_siblings(
-            reason="user_disarm",
+            reason=DISMISSAL_REASON_USER_DISARM,
             new_mode="disarmed",
         )
         # Capture the calling user's context up-front — HA expires
@@ -811,7 +815,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self.hass.bus.async_fire(FORCE_ARM_EXPIRED_EVENT_TYPE, payload)
 
     def _fire_arming_exception_dismissed_event(
-        self, *, reason: str, new_mode: str | None
+        self, *, reason: DismissalReason, new_mode: str | None
     ) -> None:
         """Fire the verisure_owa_arming_exception_dismissed event.
 
@@ -869,9 +873,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._fire_force_arm_expired_event()
         if self._notifications_enabled:
             self._notify_force_arm_expired()
-        self._force_context = None
-        self._attr_extra_state_attributes.pop("arm_exceptions", None)
-        self._attr_extra_state_attributes.pop("force_arm_available", None)
+        self._wipe_force_arm_state()
         self.async_write_ha_state()
 
     def _clear_force_context(self) -> None:
@@ -883,6 +885,15 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         (force_arm, force_arm_cancel, sibling dismissal).
         """
         self._cancel_force_arm_expiry()
+        self._wipe_force_arm_state()
+
+    def _wipe_force_arm_state(self) -> None:
+        """Clear the in-memory force-arm context dict and its public attributes.
+
+        Shared by the timer expiry path and the canonical-resolution clear
+        path so both stay in lock-step when new force-arm-related entity
+        attributes get added.
+        """
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
@@ -927,7 +938,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         return siblings
 
     async def _dismiss_pending_force_context_on_siblings(
-        self, *, reason: str, new_mode: str
+        self, *, reason: DismissalReason, new_mode: str
     ) -> None:
         """For every panel on this installation that has an active force-arm
         context, fire the dismissed event and clear the context.
