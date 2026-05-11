@@ -46,6 +46,24 @@ from custom_components.verisure_owa.const import (
     CONF_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
 )
+from custom_components.verisure_owa.events import (
+    ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+    FORCE_ARM_EXPIRED_EVENT_TYPE,
+)
+
+
+class TestNewArmingExceptionEventConstants:
+    """Tests that the two new event-type constants are defined with the
+    canonical verisure_owa_* names."""
+
+    def test_force_arm_expired_event_type(self):
+        assert FORCE_ARM_EXPIRED_EVENT_TYPE == "verisure_owa_force_arm_expired"
+
+    def test_arming_exception_dismissed_event_type(self):
+        assert (
+            ARMING_EXCEPTION_DISMISSED_EVENT_TYPE
+            == "verisure_owa_arming_exception_dismissed"
+        )
 
 
 class TestForceArmNotificationsConfig:

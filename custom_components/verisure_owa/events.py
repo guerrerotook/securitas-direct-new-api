@@ -27,6 +27,17 @@ ARMING_EXCEPTION_EVENT_TYPE = "verisure_owa_arming_exception"
 # Deprecated alias — fires alongside the canonical event, removed in v6.0.0.
 LEGACY_ARMING_EXCEPTION_EVENT_TYPE = "securitas_arming_exception"
 
+# Fired when the force-arm context times out (180 s) without the user
+# acting on the action buttons. Built-in handler updates the mobile
+# notification to remove its action buttons.
+FORCE_ARM_EXPIRED_EVENT_TYPE = "verisure_owa_force_arm_expired"
+
+# Fired when an active force-arm context is cleared by a different
+# arm/disarm action (NOT by force_arm or force_arm_cancel themselves —
+# those are the canonical resolutions). Built-in handler dismisses the
+# persistent + mobile notifications.
+ARMING_EXCEPTION_DISMISSED_EVENT_TYPE = "verisure_owa_arming_exception_dismissed"
+
 # Display name attributed to synthetic events when the triggering HA call
 # carries no user_id (automation/script-driven actions).
 _HA_USER = "Home Assistant"
