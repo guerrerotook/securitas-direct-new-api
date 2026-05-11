@@ -66,6 +66,64 @@ class TestNewArmingExceptionEventConstants:
         )
 
 
+class TestNotificationTranslationsPersistentMessageTrim:
+    """The persistent-notification arm_blocked_open_sensors.message must
+    not direct users to a mobile notification — anyone reading the
+    persistent notification is already in the HA UI."""
+
+    LOCALES = ("en", "es", "fr", "it", "pt", "pt-BR", "ca")
+
+    # Substrings (case-insensitive) that would indicate a leftover
+    # "or on your mobile notification" clause per locale. We only check
+    # for words that *uniquely* appear in the mobile clause, not in the
+    # ambient text — "mobile" / "móvil" / "móvel" / "phone".
+    FORBIDDEN_BY_LOCALE = {
+        "en": ["mobile notification"],
+        "es": ["notificación móvil"],
+        "fr": ["notification mobile"],
+        "it": ["notifica mobile"],
+        "pt": ["notificação móvel"],
+        "pt-BR": ["notificação móvel"],
+        "ca": ["notificació mòbil"],
+    }
+
+    def test_message_does_not_mention_mobile_notification(self):
+        from custom_components.verisure_owa.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]
+            msg = entry["message"].lower()
+            for forbidden in self.FORBIDDEN_BY_LOCALE[locale]:
+                assert forbidden.lower() not in msg, (
+                    f"Locale {locale!r} arm_blocked_open_sensors.message "
+                    f"still contains forbidden substring {forbidden!r}: {entry['message']!r}"
+                )
+
+    def test_message_still_mentions_alarm_card(self):
+        """Sanity: the alarm-card guidance must still be present per locale."""
+        from custom_components.verisure_owa.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        # Translation hint per locale that should remain.
+        keepers = {
+            "en": "alarm card",
+            "es": "tarjeta de la alarma",
+            "fr": "carte d'alarme",
+            "it": "card dell'allarme",
+            "pt": "cartão do alarme",
+            "pt-BR": "cartão do alarme",
+            "ca": "targeta de l'alarma",
+        }
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]
+            assert keepers[locale].lower() in entry["message"].lower(), (
+                f"Locale {locale!r} no longer mentions {keepers[locale]!r}"
+            )
+
+
 class TestForceArmNotificationsConfig:
     """Tests for the force_arm_notifications config toggle."""
 
