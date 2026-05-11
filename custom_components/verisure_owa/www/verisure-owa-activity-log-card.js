@@ -863,6 +863,8 @@ class VerisureOwaActivityLogCard extends HTMLElement {
           display: none;
           padding: 4px 16px 12px 60px;
           background: var(--secondary-background-color, rgba(0,0,0,.04));
+          user-select: text;
+          -webkit-user-select: text;
         }
         .details-row.expanded { display: block; }
         table.details {
