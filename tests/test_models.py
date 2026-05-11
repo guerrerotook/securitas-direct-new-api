@@ -1062,8 +1062,9 @@ class TestActivityEventCategory:
             assert self._ev(code).category == ActivityCategory.ARMED, code
 
     def test_disarmed_codes(self):
-        # 822 is the panel's disarm signal ("Disconnection Exterior + Main").
-        for code in (1, 32, 107, 700, 720, 822):
+        # 820 ("Disattivazione Perimetrale" — perimeter-only disarm) and 822
+        # ("Disconnection Exterior + Main") are the panel's disarm signals.
+        for code in (1, 32, 107, 700, 720, 820, 822):
             assert self._ev(code).category == ActivityCategory.DISARMED, code
 
     def test_alarm_zone_trigger(self):
