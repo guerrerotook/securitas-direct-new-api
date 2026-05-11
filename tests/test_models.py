@@ -1071,6 +1071,12 @@ class TestActivityEventCategory:
         """type=13 is a zone-level alarm (specific sensor went off)."""
         assert self._ev(13).category == ActivityCategory.ALARM
 
+    def test_photo_alarm(self):
+        """type=14 ('Allarme Foto') is a photo-detector alarm — alarm with
+        an attached image. Img attachment is conveyed via ``img=1`` on the
+        event; the category itself is ALARM, same as the generic type=13."""
+        assert self._ev(14).category == ActivityCategory.ALARM
+
     def test_tampering(self):
         """type=24 is tampering (someone interfering with equipment)."""
         assert self._ev(24).category == ActivityCategory.TAMPERING
