@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 from datetime import timedelta
 import logging
-from typing import Any
+from typing import Any, Callable
 import uuid
 
 import homeassistant.components.alarm_control_panel as alarm
@@ -22,6 +22,7 @@ from homeassistant.components.alarm_control_panel.const import AlarmControlPanel
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .. import (
@@ -179,6 +180,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # exceptions (e.g. open window).  Consumed on the next arm attempt to
         # override the exception.  Cleared on status refresh.
         self._force_context: dict[str, Any] | None = None
+        self._force_arm_expiry_unsub: Callable[[], None] | None = None
         self._mobile_action_unsub = None
         self._arming_event_unsub_new = None
         self._arming_event_unsub_legacy = None
@@ -216,6 +218,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister event listeners when removed from HA."""
+        # Reload-path safety net: if context is still alive at teardown,
+        # the new entity created post-reload would start fresh with no
+        # context. Fire dismissed event so user automations see the loss.
+        if self._force_context is not None:
+            self._fire_arming_exception_dismissed_event(
+                reason="integration_reload",
+                new_mode=None,
+            )
+        # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
+        self._cancel_force_arm_expiry()
         if self._arming_event_unsub_new:
             self._arming_event_unsub_new()
         if self._arming_event_unsub_legacy:
@@ -233,7 +245,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Handle updated data from coordinator."""
         if self._operation_in_progress:
             return  # Skip stale updates during arm/disarm
-        self._clear_force_context()
         if self.coordinator.data is not None:
             self._update_from_coordinator(self.coordinator.data)
         self.async_write_ha_state()
@@ -749,6 +760,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             e.get("alias", "unknown") for e in exc.exceptions
         ]
         self._attr_extra_state_attributes["force_arm_available"] = True
+        self._schedule_force_arm_expiry()
 
     def _fire_arming_exception_event(
         self, exc: ArmingExceptionError, mode: str
@@ -798,13 +810,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self.hass.bus.async_fire(FORCE_ARM_EXPIRED_EVENT_TYPE, payload)
 
     def _fire_arming_exception_dismissed_event(
-        self, *, reason: str, new_mode: str
+        self, *, reason: str, new_mode: str | None
     ) -> None:
         """Fire the verisure_owa_arming_exception_dismissed event.
 
         Caller is the panel that HELD the dismissed context (so payload
         entity_id is self.entity_id), even if the action that triggered
         the dismissal originated on a sibling panel.
+
+        ``new_mode`` is None when the dismissal is triggered by entity
+        teardown (reason="integration_reload") — at that point there is
+        no new mode being targeted, the entity is simply being removed.
         """
         payload = {
             "entity_id": self.entity_id,
@@ -817,23 +833,56 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 
-    def _clear_force_context(self, force: bool = False) -> None:
-        """Clear stored force-arm context and related attributes.
+    def _schedule_force_arm_expiry(self) -> None:
+        """Schedule the TTL-driven expiry callback.
 
-        When called from coordinator updates (force=False), only clears if
-        the context has aged past _FORCE_ARM_TTL (180s). On expiry, fires
-        the verisure_owa_force_arm_expired event (regardless of the
-        notification toggle — events are the public API) and, if the
-        built-in handler is enabled, updates the persistent notification.
+        Replaces the previous coordinator-update-driven TTL check, which
+        was unreliable: HA's DataUpdateCoordinator does not call its
+        listeners on consecutive failures, so a sustained API outage
+        starting before the TTL would miss the expiry event entirely.
         """
-        if not force and self._force_context is not None:
-            age = datetime.datetime.now() - self._force_context["created_at"]
-            if age < self._FORCE_ARM_TTL:
-                return
-            # Expired — public event first, then built-in side effects.
-            self._fire_force_arm_expired_event()
-            if self._notifications_enabled:
-                self._notify_force_arm_expired()
+        self._cancel_force_arm_expiry()
+        self._force_arm_expiry_unsub = async_call_later(
+            self.hass,
+            self._FORCE_ARM_TTL.total_seconds(),
+            self._async_handle_force_arm_expiry,
+        )
+
+    def _cancel_force_arm_expiry(self) -> None:
+        """Cancel any pending expiry timer (no-op if not scheduled)."""
+        if self._force_arm_expiry_unsub is not None:
+            self._force_arm_expiry_unsub()
+            self._force_arm_expiry_unsub = None
+
+    async def _async_handle_force_arm_expiry(self, _now: datetime.datetime) -> None:
+        """Timer callback: fire expired event + side effects if context still alive.
+
+        The timer fires exactly _FORCE_ARM_TTL after _set_force_context,
+        independent of coordinator state. If the context was already cleared
+        by the canonical resolution paths (force_arm, force_arm_cancel,
+        dismissal), this callback no-ops.
+        """
+        self._force_arm_expiry_unsub = None
+        if self._force_context is None:
+            return
+        self._fire_force_arm_expired_event()
+        if self._notifications_enabled:
+            self._notify_force_arm_expired()
+        self._force_context = None
+        self._attr_extra_state_attributes.pop("arm_exceptions", None)
+        self._attr_extra_state_attributes.pop("force_arm_available", None)
+        self.async_write_ha_state()
+
+    def _clear_force_context(self, force: bool = False) -> None:
+        """Cancel any pending TTL timer and wipe force-arm context attributes.
+
+        The ``force`` parameter is retained for backwards-compat with
+        existing call sites but is now a no-op — the wipe is unconditional.
+        TTL-driven expiry is handled by ``_async_handle_force_arm_expiry``
+        scheduled in ``_set_force_context``.
+        """
+        del force  # backwards-compat; wipe is now unconditional
+        self._cancel_force_arm_expiry()
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
