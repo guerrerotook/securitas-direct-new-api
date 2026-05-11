@@ -183,6 +183,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._arming_event_unsub_new = None
         self._arming_event_unsub_legacy = None
         self._force_arm_expired_event_unsub = None
+        self._arming_exception_dismissed_event_unsub = None
         self._last_handled_event_id: str | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -221,6 +222,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._arming_event_unsub_legacy()
         if self._force_arm_expired_event_unsub:
             self._force_arm_expired_event_unsub()
+        if self._arming_exception_dismissed_event_unsub:
+            self._arming_exception_dismissed_event_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
         await super().async_will_remove_from_hass()
@@ -920,6 +923,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
           notification with a button-less informational card on TTL
           expiry. The persistent side is updated by `_notify_force_arm_expired`
           directly from `_clear_force_context`.
+        - ``verisure_owa_arming_exception_dismissed`` — clears the shared
+          installation-scoped persistent + mobile notifications when the
+          stale force-arm context is dismissed (e.g. by a new arm/disarm
+          on this or a sibling panel). Does NOT use the `_last_handled_event_id`
+          dedup slot — dismissed events have unique `_event_id`s by
+          construction and must not clobber the dedup slot used by
+          arming-exception/expiry events.
         """
 
         @callback
@@ -947,6 +957,19 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._last_handled_event_id = eid
             self._notify_force_arm_expired_mobile_from_event(event)
 
+        @callback
+        def _handle_arming_exception_dismissed_event(event: Event) -> None:
+            """Handle dismissed event for this entity by clearing notifications."""
+            if event.data.get("entity_id") != self.entity_id:
+                return
+            # The notifications-enabled gate lives in async_added_to_hass at
+            # registration time; if we got here, the toggle was True. But the
+            # config can change at runtime via the options flow, so re-check
+            # before doing the dismiss work.
+            if not self._notifications_enabled:
+                return
+            self._dismiss_arming_exception_notification()
+
         self._arming_event_unsub_new = self.hass.bus.async_listen(
             ARMING_EXCEPTION_EVENT_TYPE,
             _handle_arming_exception_event,
@@ -958,6 +981,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_arm_expired_event_unsub = self.hass.bus.async_listen(
             FORCE_ARM_EXPIRED_EVENT_TYPE,
             _handle_force_arm_expired_event,
+        )
+        self._arming_exception_dismissed_event_unsub = self.hass.bus.async_listen(
+            ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+            _handle_arming_exception_dismissed_event,
         )
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:

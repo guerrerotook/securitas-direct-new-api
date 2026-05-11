@@ -1978,7 +1978,11 @@ class TestForceArmContext:
 
         # Register handler and capture callback
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
@@ -2008,7 +2012,11 @@ class TestForceArmContext:
 
         # Register handler and capture callback
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
@@ -2036,7 +2044,11 @@ class TestForceArmContext:
 
         # Register handler and capture callback
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
@@ -2913,6 +2925,105 @@ class TestArmDisarmDismissesPendingForceContext:
             if c[0][0] == "verisure_owa_arming_exception_dismissed"
         ]
         assert dismissed == []
+
+
+class TestArmingExceptionDismissedHandler:
+    """The built-in handler that responds to verisure_owa_arming_exception_dismissed."""
+
+    @staticmethod
+    def _make_event(entity_id, reason="user_arm"):
+        ev = MagicMock()
+        ev.data = {
+            "entity_id": entity_id,
+            "reason": reason,
+            "new_mode": AlarmControlPanelState.ARMED_HOME,
+            "details": {"installation": "123456"},
+            "_event_id": "ev-1",
+        }
+        return ev
+
+    def test_register_subscribes_to_dismissed(self):
+        alarm = make_alarm()
+
+        alarm._register_arming_exception_handler()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_calls = [
+            c
+            for c in listen_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed_calls) == 1
+
+    def test_handler_dismisses_when_enabled(self):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._register_arming_exception_handler()
+
+        # Capture the dismissed callback.
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_cb = next(
+            c[0][1]
+            for c in listen_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        )
+
+        ev = self._make_event(alarm.entity_id)
+        dismissed_cb(ev)
+
+        # Persistent dismiss + mobile clear_notification both scheduled.
+        # _dismiss_arming_exception_notification creates 2 tasks when
+        # notify_group is set (one per service call).
+        assert alarm.hass.async_create_task.call_count == 2
+
+    def test_handler_skips_when_disabled(self):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+
+        alarm._register_arming_exception_handler()
+        # No listener even registered when disabled — async_added_to_hass
+        # gates _register_arming_exception_handler on _notifications_enabled.
+        # But the method itself, if called, must still subscribe (the
+        # gate lives at registration time, not in the handler).
+        # However, when the handler is invoked under disabled config,
+        # it must skip the dismiss work.
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_cb = next(
+            (
+                c[0][1]
+                for c in listen_calls
+                if c[0][0] == "verisure_owa_arming_exception_dismissed"
+            ),
+            None,
+        )
+        # If registered, invoke it; either way, no async_create_task fires.
+        alarm.hass.async_create_task.reset_mock()
+        if dismissed_cb is not None:
+            ev = self._make_event(alarm.entity_id)
+            dismissed_cb(ev)
+        alarm.hass.async_create_task.assert_not_called()
+
+    def test_handler_skips_event_for_other_entity(self):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._register_arming_exception_handler()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_cb = next(
+            c[0][1]
+            for c in listen_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        )
+
+        ev = self._make_event(entity_id="alarm_control_panel.different")
+        dismissed_cb(ev)
+
+        # No dismiss tasks scheduled for an event targeted at a different entity.
+        alarm.hass.async_create_task.assert_not_called()
 
 
 # ===========================================================================
@@ -4650,7 +4761,11 @@ class TestForceArmWorkflow:
 
         # Register handler (simulates async_added_to_hass)
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         # Step 1: initial arm attempt fails
         alarm._state = AlarmControlPanelState.ARMING
