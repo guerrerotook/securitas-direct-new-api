@@ -397,6 +397,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     ) -> None:
         """Arm the alarm in the specified mode."""
         if self._check_code_for_arm_if_required(code):
+            await self._dismiss_pending_force_context_on_siblings(
+                reason="user_arm",
+                new_mode=state,
+            )
             self._force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(state)
 
@@ -591,6 +595,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
+        await self._dismiss_pending_force_context_on_siblings(
+            reason="user_disarm",
+            new_mode="disarmed",
+        )
         # Capture the calling user's context up-front — HA expires
         # `self._context` ~1 s after async_set_context, and the disarm
         # transition + state writes below take longer than that.

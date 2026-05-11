@@ -2715,6 +2715,206 @@ class TestDismissPendingForceContextOnSiblings:
         assert sub._force_context is None
 
 
+class TestArmDisarmDismissesPendingForceContext:
+    """Regular arm/disarm entry points must clear stale force contexts
+    BEFORE dispatching, so the user sees notifications vanish immediately."""
+
+    def _setup_lone_panel(self, alarm):
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {alarm.installation.number: alarm},
+            "axis_alarm_panels": {alarm.installation.number: {}},
+        }
+
+    async def test_async_arm_fires_dismissed_when_context_present(self):
+        alarm = make_alarm()
+        self._setup_lone_panel(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="N",
+                protom_response_date="",
+            )
+        )
+
+        await alarm._async_arm(AlarmControlPanelState.ARMED_HOME)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["reason"] == "user_arm"
+        assert payload["new_mode"] == AlarmControlPanelState.ARMED_HOME
+
+    async def test_async_arm_no_event_when_no_context(self):
+        alarm = make_alarm()
+        self._setup_lone_panel(alarm)
+        assert alarm._force_context is None
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="N",
+                protom_response_date="",
+            )
+        )
+
+        await alarm._async_arm(AlarmControlPanelState.ARMED_HOME)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_async_alarm_disarm_fires_dismissed_when_context_present(self):
+        alarm = make_alarm()
+        self._setup_lone_panel(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm._last_proto_code = "T"
+        alarm.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="D",
+                protom_response_date="",
+            )
+        )
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="D",
+                protom_response_date="",
+            )
+        )
+
+        await alarm.async_alarm_disarm()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["reason"] == "user_disarm"
+        assert payload["new_mode"] == "disarmed"
+
+    async def test_dismiss_runs_before_dispatch(self):
+        """The dismissed event fires BEFORE the new arm operation dispatches —
+        so the user sees notifications vanish immediately even if the new
+        arm itself fails or hangs."""
+        alarm = make_alarm()
+        self._setup_lone_panel(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        # New arm raises — confirms the dismissed event still fires.
+        alarm.client.arm_alarm = AsyncMock(side_effect=VerisureOwaError("boom"))
+
+        await alarm._async_arm(AlarmControlPanelState.ARMED_HOME)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+
+    async def test_force_arm_does_not_fire_dismissed_event(self):
+        """async_force_arm is the canonical resolution — must not fire dismissed."""
+        alarm = make_alarm()
+        self._setup_lone_panel(alarm)
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_date="",
+            )
+        )
+
+        await alarm.async_force_arm()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_force_arm_cancel_does_not_fire_dismissed_event(self):
+        """async_force_arm_cancel is the canonical resolution — must not fire."""
+        alarm = make_alarm()
+        self._setup_lone_panel(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+
+        await alarm.async_force_arm_cancel()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+
 # ===========================================================================
 # force_arm_cancel service
 # ===========================================================================
