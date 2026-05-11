@@ -126,22 +126,25 @@ class CommandResolver:
         return frozenset(self._unsupported)
 
     def can_reach_interior(self, mode: InteriorMode) -> bool:
-        """Return True if some known command path can reach ``mode``.
+        """Return True if the Interior sub-panel can reach ``mode``.
 
-        Used by the Interior sub-panel to drop a feature (e.g. ARM_NIGHT)
-        once the underlying command (ARMNIGHT1) has been rejected by the
-        panel — there's no fallback for a pure-interior transition, so the
-        button would otherwise stay clickable but always fail.
+        The Interior sub-panel only ever drives the interior axis — it
+        preserves the perimeter state. resolve()'s "only interior changes"
+        branch (and the "disarm-then-rearm" branch when current interior
+        is non-OFF + peri is OFF) calls ``_INTERIOR_ARM[mode]`` without
+        any fallback, so if that basic command is rejected, the mode is
+        unreachable from this entity regardless of has_peri.
+
+        We deliberately don't try the compound (``ARMNIGHT1PERI1`` etc.)
+        as a fallback: it's only used when both axes change in one step,
+        which the sub-panel never asks for. Considering the compound as
+        a fallback here would keep the rejected button visible even
+        though pressing it would always re-issue the failing basic
+        command.
         """
         if mode == InteriorMode.OFF:
             return True  # disarm always available
-        if _INTERIOR_ARM[mode] not in self._unsupported:
-            return True
-        if self._has_peri:
-            combined = _COMBINED_ARM.get(mode, [])
-            if any(c not in self._unsupported for c in combined):
-                return True
-        return False
+        return _INTERIOR_ARM[mode] not in self._unsupported
 
     def _resolve_annex(
         self, current_annex: AnnexMode, target_annex: AnnexMode

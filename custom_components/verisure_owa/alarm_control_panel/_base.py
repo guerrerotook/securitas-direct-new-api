@@ -644,30 +644,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         from homeassistant.helpers import entity_registry as er
 
         if not self.entity_id:
-            _LOGGER.warning(
-                "[supported_features] no entity_id on %s — skipping registry sync",
-                type(self).__name__,
-            )
             return
         registry = er.async_get(self.hass)
-        entry = registry.async_get(self.entity_id)
-        if entry is None:
-            _LOGGER.warning(
-                "[supported_features] %s not in registry — skipping sync",
-                self.entity_id,
-            )
+        if registry.async_get(self.entity_id) is None:
             return
-        want = int(self.supported_features)
-        _LOGGER.warning(
-            "[supported_features] %s: registry=%s want=%s resolver.unsupported=%s",
-            self.entity_id,
-            entry.supported_features,
-            want,
-            sorted(self._resolver.unsupported),
-        )
         registry.async_update_entity(
             self.entity_id,
-            supported_features=want,
+            supported_features=int(self.supported_features),
         )
 
     def _recompute_supported_features(self) -> None:
