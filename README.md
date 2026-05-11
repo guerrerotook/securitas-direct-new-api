@@ -453,6 +453,31 @@ You then have ~180 seconds to either fix the underlying issue and arm normally, 
 | `details.installation` | The Verisure installation number. |
 | `details.exceptions` | Full exception list from the API (`alias`, `zone_id`, `device_type`). |
 
+### The `verisure_owa_force_arm_expired` event
+
+Fires when the 180 s force-arm window expires without the user acting on it. Useful for sending a follow-up message ("alarm was not armed — please retry") that's distinct from the initial "arming blocked" alert. Fires regardless of the notifications toggle.
+
+| Field | What it tells you |
+| ----- | ----------------- |
+| `entity_id` | The alarm panel entity whose force-arm context expired. |
+| `mode` | The HA state that was originally attempted. |
+| `zones` | Open zone names from the original failure. |
+| `details.installation` | The Verisure installation number. |
+| `details.exceptions` | Full exception list captured at the original failure. |
+| `_event_id` | UUID for deduplication. |
+
+### The `verisure_owa_arming_exception_dismissed` event
+
+Fires when an active force-arm context is cleared by a *different* arm/disarm action — i.e. the user moved on instead of tapping **Force Arm** or **Cancel**. Does NOT fire from the canonical resolutions (`async_force_arm` / `async_force_arm_cancel`). Useful for dismissing your own custom notifications when the user takes a different action.
+
+| Field | What it tells you |
+| ----- | ----------------- |
+| `entity_id` | The alarm panel entity that HELD the dismissed context (may differ from the panel the user just interacted with — multi-panel installations are scoped per installation). |
+| `reason` | `"user_arm"` or `"user_disarm"`. |
+| `new_mode` | The state the user is moving to (`armed_home`, `armed_away`, …, or `"disarmed"`). |
+| `details.installation` | The Verisure installation number. |
+| `_event_id` | UUID for deduplication. |
+
 ### Writing your own automations
 
 Disable **Built-in force-arm notifications** in the integration options, then trigger on the event. The most common pattern is to auto-force-arm only when the user picks Away (because at that point they've left the building):
