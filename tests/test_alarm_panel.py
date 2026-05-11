@@ -2240,12 +2240,13 @@ class TestForceArmExpiredEventFire:
         ]
         assert "_event_id" in payload
 
-    def test_event_does_not_fire_on_force_clear(self):
-        """force=True clear (cancel/confirm path) must NOT fire the event."""
+    def test_event_does_not_fire_on_direct_clear(self):
+        """Direct _clear_force_context (cancel/confirm/sibling-dismiss path) must
+        not fire the expired event — that is the timer callback's job alone."""
         alarm = make_alarm()
         alarm._force_context = self._expired_context()  # even when expired
 
-        alarm._clear_force_context(force=True)
+        alarm._clear_force_context()
 
         fire_calls = alarm.hass.bus.async_fire.call_args_list
         force_expired = [
@@ -2271,9 +2272,12 @@ class TestForceArmExpiredEventFire:
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_HOME)
 
         mock_call_later.assert_called_once()
-        delay_seconds = mock_call_later.call_args[0][1]
-        assert delay_seconds == alarm._FORCE_ARM_TTL.total_seconds()
-        assert delay_seconds == 180
+        delay = mock_call_later.call_args[0][1]
+        # async_call_later accepts a timedelta directly — we pass the field
+        # itself rather than .total_seconds() so the unit lives at the
+        # declaration site.
+        assert delay == alarm._FORCE_ARM_TTL
+        assert delay.total_seconds() == 180
 
     async def test_event_fires_even_when_notifications_disabled(self):
         """Events are the public API and fire regardless of the notification toggle."""
@@ -2320,8 +2324,8 @@ class TestForceArmExpiryTimer:
         mock_call_later.assert_called_once()
         args = mock_call_later.call_args[0]
         assert args[0] is alarm.hass
-        # Delay must be the TTL in seconds (not a raw 180).
-        assert args[1] == alarm._FORCE_ARM_TTL.total_seconds()
+        # Delay is the TTL — async_call_later accepts a timedelta directly.
+        assert args[1] == alarm._FORCE_ARM_TTL
         # Callback is the expiry handler.
         assert args[2] == alarm._async_handle_force_arm_expiry
 

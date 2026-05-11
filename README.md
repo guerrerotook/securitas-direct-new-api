@@ -468,15 +468,17 @@ Fires when the 180 s force-arm window expires without the user acting on it. Use
 
 ### The `verisure_owa_arming_exception_dismissed` event
 
-Fires when an active force-arm context is cleared by a *different* arm/disarm action — i.e. the user moved on instead of tapping **Force Arm** or **Cancel**. Does NOT fire from the canonical resolutions (`async_force_arm` / `async_force_arm_cancel`). Useful for dismissing your own custom notifications when the user takes a different action.
+Fires when an active force-arm context is cleared by something other than the user tapping **Force Arm** or **Cancel** — either a different arm/disarm action ("user moved on"), or the integration itself being torn down (options change, reauth, reload) while the context was still alive. Does NOT fire from the canonical resolutions (`async_force_arm` / `async_force_arm_cancel`). Useful for dismissing your own custom notifications when the context goes away involuntarily.
 
 | Field | What it tells you |
 | ----- | ----------------- |
 | `entity_id` | The alarm panel entity that HELD the dismissed context (may differ from the panel the user just interacted with — multi-panel installations are scoped per installation). |
-| `reason` | `"user_arm"` or `"user_disarm"`. |
-| `new_mode` | The state the user is moving to (`armed_home`, `armed_away`, …, or `"disarmed"`). |
+| `reason` | `"user_arm"`, `"user_disarm"`, or `"integration_reload"`. |
+| `new_mode` | The state the user is moving to (`armed_home`, `armed_away`, …, or `"disarmed"`). `null` when `reason == "integration_reload"` — no new mode applies. |
 | `details.installation` | The Verisure installation number. |
 | `_event_id` | UUID for deduplication. |
+
+**Watch out:** automations that match `reason in ['user_arm', 'user_disarm']` will miss the reload case. If you want the broader "context lost" signal, match on the event type alone or include `'integration_reload'`. Automations that read `new_mode.startswith(...)` will fail with an `UndefinedError` on the reload case — guard with `new_mode is not none` first.
 
 ### Writing your own automations
 

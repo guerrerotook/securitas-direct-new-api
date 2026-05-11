@@ -7,10 +7,11 @@ inherit the bulk of their behaviour from BaseVerisureOwaAlarmPanel here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import datetime
 from datetime import timedelta
 import logging
-from typing import Any, Callable
+from typing import Any
 import uuid
 
 import homeassistant.components.alarm_control_panel as alarm
@@ -844,7 +845,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._cancel_force_arm_expiry()
         self._force_arm_expiry_unsub = async_call_later(
             self.hass,
-            self._FORCE_ARM_TTL.total_seconds(),
+            self._FORCE_ARM_TTL,
             self._async_handle_force_arm_expiry,
         )
 
@@ -873,15 +874,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._attr_extra_state_attributes.pop("force_arm_available", None)
         self.async_write_ha_state()
 
-    def _clear_force_context(self, force: bool = False) -> None:
+    def _clear_force_context(self) -> None:
         """Cancel any pending TTL timer and wipe force-arm context attributes.
 
-        The ``force`` parameter is retained for backwards-compat with
-        existing call sites but is now a no-op — the wipe is unconditional.
         TTL-driven expiry is handled by ``_async_handle_force_arm_expiry``
-        scheduled in ``_set_force_context``.
+        scheduled in ``_set_force_context``; this method just performs the
+        unconditional wipe used by the canonical resolution paths
+        (force_arm, force_arm_cancel, sibling dismissal).
         """
-        del force  # backwards-compat; wipe is now unconditional
         self._cancel_force_arm_expiry()
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
@@ -951,7 +951,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 reason=reason,
                 new_mode=new_mode,
             )
-            panel._clear_force_context(force=True)  # noqa: SLF001  # pylint: disable=protected-access
+            panel._clear_force_context()  # noqa: SLF001  # pylint: disable=protected-access
 
     @property
     def _notifications_enabled(self) -> bool:
@@ -1182,7 +1182,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
             return
         _LOGGER.info("Force-arm cancelled by user")
-        self._clear_force_context(force=True)
+        self._clear_force_context()
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
         self.async_write_ha_state()
@@ -1223,7 +1223,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             "Force-arming: overriding previous exceptions %s",
             [e.get("alias") for e in bypassed],
         )
-        self._clear_force_context(force=True)
+        self._clear_force_context()
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)
