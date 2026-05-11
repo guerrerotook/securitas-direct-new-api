@@ -2404,10 +2404,11 @@ class TestForceArmExpiredHandlerRegistration:
         # Same event id again — must be ignored.
         expired_cb(ev)
 
-        # Only one async_create_task scheduled across the two calls.
+        # Only one async_create_task scheduled across the two calls — the
+        # second invocation hit the dedup guard and bailed before scheduling.
         first_count = alarm.hass.async_create_task.call_count
-        # second call is idempotent — no growth
-        # But MagicMock keeps the count, so re-invoke to confirm:
+        assert first_count == 1
+        # Third invocation with the same event id is idempotent — no growth.
         expired_cb(ev)
         assert alarm.hass.async_create_task.call_count == first_count
 
