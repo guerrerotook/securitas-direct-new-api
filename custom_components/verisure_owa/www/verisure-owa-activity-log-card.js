@@ -474,7 +474,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     try {
       // Routes through the integration's API queue at FOREGROUND priority,
       // ahead of the next scheduled 60s poll.
-      await this._hass.callService("securitas", "refresh_activity_log", {
+      await this._hass.callService("verisure_owa", "refresh_activity_log", {
         entity_id: this._config.entity,
       });
     } catch (e) {
@@ -654,7 +654,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     this._render();
     try {
       const result = await this._callServiceWithResponse(
-        "securitas",
+        "verisure_owa",
         "fetch_activity_image",
         {
           entity_id: this._config.entity,
