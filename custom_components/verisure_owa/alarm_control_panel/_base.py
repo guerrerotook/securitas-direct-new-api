@@ -821,6 +821,32 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Return a per-installation persistent-notification ID."""
         return f"{DOMAIN}.arming_exception_{self.installation.number}"
 
+    def _siblings_on_installation(self) -> list[BaseVerisureOwaAlarmPanel]:
+        """Return all alarm panels (combined + sub-panels) for this installation.
+
+        Walks ``hass.data[DOMAIN]`` config-entry buckets — each entry's
+        ``combined_alarm_panels`` and ``axis_alarm_panels`` are populated by
+        ``alarm_control_panel.__init__.async_setup_entry``.
+
+        Always includes ``self``. Returns ``[self]`` if entry data is missing
+        (defensive — early registration paths or test scaffolding may not
+        have populated the buckets yet).
+        """
+        inst_num = self.installation.number
+        siblings: list[BaseVerisureOwaAlarmPanel] = []
+        domain_data = self.hass.data.get(DOMAIN, {})
+        for entry_data in domain_data.values():
+            if not isinstance(entry_data, dict):
+                continue
+            combined = entry_data.get("combined_alarm_panels", {}).get(inst_num)
+            if combined is not None:
+                siblings.append(combined)
+            axis_panels = entry_data.get("axis_alarm_panels", {}).get(inst_num, {})
+            siblings.extend(axis_panels.values())
+        if self not in siblings:
+            siblings.append(self)
+        return siblings
+
     @property
     def _notifications_enabled(self) -> bool:
         """Return True if the built-in force-arm notification handler is active."""

@@ -2413,6 +2413,86 @@ class TestForceArmExpiredHandlerRegistration:
         assert alarm.hass.async_create_task.call_count == first_count
 
 
+class TestSiblingPanelLookup:
+    """The cross-panel sibling-lookup helper for installation-wide coordination."""
+
+    def _setup_entry_data(self, alarm, *, sub_panels=()):
+        """Populate hass.data[DOMAIN] mirroring alarm_control_panel.__init__'s setup."""
+        from custom_components.verisure_owa import DOMAIN
+
+        # Real dict, not MagicMock, so .get/.setdefault behave correctly.
+        alarm.hass.data = {DOMAIN: {}}
+        entry_data = {
+            "combined_alarm_panels": {alarm.installation.number: alarm},
+            "axis_alarm_panels": {
+                alarm.installation.number: {panel._AXIS: panel for panel in sub_panels}
+            },
+        }
+        # Real entry id is irrelevant — the helper iterates all entries.
+        alarm.hass.data[DOMAIN]["entry-id-1"] = entry_data
+
+    def test_lookup_returns_self_only_when_no_sub_panels(self):
+        alarm = make_alarm()
+        self._setup_entry_data(alarm, sub_panels=())
+
+        siblings = alarm._siblings_on_installation()
+
+        assert siblings == [alarm]
+
+    def test_lookup_returns_combined_plus_sub_panels(self):
+        alarm = make_alarm()
+        sub1 = MagicMock()
+        sub1._AXIS = "interior"
+        sub2 = MagicMock()
+        sub2._AXIS = "perimeter"
+        self._setup_entry_data(alarm, sub_panels=(sub1, sub2))
+
+        siblings = alarm._siblings_on_installation()
+
+        # Combined panel always present; sub-panel order is by axis-key
+        # iteration which we don't promise — assert as a set.
+        assert set(siblings) == {alarm, sub1, sub2}
+
+    def test_lookup_skips_other_installations(self):
+        """Only panels for THIS installation number are returned."""
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        # Another combined panel for a different installation in the same
+        # hass.data entry block.
+        other = MagicMock()
+        other.installation = MagicMock(number="999999")
+
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {
+                alarm.installation.number: alarm,
+                "999999": other,
+            },
+            "axis_alarm_panels": {alarm.installation.number: {}},
+        }
+
+        siblings = alarm._siblings_on_installation()
+
+        assert siblings == [alarm]
+        assert other not in siblings
+
+    def test_lookup_handles_missing_entry_data_gracefully(self):
+        """If hass.data[DOMAIN] is empty, helper returns just self.
+
+        Defensive: setup ordering means the entry data dict could be
+        missing during very early registration paths.
+        """
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        alarm.hass.data = {DOMAIN: {}}
+
+        siblings = alarm._siblings_on_installation()
+
+        assert siblings == [alarm]
+
+
 # ===========================================================================
 # force_arm_cancel service
 # ===========================================================================
