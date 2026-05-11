@@ -38,6 +38,7 @@ from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
 from ..events import (
     ARMING_EXCEPTION_EVENT_TYPE,
+    FORCE_ARM_EXPIRED_EVENT_TYPE,
     LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
     inject_ha_event,
 )
@@ -758,20 +759,46 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # Deprecated alias — removed in v6.0.0.
         self.hass.bus.async_fire(LEGACY_ARMING_EXCEPTION_EVENT_TYPE, payload)
 
+    def _fire_force_arm_expired_event(self) -> None:
+        """Fire the verisure_owa_force_arm_expired event from the saved context.
+
+        Must be called BEFORE the context is wiped — derives the payload from
+        the still-live _force_context snapshot.
+        """
+        assert self._force_context is not None, (
+            "_fire_force_arm_expired_event called without a force_context"
+        )
+        exceptions = self._force_context.get("exceptions", [])
+        zones = [e.get("alias", "unknown") for e in exceptions]
+        payload = {
+            "entity_id": self.entity_id,
+            "mode": self._force_context["mode"],
+            "zones": zones,
+            "details": {
+                "installation": self.installation.number,
+                "exceptions": exceptions,
+            },
+            "_event_id": str(uuid.uuid4()),
+        }
+        self.hass.bus.async_fire(FORCE_ARM_EXPIRED_EVENT_TYPE, payload)
+
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 
     def _clear_force_context(self, force: bool = False) -> None:
         """Clear stored force-arm context and related attributes.
 
         When called from coordinator updates (force=False), only clears if
-        the context has aged past _FORCE_ARM_TTL (180s).  On expiry, the
-        notification is updated to inform the user the alarm was not armed.
+        the context has aged past _FORCE_ARM_TTL (180s). On expiry, fires
+        the verisure_owa_force_arm_expired event (regardless of the
+        notification toggle — events are the public API) and, if the
+        built-in handler is enabled, updates the persistent notification.
         """
         if not force and self._force_context is not None:
             age = datetime.datetime.now() - self._force_context["created_at"]
             if age < self._FORCE_ARM_TTL:
                 return
-            # Expired — update notification to inform user
+            # Expired — public event first, then built-in side effects.
+            self._fire_force_arm_expired_event()
             if self._notifications_enabled:
                 self._notify_force_arm_expired()
         self._force_context = None

@@ -2176,6 +2176,100 @@ class TestForceArmContext:
         assert alarm._force_context is not None  # untouched
 
 
+class TestForceArmExpiredEventFire:
+    """Tests that the verisure_owa_force_arm_expired event is fired when the
+    180s force-arm context expires."""
+
+    @staticmethod
+    def _expired_context(mode=AlarmControlPanelState.ARMED_AWAY):
+        return {
+            "reference_id": "ref-expire",
+            "suid": "suid-expire",
+            "mode": mode,
+            "exceptions": [
+                {"alias": "Front door", "deviceType": "MG", "zone_id": "1"},
+                {"alias": "Garage", "deviceType": "MG", "zone_id": "2"},
+            ],
+            "created_at": datetime.now() - timedelta(seconds=300),
+        }
+
+    def test_event_fires_on_expiry_via_coordinator_update(self):
+        alarm = make_alarm()
+        alarm._force_context = self._expired_context()
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Front door", "Garage"]
+        alarm.coordinator.data = AlarmStatusData(
+            status=SStatus(status="D"), protom_response="D"
+        )
+
+        alarm._handle_coordinator_update()
+
+        # Expiry path fires verisure_owa_force_arm_expired with the original
+        # mode + zones derived from the saved exceptions.
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(force_expired) == 1
+        payload = force_expired[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["mode"] == AlarmControlPanelState.ARMED_AWAY
+        assert payload["zones"] == ["Front door", "Garage"]
+        assert payload["details"]["installation"] == "123456"
+        assert payload["details"]["exceptions"] == [
+            {"alias": "Front door", "deviceType": "MG", "zone_id": "1"},
+            {"alias": "Garage", "deviceType": "MG", "zone_id": "2"},
+        ]
+        assert "_event_id" in payload
+
+    def test_event_does_not_fire_on_force_clear(self):
+        """force=True clear (cancel/confirm path) must NOT fire the event."""
+        alarm = make_alarm()
+        alarm._force_context = self._expired_context()  # even when expired
+
+        alarm._clear_force_context(force=True)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert force_expired == []
+
+    def test_event_does_not_fire_when_context_still_fresh(self):
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-fresh",
+            "suid": "suid-fresh",
+            "mode": AlarmControlPanelState.ARMED_HOME,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),  # fresh
+        }
+
+        alarm._clear_force_context(force=False)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert force_expired == []
+        # Context remains because TTL not exceeded
+        assert alarm._force_context is not None
+
+    def test_event_fires_even_when_notifications_disabled(self):
+        """Events are the public API and fire regardless of the notification toggle."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm._force_context = self._expired_context()
+
+        alarm._clear_force_context(force=False)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(force_expired) == 1
+
+
 # ===========================================================================
 # force_arm_cancel service
 # ===========================================================================
