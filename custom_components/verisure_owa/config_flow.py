@@ -82,7 +82,14 @@ VERSION = 4
 
 _LOGGER = logging.getLogger(__name__)
 
-_NOTIFY_EXCLUDE = {"notify", "send_message"}
+# Services that should not appear in the Notify-service dropdown.
+# - `notify` / `send_message`: aliases of the legacy generic notify service;
+#   not useful as a routing target.
+# - `persistent_notification`: the integration already creates its own
+#   persistent notification directly via the `persistent_notification` domain.
+#   Routing via `notify.persistent_notification` would produce a duplicate
+#   card with no actions and no useful body and never reach a real device.
+_NOTIFY_EXCLUDE = {"notify", "send_message", "persistent_notification"}
 
 PANEL_OPTION_KEYS = (
     CONF_ENABLE_PERIMETER_PANEL,

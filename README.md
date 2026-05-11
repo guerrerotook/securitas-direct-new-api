@@ -515,6 +515,8 @@ notify:
 
 After a restart, `notify.mobiles` shows up in the dropdown. The action buttons in the notification are scoped to the installation, so any household member who taps **Force Arm** or **Cancel** triggers the right action.
 
+**Don't include `notify.persistent_notification` in the notify group.** The integration already creates its own persistent notification directly. Adding `notify.persistent_notification` to your group will produce a second, duplicate persistent card every time arming is blocked — with no action buttons and a generic body. The integration filters `notify.persistent_notification` out of the **Notify service** dropdown for the same reason; if you build the group in YAML, leave it out yourself.
+
 ## Troubleshooting
 
 - **HTTP 403 errors / rate limiting** — Verisure uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries once automatically, but if you see repeated 403 errors in the logs:
