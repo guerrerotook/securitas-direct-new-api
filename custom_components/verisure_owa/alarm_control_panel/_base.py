@@ -610,10 +610,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         a sub-panel mode disabled by a 400 stays disabled across HA restarts.
         Writing to entry.data via async_update_entry also triggers the update
         listener; CONF_UNSUPPORTED_COMMANDS isn't options-managed so the
-        listener no-ops there. The recompute + async_write_ha_state call
-        forces HA's cached supported_features (and the entity registry's
-        cached value) to refresh so the now-unreachable button drops out of
-        the UI immediately.
+        listener no-ops there.
+
+        The entity registry's cached ``supported_features`` is normally
+        refreshed from inside ``_async_write_ha_state``, but empirically
+        that path doesn't always propagate the change to the entity
+        registry for sub-panels (the Main panel's registry does update —
+        sub-panels' don't). Update the registry explicitly so the
+        frontend's now-unreachable button drops out of the card.
         """
         entry = getattr(self._client, "config_entry", None)
         if entry is None:
@@ -626,7 +630,28 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             entry, data={**entry.data, "unsupported_commands": new}
         )
         self._recompute_supported_features()
+        self._force_registry_supported_features()
         self.async_write_ha_state()
+
+    def _force_registry_supported_features(self) -> None:
+        """Push the current ``supported_features`` value into the entity registry.
+
+        HA's auto-update path inside ``_async_write_ha_state`` should do this,
+        but for sub-panels it doesn't fire reliably — leaving the persisted
+        registry value stale and the rejected button still rendering on the
+        card. Updating the registry directly keeps the two in sync.
+        """
+        from homeassistant.helpers import entity_registry as er
+
+        if not self.entity_id:
+            return
+        registry = er.async_get(self.hass)
+        if registry.async_get(self.entity_id) is None:
+            return
+        registry.async_update_entity(
+            self.entity_id,
+            supported_features=int(self.supported_features),
+        )
 
     def _recompute_supported_features(self) -> None:
         """Override in sub-panels to refresh ``_attr_supported_features`` from

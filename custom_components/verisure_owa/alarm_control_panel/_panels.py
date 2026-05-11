@@ -267,6 +267,20 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
         # _attr in sync ensures the registry-update path sees the change.
         self._recompute_supported_features()
 
+    async def async_added_to_hass(self) -> None:
+        """Sync the entity registry with the resolver-hydrated feature set.
+
+        On HA restart the resolver is rehydrated from the persisted
+        ``unsupported_commands`` list, but no ``_persist_unsupported`` call
+        fires (no rejection happens — we just refuse to try the known-bad
+        command). HA's auto-registry-update doesn't reliably propagate the
+        new ``supported_features`` for sub-panels, so the previously-rejected
+        button reappears on the card. Forcing the registry update here keeps
+        it in sync with the resolver from the first state write.
+        """
+        await super().async_added_to_hass()
+        self._force_registry_supported_features()
+
     def _recompute_supported_features(self) -> None:
         """Update ``_attr_supported_features`` from the resolver.
 
