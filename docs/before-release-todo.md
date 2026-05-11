@@ -388,6 +388,42 @@ on actual API responses, multi-axis state, or hardware configuration.
       Cancel buttons fires when arming with an open sensor; Force Arm
       bypasses the exception. Confirmed working on the user's install.
 
+- [x] **`verisure_owa_force_arm_expired` fires during a sustained API
+      outage.** Triggered an arming exception, then killed DNS / network
+      on the HA host. Waited 3+ minutes. Confirmed in Developer Tools →
+      Events that the event fired at exactly the TTL boundary,
+      independent of coordinator state (the previous coordinator-driven
+      check would have silently skipped expiry because HA's
+      `DataUpdateCoordinator` does not call its listeners on consecutive
+      failed refreshes).
+
+- [x] **`verisure_owa_arming_exception_dismissed` fires on integration
+      reload.** Triggered an arming exception, then changed an
+      integration option that forces a reload while the force-arm
+      context was still alive. Confirmed the event payload includes
+      `reason="integration_reload"` and `new_mode=null`.
+
+- [x] **Mobile notification on TTL expiry replaces in place (Android).**
+      Verified on the Android Companion app: the arm-blocked card with
+      Force Arm / Cancel buttons is updated in place to a button-less
+      informational card after 180 s (same `tag`, no `actions` array),
+      not stacked as a new notification.
+
+- [x] **Mobile notification on TTL expiry replaces in place (iOS).**
+      Same behaviour verified on the iOS Companion app: the existing
+      card is updated in place to the button-less informational version.
+
+- [x] **Cross-panel dismissal.** Triggered an arming exception on the
+      Combined panel, then armed via the Interior sub-panel. The
+      Combined panel's persistent + mobile notifications cleared
+      immediately and the dismissed event fired attributed to Combined's
+      `entity_id`.
+
+- [x] **Notify-service dropdown excludes
+      `notify.persistent_notification`.** Verified in the options flow
+      that the persistent-notification service does not appear in the
+      dropdown (config_flow.py `_NOTIFY_EXCLUDE`).
+
 - [x] **Backwards compatibility.** Existing users keep their
       `entity_id`, mappings, and PIN configuration. `CONF_HAS_PERI` is
       dropped from stored data and recomputed at load time.
