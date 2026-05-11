@@ -2,6 +2,15 @@
 
 The most recent release is at the top; append new entries above the previous one with each release.
 
+## v5.0.1
+
+### Bug fixes
+
+- **Activity log refresh button.** The refresh button and the on-expand image fetch for image-request events called the legacy `securitas.*` services and failed with "Action securitas.refresh_activity_log not found"; both now use the new `verisure_owa.*` services.
+- **Activity log text selection.** The event rows in the activity log card swallowed text selection — Lovelace inherits `user-select: none` into the card's shadow tree, and the row click handler toggled expand/collapse on any drag. The card now opts back in to text selection on both the header and the expanded details and only toggles on clicks (drags ≥ 4 px no longer fire the toggle).
+- **Sub-panel entity_ids.** Enabling the Interior, Perimeter, or Annex sub-panel created an entity_id with the installation alias repeated (`alarm_control_panel.<alias>_interior_<alias>` and similar) — the same upgrade-path bug the Main panel was healed for. Sub-panels now seed `<alias>_<circuit>` on fresh installs and an upgrade-time healer relocates any already-broken entries to the canonical slot, evicting a stale `verisure_owa` squatter if present.
+- **Activity log unknown events.** Event type 820 ("Disattivazione Perimetrale", perimeter disarm — the disarm counterpart to the existing 821/823/824 perimeter-arm codes) is now mapped to `DISARMED` instead of `UNKNOWN`.
+
 ## v5.0.0
 
 ### Highlights
