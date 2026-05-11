@@ -212,23 +212,34 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
 )
 
 
+def _synced_entry_data(entry: ConfigEntry) -> dict[str, Any] | None:
+    """Return entry.data with options-managed fields aligned to entry.options.
+
+    Returns ``None`` when no change is needed, or when entry.options is empty
+    (fresh install — initial config-flow values live in entry.data and are
+    the source of truth until the options flow runs at least once).
+
+    Otherwise drops options-managed keys from entry.data and re-applies them
+    from entry.options, so a key the user cleared in options doesn't keep its
+    previous value in data — which `_opt()` (and the options form's
+    `_suggested_map` fallback) would otherwise resurrect.
+    """
+    if not entry.options:
+        return None
+    new_data = {k: v for k, v in entry.data.items() if k not in _OPTIONS_MANAGED_FIELDS}
+    new_data.update(entry.options)
+    if dict(entry.data) == new_data:
+        return None
+    return new_data
+
+
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
-    if any(
-        entry.data.get(attrib) != entry.options.get(attrib)
-        for attrib in _OPTIONS_MANAGED_FIELDS
-    ):
-        # Drop options-managed keys from data before applying the new options
-        # so a cleared field (key absent or empty in options) doesn't keep its
-        # previous data value. Merging via {**data, **options} preserved stale
-        # values for keys the user cleared, which left e.g. map_vacation
-        # "stuck" — the form would re-render with the old value next time.
-        new_data = {
-            k: v for k, v in entry.data.items() if k not in _OPTIONS_MANAGED_FIELDS
-        }
-        new_data.update(entry.options)
-        hass.config_entries.async_update_entry(entry, data=new_data)
-        await hass.config_entries.async_reload(entry.entry_id)
+    new_data = _synced_entry_data(entry)
+    if new_data is None:
+        return
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

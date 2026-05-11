@@ -972,17 +972,21 @@ async def test_options_mappings_submitting_creates_entry(hass):
     assert result["data"][CONF_MAP_HOME] == STD_DEFAULTS[CONF_MAP_HOME]
     assert result["data"][CONF_MAP_AWAY] == STD_DEFAULTS[CONF_MAP_AWAY]
     assert result["data"][CONF_MAP_NIGHT] == STD_DEFAULTS[CONF_MAP_NIGHT]
-    assert CONF_MAP_CUSTOM not in result["data"]
-    assert CONF_MAP_VACATION not in result["data"]
+    # Optional mapping fields the user didn't set are normalized to "" so
+    # the update listener sees a diff against any previously-saved value.
+    assert not result["data"][CONF_MAP_CUSTOM]
+    assert not result["data"][CONF_MAP_VACATION]
 
 
-async def test_options_mappings_empty_string_clears_saved_value(hass):
-    """User picks the '(Not used)' option in the UI (which submits empty
-    string). The form must accept it and persist the field as cleared.
+async def test_options_mappings_omitted_optional_key_records_as_cleared(hass):
+    """HA's frontend omits a cleared select key from user_input rather than
+    sending an empty string. The previous-options dict also had no key
+    (from the prior broken save), so a naive merge produces no diff — the
+    update listener never fires and the cleared state is never persisted.
 
-    Regression: PR 463 dropped the in-list "Not used" option but didn't add
-    a clearing affordance, so the select selector rejected empty strings —
-    users couldn't unset a previously-saved mapping from the UI at all.
+    The mappings step must surface "user cleared this field" as an explicit
+    empty value in entry.options so the listener sees the change and syncs
+    the stale value out of entry.data.
     """
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -990,7 +994,15 @@ async def test_options_mappings_empty_string_clears_saved_value(hass):
             has_peri=True,
             map_vacation=VerisureOwaState.PARTIAL_NIGHT_PERI.value,
         ),
-        options={CONF_MAP_VACATION: VerisureOwaState.PARTIAL_NIGHT_PERI.value},
+        # Prior options also lack map_vacation (from a previous broken save
+        # under the old listener). Without normalization the new save
+        # produces the same shape and no change is detected.
+        options={
+            CONF_MAP_HOME: PERI_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
+        },
     )
     entry.add_to_hass(hass)
 
@@ -1008,17 +1020,20 @@ async def test_options_mappings_empty_string_clears_saved_value(hass):
             CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
             CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
             CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
-            CONF_MAP_VACATION: "",
+            # CONF_MAP_VACATION omitted — HA frontend drops cleared keys.
         },
     )
 
-    assert result["type"] == FlowResultType.CREATE_ENTRY, (
-        f"Empty value should be accepted, got {result['type']} "
-        f"with errors={result.get('errors')}"
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    # Saved options must include map_vacation (as empty/falsy) so the diff
+    # vs. entry.data fires the listener and clears the stale data value.
+    assert CONF_MAP_VACATION in result["data"], (
+        "Cleared optional map field must be explicitly recorded in options "
+        "(empty string), not silently omitted — otherwise the listener has "
+        "no diff to act on and stale entry.data lingers."
     )
-    assert not result["data"].get(CONF_MAP_VACATION), (
-        f"Empty value should resolve to falsy, "
-        f"got {result['data'].get(CONF_MAP_VACATION)!r}"
+    assert not result["data"][CONF_MAP_VACATION], (
+        f"Cleared field must be falsy, got {result['data'][CONF_MAP_VACATION]!r}"
     )
 
 
@@ -1048,8 +1063,9 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
     assert CONF_SCAN_INTERVAL in result["data"]
     # Mapping data should be present
     assert result["data"][CONF_MAP_HOME] == VerisureOwaState.TOTAL.value
-    assert CONF_MAP_CUSTOM not in result["data"]
-    assert CONF_MAP_VACATION not in result["data"]
+    # Optional mapping fields the user didn't set normalize to falsy.
+    assert not result["data"][CONF_MAP_CUSTOM]
+    assert not result["data"][CONF_MAP_VACATION]
 
 
 # ===================================================================

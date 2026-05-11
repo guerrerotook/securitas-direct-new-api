@@ -181,17 +181,42 @@ def _mapping_field(key: str, suggestion: str | None) -> vol.Optional:
 def _mapping_select_options(*, has_peri: bool, has_annex: bool) -> list[dict[str, str]]:
     """Build the dropdown options for a state-mapping field.
 
-    Prepends an explicit empty-value "(Not used)" choice so the user can
-    actually clear the field from the UI — HA's select selector rejects
-    empty strings unless they appear in the options list. The empty value
-    flows through as ``map_xxx=""`` in entry data; the alarm panel treats
-    that as "no mapping" (see ``BaseVerisureOwaAlarmPanel.__init__``:
-    ``if not sec_state_str: continue``).
+    Clearing happens via the form's X (clear) button — HA's frontend then
+    omits the key from user_input. ``_normalize_mapping_input`` surfaces
+    that absence as an explicit ``""`` in entry.options so the update
+    listener sees a diff against the stale entry.data value and syncs.
     """
-    return [{"value": "", "label": "(Not used)"}] + [
+    return [
         {"value": s.value, "label": STATE_LABELS[s]}
         for s in dropdown_options(has_peri=has_peri, has_annex=has_annex)
     ]
+
+
+_MAPPING_FIELDS: tuple[str, ...] = (
+    CONF_MAP_HOME,
+    CONF_MAP_AWAY,
+    CONF_MAP_NIGHT,
+    CONF_MAP_VACATION,
+    CONF_MAP_CUSTOM,
+)
+
+
+def _normalize_mapping_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Ensure every mapping field is present in ``user_input``.
+
+    HA's frontend omits cleared select fields from the submitted user_input
+    entirely (rather than sending an empty string). With the prior options
+    dict also missing the same key from an earlier broken save, the new
+    options dict would match the old one and no update listener would fire
+    — the cleared state never reaches entry.data, and the form keeps
+    pre-filling with the stale value on the next open.
+
+    Surface the cleared state as an explicit ``""`` so the diff vs. the
+    prior options is non-empty and downstream sync runs.
+    """
+    return {key: user_input.get(key, "") for key in _MAPPING_FIELDS} | {
+        k: v for k, v in user_input.items() if k not in _MAPPING_FIELDS
+    }
 
 
 def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
@@ -869,7 +894,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Step 4: Alarm state mappings, then create entry."""
         if user_input is not None:
             self.config.update(self._options_data)
-            self.config.update(user_input)
+            self.config.update(_normalize_mapping_input(user_input))
             assert self._selected_installation is not None
             return await self._create_entry_for_installation(
                 self._selected_installation
@@ -1002,7 +1027,10 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> config_entries.ConfigFlowResult:
         """Step 2: Alarm state mappings."""
         if user_input is not None:
-            self._general_data = {**self._general_data, **user_input}
+            self._general_data = {
+                **self._general_data,
+                **_normalize_mapping_input(user_input),
+            }
             return await self.async_step_lock_automations()
 
         # Resolve via the helper so we read coordinator → published cache →
