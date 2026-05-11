@@ -37,6 +37,7 @@ from ..const import CIRCUIT_ANNEX, CIRCUIT_INTERIOR, CIRCUIT_PERIMETER
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
 from ..events import (
+    ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     ARMING_EXCEPTION_EVENT_TYPE,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
     LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
@@ -785,6 +786,24 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         }
         self.hass.bus.async_fire(FORCE_ARM_EXPIRED_EVENT_TYPE, payload)
 
+    def _fire_arming_exception_dismissed_event(
+        self, *, reason: str, new_mode: str
+    ) -> None:
+        """Fire the verisure_owa_arming_exception_dismissed event.
+
+        Caller is the panel that HELD the dismissed context (so payload
+        entity_id is self.entity_id), even if the action that triggered
+        the dismissal originated on a sibling panel.
+        """
+        payload = {
+            "entity_id": self.entity_id,
+            "reason": reason,
+            "new_mode": new_mode,
+            "details": {"installation": self.installation.number},
+            "_event_id": str(uuid.uuid4()),
+        }
+        self.hass.bus.async_fire(ARMING_EXCEPTION_DISMISSED_EVENT_TYPE, payload)
+
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 
     def _clear_force_context(self, force: bool = False) -> None:
@@ -846,6 +865,41 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if self not in siblings:
             siblings.append(self)
         return siblings
+
+    async def _dismiss_pending_force_context_on_siblings(
+        self, *, reason: str, new_mode: str
+    ) -> None:
+        """For every panel on this installation that has an active force-arm
+        context, fire the dismissed event and clear the context.
+
+        Called from the regular arm/disarm entry points (`_async_arm`,
+        `async_alarm_disarm`) BEFORE the new operation dispatches, so the
+        user sees stale notifications vanish immediately even if the new
+        operation fails.
+
+        Each panel that held a context is attributed in its own dismissed
+        event with its own entity_id; typically only zero or one panel
+        holds context at any time. Events are fired via the shared
+        ``hass.bus`` directly (rather than delegating through each panel's
+        ``_fire_arming_exception_dismissed_event``) so that the helper
+        works against sibling panels regardless of how they're wired —
+        the per-panel ``entity_id`` in the payload carries the attribution.
+        """
+        for panel in self._siblings_on_installation():
+            if panel._force_context is None:  # noqa: SLF001  # pylint: disable=protected-access
+                continue
+            # Fire the public event first (panel attribution), then wipe
+            # the panel's context. The integration's own dismissed-event
+            # handler (added in Task 9) clears the shared notification.
+            payload = {
+                "entity_id": panel.entity_id,
+                "reason": reason,
+                "new_mode": new_mode,
+                "details": {"installation": panel.installation.number},
+                "_event_id": str(uuid.uuid4()),
+            }
+            panel.hass.bus.async_fire(ARMING_EXCEPTION_DISMISSED_EVENT_TYPE, payload)
+            panel._clear_force_context(force=True)  # noqa: SLF001  # pylint: disable=protected-access
 
     @property
     def _notifications_enabled(self) -> bool:

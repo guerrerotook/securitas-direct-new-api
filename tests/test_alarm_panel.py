@@ -2527,6 +2527,192 @@ class TestSiblingPanelLookup:
         assert other_sub not in siblings
 
 
+class TestFireArmingExceptionDismissedEvent:
+    """The verisure_owa_arming_exception_dismissed event fired when a panel's
+    force-arm context is cleared by a different arm/disarm action."""
+
+    def test_payload_shape(self):
+        alarm = make_alarm()
+
+        alarm._fire_arming_exception_dismissed_event(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_HOME,
+        )
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["reason"] == "user_arm"
+        assert payload["new_mode"] == AlarmControlPanelState.ARMED_HOME
+        assert payload["details"] == {"installation": "123456"}
+        assert "_event_id" in payload
+
+
+class TestDismissPendingForceContextOnSiblings:
+    """The cross-panel dismissal helper called by _async_arm / async_alarm_disarm."""
+
+    def _setup(self, alarm, sub_panels=()):
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {alarm.installation.number: alarm},
+            "axis_alarm_panels": {
+                alarm.installation.number: {p._AXIS: p for p in sub_panels}
+            },
+        }
+
+    async def test_no_op_when_no_panel_has_context(self):
+        """No siblings hold a force context — nothing fires, nothing clears."""
+        alarm = make_alarm()
+        self._setup(alarm)
+
+        await alarm._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_HOME,
+        )
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_fires_for_self_when_self_has_context(self):
+        alarm = make_alarm()
+        self._setup(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        await alarm._dismiss_pending_force_context_on_siblings(
+            reason="user_disarm",
+            new_mode="disarmed",
+        )
+
+        # Event fired with self.entity_id
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["reason"] == "user_disarm"
+        # Self's context cleared
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+
+    async def test_fires_for_sibling_with_context_attributing_to_sibling(self):
+        """If Combined holds context and Interior triggered the dismissal,
+        the event must carry Combined's entity_id (the panel that held
+        the context)."""
+        combined = make_alarm()
+        # Build a sibling sub-panel as a MagicMock with the minimum
+        # surface the helper depends on.
+        sub = MagicMock()
+        sub._AXIS = "interior"
+        sub.entity_id = "alarm_control_panel.home_interior"
+        sub._force_context = None  # sibling doesn't hold context
+        sub._clear_force_context = MagicMock()
+        # Combined holds the context.
+        combined._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        self._setup(combined, sub_panels=(sub,))
+
+        # Interior triggers dismissal.
+        # Use combined's helper but invoke from sub's perspective by
+        # binding the unbound method (sub is a MagicMock so it can't run
+        # the real coroutine). Equivalently: call combined's helper —
+        # the helper attributes events to whichever sibling held the
+        # context, which is the property under test.
+        await combined._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_NIGHT,
+        )
+
+        fire_calls = combined.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        # Attributed to the panel that held the context (Combined),
+        # not the panel that triggered the dismissal.
+        assert payload["entity_id"] == combined.entity_id
+        # Sibling without context: not cleared.
+        sub._clear_force_context.assert_not_called()
+
+    async def test_fires_one_event_per_panel_with_context(self):
+        """If multiple siblings hold contexts (theoretically possible),
+        each gets its own dismissed event."""
+        combined = make_alarm()
+        # Build a sibling with its own context.
+        sub = MagicMock()
+        sub._AXIS = "interior"
+        sub.entity_id = "alarm_control_panel.home_interior"
+        sub._force_context = {
+            "reference_id": "ref-sub",
+            "suid": "suid-sub",
+            "mode": AlarmControlPanelState.ARMED_NIGHT,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        sub._clear_force_context = MagicMock()
+        sub.installation = combined.installation
+        sub.hass = combined.hass
+
+        combined._force_context = {
+            "reference_id": "ref-comb",
+            "suid": "suid-comb",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+
+        self._setup(combined, sub_panels=(sub,))
+
+        await combined._dismiss_pending_force_context_on_siblings(
+            reason="user_disarm",
+            new_mode="disarmed",
+        )
+
+        fire_calls = combined.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 2
+        attributed_ids = {c[0][1]["entity_id"] for c in dismissed}
+        assert attributed_ids == {combined.entity_id, sub.entity_id}
+        # Both contexts cleared.
+        assert combined._force_context is None
+        sub._clear_force_context.assert_called_once_with(force=True)
+
+
 # ===========================================================================
 # force_arm_cancel service
 # ===========================================================================
