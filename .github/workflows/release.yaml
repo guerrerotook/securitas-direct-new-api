@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 5.1.0 — no leading v)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Bump manifests, tag, and release
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      BRANCH: ${{ github.ref_name }}
+      REF_TYPE: ${{ github.ref_type }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate dispatch ref
+        run: |
+          if [ "$REF_TYPE" != "branch" ]; then
+            echo "Workflow must be dispatched from a branch (got $REF_TYPE '$BRANCH'). The bump commit needs a branch to land on." >&2
+            exit 1
+          fi
+
+      - name: Validate version input
+        run: |
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version '$VERSION' must be X.Y.Z or X.Y.Z-suffix with no leading zeros (build metadata not supported)." >&2
+            exit 1
+          fi
+          if git show-ref --tags --verify --quiet "refs/tags/v$VERSION"; then
+            echo "Tag v$VERSION already exists." >&2
+            exit 1
+          fi
+
+      - name: Bump manifest versions
+        run: |
+          python3 <<'PY'
+          import os, re, sys
+          new_version = os.environ["VERSION"]
+          for path in (
+              "custom_components/verisure_owa/manifest.json",
+              "custom_components/securitas/manifest.json",
+          ):
+              with open(path) as f:
+                  content = f.read()
+              updated, n = re.subn(
+                  r'("version"\s*:\s*)"[^"]+"',
+                  lambda m: m.group(1) + f'"{new_version}"',
+                  content,
+              )
+              if n != 1:
+                  sys.exit(f"Expected exactly one version field in {path}, found {n}")
+              with open(path, "w") as f:
+                  f.write(updated)
+          PY
+          git diff --stat
+          git diff
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit, tag, push
+        run: |
+          git add custom_components/verisure_owa/manifest.json custom_components/securitas/manifest.json
+          if git diff --cached --quiet; then
+            echo "Manifests already at $VERSION — refusing to tag without a release commit." >&2
+            echo "Investigate prior state (hand-edited manifest? partial earlier run?) before re-running." >&2
+            exit 1
+          fi
+          git commit -m "chore: release $VERSION"
+          git tag -a "v$VERSION" -m "Release $VERSION"
+          git push origin "HEAD:$BRANCH"
+          git push origin "v$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prerelease_flag=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --generate-notes \
+            $prerelease_flag
