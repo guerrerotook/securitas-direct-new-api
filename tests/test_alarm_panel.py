@@ -149,6 +149,7 @@ class TestForceArmExpiredMobileMessageTranslation:
                 f"Locale {locale!r} force_arm_expired.mobile_message is empty"
             )
 
+
 # Feature flags for tests that exercise registry APIs introduced after our
 # minimum-supported HA (2025.2). On older HA the underlying bug doesn't
 # manifest the same way and the test scaffolding can't be constructed — skip
