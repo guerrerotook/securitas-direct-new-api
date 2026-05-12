@@ -395,3 +395,60 @@ class TestMultiAxisAnnexTransitions:
         # Interior is unchanged, so no ARM1 or DARM1
         assert "ARM1" not in cmds
         assert "DARM1" not in cmds
+
+
+class TestCanReachPerimeter:
+    """``can_reach_perimeter(mode)`` gates the Perimeter sub-panel's
+    supported_features. The arm-perimeter wire command is ``PERI1`` (the
+    standalone-perimeter branch in ``_resolve_arm``); if the panel rejects
+    ``PERI1`` once, the resolver records it and subsequent calls must
+    report the mode unreachable so the sub-panel can drop ``ARM_AWAY``
+    from its supported_features set."""
+
+    def test_on_is_reachable_when_peri1_not_unsupported(self):
+        resolver = CommandResolver(has_peri=True)
+        assert resolver.can_reach_perimeter(PerimeterMode.ON) is True
+
+    def test_on_is_not_reachable_when_peri1_unsupported(self):
+        resolver = CommandResolver(has_peri=True)
+        resolver.mark_unsupported("PERI1")
+        assert resolver.can_reach_perimeter(PerimeterMode.ON) is False
+
+    def test_off_is_always_reachable(self):
+        """Disarm is always reachable — the Perimeter sub-panel can always
+        offer DISARMED, even when the arm command is unsupported."""
+        resolver = CommandResolver(has_peri=True)
+        resolver.mark_unsupported("PERI1")
+        assert resolver.can_reach_perimeter(PerimeterMode.OFF) is True
+
+    def test_seeded_unsupported_from_persisted_set(self):
+        """Rejections survive HA restart via entry.data; hydrating the
+        resolver with a seed list must produce the same can_reach result."""
+        resolver = CommandResolver(has_peri=True, unsupported=["PERI1"])
+        assert resolver.can_reach_perimeter(PerimeterMode.ON) is False
+
+
+class TestCanReachAnnex:
+    """``can_reach_annex(mode)`` gates the Annex sub-panel's
+    supported_features. The arm-annex wire command is ``ARMANNEX1``; if
+    the panel rejects it once, the resolver records it and subsequent
+    calls must report the mode unreachable so the sub-panel can drop
+    ``ARM_AWAY`` from its supported_features set."""
+
+    def test_on_is_reachable_when_armannex1_not_unsupported(self):
+        resolver = CommandResolver(has_peri=False)
+        assert resolver.can_reach_annex(AnnexMode.ON) is True
+
+    def test_on_is_not_reachable_when_armannex1_unsupported(self):
+        resolver = CommandResolver(has_peri=False)
+        resolver.mark_unsupported("ARMANNEX1")
+        assert resolver.can_reach_annex(AnnexMode.ON) is False
+
+    def test_off_is_always_reachable(self):
+        resolver = CommandResolver(has_peri=False)
+        resolver.mark_unsupported("ARMANNEX1")
+        assert resolver.can_reach_annex(AnnexMode.OFF) is True
+
+    def test_seeded_unsupported_from_persisted_set(self):
+        resolver = CommandResolver(has_peri=False, unsupported=["ARMANNEX1"])
+        assert resolver.can_reach_annex(AnnexMode.ON) is False

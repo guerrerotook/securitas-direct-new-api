@@ -3796,6 +3796,11 @@ class TestCompoundArmCommands:
         starts with the resolver pre-loaded — sub-panels otherwise expose
         the failing mode again on restart and the user pays the same
         rejection over and over.
+
+        Persisted shape is ``{<installation.number>: [<commands>...]}``
+        (a dict keyed by installation number) so that legacy entries
+        covering multiple installations don't share one global list and
+        cross-contaminate sibling panels' resolvers.
         """
         alarm = make_alarm(config=_night_peri_config())
         alarm._state = AlarmControlPanelState.ARMING
@@ -3817,10 +3822,100 @@ class TestCompoundArmCommands:
             "Expected entry data to be persisted after mark_unsupported"
         )
         kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
-        persisted = kwargs.get("data", {}).get("unsupported_commands", [])
-        assert "ARMNIGHT1PERI1" in persisted, (
-            f"Persisted unsupported list missing ARMNIGHT1PERI1, got {persisted!r}"
+        persisted = kwargs.get("data", {}).get("unsupported_commands", {})
+        # Per-installation keyed format — Main panel's installation number is "123456"
+        assert isinstance(persisted, dict), (
+            f"Persisted unsupported_commands must be a dict, got {type(persisted).__name__}"
         )
+        installation_num = str(alarm._installation.number)
+        assert "ARMNIGHT1PERI1" in persisted.get(installation_num, []), (
+            f"Persisted unsupported list missing ARMNIGHT1PERI1 for "
+            f"installation {installation_num!r}, got {persisted!r}"
+        )
+
+    async def test_persist_unsupported_migrates_legacy_flat_list(self):
+        """On upgrade from the v5.0.1-pre flat-list format, the first
+        persist call must convert ``["ARMHOME1"]`` into
+        ``{<installation.number>: [<new sorted list>]}`` — preserving
+        the legacy rejection under THIS installation's slot rather than
+        dropping it on the floor.
+
+        In production ``client.config["unsupported_commands"]`` is sourced
+        from ``entry.data["unsupported_commands"]`` (see ``__init__.py``'s
+        setup hydration), so the legacy flat list is what the resolver
+        starts pre-loaded with on the new build. By the time
+        ``_persist_unsupported`` runs, the resolver already contains the
+        legacy rejection plus any new one — and the write must reflect
+        that union under the per-installation slot.
+        """
+        # Mirror production: client.config + entry.data both carry the
+        # same legacy flat-list rejection. The resolver hydrates from
+        # client.config at __init__; entry.data is what _persist reads.
+        config = _night_peri_config()
+        config["unsupported_commands"] = ["ARMHOME1"]
+        alarm = make_alarm(config=config)
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        entry = MagicMock()
+        entry.data = {
+            "username": "u",
+            "country": "IT",
+            "unsupported_commands": ["ARMHOME1"],  # legacy rejection
+        }
+        alarm._client.config_entry = entry
+        alarm.hass.config_entries = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("API error", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
+        persisted = kwargs.get("data", {}).get("unsupported_commands", {})
+        installation_num = str(alarm._installation.number)
+        assert isinstance(persisted, dict), "Migration should produce dict format"
+        # Both the legacy rejection AND the new one must end up under
+        # this installation's slot (legacy list was associated with THIS
+        # installation's resolver because the resolver-init read both).
+        assert "ARMHOME1" in persisted.get(installation_num, [])
+        assert "ARMNIGHT1PERI1" in persisted.get(installation_num, [])
+
+    async def test_persist_unsupported_preserves_sibling_installation_slot(self):
+        """When entry.data already has the keyed-dict format with another
+        installation's rejections, persisting from THIS installation must
+        only touch THIS installation's slot — siblings' lists stay intact."""
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        entry = MagicMock()
+        entry.data = {
+            "username": "u",
+            "country": "IT",
+            "unsupported_commands": {
+                "999999": ["ARMDAY1"],  # sibling installation's rejections
+            },
+        }
+        alarm._client.config_entry = entry
+        alarm.hass.config_entries = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("API error", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
+        persisted = kwargs.get("data", {}).get("unsupported_commands", {})
+        installation_num = str(alarm._installation.number)
+        assert persisted.get("999999") == ["ARMDAY1"], (
+            f"Sibling installation 999999 slot was mutated: {persisted!r}"
+        )
+        assert "ARMNIGHT1PERI1" in persisted.get(installation_num, [])
 
     async def test_disarm_preserves_protom_response_date_in_state_attrs(self):
         """OperationStatus fields beyond protom_response (notably
@@ -5565,9 +5660,89 @@ class TestInteriorSubPanel:
         assert feats & F.ARM_NIGHT
         assert not (feats & F.ARM_AWAY)
 
-    def test_hydrates_unsupported_from_client_config(self):
+    def _make_subpanel_with_persisted_unsupported(self, persisted, installation_num):
+        """Build an InteriorVerisureOwaAlarmPanel where ``client.config`` has
+        the given ``unsupported_commands`` payload and the panel's
+        ``installation.number`` is ``installation_num``.
+
+        Shared helper for the resolver-hydration tests below (flat-list
+        back-compat and per-installation dict format).
+        """
+        from custom_components.verisure_owa.alarm_control_panel import (
+            InteriorVerisureOwaAlarmPanel,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        coordinator = MagicMock()
+        coordinator.has_peri = False
+        coordinator.has_annex = False
+        coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        installation = MagicMock(number=installation_num, alias="A", address="x")
+        client = MagicMock()
+        client.config = {"unsupported_commands": persisted}
+        hass = MagicMock()
+        with (
+            patch.object(
+                InteriorVerisureOwaAlarmPanel,
+                "async_schedule_update_ha_state",
+                MagicMock(),
+            ),
+            patch.object(
+                InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+            ),
+        ):
+            return InteriorVerisureOwaAlarmPanel(
+                installation, client, hass, coordinator
+            )
+
+    def test_hydrates_unsupported_from_legacy_flat_list(self):
         """Resolver starts pre-loaded with the persisted unsupported list so
-        a previously-rejected command stays rejected across HA restarts."""
+        a previously-rejected command stays rejected across HA restarts.
+
+        Legacy flat-list format (a bare list applied to every installation
+        on the entry) must keep working — that's the v5.0.1-pre format,
+        and an upgraded install needs the existing rejections to survive
+        until the panel re-persists in the new keyed-dict shape.
+        """
+        panel = self._make_subpanel_with_persisted_unsupported(
+            persisted=["ARMNIGHT1"], installation_num="1"
+        )
+        assert "ARMNIGHT1" in panel._resolver.unsupported
+
+    def test_hydrates_unsupported_from_per_installation_dict(self):
+        """New keyed-dict format scopes ``unsupported_commands`` per
+        installation. Only the rejections under THIS installation's number
+        are loaded into the resolver — siblings on the same legacy entry
+        keep their own slot."""
+        panel = self._make_subpanel_with_persisted_unsupported(
+            persisted={"1": ["ARMNIGHT1"], "2": ["ARMDAY1"]},
+            installation_num="1",
+        )
+        assert "ARMNIGHT1" in panel._resolver.unsupported
+        assert "ARMDAY1" not in panel._resolver.unsupported, (
+            "Rejections from another installation on the same entry must "
+            "not contaminate this installation's resolver"
+        )
+
+    def test_dict_format_empty_when_installation_missing(self):
+        """If the dict has no slot for THIS installation, the resolver
+        starts empty — siblings' rejections don't apply."""
+        panel = self._make_subpanel_with_persisted_unsupported(
+            persisted={"42": ["ARMNIGHT1"]},
+            installation_num="1",
+        )
+        assert "ARMNIGHT1" not in panel._resolver.unsupported
+
+    def test_no_persisted_data_starts_empty(self):
+        """Missing key entirely should yield an empty resolver."""
         from custom_components.verisure_owa.alarm_control_panel import (
             InteriorVerisureOwaAlarmPanel,
         )
@@ -5587,8 +5762,7 @@ class TestInteriorSubPanel:
         )
         installation = MagicMock(number="1", alias="A", address="x")
         client = MagicMock()
-        # Persisted from a previous session — must hydrate the resolver.
-        client.config = {"unsupported_commands": ["ARMNIGHT1"]}
+        client.config = {}  # no unsupported_commands key at all
         hass = MagicMock()
         with (
             patch.object(
@@ -5603,8 +5777,7 @@ class TestInteriorSubPanel:
             panel = InteriorVerisureOwaAlarmPanel(
                 installation, client, hass, coordinator
             )
-
-        assert "ARMNIGHT1" in panel._resolver.unsupported
+        assert panel._resolver.unsupported == frozenset()
 
     async def test_subpanel_raises_subpanel_error_when_command_unsupported(self):
         """Sub-panels have no user-editable mappings, so the rejection
@@ -5708,6 +5881,35 @@ class TestPerimeterSubPanel:
         assert feats & F.ARM_AWAY
         assert not (feats & F.ARM_HOME)
         assert not (feats & F.ARM_NIGHT)
+
+    def test_supported_features_drops_arm_away_when_peri1_unsupported(self):
+        """If the panel has rejected ``PERI1`` (the only arm-perimeter
+        command on the Perimeter sub-panel's standalone-axis branch), the
+        sub-panel must stop offering ``ARM_AWAY`` — otherwise the user
+        keeps pressing a button that's known to fail. Mirror of the
+        Interior sub-panel's ``ARMNIGHT1`` drop.
+        """
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_perimeter_panel()
+        panel._resolver.mark_unsupported("PERI1")
+
+        feats = panel.supported_features
+        assert not (feats & F.ARM_AWAY), (
+            "ARM_AWAY must be dropped after PERI1 was rejected"
+        )
+
+    def test_recompute_supported_features_drops_arm_away_too(self):
+        """``_recompute_supported_features`` is what propagates the
+        feature change to the entity registry (HA's cached_property and
+        the auto-update path read ``_attr_supported_features`` rather
+        than the @property). It has to agree with the live property."""
+        panel = _make_perimeter_panel()
+        panel._resolver.mark_unsupported("PERI1")
+        panel._recompute_supported_features()
+        assert panel._attr_supported_features == panel.supported_features
 
     def test_resolve_target_armed_away(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -5883,6 +6085,28 @@ class TestAnnexSubPanel:
         assert feats & F.ARM_AWAY
         assert not (feats & F.ARM_HOME)
         assert not (feats & F.ARM_NIGHT)
+
+    def test_supported_features_drops_arm_away_when_armannex1_unsupported(self):
+        """If the panel has rejected ``ARMANNEX1`` (the only arm-annex
+        wire command), the Annex sub-panel must stop offering
+        ``ARM_AWAY``."""
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_annex_panel()
+        panel._resolver.mark_unsupported("ARMANNEX1")
+
+        feats = panel.supported_features
+        assert not (feats & F.ARM_AWAY), (
+            "ARM_AWAY must be dropped after ARMANNEX1 was rejected"
+        )
+
+    def test_recompute_supported_features_drops_arm_away_too(self):
+        panel = _make_annex_panel()
+        panel._resolver.mark_unsupported("ARMANNEX1")
+        panel._recompute_supported_features()
+        assert panel._attr_supported_features == panel.supported_features
 
     def test_resolve_armed_away_preserves_other_axes(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (

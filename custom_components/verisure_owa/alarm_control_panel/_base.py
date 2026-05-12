@@ -91,6 +91,30 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 _LOGGER = logging.getLogger(__name__)
 
 
+def _read_unsupported_for_installation(
+    config: dict[str, Any], installation_number: str
+) -> list[str]:
+    """Pull this installation's persisted unsupported-commands list.
+
+    ``config[CONF_UNSUPPORTED_COMMANDS]`` may be in one of three shapes:
+
+    - **Missing / empty** — return ``[]``.
+    - **Dict** (current format, keyed by ``installation.number`` as str) —
+      return that installation's slot, or ``[]`` if it has none.
+    - **List** (v5.0.1-pre legacy format, a single flat list applied to
+      every installation on the entry) — return the list verbatim. Each
+      installation reading the legacy format sees the same rejections;
+      they get re-keyed under their own slot by ``_persist_unsupported``
+      on the next write.
+    """
+    raw = config.get(CONF_UNSUPPORTED_COMMANDS)
+    if isinstance(raw, dict):
+        return list(raw.get(installation_number, []))
+    if isinstance(raw, list):
+        return list(raw)
+    return []
+
+
 def build_partial_disarm_target(current: AlarmState, circuits: list[str]) -> AlarmState:
     """Build an AlarmState that disarms ``circuits`` and keeps the rest.
 
@@ -146,7 +170,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._last_unmapped_logged: str | None = None
         self._resolver = CommandResolver(
             has_peri=self._has_peri,
-            unsupported=self._client.config.get(CONF_UNSUPPORTED_COMMANDS, []),
+            unsupported=_read_unsupported_for_installation(
+                self._client.config, str(installation.number)
+            ),
         )
 
         # Build outgoing map: HA state -> API command string
@@ -617,6 +643,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         listener; CONF_UNSUPPORTED_COMMANDS isn't options-managed so the
         listener no-ops there.
 
+        Persisted shape is ``{<installation.number>: [<commands>...]}`` so
+        a legacy entry that covers multiple installations (no
+        ``CONF_INSTALLATION`` set, so ``_fetch_and_cache_installations``
+        returns them all) doesn't cross-contaminate sibling panels: each
+        panel reads only its own slot at setup, and persisting only
+        rewrites its own slot. The legacy flat-list format is migrated
+        on first write — the existing list is associated with THIS
+        installation's slot, since the legacy resolver-init read it for
+        this installation.
+
         The entity registry's cached ``supported_features`` is normally
         refreshed from inside ``_async_write_ha_state``, but empirically
         that path doesn't always propagate the change to the entity
@@ -627,12 +663,27 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         entry = getattr(self._client, "config_entry", None)
         if entry is None:
             return
-        current: list[str] = list(entry.data.get(CONF_UNSUPPORTED_COMMANDS, []))
-        new = sorted(self._resolver.unsupported)
-        if current == new:
+        installation_num = str(self._installation.number)
+        existing = entry.data.get(CONF_UNSUPPORTED_COMMANDS)
+        if isinstance(existing, dict):
+            current_map: dict[str, list[str]] = {
+                k: list(v) for k, v in existing.items()
+            }
+        elif isinstance(existing, list):
+            # Legacy flat-list format from v5.0.1-pre. The bare list was
+            # applied to every installation's resolver on read; migrate
+            # by attributing it to THIS installation's slot. Siblings that
+            # also need it will repopulate their own slot the next time
+            # they hit a rejection.
+            current_map = {installation_num: list(existing)}
+        else:
+            current_map = {}
+        new_list = sorted(self._resolver.unsupported)
+        if current_map.get(installation_num) == new_list:
             return
+        new_map = {**current_map, installation_num: new_list}
         self.hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_UNSUPPORTED_COMMANDS: new}
+            entry, data={**entry.data, CONF_UNSUPPORTED_COMMANDS: new_map}
         )
         self._recompute_supported_features()
         self._force_registry_supported_features()

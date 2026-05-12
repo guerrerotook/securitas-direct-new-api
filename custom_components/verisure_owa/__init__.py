@@ -301,9 +301,20 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_MAP_CUSTOM] = _opt(CONF_MAP_CUSTOM)
     config[CONF_MAP_VACATION] = _opt(CONF_MAP_VACATION)
     # Runtime-learned unsupported commands (data-only — not user-editable).
-    config[CONF_UNSUPPORTED_COMMANDS] = list(
-        entry.data.get(CONF_UNSUPPORTED_COMMANDS, [])
-    )
+    # Persisted shape is ``{<installation.number>: [<commands>...]}``; the
+    # legacy v5.0.1-pre flat-list ``[<commands>...]`` is preserved verbatim
+    # so ``BaseVerisureOwaAlarmPanel._read_unsupported_for_installation``
+    # can migrate it on the next persist. Deep-copy lists/dicts so later
+    # in-place mutations don't leak back into ``entry.data``.
+    _raw_unsupported = entry.data.get(CONF_UNSUPPORTED_COMMANDS, {})
+    if isinstance(_raw_unsupported, dict):
+        config[CONF_UNSUPPORTED_COMMANDS] = {
+            k: list(v) for k, v in _raw_unsupported.items()
+        }
+    elif isinstance(_raw_unsupported, list):
+        config[CONF_UNSUPPORTED_COMMANDS] = list(_raw_unsupported)
+    else:
+        config[CONF_UNSUPPORTED_COMMANDS] = {}
 
     need_sign_in = False
     if CONF_DEVICE_ID in entry.data:

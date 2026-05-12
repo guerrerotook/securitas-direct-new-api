@@ -146,6 +146,31 @@ class CommandResolver:
             return True  # disarm always available
         return _INTERIOR_ARM[mode] not in self._unsupported
 
+    def can_reach_perimeter(self, mode: PerimeterMode) -> bool:
+        """Return True if the Perimeter sub-panel can reach ``mode``.
+
+        The Perimeter sub-panel only drives the perimeter axis (preserving
+        interior). The arm-perimeter wire command on the standalone path
+        is ``PERI1`` (see ``_resolve_arm``'s "only perimeter changes"
+        branch). If that's rejected the mode is unreachable from this
+        entity, mirroring ``can_reach_interior``'s contract: disarm always
+        available, arm-on gated by the resolver's unsupported set.
+        """
+        if mode == PerimeterMode.OFF:
+            return True  # disarm always available
+        return "PERI1" not in self._unsupported
+
+    def can_reach_annex(self, mode: AnnexMode) -> bool:
+        """Return True if the Annex sub-panel can reach ``mode``.
+
+        The Annex sub-panel drives the annex axis with the explicit
+        ``ARMANNEX1`` / ``DARMANNEX1`` commands. If ``ARMANNEX1`` is
+        rejected the mode is unreachable; disarm stays available.
+        """
+        if mode == AnnexMode.OFF:
+            return True  # disarm always available
+        return "ARMANNEX1" not in self._unsupported
+
     def _resolve_annex(
         self, current_annex: AnnexMode, target_annex: AnnexMode
     ) -> list[CommandStep]:
