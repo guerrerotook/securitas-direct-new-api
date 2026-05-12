@@ -2,7 +2,7 @@
 
 [![HACS Default](https://img.shields.io/badge/HACS-Default-blue.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/v/release/guerrerotook/securitas-direct-new-api)](https://github.com/guerrerotook/securitas-direct-new-api/releases)
-[![GitHub Downloads](https://img.shields.io/github/downloads/guerrerotook/securitas-direct-new-api/total)](https://github.com/guerrerotook/securitas-direct-new-api/releases)
+[![Active Installations](https://img.shields.io/badge/dynamic/json?url=https://analytics.home-assistant.io/custom_integrations.json&label=Active%20Installations&query=$.verisure_owa.total&color=blue)](https://analytics.home-assistant.io/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 A Home Assistant integration for **Verisure** (formerly Securitas Direct in some markets), supporting Argentina, Brazil, Chile, France, Ireland, Italy, Peru, Portugal, Spain, and the United Kingdom.
