@@ -619,8 +619,9 @@ class VerisureOwaActivityLogCard extends HTMLElement {
       }
     };
     // Drag threshold (px) for distinguishing a click from a text-selection drag.
-    // Pointer travel beyond this between mousedown and click means the user was
-    // selecting text, not tapping the row — leave the row state alone.
+    // Pointer travel of more than this many px between pointerdown and click
+    // (strict > — a 4-px jitter still toggles) means the user was selecting
+    // text, not tapping the row, so leave the row state alone.
     const DRAG_THRESHOLD = 4;
     this.shadowRoot.querySelectorAll(".event").forEach((row) => {
       let downX = 0;
@@ -818,9 +819,9 @@ class VerisureOwaActivityLogCard extends HTMLElement {
           border-top: 1px solid var(--divider-color, rgba(0,0,0,.06));
           /* HA's Lovelace shell inherits user-select: none into our shadow
              tree; explicitly opt back in so users can highlight the alias
-             / actor text on the row. The pointerdown/click handler in
-             setupEventListeners filters out drags so selection doesn't
-             also toggle the row. */
+             / actor text on the row. The pointerdown/click handler wired
+             in _render() filters out drags so selection doesn't also
+             toggle the row. */
           user-select: text;
           -webkit-user-select: text;
         }
