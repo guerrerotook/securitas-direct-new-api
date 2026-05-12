@@ -395,7 +395,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         unique_id = f"{username}_{installation.number}"
         await self.async_set_unique_id(unique_id)
-        self._abort_if_unique_id_configured()
+        # HA 2026.6: opt out of implicit reload to avoid deprecated double-reload
+        # with the entry-update listener registered in __init__.async_setup_entry.
+        self._abort_if_unique_id_configured(reload_on_update=False)
         self.config[CONF_INSTALLATION] = installation.number
         assert self.hub is not None
         refresh_token = self.hub.get_refresh_token()

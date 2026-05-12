@@ -1469,6 +1469,61 @@ async def test_all_configured_aborts(hass):
     assert result["reason"] == "already_configured"
 
 
+async def test_abort_opts_out_of_reload_on_update(hass):
+    """`_abort_if_unique_id_configured` must be called with reload_on_update=False.
+
+    HA 2026.6 deprecates the combination of `add_update_listener` and the
+    reload-on-update path of `_abort_if_unique_id_configured`; in 2026.12 it
+    becomes an error. We keep the listener (it syncs options into data) and
+    opt out on the abort side instead.
+    See developers.home-assistant.io/blog/2026/05/07/
+    config-entry-listener-together-with-reloading-methods/
+    """
+    from homeassistant import config_entries as ha_config_entries
+
+    from custom_components.verisure_owa.config_flow import FlowHandler
+
+    # Pre-existing entry on a *different* installation so the pre-step filter
+    # doesn't drop the available one — the abort path inside
+    # `_create_entry_for_installation` is what we want to exercise. We then
+    # patch `_async_current_entries` to also hide the pre-existing entry from
+    # the filter, while leaving it visible to the abort's lookup.
+    blocking_data = make_config_entry_data()
+    blocking_data[CONF_INSTALLATION] = "111"
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_111",
+        data=blocking_data,
+        version=3,
+    ).add_to_hass(hass)
+
+    mock_hub = _hub_factory()
+    mock_hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number="111", alias="Home")]
+    )
+
+    captured_kwargs: dict = {}
+    real_abort = ha_config_entries.ConfigFlow._abort_if_unique_id_configured
+
+    def spy_abort(self, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_abort(self, *args, **kwargs)
+
+    with (
+        patch.object(FlowHandler, "_async_current_entries", return_value=[]),
+        patch.object(
+            ha_config_entries.ConfigFlow,
+            "_abort_if_unique_id_configured",
+            spy_abort,
+        ),
+    ):
+        await _complete_full_flow(hass, mock_hub)
+
+    assert captured_kwargs.get("reload_on_update") is False, (
+        f"Expected reload_on_update=False, got kwargs={captured_kwargs}"
+    )
+
+
 # ===================================================================
 # TestFullFlow (~3 tests)
 # ===================================================================
