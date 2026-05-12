@@ -571,24 +571,34 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     raise
                 if err.http_status == 409:
                     raise  # Server busy — don't try alternatives
-                if err.http_status is not None and 400 <= err.http_status < 500:
-                    # 4xx (BAD_USER_INPUT, "command not valid for panel", etc.)
-                    # — command not in panel's enum, mark as unsupported and
-                    # try the next alternative.
+                if err.http_status == 400:
+                    # 400 BAD_USER_INPUT ("command not valid for panel") is
+                    # the *only* HTTP status the Verisure OWA API uses to
+                    # signal "this command is not in the panel's enum".
+                    # Mark this specific command unsupported, persist, and
+                    # try the next alternative in the step.
+                    #
+                    # We deliberately do NOT blacklist for other 4xx
+                    # (401 auth-blip, 422 validation hiccup, 429 rate-limit,
+                    # 451 legal-block, etc.) — those are transient or
+                    # environmental and persisting them would permanently
+                    # disable an arming mode the user actually has, just
+                    # because the panel was briefly unreachable. Propagate
+                    # the error so the caller sees the transient failure
+                    # without polluting unsupported_commands.
                     _LOGGER.info(
-                        "Command %s not supported by panel (status %s),"
+                        "Command %s not supported by panel (status 400),"
                         " trying next alternative: %s",
                         command,
-                        err.http_status,
                         err.log_detail(),
                     )
                     self._resolver.mark_unsupported(command)
                     self._persist_unsupported()
                 else:
-                    # 5xx server error or panel-level error (e.g.
-                    # TECHNICAL_ERROR after polling) — transient/communication
-                    # failure, not a command issue. Don't blacklist the command
-                    # and don't try alternatives (they'll likely also fail).
+                    # Any other 4xx (transient auth, rate-limit, etc.) or
+                    # 5xx server error / panel-level error — not a "command
+                    # not valid" case. Don't blacklist; don't try
+                    # alternatives (they'll likely also fail the same way).
                     raise
                 last_err = err
 

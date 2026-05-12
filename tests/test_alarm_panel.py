@@ -3790,6 +3790,45 @@ class TestCompoundArmCommands:
         assert "ARMNIGHT1PERI1" in alarm._resolver.unsupported
         assert alarm._state == AlarmControlPanelState.DISARMED
 
+    @pytest.mark.parametrize("transient_status", [401, 422, 429, 451])
+    async def test_non_400_4xx_does_not_blacklist_command(self, transient_status):
+        """Only HTTP 400 (BAD_USER_INPUT / "command not valid for panel") means
+        the panel rejected the command. Other 4xx statuses (401 auth-blip,
+        422 validation, 429 rate-limit, etc.) are transient or environmental
+        and must NOT mark the command unsupported — otherwise a single bad
+        moment permanently disables an arming mode the user actually has.
+
+        Sibling concern from PR #467 review: blacklisting too broadly lets
+        ``unsupported_commands`` get polluted by transient auth or rate-limit
+        problems.
+        """
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("transient", http_status=transient_status)
+        )
+
+        # set_arm_state catches VerisureOwaError and routes through the
+        # arm-failed error handler (notify + log) without re-raising —
+        # so the call returns normally; the critical check is below.
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        # Critically: no command was marked unsupported.
+        assert alarm._resolver.unsupported == frozenset(), (
+            f"transient {transient_status} must not blacklist any command, "
+            f"but resolver.unsupported = {alarm._resolver.unsupported!r}"
+        )
+        # And no alternatives were attempted — the 4xx propagated out of
+        # _execute_step, the executor stopped at the first failure
+        # rather than trying every command in the step (which would
+        # also fail and add latency).
+        assert alarm.client.arm_alarm.call_count == 1, (
+            f"transient {transient_status} should stop at first failure, "
+            f"but tried {alarm.client.arm_alarm.call_count} alternatives"
+        )
+
     async def test_unsupported_command_is_persisted_to_entry_data(self):
         """After a 400 marks a command unsupported, the entry's data must
         gain the command in CONF_UNSUPPORTED_COMMANDS so the next setup
