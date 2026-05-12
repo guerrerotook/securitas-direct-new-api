@@ -284,40 +284,24 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
         # _attr in sync ensures the registry-update path sees the change.
         self._recompute_supported_features()
 
-    def _recompute_supported_features(self) -> None:
-        """Update ``_attr_supported_features`` from the resolver.
+    def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
+        """Build the current resolver-gated feature set for this sub-panel.
 
-        Setting ``_attr_supported_features`` goes through HA's wrapped setter,
-        which invalidates the ``supported_features`` cached_property entry —
-        so any code that reads the property after a mark_unsupported sees
-        the filtered set, and the entity registry's stored supported_features
-        gets updated on the next state write.
-        """
-        features = AlarmControlPanelEntityFeature(0)
-        if self._resolver.can_reach_interior(InteriorMode.DAY):
-            features |= AlarmControlPanelEntityFeature.ARM_HOME
-        if self._resolver.can_reach_interior(InteriorMode.NIGHT):
-            features |= AlarmControlPanelEntityFeature.ARM_NIGHT
-        if self._resolver.can_reach_interior(InteriorMode.TOTAL):
-            features |= AlarmControlPanelEntityFeature.ARM_AWAY
-        self._attr_supported_features = features
-
-    @property
-    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return interior arming features, minus any the panel has rejected.
+        Single source of truth shared by the live ``supported_features``
+        @property (HA reads it on every state calculation) and
+        ``_recompute_supported_features`` (which writes the value into
+        ``_attr_supported_features`` for HA's cached_property + entity-
+        registry path).
 
         We deliberately do NOT gate on the JWT capability set: empirically
         (Italian SDVECU OWNER) the JWT 'cap' claim can be both incomplete
         and wrong about which arming commands the panel accepts — e.g.
         claiming ARMNIGHT while the panel rejects ARMNIGHT1 with "not valid
         for Central Unit", and omitting ARMDAY while the panel happily
-        accepts ARMDAY1. Gating on the cap set therefore hides modes that
-        work and exposes modes that don't.
-
-        Instead start with all three interior modes and drop ones whose
-        underlying command has been rejected at runtime. The rejection set
-        is hydrated from persisted state on setup, so a mode disabled once
-        stays disabled across HA restarts.
+        accepts ARMDAY1. Instead start with all three interior modes and
+        drop ones whose underlying command has been rejected at runtime;
+        the rejection set is hydrated from persisted state on setup so a
+        mode disabled once stays disabled across HA restarts.
         """
         features = AlarmControlPanelEntityFeature(0)
         if self._resolver.can_reach_interior(InteriorMode.DAY):
@@ -327,6 +311,13 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
         if self._resolver.can_reach_interior(InteriorMode.TOTAL):
             features |= AlarmControlPanelEntityFeature.ARM_AWAY
         return features
+
+    def _recompute_supported_features(self) -> None:
+        self._attr_supported_features = self._compute_supported_features()
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        return self._compute_supported_features()
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""
@@ -374,26 +365,24 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
         self._attr_name = f"Perimeter - {self._installation.alias}"
         self._recompute_supported_features()
 
-    def _recompute_supported_features(self) -> None:
-        features = AlarmControlPanelEntityFeature(0)
-        if self._resolver.can_reach_perimeter(PerimeterMode.ON):
-            features |= AlarmControlPanelEntityFeature.ARM_AWAY
-        self._attr_supported_features = features
-
-    @property
-    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+    def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
         """Return ``ARM_AWAY`` unless the resolver has marked ``PERI1`` unsupported.
 
         Perimeter is binary (ON/OFF) and ``PERI1`` is the only standalone
         arm-perimeter command, so a panel rejection makes the entire
-        sub-panel button unreachable — the right move is to drop
-        ``ARM_AWAY`` from supported_features rather than keep showing a
-        button that will fail.
+        sub-panel button unreachable — drop ``ARM_AWAY`` rather than keep
+        showing a button that will fail.
         """
-        features = AlarmControlPanelEntityFeature(0)
         if self._resolver.can_reach_perimeter(PerimeterMode.ON):
-            features |= AlarmControlPanelEntityFeature.ARM_AWAY
-        return features
+            return AlarmControlPanelEntityFeature.ARM_AWAY
+        return AlarmControlPanelEntityFeature(0)
+
+    def _recompute_supported_features(self) -> None:
+        self._attr_supported_features = self._compute_supported_features()
+
+    @property
+    def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
+        return self._compute_supported_features()
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the perimeter axis."""
@@ -437,23 +426,21 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
         self._attr_name = f"Annex - {self._installation.alias}"
         self._recompute_supported_features()
 
-    def _recompute_supported_features(self) -> None:
-        features = AlarmControlPanelEntityFeature(0)
+    def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
+        """Return ``ARM_AWAY`` unless the resolver has marked ``ARMANNEX1``
+        unsupported. Mirrors the Perimeter sub-panel: annex is binary and
+        ``ARMANNEX1`` is the only arm-annex wire command, so a panel
+        rejection makes the button unreachable."""
         if self._resolver.can_reach_annex(AnnexMode.ON):
-            features |= AlarmControlPanelEntityFeature.ARM_AWAY
-        self._attr_supported_features = features
+            return AlarmControlPanelEntityFeature.ARM_AWAY
+        return AlarmControlPanelEntityFeature(0)
+
+    def _recompute_supported_features(self) -> None:
+        self._attr_supported_features = self._compute_supported_features()
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return ``ARM_AWAY`` unless the resolver has marked ``ARMANNEX1``
-        unsupported. Mirrors the Perimeter sub-panel's resolver-aware
-        feature gating — annex is binary and ``ARMANNEX1`` is the only
-        arm-annex wire command, so a panel rejection makes the button
-        unreachable and the feature should drop."""
-        features = AlarmControlPanelEntityFeature(0)
-        if self._resolver.can_reach_annex(AnnexMode.ON):
-            features |= AlarmControlPanelEntityFeature.ARM_AWAY
-        return features
+        return self._compute_supported_features()
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the annex axis."""

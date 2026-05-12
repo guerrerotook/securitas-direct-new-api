@@ -171,7 +171,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._resolver = CommandResolver(
             has_peri=self._has_peri,
             unsupported=_read_unsupported_for_installation(
-                self._client.config, str(installation.number)
+                self._client.config, installation.number
             ),
         )
 
@@ -673,7 +673,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         entry = getattr(self._client, "config_entry", None)
         if entry is None:
             return
-        installation_num = str(self._installation.number)
+        installation_num = self._installation.number
         existing = entry.data.get(CONF_UNSUPPORTED_COMMANDS)
         if isinstance(existing, dict):
             current_map: dict[str, list[str]] = {
