@@ -453,13 +453,13 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
 ```
 force_arm:
   1. Read stored reference_id, suid, mode from _force_context
-  2. _clear_force_context(force=True)
+  2. _clear_force_context()  — cancels TTL timer + wipes context dict + attrs
   3. _dismiss_arming_exception_notification() (if notifications enabled)
   4. set_arm_state(mode, force_arming_remote_id=ref_id, suid=suid)
      → API accepts force params and overrides the open-sensor exceptions
 
 force_arm_cancel:
-  1. _clear_force_context(force=True)
+  1. _clear_force_context()
   2. _dismiss_arming_exception_notification() (if notifications enabled)
   3. async_write_ha_state()
 
@@ -468,7 +468,7 @@ Mobile notification actions (when built-in handler enabled):
   - SECURITAS_CANCEL_FORCE_ARM_<num> → _clear_force_context() + write state
 ```
 
-**Force-arm context expiry:** The force-arm context has a 180-second TTL (`_FORCE_ARM_TTL`). When `_clear_force_context()` is called by a coordinator update and the context has aged past the TTL, it is cleared. If the built-in notification handler is enabled, a persistent notification is shown explaining the force-arm option has expired. This prevents stale force-arm contexts from being used after the panel has moved on.
+**Force-arm context expiry:** The force-arm context has a 180-second TTL (`_FORCE_ARM_TTL`). Expiry is driven by an independent `async_call_later` timer scheduled in `_set_force_context` (`_base.py:_schedule_force_arm_expiry`); when it fires, `_async_handle_force_arm_expiry` fires the public `verisure_owa_force_arm_expired` event, runs the built-in notification side effects (if enabled), and wipes the context. The timer runs independent of coordinator state — this matters because HA's `DataUpdateCoordinator` does NOT call its listeners on consecutive failed refreshes, so the previous coordinator-driven check would silently skip the expiry during a sustained API outage that started before the TTL boundary. `_clear_force_context()` is now a pure wipe (cancels the timer + drops the context dict + drops the entity attributes); it does no TTL bookkeeping itself and is used by the canonical resolution paths (force_arm, force_arm_cancel, sibling dismissal).
 
 The `_get_exceptions()` API call uses the same polling pattern as arm/disarm — the server returns `WAIT` on the first poll while the panel reports the open sensors, then `OK` with the full exception list on a subsequent poll.
 
@@ -494,6 +494,7 @@ When arming is blocked by open sensors (the API returns a `NON_BLOCKING` error),
 
 **Event payload:**
 ```python
+# verisure_owa_arming_exception
 {
     "entity_id": "alarm_control_panel.verisure_owa_my_home",
     "mode": "armed_away",
@@ -504,8 +505,64 @@ When arming is blocked by open sensors (the API returns a `NON_BLOCKING` error),
             {"alias": "Kitchen window", "zone_id": "3", "device_type": "MAG"},
         ],
     },
+    "_event_id": "<uuid4>",
 }
 ```
+
+**Lifecycle events** (`events.py:33,39`):
+
+Two follow-on events fire for every active force-arm context, regardless of the
+`force_arm_notifications` toggle. The toggle gates the built-in side effects only —
+the events themselves are the public contract for user automations.
+
+```python
+# verisure_owa_force_arm_expired — fires when the 180 s TTL elapses without
+# the user pressing Force Arm or Cancel.
+{
+    "entity_id": "alarm_control_panel.verisure_owa_my_home",
+    "mode": "armed_away",
+    "zones": ["Front door", "Garage"],
+    "details": {
+        "installation": "12345",
+        "exceptions": [{"alias": "Front door", "zone_id": "1", ...}],
+    },
+    "_event_id": "<uuid4>",
+}
+
+# verisure_owa_arming_exception_dismissed — fires when an active force-arm
+# context is cleared by something OTHER than force_arm / force_arm_cancel
+# (those are the canonical resolutions and do not fire dismissed).
+{
+    "entity_id": "alarm_control_panel.verisure_owa_my_home",
+    "reason": "user_arm" | "user_disarm" | "integration_reload",
+    "new_mode": "armed_home" | "armed_away" | "disarmed" | None,
+    "details": {"installation": "12345"},
+    "_event_id": "<uuid4>",
+}
+```
+
+`reason` is one of the constants in `events.py:43-46` (`DISMISSAL_REASON_USER_ARM`,
+`DISMISSAL_REASON_USER_DISARM`, `DISMISSAL_REASON_INTEGRATION_RELOAD`); `new_mode`
+is `None` only when `reason="integration_reload"` (entity teardown — there is no
+new mode being targeted).
+
+**Cross-panel coordination:** the Combined and per-axis sub-panels (Interior /
+Perimeter / Annex) for an installation share notification state. `_async_arm`
+and `async_alarm_disarm` call `_dismiss_pending_force_context_on_siblings`
+BEFORE dispatching the new operation: it walks every panel returned by
+`_siblings_on_installation` (which reads `entry_data["combined_alarm_panels"]`
+and `entry_data["axis_alarm_panels"]`), fires the dismissed event attributed to
+the panel that HELD the context (its own `entity_id`), then clears that panel's
+context. So if the user triggers an arming exception on Combined and then arms
+via the Interior sub-panel, Combined's persistent + mobile notifications vanish
+immediately even if the new arm operation later fails.
+
+**Reload safety net:** `async_will_remove_from_hass` checks for a still-live
+`_force_context` at teardown and fires the dismissed event with
+`reason="integration_reload"` and `new_mode=None`. This covers options-flow
+edits, reauth, and any other path that re-creates the entity, so user
+automations see the loss instead of silently inheriting a fresh entity with no
+context.
 
 **Built-in handler (enabled by default):**
 
@@ -513,7 +570,8 @@ When the built-in handler is active it:
 - Creates a persistent notification listing open zones with instructions for how to force-arm.
 - Sends a mobile notification (if `notify_group` is configured) with **Force Arm** / **Cancel** action buttons.
 - Listens for `mobile_app_notification_action` events to handle button taps (`SECURITAS_FORCE_ARM_<num>` → `async_force_arm()`, `SECURITAS_CANCEL_FORCE_ARM_<num>` → cancel). The action names retain the `SECURITAS_` prefix through the v5 deprecation window: the integration both sends the action (in the mobile notification payload) and listens for the resulting press event, so renaming would silently break any user automation hooked to `mobile_app_notification_action` events that match the action string. Renamed in v6 with explicit release-note guidance.
-- When force-arm context expires (180 s), updates the notification to inform the user the alarm was not armed.
+- When the force-arm context expires (180 s), fires `verisure_owa_force_arm_expired` (regardless of toggle) and — when notifications are enabled — updates the persistent notification, then replaces the mobile notification *in place* with a button-less informational card (same `tag` as the original so iOS/Android updates the existing card rather than stacking a new one; `actions` array omitted so no buttons render).
+- Listens for `verisure_owa_arming_exception_dismissed` and clears the shared persistent + mobile notifications when fired (so a sibling-panel arm/disarm or an integration reload cleans up the user-visible state).
 
 **Disabling the built-in handler:**
 

@@ -53,14 +53,14 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "The force-arm option has expired. The alarm was **not armed**. "
                 "Please try arming again."
             ),
+            "mobile_message": ("Force-arm window expired. The alarm was not armed."),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure: Arm blocked — open sensor(s)",
             "message": (
                 "Arming was blocked because the following sensor(s) are open:\n"
                 "{sensor_list}\n\n"
-                "To arm anyway, tap **Force Arm** on the alarm card "
-                "or on your mobile notification."
+                "To arm anyway, tap **Force Arm** on the alarm card."
             ),
             "mobile_message": (
                 "Arm blocked — open sensor(s): {sensor_list}. Arm anyway?"
@@ -121,6 +121,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "La opción de armado forzado ha expirado. La alarma **no** se "
                 "armó. Por favor, intenta armar de nuevo."
             ),
+            "mobile_message": ("El armado forzado ha expirado. La alarma no se armó."),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure: Armado bloqueado — sensor(es) abierto(s)",
@@ -128,7 +129,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "El armado se bloqueó porque los siguientes sensores están "
                 "abiertos:\n{sensor_list}\n\n"
                 "Para armar de todos modos, pulsa **Armar de todos modos** en "
-                "la tarjeta de la alarma o en tu notificación móvil."
+                "la tarjeta de la alarma."
             ),
             "mobile_message": (
                 "Armado bloqueado — sensor(es) abierto(s): {sensor_list}. "
@@ -190,6 +191,9 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "L'option d'armement forcé a expiré. "
                 "L'alarme **n'a pas** été armée. Veuillez réessayer."
             ),
+            "mobile_message": (
+                "L'armement forcé a expiré. L'alarme n'a pas été armée."
+            ),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure : Armement bloqué — capteur(s) ouvert(s)",
@@ -197,7 +201,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "L'armement a été bloqué car les capteurs suivants sont "
                 "ouverts :\n{sensor_list}\n\n"
                 "Pour armer quand même, appuyez sur **Armer quand même** sur "
-                "la carte d'alarme ou sur votre notification mobile."
+                "la carte d'alarme."
             ),
             "mobile_message": (
                 "Armement bloqué — capteur(s) ouvert(s) : {sensor_list}. "
@@ -259,6 +263,9 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "L'opzione di attivazione forzata è scaduta. "
                 "L'allarme **non** è stato attivato. Riprova ad attivarlo."
             ),
+            "mobile_message": (
+                "L'attivazione forzata è scaduta. L'allarme non è stato attivato."
+            ),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure: Attivazione bloccata — sensore(i) aperto(i)",
@@ -266,7 +273,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "L'attivazione è stata bloccata perché i seguenti sensori "
                 "sono aperti:\n{sensor_list}\n\n"
                 "Per attivare comunque, tocca **Attiva comunque** sulla card "
-                "dell'allarme o sulla tua notifica mobile."
+                "dell'allarme."
             ),
             "mobile_message": (
                 "Attivazione bloccata — sensore(i) aperto(i): {sensor_list}. "
@@ -328,6 +335,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "A opção de armar à força expirou. "
                 "O alarme **não** foi armado. Tente armar novamente."
             ),
+            "mobile_message": ("Armar à força expirou. O alarme não foi armado."),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure: Armar bloqueado — sensor(es) aberto(s)",
@@ -335,7 +343,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "O armar foi bloqueado porque os seguintes sensores estão "
                 "abertos:\n{sensor_list}\n\n"
                 "Para armar na mesma, toque em **Armar na mesma** no cartão "
-                "do alarme ou na sua notificação móvel."
+                "do alarme."
             ),
             "mobile_message": (
                 "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. Armar na mesma?"
@@ -396,6 +404,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "A opção de forçar armado expirou. "
                 "O alarme **não** foi armado. Tente armar novamente."
             ),
+            "mobile_message": ("Forçar armado expirou. O alarme não foi armado."),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure: Armar bloqueado — sensor(es) aberto(s)",
@@ -403,7 +412,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Armar foi bloqueado porque os seguintes sensores estão "
                 "abertos:\n{sensor_list}\n\n"
                 "Para armar mesmo assim, toque em **Forçar armado** no cartão "
-                "do alarme ou na sua notificação móvel."
+                "do alarme."
             ),
             "mobile_message": (
                 "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. "
@@ -465,6 +474,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "L'opció d'armat forçat ha expirat. "
                 "L'alarma **no** s'ha armat. Si us plau, torna a provar a armar."
             ),
+            "mobile_message": ("L'armat forçat ha expirat. L'alarma no s'ha armat."),
         },
         "arm_blocked_open_sensors": {
             "title": "Verisure: Armat bloquejat — sensor(s) obert(s)",
@@ -472,7 +482,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "L'armat s'ha bloquejat perquè els següents sensors estan "
                 "oberts:\n{sensor_list}\n\n"
                 "Per armar igualment, toca **Forçar armat** a la targeta de "
-                "l'alarma o a la teva notificació mòbil."
+                "l'alarma."
             ),
             "mobile_message": (
                 "Armat bloquejat — sensor(s) obert(s): {sensor_list}. Armar igualment?"

@@ -46,6 +46,104 @@ from custom_components.verisure_owa.const import (
     CONF_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
 )
+from custom_components.verisure_owa.events import (
+    ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+    FORCE_ARM_EXPIRED_EVENT_TYPE,
+)
+
+
+class TestNewArmingExceptionEventConstants:
+    """Tests that the two new event-type constants are defined with the
+    canonical verisure_owa_* names."""
+
+    def test_force_arm_expired_event_type(self):
+        assert FORCE_ARM_EXPIRED_EVENT_TYPE == "verisure_owa_force_arm_expired"
+
+    def test_arming_exception_dismissed_event_type(self):
+        assert (
+            ARMING_EXCEPTION_DISMISSED_EVENT_TYPE
+            == "verisure_owa_arming_exception_dismissed"
+        )
+
+
+class TestNotificationTranslationsPersistentMessageTrim:
+    """The persistent-notification arm_blocked_open_sensors.message must
+    not direct users to a mobile notification — anyone reading the
+    persistent notification is already in the HA UI."""
+
+    LOCALES = ("en", "es", "fr", "it", "pt", "pt-BR", "ca")
+
+    # Substrings (case-insensitive) that would indicate a leftover
+    # "or on your mobile notification" clause per locale. We only check
+    # for words that *uniquely* appear in the mobile clause, not in the
+    # ambient text — "mobile" / "móvil" / "móvel" / "phone".
+    FORBIDDEN_BY_LOCALE = {
+        "en": ["mobile notification"],
+        "es": ["notificación móvil"],
+        "fr": ["notification mobile"],
+        "it": ["notifica mobile"],
+        "pt": ["notificação móvel"],
+        "pt-BR": ["notificação móvel"],
+        "ca": ["notificació mòbil"],
+    }
+
+    def test_message_does_not_mention_mobile_notification(self):
+        from custom_components.verisure_owa.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]
+            msg = entry["message"].lower()
+            for forbidden in self.FORBIDDEN_BY_LOCALE[locale]:
+                assert forbidden.lower() not in msg, (
+                    f"Locale {locale!r} arm_blocked_open_sensors.message "
+                    f"still contains forbidden substring {forbidden!r}: {entry['message']!r}"
+                )
+
+    def test_message_still_mentions_alarm_card(self):
+        """Sanity: the alarm-card guidance must still be present per locale."""
+        from custom_components.verisure_owa.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        # Translation hint per locale that should remain.
+        keepers = {
+            "en": "alarm card",
+            "es": "tarjeta de la alarma",
+            "fr": "carte d'alarme",
+            "it": "card dell'allarme",
+            "pt": "cartão do alarme",
+            "pt-BR": "cartão do alarme",
+            "ca": "targeta de l'alarma",
+        }
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]
+            assert keepers[locale].lower() in entry["message"].lower(), (
+                f"Locale {locale!r} no longer mentions {keepers[locale]!r}"
+            )
+
+
+class TestForceArmExpiredMobileMessageTranslation:
+    """force_arm_expired entry must carry a mobile_message string per locale
+    for the button-less informational mobile notification on expiry."""
+
+    LOCALES = ("en", "es", "fr", "it", "pt", "pt-BR", "ca")
+
+    def test_mobile_message_present_for_all_locales(self):
+        from custom_components.verisure_owa.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["force_arm_expired"]
+            assert "mobile_message" in entry, (
+                f"Locale {locale!r} force_arm_expired entry missing mobile_message"
+            )
+            mobile = entry["mobile_message"]
+            assert isinstance(mobile, str) and mobile.strip(), (
+                f"Locale {locale!r} force_arm_expired.mobile_message is empty"
+            )
 
 
 class TestForceArmNotificationsConfig:
@@ -181,8 +279,12 @@ class TestForceArmNotificationsConfig:
         assert alarm._force_context is not None
         assert alarm._attr_extra_state_attributes["force_arm_available"] is True
 
-    def test_force_context_expiry_silent_when_disabled(self):
-        """When notifications disabled, force context expiry does not notify."""
+    async def test_force_context_expiry_silent_when_disabled(self):
+        """When notifications disabled, force context expiry does not notify.
+
+        The expiry timer callback now drives this — the coordinator-update
+        path no longer touches force context (see TestForceArmExpiryTimer).
+        """
         alarm = make_alarm()
         alarm.client.config["force_arm_notifications"] = False
         alarm._force_context = {
@@ -195,16 +297,14 @@ class TestForceArmNotificationsConfig:
         alarm._attr_extra_state_attributes["force_arm_available"] = True
         alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
 
-        alarm.coordinator.data = AlarmStatusData(
-            status=SStatus(status="D"), protom_response="D"
-        )
-
-        alarm._handle_coordinator_update()
+        # Invoke the timer callback directly — same semantics as the
+        # async_call_later-driven flow that production runs.
+        await alarm._async_handle_force_arm_expiry(datetime.now())
 
         # Force context cleared
         assert alarm._force_context is None
         assert "force_arm_available" not in alarm._attr_extra_state_attributes
-        # No notification calls
+        # No notification calls (notifications disabled)
         alarm.hass.async_create_task.assert_not_called()
 
     async def test_force_arm_no_dismiss_when_disabled(self):
@@ -327,6 +427,25 @@ def make_alarm(
     alarm.async_schedule_update_ha_state = MagicMock()
     alarm.async_write_ha_state = MagicMock()
     return alarm
+
+
+def setup_alarm_entry_data(alarm, *, sub_panels=()):
+    """Populate alarm.hass.data[DOMAIN] mirroring alarm_control_panel.__init__.
+
+    Registers ``alarm`` as the combined panel and any provided ``sub_panels``
+    in the axis-panel registry, keyed by their ``_AXIS`` attribute. Used by
+    tests that exercise `_siblings_on_installation` and the cross-panel
+    dismissal helper, both of which walk these registries.
+    """
+    from custom_components.verisure_owa import DOMAIN
+
+    alarm.hass.data = {DOMAIN: {}}
+    alarm.hass.data[DOMAIN]["entry-id-1"] = {
+        "combined_alarm_panels": {alarm.installation.number: alarm},
+        "axis_alarm_panels": {
+            alarm.installation.number: {p._AXIS: p for p in sub_panels}
+        },
+    }
 
 
 # ===========================================================================
@@ -1823,24 +1942,27 @@ class TestForceArmContext:
             "force_arm_expired",
         )
 
-    async def test_force_context_cleared_on_expired_coordinator_update(self):
-        """Coordinator update clears force context after scan interval expires."""
+    async def test_force_context_cleared_on_expiry_timer(self):
+        """Expiry timer callback clears force context + attributes.
+
+        Previously this exercised the coordinator-update-driven TTL check,
+        which has been removed (HA's coordinator does not call listeners
+        on consecutive failures, so the TTL would be missed during a
+        sustained outage). The expiry is now driven by an independent
+        async_call_later timer scheduled in _set_force_context.
+        """
         alarm = make_alarm()
         alarm._force_context = {
             "reference_id": "ref-123",
             "suid": "suid-123",
             "mode": AlarmControlPanelState.ARMED_HOME,
             "exceptions": [],
-            "created_at": datetime.now() - timedelta(seconds=300),  # Old
+            "created_at": datetime.now() - timedelta(seconds=300),
         }
         alarm._attr_extra_state_attributes["force_arm_available"] = True
         alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
 
-        alarm.coordinator.data = AlarmStatusData(
-            status=SStatus(status="D"), protom_response="D"
-        )
-
-        alarm._handle_coordinator_update()
+        await alarm._async_handle_force_arm_expiry(datetime.now())
 
         assert alarm._force_context is None
         assert "force_arm_available" not in alarm._attr_extra_state_attributes
@@ -1880,7 +2002,11 @@ class TestForceArmContext:
 
         # Register handler and capture callback
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
@@ -1910,7 +2036,11 @@ class TestForceArmContext:
 
         # Register handler and capture callback
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
@@ -1938,7 +2068,11 @@ class TestForceArmContext:
 
         # Register handler and capture callback
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
@@ -2076,6 +2210,1088 @@ class TestForceArmContext:
 
         alarm.hass.async_create_task.assert_not_called()  # type: ignore[attr-defined]
         assert alarm._force_context is not None  # untouched
+
+
+class TestForceArmExpiredEventFire:
+    """Tests that the verisure_owa_force_arm_expired event is fired when the
+    180s force-arm context expires."""
+
+    @staticmethod
+    def _expired_context(mode=AlarmControlPanelState.ARMED_AWAY):
+        return {
+            "reference_id": "ref-expire",
+            "suid": "suid-expire",
+            "mode": mode,
+            "exceptions": [
+                {"alias": "Front door", "deviceType": "MG", "zone_id": "1"},
+                {"alias": "Garage", "deviceType": "MG", "zone_id": "2"},
+            ],
+            "created_at": datetime.now() - timedelta(seconds=300),
+        }
+
+    async def test_event_fires_on_expiry_timer_callback(self):
+        """Expiry timer callback fires verisure_owa_force_arm_expired with the
+        original mode + zones derived from the saved exceptions.
+
+        Previously this exercised the coordinator-update-driven TTL check;
+        the TTL is now timer-driven (see TestForceArmExpiryTimer).
+        """
+        alarm = make_alarm()
+        alarm._force_context = self._expired_context()
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Front door", "Garage"]
+
+        await alarm._async_handle_force_arm_expiry(datetime.now())
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(force_expired) == 1
+        payload = force_expired[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["mode"] == AlarmControlPanelState.ARMED_AWAY
+        assert payload["zones"] == ["Front door", "Garage"]
+        assert payload["details"]["installation"] == "123456"
+        assert payload["details"]["exceptions"] == [
+            {"alias": "Front door", "deviceType": "MG", "zone_id": "1"},
+            {"alias": "Garage", "deviceType": "MG", "zone_id": "2"},
+        ]
+        assert "_event_id" in payload
+
+    def test_event_does_not_fire_on_direct_clear(self):
+        """Direct _clear_force_context (cancel/confirm/sibling-dismiss path) must
+        not fire the expired event — that is the timer callback's job alone."""
+        alarm = make_alarm()
+        alarm._force_context = self._expired_context()  # even when expired
+
+        alarm._clear_force_context()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert force_expired == []
+
+    def test_timer_scheduled_with_correct_delay(self):
+        """_set_force_context schedules the timer at exactly _FORCE_ARM_TTL.
+
+        Previously the "still fresh" test asserted that _clear_force_context
+        early-returned within the TTL — but that semantic is gone: the timer
+        fires exactly at TTL and the canonical clear path is unconditional.
+        What's worth asserting now is that the timer is scheduled with the
+        right delay; the rest is HA's scheduler.
+        """
+        alarm = make_alarm()
+        exc = ArmingExceptionError("ref-x", "suid-x", [{"alias": "Door"}])
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later"
+        ) as mock_call_later:
+            mock_call_later.return_value = MagicMock()
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_HOME)
+
+        mock_call_later.assert_called_once()
+        delay = mock_call_later.call_args[0][1]
+        # async_call_later accepts a timedelta directly — we pass the field
+        # itself rather than .total_seconds() so the unit lives at the
+        # declaration site.
+        assert delay == alarm._FORCE_ARM_TTL
+        assert delay.total_seconds() == 180
+
+    async def test_event_fires_even_when_notifications_disabled(self):
+        """Events are the public API and fire regardless of the notification toggle."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm._force_context = self._expired_context()
+
+        await alarm._async_handle_force_arm_expiry(datetime.now())
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(force_expired) == 1
+
+
+class TestForceArmExpiryTimer:
+    """Tests for the independent timer driving force-arm TTL expiry.
+
+    Replaces the previous coordinator-update-driven TTL check, which
+    missed the expiry event entirely during sustained API outages
+    (HA's DataUpdateCoordinator does not call listeners on consecutive
+    failures).
+    """
+
+    @staticmethod
+    def _make_exception():
+        return ArmingExceptionError(
+            "ref-timer",
+            "suid-timer",
+            [{"alias": "Front door", "deviceType": "MG", "zone_id": "1"}],
+        )
+
+    def test_set_force_context_schedules_timer(self):
+        """_set_force_context schedules async_call_later with the TTL."""
+        alarm = make_alarm()
+        exc = self._make_exception()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later"
+        ) as mock_call_later:
+            mock_call_later.return_value = MagicMock()
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+
+        mock_call_later.assert_called_once()
+        args = mock_call_later.call_args[0]
+        assert args[0] is alarm.hass
+        # Delay is the TTL — async_call_later accepts a timedelta directly.
+        assert args[1] == alarm._FORCE_ARM_TTL
+        # Callback is the expiry handler.
+        assert args[2] == alarm._async_handle_force_arm_expiry
+
+    def test_clear_force_context_cancels_timer(self):
+        """_clear_force_context cancels the pending expiry timer."""
+        alarm = make_alarm()
+        exc = self._make_exception()
+        unsub_mock = MagicMock()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            return_value=unsub_mock,
+        ):
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+
+        alarm._clear_force_context()
+
+        unsub_mock.assert_called_once()
+        assert alarm._force_arm_expiry_unsub is None
+
+    async def test_timer_callback_fires_expired_event_when_context_alive(self):
+        """The captured timer callback fires the expired event + wipes context."""
+        alarm = make_alarm()
+        exc = self._make_exception()
+        unsub_mock = MagicMock()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            return_value=unsub_mock,
+        ) as mock_call_later:
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+            callback_fn = mock_call_later.call_args[0][2]
+
+        # Reset fire-call tracking to isolate the timer-driven event.
+        alarm.hass.bus.async_fire.reset_mock()
+
+        await callback_fn(datetime.now())
+
+        # Expired event fired.
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(force_expired) == 1
+        payload = force_expired[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["mode"] == AlarmControlPanelState.ARMED_AWAY
+        assert payload["zones"] == ["Front door"]
+
+        # Context wiped.
+        assert alarm._force_context is None
+        assert "arm_exceptions" not in alarm._attr_extra_state_attributes
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        # Timer slot cleared so the unsub is never called twice on teardown.
+        assert alarm._force_arm_expiry_unsub is None
+        alarm.async_write_ha_state.assert_called()
+
+    async def test_timer_callback_noops_when_context_already_cleared(self):
+        """If context is cleared between scheduling and firing, callback no-ops."""
+        alarm = make_alarm()
+        exc = self._make_exception()
+        unsub_mock = MagicMock()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            return_value=unsub_mock,
+        ) as mock_call_later:
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+            callback_fn = mock_call_later.call_args[0][2]
+
+        # Wipe context manually as if a canonical resolution path already ran.
+        alarm._force_context = None
+        alarm.hass.bus.async_fire.reset_mock()
+
+        await callback_fn(datetime.now())
+
+        # No event fired.
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        force_expired = [
+            c for c in fire_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert force_expired == []
+        # Timer slot still cleared.
+        assert alarm._force_arm_expiry_unsub is None
+
+    async def test_force_arm_cancels_timer(self):
+        """async_force_arm cancels the pending expiry timer (force=True path)."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.DISARMED
+        exc = self._make_exception()
+        unsub_mock = MagicMock()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            return_value=unsub_mock,
+        ):
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_date="",
+            )
+        )
+
+        await alarm.async_force_arm()
+
+        unsub_mock.assert_called_once()
+
+    async def test_dismissed_path_cancels_timer(self):
+        """_dismiss_pending_force_context_on_siblings cancels the timer."""
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        # Wire up the entry-data shape the dismissal helper walks.
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {alarm.installation.number: alarm},
+            "axis_alarm_panels": {alarm.installation.number: {}},
+        }
+        exc = self._make_exception()
+        unsub_mock = MagicMock()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            return_value=unsub_mock,
+        ):
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+
+        await alarm._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_NIGHT,
+        )
+
+        unsub_mock.assert_called_once()
+
+
+class TestArmingExceptionDismissedOnEntityRemoval:
+    """Reload-path safety net: fire the dismissed event when the entity is
+    torn down with a live force-arm context (covers integration-reload
+    scenarios — options change, reauth, etc.)."""
+
+    @staticmethod
+    def _make_exception():
+        return ArmingExceptionError(
+            "ref-reload",
+            "suid-reload",
+            [{"alias": "Window", "deviceType": "MG"}],
+        )
+
+    async def test_will_remove_fires_dismissed_when_context_alive(self):
+        """async_will_remove_from_hass fires the dismissed event with
+        reason='integration_reload' and new_mode=None when context is alive."""
+        alarm = make_alarm()
+        alarm._force_context = {
+            "reference_id": "ref-reload",
+            "suid": "suid-reload",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+
+        await alarm.async_will_remove_from_hass()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["reason"] == "integration_reload"
+        assert payload["new_mode"] is None
+        assert payload["details"] == {"installation": "123456"}
+
+    async def test_will_remove_no_event_when_context_already_cleared(self):
+        """No dismissed event fires when context is already None."""
+        alarm = make_alarm()
+        alarm._force_context = None
+
+        await alarm.async_will_remove_from_hass()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_will_remove_cancels_timer(self):
+        """async_will_remove_from_hass cancels any pending expiry timer."""
+        alarm = make_alarm()
+        exc = ArmingExceptionError("ref-x", "suid-x", [{"alias": "Door"}])
+        unsub_mock = MagicMock()
+        with patch(
+            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            return_value=unsub_mock,
+        ):
+            alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
+
+        await alarm.async_will_remove_from_hass()
+
+        unsub_mock.assert_called_once()
+
+
+class TestForceArmExpiredMobileNotification:
+    """The button-less informational mobile notification sent on expiry."""
+
+    @staticmethod
+    def _make_event(entity_id="alarm_control_panel.home"):
+        """Build a mock event matching the FORCE_ARM_EXPIRED payload."""
+        from uuid import uuid4
+
+        ev = MagicMock()
+        ev.data = {
+            "entity_id": entity_id,
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "zones": ["Front door"],
+            "details": {
+                "installation": "123456",
+                "exceptions": [{"alias": "Front door"}],
+            },
+            "_event_id": str(uuid4()),
+        }
+        return ev
+
+    async def test_handler_sends_buttonless_mobile_with_same_tag(self):
+        """With notify_group + notifications enabled, expiry handler sends a
+        notify call with the same tag and no actions array."""
+        alarm = make_alarm()
+        alarm.hass.services.async_call = AsyncMock()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        # Make entity_id match the event payload
+        ev = self._make_event(entity_id=alarm.entity_id)
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert len(notify_calls) == 1
+        sd = notify_calls[0][1]["service_data"]
+        # Same tag as the original arming-exception notification (so the
+        # mobile OS replaces the existing card in place).
+        assert (
+            sd["data"]["tag"]
+            == f"verisure_owa.arming_exception_{alarm.installation.number}"
+        )
+        # No actions array — buttons removed.
+        assert "actions" not in sd["data"]
+        # Body is the mobile_message from the force_arm_expired translation.
+        from custom_components.verisure_owa.notification_translations import (
+            get_notification_strings,
+        )
+
+        expected = get_notification_strings(alarm.hass, "force_arm_expired")
+        assert sd["message"] == expected["mobile_message"]
+        assert sd["title"] == expected["title"]
+
+    async def test_handler_no_op_without_notify_group(self):
+        """Without a notify_group configured, no mobile notify call fires."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        # Explicitly no notify_group set
+        ev = self._make_event(entity_id=alarm.entity_id)
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert notify_calls == []
+
+    async def test_handler_no_op_when_notifications_disabled(self):
+        """force_arm_notifications=False suppresses the mobile call."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        ev = self._make_event(entity_id=alarm.entity_id)
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert notify_calls == []
+
+    async def test_handler_skips_event_for_other_entity(self):
+        """Handler ignores events whose entity_id does not match self."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        ev = self._make_event(entity_id="alarm_control_panel.different")
+
+        await alarm._async_notify_force_arm_expired_mobile(ev)
+
+        calls = alarm.hass.services.async_call.call_args_list
+        notify_calls = [c for c in calls if c[1].get("domain") == "notify"]
+        assert notify_calls == []
+
+
+class TestForceArmExpiredHandlerRegistration:
+    """The expiry-event handler is registered alongside the arming-exception one."""
+
+    def test_register_subscribes_to_force_arm_expired(self):
+        alarm = make_alarm()
+
+        alarm._register_arming_exception_handler()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        expired_calls = [
+            c for c in listen_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        ]
+        assert len(expired_calls) == 1
+
+    async def test_handler_dedupes_via_event_id(self):
+        """A repeated _event_id triggers the handler at most once."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._register_arming_exception_handler()
+
+        # Capture the registered callback.
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        expired_cb = next(
+            c[0][1] for c in listen_calls if c[0][0] == "verisure_owa_force_arm_expired"
+        )
+
+        ev = MagicMock()
+        ev.data = {
+            "entity_id": alarm.entity_id,
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "zones": ["Front door"],
+            "details": {"installation": "123456", "exceptions": []},
+            "_event_id": "same-id",
+        }
+        expired_cb(ev)
+        # Same event id again — must be ignored.
+        expired_cb(ev)
+
+        # Only one async_create_task scheduled across the two calls — the
+        # second invocation hit the dedup guard and bailed before scheduling.
+        first_count = alarm.hass.async_create_task.call_count
+        assert first_count == 1
+        # Third invocation with the same event id is idempotent — no growth.
+        expired_cb(ev)
+        assert alarm.hass.async_create_task.call_count == first_count
+
+
+class TestSiblingPanelLookup:
+    """The cross-panel sibling-lookup helper for installation-wide coordination."""
+
+    def test_lookup_returns_self_only_when_no_sub_panels(self):
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+
+        siblings = alarm._siblings_on_installation()
+
+        assert siblings == [alarm]
+
+    def test_lookup_returns_combined_plus_sub_panels(self):
+        alarm = make_alarm()
+        sub1 = MagicMock()
+        sub1._AXIS = "interior"
+        sub2 = MagicMock()
+        sub2._AXIS = "perimeter"
+        setup_alarm_entry_data(alarm, sub_panels=(sub1, sub2))
+
+        siblings = alarm._siblings_on_installation()
+
+        # Combined panel always present; sub-panel order is by axis-key
+        # iteration which we don't promise — assert as a set.
+        assert set(siblings) == {alarm, sub1, sub2}
+
+    def test_lookup_skips_other_installations(self):
+        """Only panels for THIS installation number are returned."""
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        # Another combined panel for a different installation in the same
+        # hass.data entry block.
+        other = MagicMock()
+        other.installation = MagicMock(number="999999")
+
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {
+                alarm.installation.number: alarm,
+                "999999": other,
+            },
+            "axis_alarm_panels": {alarm.installation.number: {}},
+        }
+
+        siblings = alarm._siblings_on_installation()
+
+        assert siblings == [alarm]
+        assert other not in siblings
+
+    def test_lookup_handles_missing_entry_data_gracefully(self):
+        """If hass.data[DOMAIN] is empty, helper returns just self.
+
+        Defensive: setup ordering means the entry data dict could be
+        missing during very early registration paths.
+        """
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        alarm.hass.data = {DOMAIN: {}}
+
+        siblings = alarm._siblings_on_installation()
+
+        assert siblings == [alarm]
+
+    def test_lookup_walks_multiple_config_entries(self):
+        """Helper iterates ALL config entries — a panel in entry-2 is found
+        even when self lives in entry-1's registry.
+
+        Real-world scenario: multiple Verisure accounts (one config entry per
+        account), each with its own installation. The helper walks every
+        entry's bucket so cross-installation arm/disarm coordination works.
+        """
+        from custom_components.verisure_owa import DOMAIN
+
+        alarm = make_alarm()
+        # A second installation living in a different config entry.
+        other = MagicMock()
+        other.installation = MagicMock(number="999999")
+        other_sub = MagicMock()
+        other_sub._AXIS = "interior"
+
+        alarm.hass.data = {DOMAIN: {}}
+        alarm.hass.data[DOMAIN]["entry-id-1"] = {
+            "combined_alarm_panels": {alarm.installation.number: alarm},
+            "axis_alarm_panels": {alarm.installation.number: {}},
+        }
+        alarm.hass.data[DOMAIN]["entry-id-2"] = {
+            "combined_alarm_panels": {"999999": other},
+            "axis_alarm_panels": {"999999": {"interior": other_sub}},
+        }
+
+        siblings = alarm._siblings_on_installation()
+
+        # Only this installation's panels, drawn from entry-id-1.
+        assert siblings == [alarm]
+        assert other not in siblings
+        assert other_sub not in siblings
+
+
+class TestFireArmingExceptionDismissedEvent:
+    """The verisure_owa_arming_exception_dismissed event fired when a panel's
+    force-arm context is cleared by a different arm/disarm action."""
+
+    def test_payload_shape(self):
+        alarm = make_alarm()
+
+        alarm._fire_arming_exception_dismissed_event(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_HOME,
+        )
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["reason"] == "user_arm"
+        assert payload["new_mode"] == AlarmControlPanelState.ARMED_HOME
+        assert payload["details"] == {"installation": "123456"}
+        assert "_event_id" in payload
+
+
+class TestDismissPendingForceContextOnSiblings:
+    """The cross-panel dismissal helper called by _async_arm / async_alarm_disarm."""
+
+    async def test_no_op_when_no_panel_has_context(self):
+        """No siblings hold a force context — nothing fires, nothing clears."""
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+
+        await alarm._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_HOME,
+        )
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_fires_for_self_when_self_has_context(self):
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+
+        await alarm._dismiss_pending_force_context_on_siblings(
+            reason="user_disarm",
+            new_mode="disarmed",
+        )
+
+        # Event fired with self.entity_id
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["entity_id"] == alarm.entity_id
+        assert payload["reason"] == "user_disarm"
+        # Self's context cleared
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        # State was written so HA sees the cleared attributes immediately.
+        alarm.async_write_ha_state.assert_called()
+
+    async def test_writes_ha_state_on_cleared_sibling(self):
+        """When a sibling's force-context is cleared, its async_write_ha_state
+        must fire so HA sees the wiped force_arm_available / arm_exceptions
+        attributes without waiting for the next coordinator update."""
+        combined = make_alarm()
+        sub = _make_interior_panel()
+        sub.entity_id = "alarm_control_panel.home_interior"
+        sub.hass = combined.hass
+        sub._installation = combined.installation
+        sub.async_write_ha_state = MagicMock()
+        sub._force_context = {
+            "reference_id": "ref-sub",
+            "suid": "suid-sub",
+            "mode": AlarmControlPanelState.ARMED_NIGHT,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        setup_alarm_entry_data(combined, sub_panels=(sub,))
+
+        await combined._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_AWAY,
+        )
+
+        # The sibling panel got its context cleared AND its state written.
+        assert sub._force_context is None
+        sub.async_write_ha_state.assert_called()
+
+    async def test_fires_for_sibling_with_context_attributing_to_sibling(self):
+        """If Combined holds context and Interior triggered the dismissal,
+        the event must carry Combined's entity_id (the panel that held
+        the context)."""
+        combined = make_alarm()
+        # Build a sibling sub-panel as a MagicMock with the minimum
+        # surface the helper depends on.
+        sub = MagicMock()
+        sub._AXIS = "interior"
+        sub.entity_id = "alarm_control_panel.home_interior"
+        sub._force_context = None  # sibling doesn't hold context
+        sub._clear_force_context = MagicMock()
+        # Combined holds the context.
+        combined._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        setup_alarm_entry_data(combined, sub_panels=(sub,))
+
+        # Interior triggers dismissal.
+        # Use combined's helper but invoke from sub's perspective by
+        # binding the unbound method (sub is a MagicMock so it can't run
+        # the real coroutine). Equivalently: call combined's helper —
+        # the helper attributes events to whichever sibling held the
+        # context, which is the property under test.
+        await combined._dismiss_pending_force_context_on_siblings(
+            reason="user_arm",
+            new_mode=AlarmControlPanelState.ARMED_NIGHT,
+        )
+
+        fire_calls = combined.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        # Attributed to the panel that held the context (Combined),
+        # not the panel that triggered the dismissal.
+        assert payload["entity_id"] == combined.entity_id
+        # Sibling without context: not cleared.
+        sub._clear_force_context.assert_not_called()
+
+    async def test_fires_one_event_per_panel_with_context(self):
+        """If multiple siblings hold contexts (theoretically possible),
+        each gets its own dismissed event."""
+        combined = make_alarm()
+        # Build a real sub-panel sibling so the helper's delegation to
+        # panel._fire_arming_exception_dismissed_event actually executes
+        # the production method (a MagicMock auto-attribute would no-op).
+        sub = _make_interior_panel()
+        sub.entity_id = "alarm_control_panel.home_interior"
+        sub.hass = combined.hass  # share the bus mock
+        # `installation` is a read-only @property — assign via the underlying
+        # attribute used by VerisureEntity.__init__.
+        sub._installation = combined.installation
+        # Stub out async_write_ha_state — the real method needs HA's loaded-
+        # integrations cache, which the MagicMock'd hass doesn't have.
+        sub.async_write_ha_state = MagicMock()
+        sub._force_context = {
+            "reference_id": "ref-sub",
+            "suid": "suid-sub",
+            "mode": AlarmControlPanelState.ARMED_NIGHT,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+
+        combined._force_context = {
+            "reference_id": "ref-comb",
+            "suid": "suid-comb",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+
+        setup_alarm_entry_data(combined, sub_panels=(sub,))
+
+        await combined._dismiss_pending_force_context_on_siblings(
+            reason="user_disarm",
+            new_mode="disarmed",
+        )
+
+        fire_calls = combined.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 2
+        attributed_ids = {c[0][1]["entity_id"] for c in dismissed}
+        assert attributed_ids == {combined.entity_id, sub.entity_id}
+        # Both contexts cleared via the real _clear_force_context method.
+        assert combined._force_context is None
+        assert sub._force_context is None
+
+
+class TestArmDisarmDismissesPendingForceContext:
+    """Regular arm/disarm entry points must clear stale force contexts
+    BEFORE dispatching, so the user sees notifications vanish immediately."""
+
+    async def test_async_arm_fires_dismissed_when_context_present(self):
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="N",
+                protom_response_date="",
+            )
+        )
+
+        await alarm._async_arm(AlarmControlPanelState.ARMED_HOME)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["reason"] == "user_arm"
+        assert payload["new_mode"] == AlarmControlPanelState.ARMED_HOME
+
+    async def test_async_arm_no_event_when_no_context(self):
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        assert alarm._force_context is None
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="N",
+                protom_response_date="",
+            )
+        )
+
+        await alarm._async_arm(AlarmControlPanelState.ARMED_HOME)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_async_alarm_disarm_fires_dismissed_when_context_present(self):
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+        alarm._last_proto_code = "T"
+        alarm.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="D",
+                protom_response_date="",
+            )
+        )
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="D",
+                protom_response_date="",
+            )
+        )
+
+        await alarm.async_alarm_disarm()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+        payload = dismissed[0][0][1]
+        assert payload["reason"] == "user_disarm"
+        assert payload["new_mode"] == "disarmed"
+
+    async def test_dismiss_runs_before_dispatch(self):
+        """The dismissed event fires BEFORE the new arm operation dispatches —
+        so the user sees notifications vanish immediately even if the new
+        arm itself fails or hangs."""
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        # New arm raises — confirms the dismissed event still fires.
+        alarm.client.arm_alarm = AsyncMock(side_effect=VerisureOwaError("boom"))
+
+        await alarm._async_arm(AlarmControlPanelState.ARMED_HOME)
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed) == 1
+
+    async def test_force_arm_does_not_fire_dismissed_event(self):
+        """async_force_arm is the canonical resolution — must not fire dismissed."""
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_date="",
+            )
+        )
+
+        await alarm.async_force_arm()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+    async def test_force_arm_cancel_does_not_fire_dismissed_event(self):
+        """async_force_arm_cancel is the canonical resolution — must not fire."""
+        alarm = make_alarm()
+        setup_alarm_entry_data(alarm)
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+
+        await alarm.async_force_arm_cancel()
+
+        fire_calls = alarm.hass.bus.async_fire.call_args_list
+        dismissed = [
+            c
+            for c in fire_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert dismissed == []
+
+
+class TestArmingExceptionDismissedHandler:
+    """The built-in handler that responds to verisure_owa_arming_exception_dismissed."""
+
+    @staticmethod
+    def _make_event(entity_id, reason="user_arm"):
+        ev = MagicMock()
+        ev.data = {
+            "entity_id": entity_id,
+            "reason": reason,
+            "new_mode": AlarmControlPanelState.ARMED_HOME,
+            "details": {"installation": "123456"},
+            "_event_id": "ev-1",
+        }
+        return ev
+
+    def test_register_subscribes_to_dismissed(self):
+        alarm = make_alarm()
+
+        alarm._register_arming_exception_handler()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_calls = [
+            c
+            for c in listen_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        ]
+        assert len(dismissed_calls) == 1
+
+    def test_handler_dismisses_when_enabled(self):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._register_arming_exception_handler()
+
+        # Capture the dismissed callback.
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_cb = next(
+            c[0][1]
+            for c in listen_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        )
+
+        ev = self._make_event(alarm.entity_id)
+        dismissed_cb(ev)
+
+        # Persistent dismiss + mobile clear_notification both scheduled.
+        # _dismiss_arming_exception_notification creates 2 tasks when
+        # notify_group is set (one per service call).
+        assert alarm.hass.async_create_task.call_count == 2
+
+    def test_handler_skips_when_disabled(self):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = False
+
+        alarm._register_arming_exception_handler()
+        # No listener even registered when disabled — async_added_to_hass
+        # gates _register_arming_exception_handler on _notifications_enabled.
+        # But the method itself, if called, must still subscribe (the
+        # gate lives at registration time, not in the handler).
+        # However, when the handler is invoked under disabled config,
+        # it must skip the dismiss work.
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_cb = next(
+            (
+                c[0][1]
+                for c in listen_calls
+                if c[0][0] == "verisure_owa_arming_exception_dismissed"
+            ),
+            None,
+        )
+        # If registered, invoke it; either way, no async_create_task fires.
+        alarm.hass.async_create_task.reset_mock()
+        if dismissed_cb is not None:
+            ev = self._make_event(alarm.entity_id)
+            dismissed_cb(ev)
+        alarm.hass.async_create_task.assert_not_called()
+
+    def test_handler_skips_event_for_other_entity(self):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+
+        alarm._register_arming_exception_handler()
+
+        listen_calls = alarm.hass.bus.async_listen.call_args_list
+        dismissed_cb = next(
+            c[0][1]
+            for c in listen_calls
+            if c[0][0] == "verisure_owa_arming_exception_dismissed"
+        )
+
+        ev = self._make_event(entity_id="alarm_control_panel.different")
+        dismissed_cb(ev)
+
+        # No dismiss tasks scheduled for an event targeted at a different entity.
+        alarm.hass.async_create_task.assert_not_called()
 
 
 # ===========================================================================
@@ -3813,7 +5029,11 @@ class TestForceArmWorkflow:
 
         # Register handler (simulates async_added_to_hass)
         alarm._register_arming_exception_handler()
-        handler_cb = alarm.hass.bus.async_listen.call_args[0][1]
+        handler_cb = next(
+            c[0][1]
+            for c in alarm.hass.bus.async_listen.call_args_list
+            if c[0][0] == "verisure_owa_arming_exception"
+        )
 
         # Step 1: initial arm attempt fails
         alarm._state = AlarmControlPanelState.ARMING

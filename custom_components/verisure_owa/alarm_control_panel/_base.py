@@ -7,6 +7,7 @@ inherit the bulk of their behaviour from BaseVerisureOwaAlarmPanel here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import datetime
 from datetime import timedelta
 import logging
@@ -22,6 +23,7 @@ from homeassistant.components.alarm_control_panel.const import AlarmControlPanel
 from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .. import (
@@ -37,8 +39,14 @@ from ..const import CIRCUIT_ANNEX, CIRCUIT_INTERIOR, CIRCUIT_PERIMETER
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
 from ..events import (
+    ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     ARMING_EXCEPTION_EVENT_TYPE,
+    DISMISSAL_REASON_INTEGRATION_RELOAD,
+    DISMISSAL_REASON_USER_ARM,
+    DISMISSAL_REASON_USER_DISARM,
+    FORCE_ARM_EXPIRED_EVENT_TYPE,
     LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
+    DismissalReason,
     inject_ha_event,
 )
 from ..notification_translations import get_notification_strings
@@ -177,9 +185,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # exceptions (e.g. open window).  Consumed on the next arm attempt to
         # override the exception.  Cleared on status refresh.
         self._force_context: dict[str, Any] | None = None
+        self._force_arm_expiry_unsub: Callable[[], None] | None = None
         self._mobile_action_unsub = None
         self._arming_event_unsub_new = None
         self._arming_event_unsub_legacy = None
+        self._force_arm_expired_event_unsub = None
+        self._arming_exception_dismissed_event_unsub = None
         self._last_handled_event_id: str | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -212,10 +223,24 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister event listeners when removed from HA."""
+        # Reload-path safety net: if context is still alive at teardown,
+        # the new entity created post-reload would start fresh with no
+        # context. Fire dismissed event so user automations see the loss.
+        if self._force_context is not None:
+            self._fire_arming_exception_dismissed_event(
+                reason=DISMISSAL_REASON_INTEGRATION_RELOAD,
+                new_mode=None,
+            )
+        # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
+        self._cancel_force_arm_expiry()
         if self._arming_event_unsub_new:
             self._arming_event_unsub_new()
         if self._arming_event_unsub_legacy:
             self._arming_event_unsub_legacy()
+        if self._force_arm_expired_event_unsub:
+            self._force_arm_expired_event_unsub()
+        if self._arming_exception_dismissed_event_unsub:
+            self._arming_exception_dismissed_event_unsub()
         if self._mobile_action_unsub:
             self._mobile_action_unsub()
         await super().async_will_remove_from_hass()
@@ -225,7 +250,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Handle updated data from coordinator."""
         if self._operation_in_progress:
             return  # Skip stale updates during arm/disarm
-        self._clear_force_context()
         if self.coordinator.data is not None:
             self._update_from_coordinator(self.coordinator.data)
         self.async_write_ha_state()
@@ -392,6 +416,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     ) -> None:
         """Arm the alarm in the specified mode."""
         if self._check_code_for_arm_if_required(code):
+            await self._dismiss_pending_force_context_on_siblings(
+                reason=DISMISSAL_REASON_USER_ARM,
+                new_mode=state,
+            )
             self._force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(state)
 
@@ -586,6 +614,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
+        await self._dismiss_pending_force_context_on_siblings(
+            reason=DISMISSAL_REASON_USER_DISARM,
+            new_mode="disarmed",
+        )
         # Capture the calling user's context up-front — HA expires
         # `self._context` ~1 s after async_set_context, and the disarm
         # transition + state writes below take longer than that.
@@ -733,6 +765,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             e.get("alias", "unknown") for e in exc.exceptions
         ]
         self._attr_extra_state_attributes["force_arm_available"] = True
+        self._schedule_force_arm_expiry()
 
     def _fire_arming_exception_event(
         self, exc: ArmingExceptionError, mode: str
@@ -758,22 +791,109 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # Deprecated alias — removed in v6.0.0.
         self.hass.bus.async_fire(LEGACY_ARMING_EXCEPTION_EVENT_TYPE, payload)
 
+    def _fire_force_arm_expired_event(self) -> None:
+        """Fire the verisure_owa_force_arm_expired event from the saved context.
+
+        Must be called BEFORE the context is wiped — derives the payload from
+        the still-live _force_context snapshot.
+        """
+        assert self._force_context is not None, (
+            "_fire_force_arm_expired_event called without a force_context"
+        )
+        exceptions = self._force_context.get("exceptions", [])
+        zones = [e.get("alias", "unknown") for e in exceptions]
+        payload = {
+            "entity_id": self.entity_id,
+            "mode": self._force_context["mode"],
+            "zones": zones,
+            "details": {
+                "installation": self.installation.number,
+                "exceptions": exceptions,
+            },
+            "_event_id": str(uuid.uuid4()),
+        }
+        self.hass.bus.async_fire(FORCE_ARM_EXPIRED_EVENT_TYPE, payload)
+
+    def _fire_arming_exception_dismissed_event(
+        self, *, reason: DismissalReason, new_mode: str | None
+    ) -> None:
+        """Fire the verisure_owa_arming_exception_dismissed event.
+
+        Caller is the panel that HELD the dismissed context (so payload
+        entity_id is self.entity_id), even if the action that triggered
+        the dismissal originated on a sibling panel.
+
+        ``new_mode`` is None when the dismissal is triggered by entity
+        teardown (reason="integration_reload") — at that point there is
+        no new mode being targeted, the entity is simply being removed.
+        """
+        payload = {
+            "entity_id": self.entity_id,
+            "reason": reason,
+            "new_mode": new_mode,
+            "details": {"installation": self.installation.number},
+            "_event_id": str(uuid.uuid4()),
+        }
+        self.hass.bus.async_fire(ARMING_EXCEPTION_DISMISSED_EVENT_TYPE, payload)
+
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 
-    def _clear_force_context(self, force: bool = False) -> None:
-        """Clear stored force-arm context and related attributes.
+    def _schedule_force_arm_expiry(self) -> None:
+        """Schedule the TTL-driven expiry callback.
 
-        When called from coordinator updates (force=False), only clears if
-        the context has aged past _FORCE_ARM_TTL (180s).  On expiry, the
-        notification is updated to inform the user the alarm was not armed.
+        Replaces the previous coordinator-update-driven TTL check, which
+        was unreliable: HA's DataUpdateCoordinator does not call its
+        listeners on consecutive failures, so a sustained API outage
+        starting before the TTL would miss the expiry event entirely.
         """
-        if not force and self._force_context is not None:
-            age = datetime.datetime.now() - self._force_context["created_at"]
-            if age < self._FORCE_ARM_TTL:
-                return
-            # Expired — update notification to inform user
-            if self._notifications_enabled:
-                self._notify_force_arm_expired()
+        self._cancel_force_arm_expiry()
+        self._force_arm_expiry_unsub = async_call_later(
+            self.hass,
+            self._FORCE_ARM_TTL,
+            self._async_handle_force_arm_expiry,
+        )
+
+    def _cancel_force_arm_expiry(self) -> None:
+        """Cancel any pending expiry timer (no-op if not scheduled)."""
+        if self._force_arm_expiry_unsub is not None:
+            self._force_arm_expiry_unsub()
+            self._force_arm_expiry_unsub = None
+
+    async def _async_handle_force_arm_expiry(self, _now: datetime.datetime) -> None:
+        """Timer callback: fire expired event + side effects if context still alive.
+
+        The timer fires exactly _FORCE_ARM_TTL after _set_force_context,
+        independent of coordinator state. If the context was already cleared
+        by the canonical resolution paths (force_arm, force_arm_cancel,
+        dismissal), this callback no-ops.
+        """
+        self._force_arm_expiry_unsub = None
+        if self._force_context is None:
+            return
+        self._fire_force_arm_expired_event()
+        if self._notifications_enabled:
+            self._notify_force_arm_expired()
+        self._wipe_force_arm_state()
+        self.async_write_ha_state()
+
+    def _clear_force_context(self) -> None:
+        """Cancel any pending TTL timer and wipe force-arm context attributes.
+
+        TTL-driven expiry is handled by ``_async_handle_force_arm_expiry``
+        scheduled in ``_set_force_context``; this method just performs the
+        unconditional wipe used by the canonical resolution paths
+        (force_arm, force_arm_cancel, sibling dismissal).
+        """
+        self._cancel_force_arm_expiry()
+        self._wipe_force_arm_state()
+
+    def _wipe_force_arm_state(self) -> None:
+        """Clear the in-memory force-arm context dict and its public attributes.
+
+        Shared by the timer expiry path and the canonical-resolution clear
+        path so both stay in lock-step when new force-arm-related entity
+        attributes get added.
+        """
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
@@ -791,6 +911,66 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Return a per-installation persistent-notification ID."""
         return f"{DOMAIN}.arming_exception_{self.installation.number}"
 
+    def _siblings_on_installation(self) -> list[BaseVerisureOwaAlarmPanel]:
+        """Return all alarm panels (combined + sub-panels) for this installation.
+
+        Walks ``hass.data[DOMAIN]`` config-entry buckets — each entry's
+        ``combined_alarm_panels`` and ``axis_alarm_panels`` are populated by
+        ``alarm_control_panel.__init__.async_setup_entry``.
+
+        Always includes ``self``. Returns ``[self]`` if entry data is missing
+        (defensive — early registration paths or test scaffolding may not
+        have populated the buckets yet).
+        """
+        inst_num = self.installation.number
+        siblings: list[BaseVerisureOwaAlarmPanel] = []
+        domain_data = self.hass.data.get(DOMAIN, {})
+        for entry_data in domain_data.values():
+            if not isinstance(entry_data, dict):
+                continue
+            combined = entry_data.get("combined_alarm_panels", {}).get(inst_num)
+            if combined is not None:
+                siblings.append(combined)
+            axis_panels = entry_data.get("axis_alarm_panels", {}).get(inst_num, {})
+            siblings.extend(axis_panels.values())
+        if self not in siblings:
+            siblings.append(self)
+        return siblings
+
+    async def _dismiss_pending_force_context_on_siblings(
+        self, *, reason: DismissalReason, new_mode: str
+    ) -> None:
+        """For every panel on this installation that has an active force-arm
+        context, fire the dismissed event and clear the context.
+
+        Called from the regular arm/disarm entry points (`_async_arm`,
+        `async_alarm_disarm`) BEFORE the new operation dispatches, so the
+        user sees stale notifications vanish immediately even if the new
+        operation fails.
+
+        Each panel that held a context is attributed in its own dismissed
+        event with its own entity_id; typically only zero or one panel
+        holds context at any time.
+        """
+        for panel in self._siblings_on_installation():
+            if panel._force_context is None:  # noqa: SLF001  # pylint: disable=protected-access
+                continue
+            # Fire the public event first (panel attribution), then wipe
+            # the panel's context. The integration's own dismissed-event
+            # handler clears the shared notification.
+            panel._fire_arming_exception_dismissed_event(  # noqa: SLF001  # pylint: disable=protected-access
+                reason=reason,
+                new_mode=new_mode,
+            )
+            panel._clear_force_context()  # noqa: SLF001  # pylint: disable=protected-access
+            # Push the wiped `force_arm_available` / `arm_exceptions`
+            # attributes to HA's state machine on every cleared panel.
+            # `self` will be re-written by the caller's downstream
+            # `set_arm_state` / disarm flow, but siblings have no other
+            # path to refresh and would otherwise display stale
+            # attributes until the next coordinator update.
+            panel.async_write_ha_state()
+
     @property
     def _notifications_enabled(self) -> bool:
         """Return True if the built-in force-arm notification handler is active."""
@@ -799,10 +979,26 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     def _register_arming_exception_handler(self) -> None:
         """Register event listeners for built-in arming exception notifications.
 
-        Listens to both the new verisure_owa_arming_exception and the legacy
-        securitas_arming_exception events. Deduplicates via _event_id so the
-        handler fires at most once per arming exception even though both events
-        carry the same payload.
+        Listens to:
+        - ``verisure_owa_arming_exception`` (canonical) — sends initial
+          persistent + mobile notifications with action buttons.
+        - ``securitas_arming_exception`` — deprecated alias of the above,
+          removed in v6.0.0. Deduplicated via _event_id so the handler
+          fires at most once per arming exception even though both events
+          carry the same payload.
+        - ``verisure_owa_force_arm_expired`` — replaces the mobile
+          notification with a button-less informational card on TTL
+          expiry. The persistent side is updated directly by
+          `_async_handle_force_arm_expiry` (the TTL timer callback),
+          which fires the event AND calls `_notify_force_arm_expired()`
+          in the same tick.
+        - ``verisure_owa_arming_exception_dismissed`` — clears the shared
+          installation-scoped persistent + mobile notifications when the
+          stale force-arm context is dismissed (e.g. by a new arm/disarm
+          on this or a sibling panel). Does NOT use the `_last_handled_event_id`
+          dedup slot — dismissed events have unique `_event_id`s by
+          construction and must not clobber the dedup slot used by
+          arming-exception/expiry events.
         """
 
         @callback
@@ -816,6 +1012,33 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._last_handled_event_id = eid
             self._notify_arm_exceptions_from_event(event)
 
+        @callback
+        def _handle_force_arm_expired_event(event: Event) -> None:
+            """Handle force-arm-expired event for this entity."""
+            if event.data.get("entity_id") != self.entity_id:
+                return
+            eid = event.data.get("_event_id")
+            # Reuse the same dedup slot — the same event_id can only ever
+            # describe one transition, never both an arming exception AND
+            # an expiry, so collisions are not possible in practice.
+            if eid is not None and eid == self._last_handled_event_id:
+                return
+            self._last_handled_event_id = eid
+            self._notify_force_arm_expired_mobile_from_event(event)
+
+        @callback
+        def _handle_arming_exception_dismissed_event(event: Event) -> None:
+            """Handle dismissed event for this entity by clearing notifications."""
+            if event.data.get("entity_id") != self.entity_id:
+                return
+            # The notifications-enabled gate lives in async_added_to_hass at
+            # registration time; if we got here, the toggle was True. But the
+            # config can change at runtime via the options flow, so re-check
+            # before doing the dismiss work.
+            if not self._notifications_enabled:
+                return
+            self._dismiss_arming_exception_notification()
+
         self._arming_event_unsub_new = self.hass.bus.async_listen(
             ARMING_EXCEPTION_EVENT_TYPE,
             _handle_arming_exception_event,
@@ -823,6 +1046,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._arming_event_unsub_legacy = self.hass.bus.async_listen(
             LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
             _handle_arming_exception_event,
+        )
+        self._force_arm_expired_event_unsub = self.hass.bus.async_listen(
+            FORCE_ARM_EXPIRED_EVENT_TYPE,
+            _handle_force_arm_expired_event,
+        )
+        self._arming_exception_dismissed_event_unsub = self.hass.bus.async_listen(
+            ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+            _handle_arming_exception_dismissed_event,
         )
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
@@ -889,6 +1120,48 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 },
             )
 
+    async def _async_notify_force_arm_expired_mobile(self, event: Event) -> None:
+        """Replace the mobile arming-exception notification with a button-less
+        informational card when the force-arm window expires.
+
+        Same `tag` as the original notification (so iOS/Android updates the
+        existing card in place rather than stacking a new one). No `actions`
+        array — the buttons are removed.
+
+        No-ops when notifications are disabled or no notify_group is configured.
+        Per-entity scoped: ignores events whose entity_id is not ours.
+        """
+        if event.data.get("entity_id") != self.entity_id:
+            return
+        if not self._notifications_enabled:
+            return
+        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        if not notify_group:
+            return
+
+        entry = get_notification_strings(self.hass, "force_arm_expired")
+        title = entry.get("title", "")
+        # Fall back to message if mobile_message is missing — defensive against
+        # partial translation data; existing tests assert mobile_message is
+        # present in every locale we ship, but a future locale might lag.
+        mobile_message = entry.get("mobile_message") or entry.get("message", "")
+
+        await self.hass.services.async_call(
+            domain="notify",
+            service=notify_group,
+            service_data={
+                "title": title,
+                "message": mobile_message,
+                "data": {
+                    "tag": self._arming_exception_notification_id,
+                },
+            },
+        )
+
+    def _notify_force_arm_expired_mobile_from_event(self, event: Event) -> None:
+        """Schedule the async expiry-mobile-notify on the HA loop."""
+        self.hass.async_create_task(self._async_notify_force_arm_expired_mobile(event))
+
     def _dismiss_arming_exception_notification(self) -> None:
         """Dismiss the persistent and mobile arming-exception notifications."""
         self.hass.async_create_task(
@@ -929,7 +1202,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
             return
         _LOGGER.info("Force-arm cancelled by user")
-        self._clear_force_context(force=True)
+        self._clear_force_context()
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
         self.async_write_ha_state()
@@ -970,7 +1243,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             "Force-arming: overriding previous exceptions %s",
             [e.get("alias") for e in bypassed],
         )
-        self._clear_force_context(force=True)
+        self._clear_force_context()
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)

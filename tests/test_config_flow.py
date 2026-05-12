@@ -2234,3 +2234,64 @@ async def test_lock_automations_skipped_when_no_locks_discovered(hass):
     )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+# ===========================================================================
+# Notify-service dropdown — exclude persistent_notification
+# ===========================================================================
+
+
+class TestNotifyServiceDropdown:
+    """The notify-service dropdown must exclude `notify.persistent_notification`.
+
+    The integration already creates its own persistent notification directly
+    via the `persistent_notification` domain — using `notify.persistent_notification`
+    as the Notify service would produce a second, duplicate persistent card on
+    every arming-exception event with no useful content (no actions, generic
+    title), and never reach an actual mobile device.
+    """
+
+    def test_persistent_notification_not_in_dropdown(self):
+        """`notify.persistent_notification` is filtered out of the dropdown."""
+        from custom_components.verisure_owa.config_flow import _get_notify_options
+
+        hass = MagicMock()
+        hass.services.async_services = MagicMock(
+            return_value={
+                "notify": {
+                    "persistent_notification": MagicMock(),
+                    "mobile_app_phone": MagicMock(),
+                    "send_message": MagicMock(),
+                    "notify": MagicMock(),
+                }
+            }
+        )
+
+        options = _get_notify_options(hass)
+        labels = {opt["label"] for opt in options}
+        values = {opt["value"] for opt in options}
+
+        assert "persistent_notification" not in labels
+        assert "persistent_notification" not in values
+        # Real notify targets should still be present.
+        assert "mobile_app_phone" in labels
+
+    def test_dropdown_keeps_existing_exclusions(self):
+        """Pre-existing exclusions (`notify`, `send_message`) still apply."""
+        from custom_components.verisure_owa.config_flow import _get_notify_options
+
+        hass = MagicMock()
+        hass.services.async_services = MagicMock(
+            return_value={
+                "notify": {
+                    "notify": MagicMock(),
+                    "send_message": MagicMock(),
+                    "mobile_app_phone": MagicMock(),
+                }
+            }
+        )
+
+        labels = {opt["label"] for opt in _get_notify_options(hass)}
+        assert "notify" not in labels
+        assert "send_message" not in labels
+        assert "mobile_app_phone" in labels

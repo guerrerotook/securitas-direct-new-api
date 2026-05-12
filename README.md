@@ -453,6 +453,33 @@ You then have ~180 seconds to either fix the underlying issue and arm normally, 
 | `details.installation` | The Verisure installation number. |
 | `details.exceptions` | Full exception list from the API (`alias`, `zone_id`, `device_type`). |
 
+### The `verisure_owa_force_arm_expired` event
+
+Fires when the 180 s force-arm window expires without the user acting on it. Useful for sending a follow-up message ("alarm was not armed — please retry") that's distinct from the initial "arming blocked" alert. Fires regardless of the notifications toggle.
+
+| Field | What it tells you |
+| ----- | ----------------- |
+| `entity_id` | The alarm panel entity whose force-arm context expired. |
+| `mode` | The HA state that was originally attempted. |
+| `zones` | Open zone names from the original failure. |
+| `details.installation` | The Verisure installation number. |
+| `details.exceptions` | Full exception list captured at the original failure. |
+| `_event_id` | UUID for deduplication. |
+
+### The `verisure_owa_arming_exception_dismissed` event
+
+Fires when an active force-arm context is cleared by something other than the user tapping **Force Arm** or **Cancel** — either a different arm/disarm action ("user moved on"), or the integration itself being torn down (options change, reauth, reload) while the context was still alive. Does NOT fire from the canonical resolutions (`async_force_arm` / `async_force_arm_cancel`). Useful for dismissing your own custom notifications when the context goes away involuntarily.
+
+| Field | What it tells you |
+| ----- | ----------------- |
+| `entity_id` | The alarm panel entity that HELD the dismissed context (may differ from the panel the user just interacted with — multi-panel installations are scoped per installation). |
+| `reason` | `"user_arm"`, `"user_disarm"`, or `"integration_reload"`. |
+| `new_mode` | The state the user is moving to (`armed_home`, `armed_away`, …, or `"disarmed"`). `null` when `reason == "integration_reload"` — no new mode applies. |
+| `details.installation` | The Verisure installation number. |
+| `_event_id` | UUID for deduplication. |
+
+**Watch out:** automations that match `reason in ['user_arm', 'user_disarm']` will miss the reload case. If you want the broader "context lost" signal, match on the event type alone or include `'integration_reload'`. Automations that read `new_mode.startswith(...)` will fail with an `UndefinedError` on the reload case — guard with `new_mode is not none` first.
+
 ### Writing your own automations
 
 Disable **Built-in force-arm notifications** in the integration options, then trigger on the event. The most common pattern is to auto-force-arm only when the user picks Away (because at that point they've left the building):
@@ -487,6 +514,8 @@ notify:
 ```
 
 After a restart, `notify.mobiles` shows up in the dropdown. The action buttons in the notification are scoped to the installation, so any household member who taps **Force Arm** or **Cancel** triggers the right action.
+
+**Don't include `notify.persistent_notification` in the notify group.** The integration already creates its own persistent notification directly. Adding `notify.persistent_notification` to your group will produce a second, duplicate persistent card every time arming is blocked — with no action buttons and a generic body. The integration filters `notify.persistent_notification` out of the **Notify service** dropdown for the same reason; if you build the group in YAML, leave it out yourself.
 
 ## Troubleshooting
 
