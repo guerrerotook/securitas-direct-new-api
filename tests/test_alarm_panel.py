@@ -1,7 +1,9 @@
 """Tests for alarm_control_panel entity logic."""
 
+import inspect
 from datetime import datetime, timedelta
 
+import attr
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +15,8 @@ from homeassistant.components.alarm_control_panel.const import (
     CodeFormat,
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import entity_registry as _er_for_feature_detect
+from homeassistant.helpers.entity_registry import DeletedRegistryEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -144,6 +148,21 @@ class TestForceArmExpiredMobileMessageTranslation:
             assert isinstance(mobile, str) and mobile.strip(), (
                 f"Locale {locale!r} force_arm_expired.mobile_message is empty"
             )
+
+# Feature flags for tests that exercise registry APIs introduced after our
+# minimum-supported HA (2025.2). On older HA the underlying bug doesn't
+# manifest the same way and the test scaffolding can't be constructed — skip
+# those tests rather than fake them, since the real-HA assertions are what
+# give them value.
+_HAS_OBJECT_ID_BASE_KWARG = (
+    "object_id_base"
+    in inspect.signature(
+        _er_for_feature_detect.EntityRegistry.async_get_or_create
+    ).parameters
+)
+_DELETED_REGISTRY_ENTRY_HAS_ALIASES = "aliases" in {
+    field.name for field in attr.fields(DeletedRegistryEntry)
+}
 
 
 class TestForceArmNotificationsConfig:
@@ -5406,6 +5425,15 @@ class TestSubPanelSuggestedObjectId:
         panel = _make_annex_panel()
         assert panel.suggested_object_id == "TestHome annex"
 
+    @pytest.mark.skipif(
+        not _HAS_OBJECT_ID_BASE_KWARG,
+        reason=(
+            "object_id_base kwarg on async_get_or_create was added after our "
+            "minimum-supported HA (2025.2). The doubled-alias bug this test "
+            "guards against is HA 2026.5+ behaviour — no point reproducing "
+            "it on older HA where the registry-create path differs."
+        ),
+    )
     @pytest.mark.parametrize(
         "suffix,panel_factory",
         [
@@ -7254,6 +7282,18 @@ class TestSubPanelEntityIdHealer:
             == f"alarm_control_panel.{alias_slug}_interior_{alias_slug}"
         )
 
+    @pytest.mark.skipif(
+        not _DELETED_REGISTRY_ENTRY_HAS_ALIASES,
+        reason=(
+            "DeletedRegistryEntry.aliases field was added after our "
+            "minimum-supported HA (2025.2); the test seeds a tombstone via "
+            "the dataclass constructor so its kwargs have to match the live "
+            "HA's attr fields. Production code reads tombstones the registry "
+            "produced naturally (attr.evolve preserves whatever fields exist), "
+            "so it's the test scaffolding that's HA-version-specific, not the "
+            "healer."
+        ),
+    )
     @pytest.mark.parametrize(
         "suffix",
         ["_interior", "_perimeter", "_annex"],
@@ -7274,7 +7314,6 @@ class TestSubPanelEntityIdHealer:
         from datetime import datetime, timezone
 
         from homeassistant.helpers import entity_registry as er
-        from homeassistant.helpers.entity_registry import DeletedRegistryEntry
         from homeassistant.util import slugify
 
         from custom_components.verisure_owa.alarm_control_panel import (

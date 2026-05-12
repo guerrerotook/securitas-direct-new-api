@@ -1057,7 +1057,10 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 return val
             return defaults.get(key)
 
-        # Build dropdown options (with an explicit empty entry for clearing)
+        # Build dropdown options — only real values appear; clearing happens
+        # via the form's X (clear) button (HA omits the key from user_input,
+        # which ``_normalize_mapping_input`` surfaces as an explicit "" in
+        # entry.options so the update listener sees the diff).
         select_options = _mapping_select_options(has_peri=has_peri, has_annex=has_annex)
         select_cfg = {"select": {"options": select_options, "mode": "dropdown"}}
 

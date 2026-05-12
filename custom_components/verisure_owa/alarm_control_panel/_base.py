@@ -35,7 +35,12 @@ from .. import (
     VerisureHub,
     _notify,
 )
-from ..const import CIRCUIT_ANNEX, CIRCUIT_INTERIOR, CIRCUIT_PERIMETER
+from ..const import (
+    CIRCUIT_ANNEX,
+    CIRCUIT_INTERIOR,
+    CIRCUIT_PERIMETER,
+    CONF_UNSUPPORTED_COMMANDS,
+)
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
 from ..events import (
@@ -141,7 +146,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._last_unmapped_logged: str | None = None
         self._resolver = CommandResolver(
             has_peri=self._has_peri,
-            unsupported=self._client.config.get("unsupported_commands", []),
+            unsupported=self._client.config.get(CONF_UNSUPPORTED_COMMANDS, []),
         )
 
         # Build outgoing map: HA state -> API command string
@@ -622,12 +627,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         entry = getattr(self._client, "config_entry", None)
         if entry is None:
             return
-        current: list[str] = list(entry.data.get("unsupported_commands", []))
+        current: list[str] = list(entry.data.get(CONF_UNSUPPORTED_COMMANDS, []))
         new = sorted(self._resolver.unsupported)
         if current == new:
             return
         self.hass.config_entries.async_update_entry(
-            entry, data={**entry.data, "unsupported_commands": new}
+            entry, data={**entry.data, CONF_UNSUPPORTED_COMMANDS: new}
         )
         self._recompute_supported_features()
         self._force_registry_supported_features()
