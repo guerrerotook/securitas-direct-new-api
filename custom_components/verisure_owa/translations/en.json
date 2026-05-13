@@ -219,6 +219,9 @@
         "unsupported_alarm_mode": {
             "message": "This alarm mode is not supported by your panel (rejected: {tried}). Check the state mappings in the integration options (Settings → Devices & Services → Verisure OWA → Configure)."
         },
+        "unsupported_alarm_mode_subpanel": {
+            "message": "This alarm mode is not supported by your panel (rejected: {tried}). It has been disabled on this sub-panel and won't be offered again."
+        },
         "no_supported_command": {
             "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Verisure OWA → Configure)."
         }

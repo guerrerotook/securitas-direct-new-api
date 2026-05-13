@@ -35,7 +35,12 @@ from .. import (
     VerisureHub,
     _notify,
 )
-from ..const import CIRCUIT_ANNEX, CIRCUIT_INTERIOR, CIRCUIT_PERIMETER
+from ..const import (
+    CIRCUIT_ANNEX,
+    CIRCUIT_INTERIOR,
+    CIRCUIT_PERIMETER,
+    CONF_UNSUPPORTED_COMMANDS,
+)
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
 from ..events import (
@@ -86,6 +91,30 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 _LOGGER = logging.getLogger(__name__)
 
 
+def _read_unsupported_for_installation(
+    config: dict[str, Any], installation_number: str
+) -> list[str]:
+    """Pull this installation's persisted unsupported-commands list.
+
+    ``config[CONF_UNSUPPORTED_COMMANDS]`` may be in one of three shapes:
+
+    - **Missing / empty** — return ``[]``.
+    - **Dict** (current format, keyed by ``installation.number`` as str) —
+      return that installation's slot, or ``[]`` if it has none.
+    - **List** (v5.0.1-pre legacy format, a single flat list applied to
+      every installation on the entry) — return the list verbatim. Each
+      installation reading the legacy format sees the same rejections;
+      they get re-keyed under their own slot by ``_persist_unsupported``
+      on the next write.
+    """
+    raw = config.get(CONF_UNSUPPORTED_COMMANDS)
+    if isinstance(raw, dict):
+        return list(raw.get(installation_number, []))
+    if isinstance(raw, list):
+        return list(raw)
+    return []
+
+
 def build_partial_disarm_target(current: AlarmState, circuits: list[str]) -> AlarmState:
     """Build an AlarmState that disarms ``circuits`` and keeps the rest.
 
@@ -111,6 +140,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     """Representation of a Verisure alarm status."""
 
     _attr_has_entity_name = False
+    # The combined Main panel exposes a user-editable mapping per HA alarm
+    # state, so a panel-rejected command is a config issue — the rejection
+    # notification points the user at the mappings UI. Sub-panels override
+    # this to False (no mapping; the right action is to drop the feature).
+    _is_mappable: bool = True
 
     def __init__(
         self,
@@ -134,7 +168,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._last_proto_code: str | None = None
         # Last proto code we warned about; dedupes the per-poll spam.
         self._last_unmapped_logged: str | None = None
-        self._resolver = CommandResolver(has_peri=self._has_peri)
+        self._resolver = CommandResolver(
+            has_peri=self._has_peri,
+            unsupported=_read_unsupported_for_installation(
+                self._client.config, installation.number
+            ),
+        )
 
         # Build outgoing map: HA state -> API command string
         # Build incoming map: protomResponse code -> HA state
@@ -532,37 +571,67 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     raise
                 if err.http_status == 409:
                     raise  # Server busy — don't try alternatives
-                if err.http_status is not None and 400 <= err.http_status < 500:
-                    # 4xx (BAD_USER_INPUT, "command not valid for panel", etc.)
-                    # — command not in panel's enum, mark as unsupported and
-                    # try the next alternative.
+                if err.http_status == 400:
+                    # 400 BAD_USER_INPUT ("command not valid for panel") is
+                    # the *only* HTTP status the Verisure OWA API uses to
+                    # signal "this command is not in the panel's enum".
+                    # Mark this specific command unsupported, persist, and
+                    # try the next alternative in the step.
+                    #
+                    # We deliberately do NOT blacklist for other 4xx
+                    # (401 auth-blip, 422 validation hiccup, 429 rate-limit,
+                    # 451 legal-block, etc.) — those are transient or
+                    # environmental and persisting them would permanently
+                    # disable an arming mode the user actually has, just
+                    # because the panel was briefly unreachable. Propagate
+                    # the error so the caller sees the transient failure
+                    # without polluting unsupported_commands.
                     _LOGGER.info(
-                        "Command %s not supported by panel (status %s),"
+                        "Command %s not supported by panel (status 400),"
                         " trying next alternative: %s",
                         command,
-                        err.http_status,
                         err.log_detail(),
                     )
                     self._resolver.mark_unsupported(command)
+                    self._persist_unsupported()
                 else:
-                    # 5xx server error or panel-level error (e.g.
-                    # TECHNICAL_ERROR after polling) — transient/communication
-                    # failure, not a command issue. Don't blacklist the command
-                    # and don't try alternatives (they'll likely also fail).
+                    # Any other 4xx (transient auth, rate-limit, etc.) or
+                    # 5xx server error / panel-level error — not a "command
+                    # not valid" case. Don't blacklist; don't try
+                    # alternatives (they'll likely also fail the same way).
                     raise
                 last_err = err
 
         if last_err and last_err.http_status == 400:
+            # Sub-panels have no user-editable mapping — point the user at
+            # the auto-disabled feature; mappable Main panel still points
+            # them at the mappings UI.
+            key = (
+                "unsupported_alarm_mode"
+                if self._is_mappable
+                else "unsupported_alarm_mode_subpanel"
+            )
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
-                translation_key="unsupported_alarm_mode",
+                translation_key=key,
                 translation_placeholders={"tried": ", ".join(step.commands)},
             ) from last_err
         if last_err:
             raise last_err
+        # All step.commands were already in resolver.unsupported (e.g. a
+        # second click on a mode whose only command we rejected last time).
+        # On sub-panels this normally shouldn't happen — the button should
+        # already be hidden by supported_features — but if the UI still
+        # offered it, surface the same "disabled on this sub-panel" message
+        # rather than pointing at the (missing) mappings UI.
         raise HomeAssistantError(
             translation_domain=DOMAIN,
-            translation_key="no_supported_command",
+            translation_key=(
+                "no_supported_command"
+                if self._is_mappable
+                else "unsupported_alarm_mode_subpanel"
+            ),
+            translation_placeholders={"tried": ", ".join(step.commands)},
         )
 
     async def _send_single_command(
@@ -574,6 +643,87 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if command.startswith("D"):
             return await self.client.disarm_alarm(self.installation, command)
         return await self.client.arm_alarm(self.installation, command, **force_params)
+
+    def _persist_unsupported(self) -> None:
+        """Write the resolver's unsupported set to entry.data and refresh state.
+
+        Persisting means the resolver starts pre-loaded on the next setup, so
+        a sub-panel mode disabled by a 400 stays disabled across HA restarts.
+        Writing to entry.data via async_update_entry also triggers the update
+        listener; CONF_UNSUPPORTED_COMMANDS isn't options-managed so the
+        listener no-ops there.
+
+        Persisted shape is ``{<installation.number>: [<commands>...]}`` so
+        a legacy entry that covers multiple installations (no
+        ``CONF_INSTALLATION`` set, so ``_fetch_and_cache_installations``
+        returns them all) doesn't cross-contaminate sibling panels: each
+        panel reads only its own slot at setup, and persisting only
+        rewrites its own slot. The legacy flat-list format is migrated
+        on first write — the existing list is associated with THIS
+        installation's slot, since the legacy resolver-init read it for
+        this installation.
+
+        The entity registry's cached ``supported_features`` is normally
+        refreshed from inside ``_async_write_ha_state``, but empirically
+        that path doesn't always propagate the change to the entity
+        registry for sub-panels (the Main panel's registry does update —
+        sub-panels' don't). Update the registry explicitly so the
+        frontend's now-unreachable button drops out of the card.
+        """
+        entry = getattr(self._client, "config_entry", None)
+        if entry is None:
+            return
+        installation_num = self._installation.number
+        existing = entry.data.get(CONF_UNSUPPORTED_COMMANDS)
+        if isinstance(existing, dict):
+            current_map: dict[str, list[str]] = {
+                k: list(v) for k, v in existing.items()
+            }
+        elif isinstance(existing, list):
+            # Legacy flat-list format from v5.0.1-pre. The bare list was
+            # applied to every installation's resolver on read; migrate
+            # by attributing it to THIS installation's slot. Siblings that
+            # also need it will repopulate their own slot the next time
+            # they hit a rejection.
+            current_map = {installation_num: list(existing)}
+        else:
+            current_map = {}
+        new_list = sorted(self._resolver.unsupported)
+        if current_map.get(installation_num) == new_list:
+            return
+        new_map = {**current_map, installation_num: new_list}
+        self.hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_UNSUPPORTED_COMMANDS: new_map}
+        )
+        self._recompute_supported_features()
+        self._force_registry_supported_features()
+        self.async_write_ha_state()
+
+    def _force_registry_supported_features(self) -> None:
+        """Push the current ``supported_features`` value into the entity registry.
+
+        HA's auto-update path inside ``_async_write_ha_state`` should do this,
+        but for sub-panels it doesn't fire reliably — leaving the persisted
+        registry value stale and the rejected button still rendering on the
+        card. Updating the registry directly keeps the two in sync.
+        """
+        from homeassistant.helpers import entity_registry as er
+
+        if not self.entity_id:
+            return
+        registry = er.async_get(self.hass)
+        if registry.async_get(self.entity_id) is None:
+            return
+        registry.async_update_entity(
+            self.entity_id,
+            supported_features=int(self.supported_features),
+        )
+
+    def _recompute_supported_features(self) -> None:
+        """Override in sub-panels to refresh ``_attr_supported_features`` from
+        the resolver. No-op on the Combined Main panel where features are
+        driven by the user's state mapping rather than panel capabilities.
+        """
 
     def _set_refresh_failed(self, failed: bool) -> None:
         """Track whether the last manual refresh timed out."""

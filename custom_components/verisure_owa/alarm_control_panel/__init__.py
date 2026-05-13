@@ -51,6 +51,7 @@ __all__ = [
     "InteriorVerisureOwaAlarmPanel",
     "PerimeterVerisureOwaAlarmPanel",
     "_heal_combined_panel_entity_id",
+    "_heal_subpanel_entity_id",
     "async_setup_entry",
     "build_partial_disarm_target",
 ]
@@ -65,7 +66,13 @@ async def _heal_combined_panel_entity_id(
     the v4 layout). Earlier v5 builds slugified the friendly name
     ``Main - <alias>`` and ended up at ``alarm_control_panel.<alias>_main_<alias>``;
     a downgrade-then-re-upgrade leaves a stale entity squatting on the
-    canonical slot which pushes the new entity to ``_2``. This helper:
+    canonical slot which pushes the new entity to ``_2``.
+
+    Also rewrites the ``deleted_entities`` tombstone if one is present with
+    a non-canonical entity_id, so a delete/re-add cycle doesn't reintroduce
+    a stale slug from HA's ``async_get_or_create`` restoration path.
+
+    This helper:
 
     1. Finds the entity registered under our v5 unique_id for this installation.
     2. If it is already at the canonical slot, returns.
@@ -81,16 +88,17 @@ async def _heal_combined_panel_entity_id(
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
     our_unique_id = f"v5_verisure_owa.{installation.number}"
+    canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+
+    _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical)
+
     try:
         our_entity_id = ent_reg.async_get_entity_id(
             "alarm_control_panel", DOMAIN, our_unique_id
         )
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         return
-    if our_entity_id is None:
-        return
-    canonical = f"alarm_control_panel.{slugify(installation.alias)}"
-    if our_entity_id == canonical:
+    if our_entity_id is None or our_entity_id == canonical:
         return
 
     occupant = ent_reg.async_get(canonical)
@@ -120,6 +128,109 @@ async def _heal_combined_panel_entity_id(
     ent_reg.async_update_entity(our_entity_id, new_entity_id=canonical)
 
 
+async def _heal_subpanel_entity_id(
+    hass: HomeAssistant, installation: Installation, suffix: str
+) -> None:
+    """Move a sub-panel onto its canonical ``<alias>_<circuit>`` slot.
+
+    Counterpart to ``_heal_combined_panel_entity_id`` for the axis sub-panels.
+    Without the ``suggested_object_id`` override now defined on each sub-panel,
+    HA slugified the friendly name ``<circuit> - <alias>`` with the device
+    name prepended and ended up at ``<alias>_<circuit>_<alias>``. Existing
+    installs that enabled a sub-panel before the fix carry the broken slot in
+    their registry; this helper relocates them to ``<alias>_<circuit>``.
+
+    Also rewrites the ``deleted_entities`` tombstone if one is present with
+    the broken entity_id: HA's ``async_get_or_create`` restores a removed
+    entity onto its previous ``entity_id`` (bypassing ``suggested_object_id``
+    entirely), so deleting and re-adding a sub-panel that had the doubled
+    slug would otherwise re-introduce it on every cycle until a subsequent
+    HA restart triggered the healer.
+
+    ``suffix`` is the unique_id suffix used by the sub-panel (e.g.
+    ``"_interior"``); the canonical entity_id slug is the bare alias slug with
+    the same suffix appended.
+    """
+    try:
+        ent_reg = er.async_get(hass)
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
+        return
+    our_unique_id = f"v5_verisure_owa.{installation.number}{suffix}"
+    canonical = f"alarm_control_panel.{slugify(installation.alias)}{suffix}"
+
+    # Rewrite the tombstone first — if the entity is also live (a partial
+    # state where both exist on different ids), the live-rename below picks
+    # up the canonical slot afterwards.
+    _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical)
+
+    try:
+        our_entity_id = ent_reg.async_get_entity_id(
+            "alarm_control_panel", DOMAIN, our_unique_id
+        )
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        return
+    if our_entity_id is None or our_entity_id == canonical:
+        return
+
+    occupant = ent_reg.async_get(canonical)
+    if occupant is not None and occupant.entity_id != our_entity_id:
+        # Skip rather than evict: unlike the combined panel (which has a
+        # v4 legacy to displace), sub-panels are v5-only and there is no
+        # known stale-squatter scenario worth evicting for. The occupant
+        # is most likely another installation that happens to share the
+        # alias slug, and removing it would silently delete that
+        # installation's sub-panel.
+        _LOGGER.warning(
+            "Cannot reclaim %s for installation %s: slot held by %s "
+            "(domain %s); the sub-panel will stay at %s",
+            canonical,
+            installation.number,
+            occupant.unique_id,
+            occupant.platform,
+            our_entity_id,
+        )
+        return
+
+    _LOGGER.info(
+        "Renaming alarm-subpanel entity_id: %s -> %s", our_entity_id, canonical
+    )
+    ent_reg.async_update_entity(our_entity_id, new_entity_id=canonical)
+
+
+def _rewrite_tombstone_entity_id(
+    ent_reg: er.EntityRegistry, unique_id: str, canonical: str
+) -> None:
+    """Rewrite a non-canonical ``entity_id`` on a deleted-entity tombstone.
+
+    HA stores deleted entities in ``ent_reg.deleted_entities`` so that user
+    customisations (area, name, options) survive a delete/re-add cycle. On
+    re-add ``async_get_or_create`` pops the tombstone and restores its
+    ``entity_id`` directly — ignoring the entity's ``suggested_object_id``.
+
+    For alarm panels removed from a pre-healer install, the tombstone's
+    entity_id is the broken ``<alias>_main_<alias>`` /
+    ``<alias>_<circuit>_<alias>`` form. Rewrite it to canonical here
+    (preserving every other field) so the next re-add lands on the correct
+    slot from the first registration, not after a follow-up restart's
+    healer pass.
+    """
+    import attr
+
+    deleted = getattr(ent_reg, "deleted_entities", None)
+    if deleted is None:
+        return
+    key = ("alarm_control_panel", DOMAIN, unique_id)
+    tombstone = deleted.get(key)
+    if tombstone is None or tombstone.entity_id == canonical:
+        return
+    _LOGGER.info(
+        "Rewriting deleted alarm-panel tombstone: %s -> %s",
+        tombstone.entity_id,
+        canonical,
+    )
+    deleted[key] = attr.evolve(tombstone, entity_id=canonical)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -146,6 +257,12 @@ async def async_setup_entry(
     # the registry is healed transparently.
     for devices in securitas_devices:
         await _heal_combined_panel_entity_id(hass, devices.installation)
+        # Sub-panels carry the same bug: ``<alias>_<circuit>_<alias>`` from
+        # builds that registered them before the suggested_object_id fix.
+        # Run unconditionally — if no broken (or any) entity exists for a
+        # circuit the helper returns immediately.
+        for suffix in ("_interior", "_perimeter", "_annex"):
+            await _heal_subpanel_entity_id(hass, devices.installation, suffix)
 
     for devices in securitas_devices:
         combined = CombinedVerisureOwaAlarmPanel(

@@ -1062,13 +1062,20 @@ class TestActivityEventCategory:
             assert self._ev(code).category == ActivityCategory.ARMED, code
 
     def test_disarmed_codes(self):
-        # 822 is the panel's disarm signal ("Disconnection Exterior + Main").
-        for code in (1, 32, 107, 700, 720, 822):
+        # 820 ("Disattivazione Perimetrale" — perimeter-only disarm) and 822
+        # ("Disconnection Exterior + Main") are the panel's disarm signals.
+        for code in (1, 32, 107, 700, 720, 820, 822):
             assert self._ev(code).category == ActivityCategory.DISARMED, code
 
     def test_alarm_zone_trigger(self):
         """type=13 is a zone-level alarm (specific sensor went off)."""
         assert self._ev(13).category == ActivityCategory.ALARM
+
+    def test_photo_alarm(self):
+        """type=14 ('Allarme Foto') is a photo-detector alarm — alarm with
+        an attached image. Img attachment is conveyed via ``img=1`` on the
+        event; the category itself is ALARM, same as the generic type=13."""
+        assert self._ev(14).category == ActivityCategory.ALARM
 
     def test_tampering(self):
         """type=24 is tampering (someone interfering with equipment)."""

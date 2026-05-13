@@ -474,7 +474,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     try {
       // Routes through the integration's API queue at FOREGROUND priority,
       // ahead of the next scheduled 60s poll.
-      await this._hass.callService("securitas", "refresh_activity_log", {
+      await this._hass.callService("verisure_owa", "refresh_activity_log", {
         entity_id: this._config.entity,
       });
     } catch (e) {
@@ -598,17 +598,19 @@ class VerisureOwaActivityLogCard extends HTMLElement {
         row.classList.add("expanded");
         row.setAttribute("aria-expanded", "true");
         if (details) details.classList.add("expanded");
-        // Lazy-fetch the historical image for image-request events.
-        // Skip synthetic ids (prefix `ha-`) — those are HA-side
-        // placeholders the Verisure server can't resolve.  Injected
-        // events from the capture button use the real server id, so
-        // the fetch works for them too.
+        // Lazy-fetch the historical image for any event the panel
+        // tagged with an image (img=1) — image-request events as well
+        // as photo-detector alarms ("Allarme Foto", type 14).  Skip
+        // synthetic ids (prefix `ha-`) — those are HA-side placeholders
+        // the Verisure server can't resolve.  Injected events from the
+        // capture button use the real server id, so the fetch works
+        // for them too.
         const event = this._latestEvents.find(
           (e) => String(e.id_signal || "") === id
         );
         if (
           event &&
-          event.category === "image_request" &&
+          event.img === 1 &&
           !id.startsWith("ha-") &&
           !this._imageCache.has(id)
         ) {
@@ -616,8 +618,27 @@ class VerisureOwaActivityLogCard extends HTMLElement {
         }
       }
     };
+    // Drag threshold (px) for distinguishing a click from a text-selection drag.
+    // Pointer travel of more than this many px between pointerdown and click
+    // (strict > — a 4-px jitter still toggles) means the user was selecting
+    // text, not tapping the row, so leave the row state alone.
+    const DRAG_THRESHOLD = 4;
     this.shadowRoot.querySelectorAll(".event").forEach((row) => {
-      row.addEventListener("click", () => toggleRow(row));
+      let downX = 0;
+      let downY = 0;
+      row.addEventListener("pointerdown", (e) => {
+        downX = e.clientX;
+        downY = e.clientY;
+      });
+      row.addEventListener("click", (e) => {
+        if (
+          Math.abs(e.clientX - downX) > DRAG_THRESHOLD ||
+          Math.abs(e.clientY - downY) > DRAG_THRESHOLD
+        ) {
+          return;
+        }
+        toggleRow(row);
+      });
       row.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -636,7 +657,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     this._render();
     try {
       const result = await this._callServiceWithResponse(
-        "securitas",
+        "verisure_owa",
         "fetch_activity_image",
         {
           entity_id: this._config.entity,
@@ -702,8 +723,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
   }
 
   _renderDetails(event, lang) {
-    const imageBlock =
-      event.category === "image_request" ? this._renderImageBlock(event) : "";
+    const imageBlock = event.img === 1 ? this._renderImageBlock(event) : "";
     const prompt =
       event.category === "unknown"
         ? `<div class="unknown-prompt">${escHtml(_t(lang, "unknown_event_prompt"))}</div>`
@@ -797,6 +817,13 @@ class VerisureOwaActivityLogCard extends HTMLElement {
           padding: 8px 16px;
           cursor: pointer;
           border-top: 1px solid var(--divider-color, rgba(0,0,0,.06));
+          /* HA's Lovelace shell inherits user-select: none into our shadow
+             tree; explicitly opt back in so users can highlight the alias
+             / actor text on the row. The pointerdown/click handler wired
+             in _render() filters out drags so selection doesn't also
+             toggle the row. */
+          user-select: text;
+          -webkit-user-select: text;
         }
         .event:first-of-type { border-top: 0; }
         .event:hover { background: var(--secondary-background-color, rgba(0,0,0,.03)); }
@@ -838,6 +865,8 @@ class VerisureOwaActivityLogCard extends HTMLElement {
           display: none;
           padding: 4px 16px 12px 60px;
           background: var(--secondary-background-color, rgba(0,0,0,.04));
+          user-select: text;
+          -webkit-user-select: text;
         }
         .details-row.expanded { display: block; }
         table.details {

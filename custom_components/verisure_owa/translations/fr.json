@@ -213,6 +213,9 @@
         "unsupported_alarm_mode": {
             "message": "Ce mode d'alarme n'est pas pris en charge par votre panneau (rejeté : {tried}). Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Verisure OWA → Configurer)."
         },
+        "unsupported_alarm_mode_subpanel": {
+            "message": "Ce mode d'alarme n'est pas pris en charge par votre panneau (rejeté : {tried}). Il a été désactivé sur ce sous-panneau et ne sera plus proposé."
+        },
         "no_supported_command": {
             "message": "Aucune commande compatible trouvée pour ce panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Verisure OWA → Configurer)."
         }

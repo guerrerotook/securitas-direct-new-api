@@ -45,6 +45,12 @@ CONF_INSTALLATION = "installation"
 CONF_ENABLE_INTERIOR_PANEL = "enable_interior_panel"
 CONF_ENABLE_PERIMETER_PANEL = "enable_perimeter_panel"
 CONF_ENABLE_ANNEX_PANEL = "enable_annex_panel"
+# Persisted list of API command strings (e.g. "ARMNIGHT1") the panel has
+# already rejected at runtime. Hydrated into the CommandResolver on setup
+# so a sub-panel mode disabled by a 400 response stays disabled across
+# HA restarts — otherwise the user would re-encounter the same failure
+# until they manually edited storage.
+CONF_UNSUPPORTED_COMMANDS = "unsupported_commands"
 
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CODE_ARM_REQUIRED = False

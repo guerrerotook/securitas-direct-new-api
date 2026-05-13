@@ -1,7 +1,9 @@
 """Tests for alarm_control_panel entity logic."""
 
+import inspect
 from datetime import datetime, timedelta
 
+import attr
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +15,8 @@ from homeassistant.components.alarm_control_panel.const import (
     CodeFormat,
 )
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import entity_registry as _er_for_feature_detect
+from homeassistant.helpers.entity_registry import DeletedRegistryEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -144,6 +148,22 @@ class TestForceArmExpiredMobileMessageTranslation:
             assert isinstance(mobile, str) and mobile.strip(), (
                 f"Locale {locale!r} force_arm_expired.mobile_message is empty"
             )
+
+
+# Feature flags for tests that exercise registry APIs introduced after our
+# minimum-supported HA (2025.2). On older HA the underlying bug doesn't
+# manifest the same way and the test scaffolding can't be constructed — skip
+# those tests rather than fake them, since the real-HA assertions are what
+# give them value.
+_HAS_OBJECT_ID_BASE_KWARG = (
+    "object_id_base"
+    in inspect.signature(
+        _er_for_feature_detect.EntityRegistry.async_get_or_create
+    ).parameters
+)
+_DELETED_REGISTRY_ENTRY_HAS_ALIASES = "aliases" in {
+    field.name for field in attr.fields(DeletedRegistryEntry)
+}
 
 
 class TestForceArmNotificationsConfig:
@@ -3771,6 +3791,172 @@ class TestCompoundArmCommands:
         assert "ARMNIGHT1PERI1" in alarm._resolver.unsupported
         assert alarm._state == AlarmControlPanelState.DISARMED
 
+    @pytest.mark.parametrize("transient_status", [401, 422, 429, 451])
+    async def test_non_400_4xx_does_not_blacklist_command(self, transient_status):
+        """Only HTTP 400 (BAD_USER_INPUT / "command not valid for panel") means
+        the panel rejected the command. Other 4xx statuses (401 auth-blip,
+        422 validation, 429 rate-limit, etc.) are transient or environmental
+        and must NOT mark the command unsupported — otherwise a single bad
+        moment permanently disables an arming mode the user actually has.
+
+        Sibling concern from PR #467 review: blacklisting too broadly lets
+        ``unsupported_commands`` get polluted by transient auth or rate-limit
+        problems.
+        """
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("transient", http_status=transient_status)
+        )
+
+        # set_arm_state catches VerisureOwaError and routes through the
+        # arm-failed error handler (notify + log) without re-raising —
+        # so the call returns normally; the critical check is below.
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        # Critically: no command was marked unsupported.
+        assert alarm._resolver.unsupported == frozenset(), (
+            f"transient {transient_status} must not blacklist any command, "
+            f"but resolver.unsupported = {alarm._resolver.unsupported!r}"
+        )
+        # And no alternatives were attempted — the 4xx propagated out of
+        # _execute_step, the executor stopped at the first failure
+        # rather than trying every command in the step (which would
+        # also fail and add latency).
+        assert alarm.client.arm_alarm.call_count == 1, (
+            f"transient {transient_status} should stop at first failure, "
+            f"but tried {alarm.client.arm_alarm.call_count} alternatives"
+        )
+
+    async def test_unsupported_command_is_persisted_to_entry_data(self):
+        """After a 400 marks a command unsupported, the entry's data must
+        gain the command in CONF_UNSUPPORTED_COMMANDS so the next setup
+        starts with the resolver pre-loaded — sub-panels otherwise expose
+        the failing mode again on restart and the user pays the same
+        rejection over and over.
+
+        Persisted shape is ``{<installation.number>: [<commands>...]}``
+        (a dict keyed by installation number) so that legacy entries
+        covering multiple installations don't share one global list and
+        cross-contaminate sibling panels' resolvers.
+        """
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        entry = MagicMock()
+        entry.data = {"username": "u", "country": "IT"}
+        alarm._client.config_entry = entry
+        alarm.hass.config_entries = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("API error", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        assert alarm.hass.config_entries.async_update_entry.called, (
+            "Expected entry data to be persisted after mark_unsupported"
+        )
+        kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
+        persisted = kwargs.get("data", {}).get("unsupported_commands", {})
+        # Per-installation keyed format — Main panel's installation number is "123456"
+        assert isinstance(persisted, dict), (
+            f"Persisted unsupported_commands must be a dict, got {type(persisted).__name__}"
+        )
+        installation_num = str(alarm._installation.number)
+        assert "ARMNIGHT1PERI1" in persisted.get(installation_num, []), (
+            f"Persisted unsupported list missing ARMNIGHT1PERI1 for "
+            f"installation {installation_num!r}, got {persisted!r}"
+        )
+
+    async def test_persist_unsupported_migrates_legacy_flat_list(self):
+        """On upgrade from the v5.0.1-pre flat-list format, the first
+        persist call must convert ``["ARMHOME1"]`` into
+        ``{<installation.number>: [<new sorted list>]}`` — preserving
+        the legacy rejection under THIS installation's slot rather than
+        dropping it on the floor.
+
+        In production ``client.config["unsupported_commands"]`` is sourced
+        from ``entry.data["unsupported_commands"]`` (see ``__init__.py``'s
+        setup hydration), so the legacy flat list is what the resolver
+        starts pre-loaded with on the new build. By the time
+        ``_persist_unsupported`` runs, the resolver already contains the
+        legacy rejection plus any new one — and the write must reflect
+        that union under the per-installation slot.
+        """
+        # Mirror production: client.config + entry.data both carry the
+        # same legacy flat-list rejection. The resolver hydrates from
+        # client.config at __init__; entry.data is what _persist reads.
+        config = _night_peri_config()
+        config["unsupported_commands"] = ["ARMHOME1"]
+        alarm = make_alarm(config=config)
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        entry = MagicMock()
+        entry.data = {
+            "username": "u",
+            "country": "IT",
+            "unsupported_commands": ["ARMHOME1"],  # legacy rejection
+        }
+        alarm._client.config_entry = entry
+        alarm.hass.config_entries = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("API error", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
+        persisted = kwargs.get("data", {}).get("unsupported_commands", {})
+        installation_num = str(alarm._installation.number)
+        assert isinstance(persisted, dict), "Migration should produce dict format"
+        # Both the legacy rejection AND the new one must end up under
+        # this installation's slot (legacy list was associated with THIS
+        # installation's resolver because the resolver-init read both).
+        assert "ARMHOME1" in persisted.get(installation_num, [])
+        assert "ARMNIGHT1PERI1" in persisted.get(installation_num, [])
+
+    async def test_persist_unsupported_preserves_sibling_installation_slot(self):
+        """When entry.data already has the keyed-dict format with another
+        installation's rejections, persisting from THIS installation must
+        only touch THIS installation's slot — siblings' lists stay intact."""
+        alarm = make_alarm(config=_night_peri_config())
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+
+        entry = MagicMock()
+        entry.data = {
+            "username": "u",
+            "country": "IT",
+            "unsupported_commands": {
+                "999999": ["ARMDAY1"],  # sibling installation's rejections
+            },
+        }
+        alarm._client.config_entry = entry
+        alarm.hass.config_entries = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("API error", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError):
+            await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
+
+        kwargs = alarm.hass.config_entries.async_update_entry.call_args.kwargs
+        persisted = kwargs.get("data", {}).get("unsupported_commands", {})
+        installation_num = str(alarm._installation.number)
+        assert persisted.get("999999") == ["ARMDAY1"], (
+            f"Sibling installation 999999 slot was mutated: {persisted!r}"
+        )
+        assert "ARMNIGHT1PERI1" in persisted.get(installation_num, [])
+
     async def test_disarm_preserves_protom_response_date_in_state_attrs(self):
         """OperationStatus fields beyond protom_response (notably
         protom_response_date) must survive the disarm path. _build_operation_status
@@ -5286,7 +5472,10 @@ def _make_interior_panel(
             InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        return InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+    panel.async_schedule_update_ha_state = MagicMock()
+    panel.async_write_ha_state = MagicMock()
+    return panel
 
 
 def _make_perimeter_panel(
@@ -5339,9 +5528,110 @@ def _make_perimeter_panel(
         return PerimeterVerisureOwaAlarmPanel(installation, client, hass, coordinator)
 
 
+class TestSubPanelSuggestedObjectId:
+    """Sub-panels must seed a single-alias entity_id slot.
+
+    HA's entity_platform routes ``entity.suggested_object_id`` into the
+    registry's ``object_id_base`` parameter, and HA 2026.5+ unconditionally
+    prepends the device name onto ``object_id_base`` (for entities with
+    ``has_entity_name=False``) — running a strip-prefix heuristic first to
+    avoid doubling the name. That heuristic only recognises space, dash, or
+    colon as the separator following the matched prefix; an underscore
+    between ``<alias>`` and ``_<circuit>`` is NOT stripped, so the device
+    name ends up prepended twice and the entity_id comes out as
+    ``alarm_control_panel.<alias>_<alias>_<circuit>`` (the "doubled-alias
+    collision form").
+
+    The sub-panel mixin therefore returns ``"<alias> <circuit>"`` (space
+    separator) from ``suggested_object_id`` — the space satisfies the
+    strip-prefix heuristic on HA 2026.5+ and slugify still maps to the
+    canonical ``<alias>_<circuit>`` slot in every supported HA version.
+    """
+
+    def test_interior(self):
+        panel = _make_interior_panel()
+        assert panel.suggested_object_id == "TestHome interior"
+
+    def test_perimeter(self):
+        panel = _make_perimeter_panel()
+        assert panel.suggested_object_id == "TestHome perimeter"
+
+    def test_annex(self):
+        panel = _make_annex_panel()
+        assert panel.suggested_object_id == "TestHome annex"
+
+    @pytest.mark.skipif(
+        not _HAS_OBJECT_ID_BASE_KWARG,
+        reason=(
+            "object_id_base kwarg on async_get_or_create was added after our "
+            "minimum-supported HA (2025.2). The doubled-alias bug this test "
+            "guards against is HA 2026.5+ behaviour — no point reproducing "
+            "it on older HA where the registry-create path differs."
+        ),
+    )
+    @pytest.mark.parametrize(
+        "suffix,panel_factory",
+        [
+            ("_interior", _make_interior_panel),
+            ("_perimeter", _make_perimeter_panel),
+        ],
+    )
+    async def test_subpanel_entity_id_canonical_through_real_registry(
+        self, hass, suffix, panel_factory
+    ):
+        """End-to-end regression: the mixin's ``suggested_object_id`` must
+        produce ``alarm_control_panel.<alias>_<circuit>`` after going through
+        HA's real ``async_get_or_create`` path with a device attached.
+
+        Mirrors the call entity_platform makes for a fresh install: the
+        property value lands in ``object_id_base``, HA prepends the device
+        name and runs strip-prefix to undo the doubling. A space separator
+        in the property's return value is what lets strip-prefix succeed on
+        HA 2026.5+.
+
+        Reproduces the doubled-alias bug regression if the separator regresses
+        to an underscore (HA 2026.5+); also locks in the right outcome on HA
+        < 2026.5 where the device name isn't prepended at all.
+        """
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.verisure_owa.const import DOMAIN
+
+        entry = MockConfigEntry(domain=DOMAIN, data={"unsupported_commands": []})
+        entry.add_to_hass(hass)
+
+        # Device name == installation.alias — this is the prefix HA 2026.5+
+        # would otherwise prepend onto object_id_base, doubling the alias.
+        dev_reg = dr.async_get(hass)
+        device = dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "v5_verisure_owa.12345")},
+            name="TestHome",
+            manufacturer="Verisure",
+        )
+
+        panel = panel_factory()
+        # entity_platform routes entity.suggested_object_id into object_id_base
+        # (because the entity doesn't set internal_integration_suggested_object_id).
+        ent_reg = er.async_get(hass)
+        registered = ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            panel.unique_id,
+            object_id_base=panel.suggested_object_id,
+            suggested_object_id=None,
+            has_entity_name=panel.has_entity_name,
+            original_name=panel.name,
+            device_id=device.id,
+            config_entry=entry,
+        )
+        assert registered.entity_id == f"alarm_control_panel.testhome{suffix}"
+
+
 class TestInteriorSubPanel:
-    def test_supported_features_always_all_three(self):
-        """Interior sub-panel always exposes ARM_HOME + ARM_NIGHT + ARM_AWAY.
+    def test_supported_features_all_three_when_nothing_unsupported(self):
+        """Interior sub-panel exposes ARM_HOME + ARM_NIGHT + ARM_AWAY by default.
 
         We deliberately do not gate on JWT capabilities: the cap set is
         empirically unreliable (e.g. Italian SDVECU advertises ARMNIGHT but
@@ -5362,6 +5652,194 @@ class TestInteriorSubPanel:
             assert feats & F.ARM_HOME, f"ARM_HOME missing for caps={caps}"
             assert feats & F.ARM_NIGHT, f"ARM_NIGHT missing for caps={caps}"
             assert feats & F.ARM_AWAY, f"ARM_AWAY missing for caps={caps}"
+
+    def test_supported_features_drops_arm_night_when_armnight1_unsupported(self):
+        """Once the panel has rejected ARMNIGHT1 (typical Italian SDVECU
+        behaviour), the Interior sub-panel must stop offering ARM_NIGHT —
+        otherwise the user keeps pressing a button that's known to fail.
+        """
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_interior_panel()
+        panel._resolver.mark_unsupported("ARMNIGHT1")
+
+        feats = panel.supported_features
+        assert feats & F.ARM_HOME, "ARM_HOME should still be available"
+        assert not (feats & F.ARM_NIGHT), (
+            "ARM_NIGHT must be dropped after ARMNIGHT1 was rejected"
+        )
+        assert feats & F.ARM_AWAY, "ARM_AWAY should still be available"
+
+    def test_supported_features_drops_arm_home_when_armday1_unsupported(self):
+        """Symmetric: ARMDAY1 rejected ⇒ no ARM_HOME on the sub-panel."""
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_interior_panel()
+        panel._resolver.mark_unsupported("ARMDAY1")
+
+        feats = panel.supported_features
+        assert not (feats & F.ARM_HOME)
+        assert feats & F.ARM_NIGHT
+        assert feats & F.ARM_AWAY
+
+    def test_supported_features_drops_arm_away_when_arm1_unsupported(self):
+        """Symmetric: ARM1 rejected ⇒ no ARM_AWAY on the sub-panel."""
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_interior_panel()
+        panel._resolver.mark_unsupported("ARM1")
+
+        feats = panel.supported_features
+        assert feats & F.ARM_HOME
+        assert feats & F.ARM_NIGHT
+        assert not (feats & F.ARM_AWAY)
+
+    def _make_subpanel_with_persisted_unsupported(self, persisted, installation_num):
+        """Build an InteriorVerisureOwaAlarmPanel where ``client.config`` has
+        the given ``unsupported_commands`` payload and the panel's
+        ``installation.number`` is ``installation_num``.
+
+        Shared helper for the resolver-hydration tests below (flat-list
+        back-compat and per-installation dict format).
+        """
+        from custom_components.verisure_owa.alarm_control_panel import (
+            InteriorVerisureOwaAlarmPanel,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        coordinator = MagicMock()
+        coordinator.has_peri = False
+        coordinator.has_annex = False
+        coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        installation = MagicMock(number=installation_num, alias="A", address="x")
+        client = MagicMock()
+        client.config = {"unsupported_commands": persisted}
+        hass = MagicMock()
+        with (
+            patch.object(
+                InteriorVerisureOwaAlarmPanel,
+                "async_schedule_update_ha_state",
+                MagicMock(),
+            ),
+            patch.object(
+                InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+            ),
+        ):
+            return InteriorVerisureOwaAlarmPanel(
+                installation, client, hass, coordinator
+            )
+
+    def test_hydrates_unsupported_from_legacy_flat_list(self):
+        """Resolver starts pre-loaded with the persisted unsupported list so
+        a previously-rejected command stays rejected across HA restarts.
+
+        Legacy flat-list format (a bare list applied to every installation
+        on the entry) must keep working — that's the v5.0.1-pre format,
+        and an upgraded install needs the existing rejections to survive
+        until the panel re-persists in the new keyed-dict shape.
+        """
+        panel = self._make_subpanel_with_persisted_unsupported(
+            persisted=["ARMNIGHT1"], installation_num="1"
+        )
+        assert "ARMNIGHT1" in panel._resolver.unsupported
+
+    def test_hydrates_unsupported_from_per_installation_dict(self):
+        """New keyed-dict format scopes ``unsupported_commands`` per
+        installation. Only the rejections under THIS installation's number
+        are loaded into the resolver — siblings on the same legacy entry
+        keep their own slot."""
+        panel = self._make_subpanel_with_persisted_unsupported(
+            persisted={"1": ["ARMNIGHT1"], "2": ["ARMDAY1"]},
+            installation_num="1",
+        )
+        assert "ARMNIGHT1" in panel._resolver.unsupported
+        assert "ARMDAY1" not in panel._resolver.unsupported, (
+            "Rejections from another installation on the same entry must "
+            "not contaminate this installation's resolver"
+        )
+
+    def test_dict_format_empty_when_installation_missing(self):
+        """If the dict has no slot for THIS installation, the resolver
+        starts empty — siblings' rejections don't apply."""
+        panel = self._make_subpanel_with_persisted_unsupported(
+            persisted={"42": ["ARMNIGHT1"]},
+            installation_num="1",
+        )
+        assert "ARMNIGHT1" not in panel._resolver.unsupported
+
+    def test_no_persisted_data_starts_empty(self):
+        """Missing key entirely should yield an empty resolver."""
+        from custom_components.verisure_owa.alarm_control_panel import (
+            InteriorVerisureOwaAlarmPanel,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
+        )
+
+        coordinator = MagicMock()
+        coordinator.has_peri = False
+        coordinator.has_annex = False
+        coordinator.alarm_state = AlarmState(
+            interior=InteriorMode.OFF,
+            perimeter=PerimeterMode.OFF,
+            annex=AnnexMode.OFF,
+        )
+        installation = MagicMock(number="1", alias="A", address="x")
+        client = MagicMock()
+        client.config = {}  # no unsupported_commands key at all
+        hass = MagicMock()
+        with (
+            patch.object(
+                InteriorVerisureOwaAlarmPanel,
+                "async_schedule_update_ha_state",
+                MagicMock(),
+            ),
+            patch.object(
+                InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
+            ),
+        ):
+            panel = InteriorVerisureOwaAlarmPanel(
+                installation, client, hass, coordinator
+            )
+        assert panel._resolver.unsupported == frozenset()
+
+    async def test_subpanel_raises_subpanel_error_when_command_unsupported(self):
+        """Sub-panels have no user-editable mappings, so the rejection
+        notification must use a sub-panel-specific translation key — not
+        the main-panel one that points the user at the (non-existent)
+        mappings UI."""
+        from custom_components.verisure_owa.verisure_owa_api import (
+            VerisureOwaError,
+        )
+        from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
+            CommandStep,
+        )
+
+        panel = _make_interior_panel()
+        panel.client.arm_alarm = AsyncMock(
+            side_effect=VerisureOwaError("rejected", http_status=400)
+        )
+
+        with pytest.raises(HomeAssistantError) as excinfo:
+            await panel._execute_step(CommandStep(commands=["ARMNIGHT1"]))
+
+        assert excinfo.value.translation_key == "unsupported_alarm_mode_subpanel"
 
     def test_resolve_target_state_armed_away(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -5443,6 +5921,35 @@ class TestPerimeterSubPanel:
         assert feats & F.ARM_AWAY
         assert not (feats & F.ARM_HOME)
         assert not (feats & F.ARM_NIGHT)
+
+    def test_supported_features_drops_arm_away_when_peri1_unsupported(self):
+        """If the panel has rejected ``PERI1`` (the only arm-perimeter
+        command on the Perimeter sub-panel's standalone-axis branch), the
+        sub-panel must stop offering ``ARM_AWAY`` — otherwise the user
+        keeps pressing a button that's known to fail. Mirror of the
+        Interior sub-panel's ``ARMNIGHT1`` drop.
+        """
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_perimeter_panel()
+        panel._resolver.mark_unsupported("PERI1")
+
+        feats = panel.supported_features
+        assert not (feats & F.ARM_AWAY), (
+            "ARM_AWAY must be dropped after PERI1 was rejected"
+        )
+
+    def test_recompute_supported_features_drops_arm_away_too(self):
+        """``_recompute_supported_features`` is what propagates the
+        feature change to the entity registry (HA's cached_property and
+        the auto-update path read ``_attr_supported_features`` rather
+        than the @property). It has to agree with the live property."""
+        panel = _make_perimeter_panel()
+        panel._resolver.mark_unsupported("PERI1")
+        panel._recompute_supported_features()
+        assert panel._attr_supported_features == panel.supported_features
 
     def test_resolve_target_armed_away(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -5618,6 +6125,28 @@ class TestAnnexSubPanel:
         assert feats & F.ARM_AWAY
         assert not (feats & F.ARM_HOME)
         assert not (feats & F.ARM_NIGHT)
+
+    def test_supported_features_drops_arm_away_when_armannex1_unsupported(self):
+        """If the panel has rejected ``ARMANNEX1`` (the only arm-annex
+        wire command), the Annex sub-panel must stop offering
+        ``ARM_AWAY``."""
+        from homeassistant.components.alarm_control_panel import (
+            AlarmControlPanelEntityFeature as F,
+        )
+
+        panel = _make_annex_panel()
+        panel._resolver.mark_unsupported("ARMANNEX1")
+
+        feats = panel.supported_features
+        assert not (feats & F.ARM_AWAY), (
+            "ARM_AWAY must be dropped after ARMANNEX1 was rejected"
+        )
+
+    def test_recompute_supported_features_drops_arm_away_too(self):
+        panel = _make_annex_panel()
+        panel._resolver.mark_unsupported("ARMANNEX1")
+        panel._recompute_supported_features()
+        assert panel._attr_supported_features == panel.supported_features
 
     def test_resolve_armed_away_preserves_other_axes(self):
         from custom_components.verisure_owa.verisure_owa_api.models import (
@@ -6835,6 +7364,282 @@ class TestCombinedPanelEntityIdHealer:
                 f"v5_verisure_owa.{installation.number}",
             )
             == f"{canonical}_2"
+        )
+
+
+# ===========================================================================
+# TestSubPanelEntityIdHealer
+# ===========================================================================
+
+
+class TestSubPanelEntityIdHealer:
+    """Healer for upgrade-path-broken sub-panel entity_ids.
+
+    Mirrors the combined-panel healer for the Interior/Perimeter/Annex axis
+    panels. A broken sub-panel sits at ``<alias>_<circuit>_<alias>`` (the
+    doubled-alias collision form); the healer relocates it to the canonical
+    ``<alias>_<circuit>`` slot, evicting any verisure_owa squatter holding
+    that slot.
+    """
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["_interior", "_perimeter", "_annex"],
+    )
+    async def test_renames_non_canonical_to_alias_suffix(self, hass, suffix):
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation.alias)
+        broken = f"{alias_slug}{suffix}_{alias_slug}"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}{suffix}",
+            suggested_object_id=broken,
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, suffix)
+
+        canonical = f"alarm_control_panel.{alias_slug}{suffix}"
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}{suffix}",
+            )
+            == canonical
+        )
+
+    async def test_no_op_when_already_canonical(self, hass):
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        canonical = f"alarm_control_panel.{slugify(installation.alias)}_interior"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation.number}_interior",
+            suggested_object_id=f"{slugify(installation.alias)}_interior",
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, "_interior")
+
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation.number}_interior",
+            )
+            == canonical
+        )
+
+    async def test_does_not_evict_another_installation_with_same_alias(self, hass):
+        """Two installations sharing the alias must not clobber each other.
+
+        Installation A (broken at <alias>_interior_<alias>) and installation B
+        (correctly at <alias>_interior) collide on the canonical slot. Heal
+        for A must leave B's entity alone and skip the rename rather than
+        evicting a valid sub-panel from another installation.
+        """
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation_a = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        installation_b_number = "100002"
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation_a.alias)
+        canonical = f"alarm_control_panel.{alias_slug}_interior"
+        # Installation B is correctly registered at the canonical slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation_b_number}_interior",
+            suggested_object_id=f"{alias_slug}_interior",
+            config_entry=entry,
+        )
+        # Installation A landed on the broken doubled-alias slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v5_verisure_owa.{installation_a.number}_interior",
+            suggested_object_id=f"{alias_slug}_interior_{alias_slug}",
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation_a, "_interior")
+
+        # Installation B's entity must still exist at the canonical slot.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation_b_number}_interior",
+            )
+            == canonical
+        )
+        # Installation A's entity stays at the broken slot — manual intervention
+        # is required to disambiguate.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v5_verisure_owa.{installation_a.number}_interior",
+            )
+            == f"alarm_control_panel.{alias_slug}_interior_{alias_slug}"
+        )
+
+    @pytest.mark.skipif(
+        not _DELETED_REGISTRY_ENTRY_HAS_ALIASES,
+        reason=(
+            "DeletedRegistryEntry.aliases field was added after our "
+            "minimum-supported HA (2025.2); the test seeds a tombstone via "
+            "the dataclass constructor so its kwargs have to match the live "
+            "HA's attr fields. Production code reads tombstones the registry "
+            "produced naturally (attr.evolve preserves whatever fields exist), "
+            "so it's the test scaffolding that's HA-version-specific, not the "
+            "healer."
+        ),
+    )
+    @pytest.mark.parametrize(
+        "suffix",
+        ["_interior", "_perimeter", "_annex"],
+    )
+    async def test_heals_doubled_alias_in_deleted_entities_tombstone(
+        self, hass, suffix
+    ):
+        """When a user removes the installation (or upgrades from a build that
+        slugified to the doubled-alias form) and re-adds it later, HA pops the
+        tombstone in ``async_get_or_create`` and restores its ``entity_id`` —
+        bypassing the entity's ``suggested_object_id``. So a freshly-readded
+        sub-panel lands back on ``<alias>_<circuit>_<alias>`` even though the
+        canonical slug would otherwise be picked.
+
+        The healer must rewrite the tombstone's ``entity_id`` to the canonical
+        slot so the next async_get_or_create restores onto the correct slug.
+        """
+        from datetime import datetime, timezone
+
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.verisure_owa.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.verisure_owa.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation.alias)
+        unique_id = f"v5_verisure_owa.{installation.number}{suffix}"
+        broken = f"alarm_control_panel.{alias_slug}{suffix}_{alias_slug}"
+        canonical = f"alarm_control_panel.{alias_slug}{suffix}"
+
+        # Seed the tombstone HA would have left behind after the user
+        # deleted the config entry from the UI.
+        now = datetime.now(timezone.utc)
+        ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
+            DeletedRegistryEntry(
+                entity_id=broken,
+                unique_id=unique_id,
+                platform=DOMAIN,
+                aliases=set(),
+                area_id=None,
+                categories={},
+                config_entry_id=None,
+                config_subentry_id=None,
+                created_at=now,
+                device_class=None,
+                disabled_by=None,
+                hidden_by=None,
+                icon=None,
+                id="some-id",
+                labels=set(),
+                modified_at=now,
+                name=None,
+                options={},
+                orphaned_timestamp=None,
+            )
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, suffix)
+
+        # The tombstone's entity_id should now be canonical so that when
+        # async_get_or_create pops it on re-add, the restored entity_id is
+        # canonical too.
+        tombstone = ent_reg.deleted_entities.get(
+            ("alarm_control_panel", DOMAIN, unique_id)
+        )
+        assert tombstone is not None, "tombstone unexpectedly removed"
+        assert tombstone.entity_id == canonical, (
+            f"tombstone still has broken entity_id {tombstone.entity_id!r}"
         )
 
 

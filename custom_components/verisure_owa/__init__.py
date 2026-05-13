@@ -58,6 +58,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENABLE_ANNEX_PANEL,
     CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
+    CONF_UNSUPPORTED_COMMANDS,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
@@ -191,32 +192,55 @@ def add_device_information[T: dict](config: T) -> T:
     return config
 
 
+# Fields owned by the options flow. When syncing options into entry.data
+# we *replace* these rather than merge, so a key cleared in options (e.g.
+# CONF_MAP_VACATION) doesn't leave a stale value lingering in entry.data.
+_OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
+    CONF_CODE,
+    CONF_CODE_ARM_REQUIRED,
+    CONF_SCAN_INTERVAL,
+    CONF_MAP_HOME,
+    CONF_MAP_AWAY,
+    CONF_MAP_NIGHT,
+    CONF_MAP_CUSTOM,
+    CONF_MAP_VACATION,
+    CONF_NOTIFY_GROUP,
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_LOCK_AUTOMATIONS,
+)
+
+
+def _synced_entry_data(entry: ConfigEntry) -> dict[str, Any] | None:
+    """Return entry.data with options-managed fields aligned to entry.options.
+
+    Returns ``None`` when no change is needed, or when entry.options is empty
+    (fresh install — initial config-flow values live in entry.data and are
+    the source of truth until the options flow runs at least once).
+
+    Otherwise drops options-managed keys from entry.data and re-applies them
+    from entry.options, so a key the user cleared in options doesn't keep its
+    previous value in data — which `_opt()` (and the options form's
+    `_suggested_map` fallback) would otherwise resurrect.
+    """
+    if not entry.options:
+        return None
+    new_data = {k: v for k, v in entry.data.items() if k not in _OPTIONS_MANAGED_FIELDS}
+    new_data.update(entry.options)
+    if dict(entry.data) == new_data:
+        return None
+    return new_data
+
+
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
-    if any(
-        entry.data.get(attrib) != entry.options.get(attrib)
-        for attrib in (
-            CONF_CODE,
-            CONF_CODE_ARM_REQUIRED,
-            CONF_SCAN_INTERVAL,
-            CONF_MAP_HOME,
-            CONF_MAP_AWAY,
-            CONF_MAP_NIGHT,
-            CONF_MAP_CUSTOM,
-            CONF_MAP_VACATION,
-            CONF_NOTIFY_GROUP,
-            CONF_FORCE_ARM_NOTIFICATIONS,
-            CONF_ENABLE_INTERIOR_PANEL,
-            CONF_ENABLE_PERIMETER_PANEL,
-            CONF_ENABLE_ANNEX_PANEL,
-            CONF_LOCK_AUTOMATIONS,
-        )
-    ):
-        # update entry replacing data with new options
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, **entry.options}
-        )
-        await hass.config_entries.async_reload(entry.entry_id)
+    new_data = _synced_entry_data(entry)
+    if new_data is None:
+        return
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -276,6 +300,21 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_MAP_NIGHT] = _opt(CONF_MAP_NIGHT)
     config[CONF_MAP_CUSTOM] = _opt(CONF_MAP_CUSTOM)
     config[CONF_MAP_VACATION] = _opt(CONF_MAP_VACATION)
+    # Runtime-learned unsupported commands (data-only — not user-editable).
+    # Persisted shape is ``{<installation.number>: [<commands>...]}``; the
+    # legacy v5.0.1-pre flat-list ``[<commands>...]`` is preserved verbatim
+    # so ``BaseVerisureOwaAlarmPanel._read_unsupported_for_installation``
+    # can migrate it on the next persist. Deep-copy lists/dicts so later
+    # in-place mutations don't leak back into ``entry.data``.
+    _raw_unsupported = entry.data.get(CONF_UNSUPPORTED_COMMANDS, {})
+    if isinstance(_raw_unsupported, dict):
+        config[CONF_UNSUPPORTED_COMMANDS] = {
+            k: list(v) for k, v in _raw_unsupported.items()
+        }
+    elif isinstance(_raw_unsupported, list):
+        config[CONF_UNSUPPORTED_COMMANDS] = list(_raw_unsupported)
+    else:
+        config[CONF_UNSUPPORTED_COMMANDS] = {}
 
     need_sign_in = False
     if CONF_DEVICE_ID in entry.data:

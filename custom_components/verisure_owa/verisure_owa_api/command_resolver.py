@@ -7,6 +7,7 @@ fallback discovery.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from .const import VerisureOwaState
@@ -97,9 +98,13 @@ class CommandResolver:
     resets on HA restart) and skips them in future resolutions.
     """
 
-    def __init__(self, has_peri: bool) -> None:
+    def __init__(
+        self,
+        has_peri: bool,
+        unsupported: Iterable[str] = (),
+    ) -> None:
         self._has_peri = has_peri
-        self._unsupported: set[str] = set()
+        self._unsupported: set[str] = set(unsupported)
 
     def update_capabilities(self, *, has_peri: bool) -> None:
         """Refresh capability flags after late capability detection.
@@ -119,6 +124,52 @@ class CommandResolver:
     def unsupported(self) -> frozenset[str]:
         """Return the set of unsupported commands."""
         return frozenset(self._unsupported)
+
+    def can_reach_interior(self, mode: InteriorMode) -> bool:
+        """Return True if the Interior sub-panel can reach ``mode``.
+
+        The Interior sub-panel only ever drives the interior axis — it
+        preserves the perimeter state. resolve()'s "only interior changes"
+        branch (and the "disarm-then-rearm" branch when current interior
+        is non-OFF + peri is OFF) calls ``_INTERIOR_ARM[mode]`` without
+        any fallback, so if that basic command is rejected, the mode is
+        unreachable from this entity regardless of has_peri.
+
+        We deliberately don't try the compound (``ARMNIGHT1PERI1`` etc.)
+        as a fallback: it's only used when both axes change in one step,
+        which the sub-panel never asks for. Considering the compound as
+        a fallback here would keep the rejected button visible even
+        though pressing it would always re-issue the failing basic
+        command.
+        """
+        if mode == InteriorMode.OFF:
+            return True  # disarm always available
+        return _INTERIOR_ARM[mode] not in self._unsupported
+
+    def can_reach_perimeter(self, mode: PerimeterMode) -> bool:
+        """Return True if the Perimeter sub-panel can reach ``mode``.
+
+        The Perimeter sub-panel only drives the perimeter axis (preserving
+        interior). The arm-perimeter wire command on the standalone path
+        is ``PERI1`` (see ``_resolve_arm``'s "only perimeter changes"
+        branch). If that's rejected the mode is unreachable from this
+        entity, mirroring ``can_reach_interior``'s contract: disarm always
+        available, arm-on gated by the resolver's unsupported set.
+        """
+        if mode == PerimeterMode.OFF:
+            return True  # disarm always available
+        return "PERI1" not in self._unsupported
+
+    def can_reach_annex(self, mode: AnnexMode) -> bool:
+        """Return True if the Annex sub-panel can reach ``mode``.
+
+        The Annex sub-panel drives the annex axis with the explicit
+        ``ARMANNEX1`` / ``DARMANNEX1`` commands. If ``ARMANNEX1`` is
+        rejected the mode is unreachable; disarm stays available.
+        """
+        if mode == AnnexMode.OFF:
+            return True  # disarm always available
+        return "ARMANNEX1" not in self._unsupported
 
     def _resolve_annex(
         self, current_annex: AnnexMode, target_annex: AnnexMode

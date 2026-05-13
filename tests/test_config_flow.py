@@ -972,8 +972,69 @@ async def test_options_mappings_submitting_creates_entry(hass):
     assert result["data"][CONF_MAP_HOME] == STD_DEFAULTS[CONF_MAP_HOME]
     assert result["data"][CONF_MAP_AWAY] == STD_DEFAULTS[CONF_MAP_AWAY]
     assert result["data"][CONF_MAP_NIGHT] == STD_DEFAULTS[CONF_MAP_NIGHT]
-    assert CONF_MAP_CUSTOM not in result["data"]
-    assert CONF_MAP_VACATION not in result["data"]
+    # Optional mapping fields the user didn't set are normalized to "" so
+    # the update listener sees a diff against any previously-saved value.
+    assert not result["data"][CONF_MAP_CUSTOM]
+    assert not result["data"][CONF_MAP_VACATION]
+
+
+async def test_options_mappings_omitted_optional_key_records_as_cleared(hass):
+    """HA's frontend omits a cleared select key from user_input rather than
+    sending an empty string. The previous-options dict also had no key
+    (from the prior broken save), so a naive merge produces no diff — the
+    update listener never fires and the cleared state is never persisted.
+
+    The mappings step must surface "user cleared this field" as an explicit
+    empty value in entry.options so the listener sees the change and syncs
+    the stale value out of entry.data.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(
+            has_peri=True,
+            map_vacation=VerisureOwaState.PARTIAL_NIGHT_PERI.value,
+        ),
+        # Prior options also lack map_vacation (from a previous broken save
+        # under the old listener). Without normalization the new save
+        # produces the same shape and no change is detected.
+        options={
+            CONF_MAP_HOME: PERI_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
+        },
+    )
+    entry.add_to_hass(hass)
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.has_peri = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "alarm_coordinator": mock_coordinator
+    }
+
+    flow_id = await _advance_to_mappings(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: PERI_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: PERI_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: PERI_DEFAULTS[CONF_MAP_NIGHT],
+            CONF_MAP_CUSTOM: PERI_DEFAULTS[CONF_MAP_CUSTOM],
+            # CONF_MAP_VACATION omitted — HA frontend drops cleared keys.
+        },
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    # Saved options must include map_vacation (as empty/falsy) so the diff
+    # vs. entry.data fires the listener and clears the stale data value.
+    assert CONF_MAP_VACATION in result["data"], (
+        "Cleared optional map field must be explicitly recorded in options "
+        "(empty string), not silently omitted — otherwise the listener has "
+        "no diff to act on and stale entry.data lingers."
+    )
+    assert not result["data"][CONF_MAP_VACATION], (
+        f"Cleared field must be falsy, got {result['data'][CONF_MAP_VACATION]!r}"
+    )
 
 
 async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
@@ -1002,8 +1063,9 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
     assert CONF_SCAN_INTERVAL in result["data"]
     # Mapping data should be present
     assert result["data"][CONF_MAP_HOME] == VerisureOwaState.TOTAL.value
-    assert CONF_MAP_CUSTOM not in result["data"]
-    assert CONF_MAP_VACATION not in result["data"]
+    # Optional mapping fields the user didn't set normalize to falsy.
+    assert not result["data"][CONF_MAP_CUSTOM]
+    assert not result["data"][CONF_MAP_VACATION]
 
 
 # ===================================================================
@@ -1405,6 +1467,61 @@ async def test_all_configured_aborts(hass):
 
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_abort_opts_out_of_reload_on_update(hass):
+    """`_abort_if_unique_id_configured` must be called with reload_on_update=False.
+
+    HA 2026.6 deprecates the combination of `add_update_listener` and the
+    reload-on-update path of `_abort_if_unique_id_configured`; in 2026.12 it
+    becomes an error. We keep the listener (it syncs options into data) and
+    opt out on the abort side instead.
+    See developers.home-assistant.io/blog/2026/05/07/
+    config-entry-listener-together-with-reloading-methods/
+    """
+    from homeassistant import config_entries as ha_config_entries
+
+    from custom_components.verisure_owa.config_flow import FlowHandler
+
+    # Pre-existing entry on a *different* installation so the pre-step filter
+    # doesn't drop the available one — the abort path inside
+    # `_create_entry_for_installation` is what we want to exercise. We then
+    # patch `_async_current_entries` to also hide the pre-existing entry from
+    # the filter, while leaving it visible to the abort's lookup.
+    blocking_data = make_config_entry_data()
+    blocking_data[CONF_INSTALLATION] = "111"
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_111",
+        data=blocking_data,
+        version=3,
+    ).add_to_hass(hass)
+
+    mock_hub = _hub_factory()
+    mock_hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number="111", alias="Home")]
+    )
+
+    captured_kwargs: dict = {}
+    real_abort = ha_config_entries.ConfigFlow._abort_if_unique_id_configured
+
+    def spy_abort(self, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_abort(self, *args, **kwargs)
+
+    with (
+        patch.object(FlowHandler, "_async_current_entries", return_value=[]),
+        patch.object(
+            ha_config_entries.ConfigFlow,
+            "_abort_if_unique_id_configured",
+            spy_abort,
+        ),
+    ):
+        await _complete_full_flow(hass, mock_hub)
+
+    assert captured_kwargs.get("reload_on_update") is False, (
+        f"Expected reload_on_update=False, got kwargs={captured_kwargs}"
+    )
 
 
 # ===================================================================

@@ -161,6 +161,45 @@ class _AxisSubPanelMixin:
     which is wrong for axis sub-panels.  This mixin replaces both paths.
     """
 
+    # Sub-panels don't expose user-editable state mappings, so a
+    # panel-rejected command can't be worked around in options — the
+    # right action is to drop the feature and tell the user it's been
+    # disabled. The Main panel keeps the default (True) and points users
+    # at the mappings UI instead.
+    _is_mappable: bool = False
+
+    @property
+    def suggested_object_id(self) -> str:
+        """Force the entity_id slug to ``<alias>_<circuit>`` on fresh installs.
+
+        ``_SUFFIX`` is the *unique-id* suffix (``_interior`` / ``_perimeter``
+        / ``_annex``) — kept as-is so existing registry entries keep the same
+        unique_id. The *display* slug returned here uses a **space**
+        separator (``"<alias> interior"``), not the unique-id underscore, for
+        the HA 2026.5+ entity-registry path:
+
+        HA 2026.5 unconditionally prepends the device name onto the
+        registry's ``object_id_base`` for entities with
+        ``has_entity_name=False``, then runs a strip-prefix heuristic to
+        avoid doubling. That heuristic only recognises space/dash/colon as
+        the separator following the matched prefix — an underscore between
+        ``<alias>`` and ``_<circuit>`` is not stripped, so the device name
+        ends up prepended twice and the entity_id comes out as
+        ``alarm_control_panel.<alias>_<alias>_<circuit>`` (the
+        "doubled-alias collision form"). Returning a space-separated value
+        here keeps the heuristic happy and produces the canonical
+        ``alarm_control_panel.<alias>_<circuit>`` after HA's own slugify
+        pass. The same value still works on HA < 2026.5 (which never
+        prepends the device name when ``has_entity_name=False``) because
+        slugify maps space → ``_`` in either case.
+
+        The ``_heal_subpanel_entity_id`` helper relocates already-broken
+        entries on existing installs that got the underscore-form slug
+        before this fix landed.
+        """
+        circuit = self._SUFFIX.lstrip("_")  # type: ignore[attr-defined]
+        return f"{self._installation.alias} {circuit}"  # type: ignore[attr-defined]
+
     def _update_from_coordinator(self, data: AlarmStatusData) -> None:  # type: ignore[override]
         """Project the coordinator's joint state onto this panel's axis.
 
@@ -204,6 +243,23 @@ class _AxisSubPanelMixin:
         )
         self._state = self._extract_state(joint)  # type: ignore[attr-defined]
 
+    async def async_added_to_hass(self) -> None:  # type: ignore[override]
+        """Sync the entity registry with the resolver-hydrated feature set.
+
+        On HA restart the resolver is rehydrated from the persisted
+        ``unsupported_commands`` mapping, but no ``_persist_unsupported``
+        call fires (no rejection happens — we just refuse to try the
+        known-bad command). HA's auto-registry-update doesn't reliably
+        propagate the new ``supported_features`` for sub-panels, so a
+        previously-rejected button would reappear on the card without
+        this explicit sync.
+
+        Shared by all three sub-panels so the feature-drop is consistent
+        regardless of which axis the rejection was on.
+        """
+        await super().async_added_to_hass()  # type: ignore[misc]
+        self._force_registry_supported_features()  # type: ignore[attr-defined]
+
 
 class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
     """Sub-panel driving only the interior axis.
@@ -220,26 +276,48 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Interior - {self._installation.alias}"
+        # Seed _attr_supported_features so HA's cached_property mechanism
+        # (and the entity registry's cached supported_features) start from
+        # the current resolver state. The @property below stays authoritative
+        # for live reads, but the cached_property is what HA's
+        # __async_calculate_state compares against the registry — keeping
+        # _attr in sync ensures the registry-update path sees the change.
+        self._recompute_supported_features()
+
+    def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
+        """Build the current resolver-gated feature set for this sub-panel.
+
+        Single source of truth shared by the live ``supported_features``
+        @property (HA reads it on every state calculation) and
+        ``_recompute_supported_features`` (which writes the value into
+        ``_attr_supported_features`` for HA's cached_property + entity-
+        registry path).
+
+        We deliberately do NOT gate on the JWT capability set: empirically
+        (Italian SDVECU OWNER) the JWT 'cap' claim can be both incomplete
+        and wrong about which arming commands the panel accepts — e.g.
+        claiming ARMNIGHT while the panel rejects ARMNIGHT1 with "not valid
+        for Central Unit", and omitting ARMDAY while the panel happily
+        accepts ARMDAY1. Instead start with all three interior modes and
+        drop ones whose underlying command has been rejected at runtime;
+        the rejection set is hydrated from persisted state on setup so a
+        mode disabled once stays disabled across HA restarts.
+        """
+        features = AlarmControlPanelEntityFeature(0)
+        if self._resolver.can_reach_interior(InteriorMode.DAY):
+            features |= AlarmControlPanelEntityFeature.ARM_HOME
+        if self._resolver.can_reach_interior(InteriorMode.NIGHT):
+            features |= AlarmControlPanelEntityFeature.ARM_NIGHT
+        if self._resolver.can_reach_interior(InteriorMode.TOTAL):
+            features |= AlarmControlPanelEntityFeature.ARM_AWAY
+        return features
+
+    def _recompute_supported_features(self) -> None:
+        self._attr_supported_features = self._compute_supported_features()
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return all interior arming features.
-
-        We deliberately do NOT gate on the JWT capability set: empirically (Italian
-        SDVECU OWNER) the JWT 'cap' claim can be both incomplete and wrong about
-        which arming commands the panel accepts — e.g. claiming ARMNIGHT while
-        the panel rejects ARMNIGHT1 with "not valid for Central Unit", and
-        omitting ARMDAY while the panel happily accepts ARMDAY1. Gating on the
-        cap set therefore hides modes that work and exposes modes that don't.
-        Instead, surface all three interior modes; the resolver's mark_unsupported
-        runtime-fallback catches genuinely-rejected commands and the user gets a
-        clear notification naming the failed command.
-        """
-        return (
-            AlarmControlPanelEntityFeature.ARM_HOME
-            | AlarmControlPanelEntityFeature.ARM_NIGHT
-            | AlarmControlPanelEntityFeature.ARM_AWAY
-        )
+        return self._compute_supported_features()
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the interior axis."""
@@ -285,11 +363,26 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Perimeter - {self._installation.alias}"
+        self._recompute_supported_features()
+
+    def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
+        """Return ``ARM_AWAY`` unless the resolver has marked ``PERI1`` unsupported.
+
+        Perimeter is binary (ON/OFF) and ``PERI1`` is the only standalone
+        arm-perimeter command, so a panel rejection makes the entire
+        sub-panel button unreachable — drop ``ARM_AWAY`` rather than keep
+        showing a button that will fail.
+        """
+        if self._resolver.can_reach_perimeter(PerimeterMode.ON):
+            return AlarmControlPanelEntityFeature.ARM_AWAY
+        return AlarmControlPanelEntityFeature(0)
+
+    def _recompute_supported_features(self) -> None:
+        self._attr_supported_features = self._compute_supported_features()
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return supported features for perimeter (binary axis, ARM_AWAY only)."""
-        return AlarmControlPanelEntityFeature.ARM_AWAY
+        return self._compute_supported_features()
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the perimeter axis."""
@@ -331,11 +424,23 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
         super().__init__(*args, **kwargs)
         self._attr_unique_id = f"{self._attr_unique_id}{self._SUFFIX}"
         self._attr_name = f"Annex - {self._installation.alias}"
+        self._recompute_supported_features()
+
+    def _compute_supported_features(self) -> AlarmControlPanelEntityFeature:
+        """Return ``ARM_AWAY`` unless the resolver has marked ``ARMANNEX1``
+        unsupported. Mirrors the Perimeter sub-panel: annex is binary and
+        ``ARMANNEX1`` is the only arm-annex wire command, so a panel
+        rejection makes the button unreachable."""
+        if self._resolver.can_reach_annex(AnnexMode.ON):
+            return AlarmControlPanelEntityFeature.ARM_AWAY
+        return AlarmControlPanelEntityFeature(0)
+
+    def _recompute_supported_features(self) -> None:
+        self._attr_supported_features = self._compute_supported_features()
 
     @property
     def supported_features(self) -> AlarmControlPanelEntityFeature:  # type: ignore[override]
-        """Return supported features for annex (binary axis, ARM_AWAY only)."""
-        return AlarmControlPanelEntityFeature.ARM_AWAY
+        return self._compute_supported_features()
 
     def _resolve_target_state(self, ha_state: str) -> AlarmState:
         """Map an HA state to a target AlarmState that touches only the annex axis."""
