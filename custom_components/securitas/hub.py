@@ -4,6 +4,7 @@ import asyncio
 import base64
 import logging
 import time
+from functools import partial
 from typing import Any
 
 from aiohttp import ClientSession
@@ -302,19 +303,32 @@ class VerisureHub:
         )
 
         try:
-            # Delegate capture + polling entirely to the client
+            # Delegate capture + polling entirely to the client.  The client
+            # pre-fetches a baseline thumbnail right before submitting the
+            # capture so it can poll for a strictly-newer frame afterwards —
+            # cached or coordinator-held timestamps aren't safe baselines
+            # because the CDN may already be serving a different stale frame.
             thumbnail = await self._api_queue.submit(
-                self.client.capture_image,
-                installation,
-                device.code,
-                device.device_type,
-                device.zone_id,
+                partial(
+                    self.client.capture_image,
+                    installation,
+                    device.code,
+                    device.device_type,
+                    device.zone_id,
+                    wait_for_fresh=True,
+                ),
                 priority=ApiQueue.FOREGROUND,
             )
 
             image_bytes = self._validate_and_store_image(
                 thumbnail, installation, device, log_warnings=True
             )
+
+            # Clear the capturing flag BEFORE pushing the new thumbnail into
+            # the coordinator — the entity's _handle_coordinator_update writes
+            # state with the new (rotated) token, and the frontend card's
+            # spinner-clear condition requires capturing=False at that moment.
+            self._camera_capturing.discard(capture_key)
 
             # Push thumbnail into the camera coordinator so entities update
             self._update_camera_coordinator_thumbnail(device.zone_id, thumbnail)

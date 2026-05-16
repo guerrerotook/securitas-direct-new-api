@@ -437,6 +437,43 @@ class TestCaptureImage:
         new_data = mock_coord.async_set_updated_data.call_args[0][0]
         assert device.zone_id in new_data.thumbnails
 
+    async def test_capturing_flag_cleared_before_coordinator_update(self):
+        """is_capturing must be False when async_set_updated_data fires.
+
+        The camera entity's _handle_coordinator_update writes state when the
+        coordinator publishes new data — if the capturing flag is still True
+        at that moment, the published state attributes include capturing=True
+        and the frontend card never sees the transition to False, so the
+        refresh spinner spins until the 15s fallback timer expires.
+        """
+        from custom_components.securitas.coordinators import CameraData
+
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        _setup_capture(hub)
+
+        mock_entry = MagicMock()
+        mock_entry.entry_id = "test_entry"
+        hub.config_entry = mock_entry
+
+        is_capturing_at_update: list[bool] = []
+
+        def _record(_data):
+            is_capturing_at_update.append(
+                hub.is_capturing(installation.number, device.zone_id)
+            )
+
+        mock_coord = MagicMock()
+        mock_coord.data = CameraData(thumbnails={}, full_images={})
+        mock_coord.async_set_updated_data = MagicMock(side_effect=_record)
+        hub.hass.data = {DOMAIN: {"test_entry": {"camera_coordinator": mock_coord}}}
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        assert is_capturing_at_update == [False]
+
     async def test_camera_state_signal_dispatched_when_no_image(self):
         """SIGNAL_CAMERA_STATE is dispatched when no image arrives."""
         hub = make_hub()
@@ -469,12 +506,34 @@ class TestCaptureImage:
         with patch("custom_components.securitas.hub.async_dispatcher_send"):
             await hub.capture_image(installation, device)
 
-        hub.client.capture_image.assert_awaited_once_with(
+        hub.client.capture_image.assert_awaited_once()
+        call = hub.client.capture_image.await_args
+        assert call.args == (
             installation,
             device.code,
             device.device_type,
             device.zone_id,
         )
+
+    async def test_passes_wait_for_fresh_true_to_client(self):
+        """Hub asks the client to wait for the freshly-captured frame.
+
+        The client pre-fetches its own baseline thumbnail at the moment of
+        the request so it can correctly detect when the CDN finally
+        publishes the new frame — cached/coordinator-held timestamps can't
+        be trusted because the CDN may already be serving a different but
+        still-stale frame.
+        """
+        hub = make_hub()
+        installation = make_installation()
+        device = make_camera_device()
+        _setup_capture(hub)
+
+        with patch("custom_components.securitas.hub.async_dispatcher_send"):
+            await hub.capture_image(installation, device)
+
+        call = hub.client.capture_image.await_args
+        assert call.kwargs.get("wait_for_fresh") is True
 
     async def test_capturing_flag_cleared_on_error(self):
         """The capturing flag is cleared even when the client raises."""

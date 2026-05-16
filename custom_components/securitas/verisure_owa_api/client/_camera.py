@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any
 
-from ..exceptions import OperationTimeoutError
+from ..exceptions import OperationTimeoutError, VerisureOwaError
 from ..graphql_queries import (
     DEVICE_LIST_QUERY,
     GET_PHOTO_IMAGES_QUERY,
@@ -95,16 +96,30 @@ class _CameraMixin(_ClientBase):
         zone_id: str,
         *,
         capture_timeout: float = 90.0,
+        wait_for_fresh: bool = False,
+        freshness_timeout: float = 30.0,
+        freshness_poll_interval: float = 2.0,
     ) -> ThumbnailResponse:
         """Request a new image capture, then fetch the resulting thumbnail.
 
         Submits a RequestImages mutation and polls RequestImagesStatus until
         the panel reports a non-processing result (or capture_timeout
-        elapses), then fetches the latest thumbnail in a single follow-up
-        call.  We don't compare idSignal against a pre-capture baseline —
-        the CDN may take a few extra seconds to publish the new frame after
-        status reports done, so a single post-poll fetch is the most
-        reliable signal we have.
+        elapses), then fetches the latest thumbnail.
+
+        The "photo-request.success" status only means the alarm-manager
+        accepted the capture request — the CDN may serve the previous frame
+        for tens of seconds after.  Comparing against a cached timestamp
+        isn't safe: the CDN may have a newer-but-still-stale frame whose
+        timestamp differs from the cache but still predates our request.
+        When `wait_for_fresh=True`, this method pre-fetches a thumbnail
+        immediately before submitting the capture so the baseline is "what
+        the CDN was serving at click time", then polls until something
+        strictly newer arrives.
+
+        Timestamps are compared lexicographically as strings, which is
+        equivalent to chronological order for the server's ISO-8601-style
+        ``YYYY-MM-DD HH:MM:SS`` format — no timezone math needed because
+        both sides come from the same server clock.
 
         Args:
             installation: The installation containing the camera.
@@ -113,12 +128,32 @@ class _CameraMixin(_ClientBase):
             zone_id: Camera zone ID.
             capture_timeout: Wall-clock timeout for the status poll
                 (default 90s).
+            wait_for_fresh: When True, pre-fetch a baseline thumbnail and
+                poll until a strictly newer one is published.  When False,
+                returns the first post-status fetch (legacy behaviour).
+            freshness_timeout: Wall-clock budget for waiting for the CDN
+                to publish a fresh frame after status reports success.
+            freshness_poll_interval: Delay between freshness retries.
 
         Returns:
-            The latest ThumbnailResponse — typically the freshly captured
-            frame, or the previous one if the poll timed out before the CDN
-            caught up.
+            The latest ThumbnailResponse — the freshly captured frame
+            when the CDN catches up in time, otherwise the most recent
+            (possibly stale) one.
         """
+        baseline_timestamp: str | None = None
+        if wait_for_fresh:
+            try:
+                baseline_thumb = await self.get_thumbnail(
+                    installation, device_type, zone_id
+                )
+                baseline_timestamp = baseline_thumb.timestamp
+            except VerisureOwaError as err:
+                _LOGGER.warning(
+                    "Pre-capture baseline fetch failed for %s; "
+                    "proceeding without freshness guarantee: %s",
+                    zone_id,
+                    err,
+                )
         # Submit capture request
         submit_content = {
             "operationName": "RequestImages",
@@ -180,7 +215,30 @@ class _CameraMixin(_ClientBase):
 
         # Whether status finished or polling timed out, fetch the latest
         # thumbnail — the CDN may have caught up while we were polling.
-        return await self.get_thumbnail(installation, device_type, zone_id)
+        thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
+        if baseline_timestamp is None:
+            return thumbnail
+
+        # Freshness poll: retry until timestamp is strictly newer than the
+        # pre-capture baseline (lexicographic string compare on the server's
+        # ISO format).  Null timestamps are treated as stale.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + freshness_timeout
+        while thumbnail.timestamp is None or thumbnail.timestamp <= baseline_timestamp:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                _LOGGER.warning(
+                    "Fresh thumbnail for %s not available after %.0fs; "
+                    "returning stale (timestamp=%s, baseline=%s)",
+                    zone_id,
+                    freshness_timeout,
+                    thumbnail.timestamp,
+                    baseline_timestamp,
+                )
+                break
+            await asyncio.sleep(min(freshness_poll_interval, remaining))
+            thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
+        return thumbnail
 
     async def get_thumbnail(
         self,
