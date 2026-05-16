@@ -66,6 +66,10 @@ class ActivityCategory(StrEnum):
     # type 501 on a failed arm/disarm round-trip and 502 on a failed status
     # refresh.
     COMMUNICATION_FAILED = "communication_failed"
+    # Panel's link to the central/website returned to normal after being
+    # unreachable. Mirror of COMMUNICATION_FAILED — the panel emits this
+    # when comms recover so the user can correlate outages.
+    COMMUNICATION_RESTORED = "communication_restored"
     UNKNOWN = "unknown"
 
 
@@ -133,6 +137,9 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # localised "Sorry, action couldn't be performed" alias by the panel.
     501: ActivityCategory.COMMUNICATION_FAILED,
     502: ActivityCategory.COMMUNICATION_FAILED,
+    # "Estado de las comunicaciones" — emitted when the panel's link to the
+    # central/website returns to normal after a period of being unreachable.
+    3121: ActivityCategory.COMMUNICATION_RESTORED,
 }
 
 

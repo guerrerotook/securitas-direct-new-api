@@ -38,6 +38,7 @@ const TRANSLATIONS = {
       power_restored: "Power restored",
       status_check: "Status check",
       communication_failed: "Communication failed",
+      communication_restored: "Communication restored",
       unknown: "Unknown event",
     },
     exception_status: {
@@ -71,6 +72,7 @@ const TRANSLATIONS = {
       power_restored: "Energía restablecida",
       status_check: "Comprobación de estado",
       communication_failed: "Fallo de comunicación",
+      communication_restored: "Comunicación restablecida",
       unknown: "Evento desconocido",
     },
     exception_status: {
@@ -104,6 +106,7 @@ const TRANSLATIONS = {
       power_restored: "Corrente ripristinata",
       status_check: "Verifica di stato",
       communication_failed: "Errore di comunicazione",
+      communication_restored: "Comunicazione ripristinata",
       unknown: "Evento sconosciuto",
     },
     exception_status: {
@@ -137,6 +140,7 @@ const TRANSLATIONS = {
       power_restored: "Courant rétabli",
       status_check: "Vérification de l'état",
       communication_failed: "Échec de communication",
+      communication_restored: "Communication rétablie",
       unknown: "Événement inconnu",
     },
     exception_status: {
@@ -170,6 +174,7 @@ const TRANSLATIONS = {
       power_restored: "Energia restaurada",
       status_check: "Verificação de estado",
       communication_failed: "Falha de comunicação",
+      communication_restored: "Comunicação restaurada",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -203,6 +208,7 @@ const TRANSLATIONS = {
       power_restored: "Energia restaurada",
       status_check: "Verificação de status",
       communication_failed: "Falha de comunicação",
+      communication_restored: "Comunicação restaurada",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -236,6 +242,7 @@ const TRANSLATIONS = {
       power_restored: "Corrent restablert",
       status_check: "Comprovació d'estat",
       communication_failed: "Error de comunicació",
+      communication_restored: "Comunicació restablerta",
       unknown: "Esdeveniment desconegut",
     },
     exception_status: {
@@ -274,6 +281,7 @@ const CATEGORY_ICONS = {
   power_restored: "mdi:power-plug",
   status_check: "mdi:lan-check",
   communication_failed: "mdi:lan-disconnect",
+  communication_restored: "mdi:lan-connect",
   unknown: "mdi:help-circle",
 };
 
@@ -291,6 +299,7 @@ const CATEGORY_COLORS = {
   power_restored: "var(--success-color, #43a047)",
   status_check: "var(--secondary-text-color)",
   communication_failed: "var(--error-color, #db4437)",
+  communication_restored: "var(--success-color, #43a047)",
   unknown: "var(--secondary-text-color)",
 };
 

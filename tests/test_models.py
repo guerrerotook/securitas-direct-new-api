@@ -1126,6 +1126,12 @@ class TestActivityEventCategory:
         assert self._ev(501).category == ActivityCategory.COMMUNICATION_FAILED
         assert self._ev(502).category == ActivityCategory.COMMUNICATION_FAILED
 
+    def test_communication_restored(self):
+        """3121 ("Estado de las comunicaciones") fires when the panel's
+        communication with the central / website returns to normal after
+        a period of being unreachable.  Mirror of COMMUNICATION_FAILED."""
+        assert self._ev(3121).category == ActivityCategory.COMMUNICATION_RESTORED
+
     def test_unknown_codes(self):
         """Codes we haven't seen fall through to UNKNOWN — future-proofing."""
         assert self._ev(99999).category == ActivityCategory.UNKNOWN
