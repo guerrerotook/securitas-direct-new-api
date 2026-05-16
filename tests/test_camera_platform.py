@@ -501,7 +501,7 @@ class TestVerisureCaptureButton:
 
         await btn.async_press()
 
-        assert camera_entity._context is ctx
+        camera_entity.async_set_context.assert_called_once_with(ctx)
 
     def test_device_info_uses_camera_sub_device(
         self, mock_hub, installation, camera_device

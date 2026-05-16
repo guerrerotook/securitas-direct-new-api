@@ -620,12 +620,21 @@ def register_v5_entity_services(hass: HomeAssistant) -> None:
     so no backwards-compat alias is needed.  Idempotent — safe to call
     on every config-entry setup.
     """
-    _register_verisure_owa_entity_service(
-        hass,
-        "refresh_alarm",
-        "alarm_control_panel",
-        "async_manual_refresh",
-        schema={
+    for spec in _V5_ENTITY_SERVICES:
+        _register_verisure_owa_entity_service(hass, **spec)
+
+
+# Declarative specs for register_v5_entity_services.  Each entry is
+# kwargs for _register_verisure_owa_entity_service; refresh_alarm,
+# capture_image and refresh_activity_log share the default
+# voluptuous_schema=None / supports_response=NONE so only the
+# fetch_activity_image entry overrides them.
+_V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
+    {
+        "service_name": "refresh_alarm",
+        "component_domain": "alarm_control_panel",
+        "method_name": "async_manual_refresh",
+        "schema": {
             "name": "Refresh alarm",
             "description": (
                 "Full alarm-status round-trip refresh — supersedes the "
@@ -636,13 +645,12 @@ def register_v5_entity_services(hass: HomeAssistant) -> None:
                 "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
             },
         },
-    )
-    _register_verisure_owa_entity_service(
-        hass,
-        "capture_image",
-        "camera",
-        "async_manual_capture",
-        schema={
+    },
+    {
+        "service_name": "capture_image",
+        "component_domain": "camera",
+        "method_name": "async_manual_capture",
+        "schema": {
             "name": "Capture image",
             "description": (
                 "Request a fresh image capture from a Verisure camera — "
@@ -651,13 +659,12 @@ def register_v5_entity_services(hass: HomeAssistant) -> None:
             "fields": {},
             "target": {"entity": {"integration": "securitas", "domain": "camera"}},
         },
-    )
-    _register_verisure_owa_entity_service(
-        hass,
-        "refresh_activity_log",
-        "sensor",
-        "async_manual_refresh",
-        schema={
+    },
+    {
+        "service_name": "refresh_activity_log",
+        "component_domain": "sensor",
+        "method_name": "async_manual_refresh",
+        "schema": {
             "name": "Refresh activity log",
             "description": (
                 "Foreground-refresh the activity timeline for an installation."
@@ -665,20 +672,20 @@ def register_v5_entity_services(hass: HomeAssistant) -> None:
             "fields": {},
             "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
         },
-    )
-    _register_verisure_owa_entity_service(
-        hass,
-        "fetch_activity_image",
-        "sensor",
-        "async_fetch_image",
-        voluptuous_schema=vol.Schema(
+    },
+    {
+        "service_name": "fetch_activity_image",
+        "component_domain": "sensor",
+        "method_name": "async_fetch_image",
+        "voluptuous_schema": vol.Schema(
             {
                 vol.Required("id_signal"): str,
                 vol.Required("signal_type"): vol.All(vol.Coerce(str)),
             },
             extra=vol.ALLOW_EXTRA,
         ),
-        schema={
+        "supports_response": SupportsResponse.ONLY,
+        "schema": {
             "name": "Fetch activity image",
             "description": (
                 "On-demand historical image fetch for image-request events. "
@@ -701,8 +708,8 @@ def register_v5_entity_services(hass: HomeAssistant) -> None:
             },
             "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
         },
-        supports_response=SupportsResponse.ONLY,
-    )
+    },
+)
 
 
 def register_service_aliases(hass: HomeAssistant) -> None:
