@@ -152,6 +152,11 @@ def make_synthetic_event(
     else:
         real_id = f"ha-{uuid.uuid4().hex}"
         sig_type = 0
+    # img=1 tells the activity-log card to render an image block and
+    # lazy-fetch via xSGetPhotoImages.  Only set it when we have a real
+    # (server-side) id for an IMAGE_REQUEST — synthetic ha-... ids can't
+    # resolve, and non-image categories don't carry photos.
+    img_flag = 1 if category == ActivityCategory.IMAGE_REQUEST and id_signal else 0
     return ActivityEvent(
         alias=alias,
         type=sig_type,
@@ -164,6 +169,7 @@ def make_synthetic_event(
         device=device,
         device_name=device_name,
         exceptions=exceptions,
+        img=img_flag,
         injected=True,
     )
 

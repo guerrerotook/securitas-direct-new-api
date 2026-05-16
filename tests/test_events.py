@@ -315,6 +315,46 @@ class TestMakeSyntheticEvent:
         assert ev.injected is True
         assert ev.model_dump()["injected"] is True
 
+    def test_image_request_with_real_id_signal_sets_img_flag(self):
+        """An injected IMAGE_REQUEST with a real server id_signal must set
+        img=1 so the activity log card renders the image block — the card's
+        lazy-fetch is gated on `event.img === 1`.  Without this, the
+        injected row shows up but never displays the photo even though the
+        server has it under the supplied id_signal.
+        """
+        ev = make_synthetic_event(
+            category=ActivityCategory.IMAGE_REQUEST,
+            alias="Image request",
+            verisure_user="clinton",
+            id_signal="848847937",
+            signal_type=16,
+        )
+        assert ev.img == 1
+
+    def test_image_request_with_synthetic_id_does_not_set_img_flag(self):
+        """A pre-capture image request (no server id yet) has no fetchable
+        image and must keep img=0 so the card doesn't attempt a fetch
+        against the synthetic ha-... id (which can't resolve)."""
+        ev = make_synthetic_event(
+            category=ActivityCategory.IMAGE_REQUEST,
+            alias="Image request",
+            verisure_user="clinton",
+        )
+        assert ev.id_signal.startswith("ha-")
+        assert ev.img == 0
+
+    def test_non_image_categories_keep_img_zero(self):
+        """Only IMAGE_REQUEST events carry images.  Arm/disarm injected
+        with a real id (hypothetical) shouldn't trick the card into
+        rendering an image block."""
+        ev = make_synthetic_event(
+            category=ActivityCategory.ARMED,
+            alias="Armed",
+            verisure_user="x",
+            id_signal="123456",
+        )
+        assert ev.img == 0
+
 
 # ── inject_ha_event ──────────────────────────────────────────────────────────
 
