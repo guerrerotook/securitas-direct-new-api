@@ -109,18 +109,19 @@ const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars)
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
-// Marker substring in VerisureCameraFull's unique_id (set in camera.py).
-// We match on this — not on entity_id — so the filter survives HA's
-// auto-disambiguation (camera.salon_full_image_2) and user renames.
-const _FULL_IMAGE_UNIQUE_ID_MARKER = "_camera_full_";
+// hass.entities exposes EntityRegistryDisplayEntry, which does NOT
+// include unique_id (only EntityRegistryEntry does, fetched via WS).
+// So we match on entity_id pattern + the integration's platform.
+// The (_\d+)? captures HA's auto-disambiguation suffix (_2, _3, ...)
+// when multiple installations produce the same default entity_id.
+const _FULL_IMAGE_ENTITY_ID_RE = /^camera\..*_full_image(_\d+)?$/;
+const _OUR_PLATFORMS = new Set(["securitas", "verisure_owa"]);
 
 function _findFullImageEntityIds(hass) {
   const ids = [];
   for (const [eid, entry] of Object.entries(hass?.entities || {})) {
-    if (!eid.startsWith("camera.")) continue;
-    if ((entry?.unique_id || "").includes(_FULL_IMAGE_UNIQUE_ID_MARKER)) {
-      ids.push(eid);
-    }
+    if (!_OUR_PLATFORMS.has(entry?.platform)) continue;
+    if (_FULL_IMAGE_ENTITY_ID_RE.test(eid)) ids.push(eid);
   }
   return ids;
 }
@@ -456,33 +457,28 @@ class VerisureOwaCameraCard extends HTMLElement {
     return index;
   }
 
-  _findCaptureButton(hass, cameraEntityId) {
+  // Camera sub-device only ever holds: the thumbnail camera entity, the
+  // full-resolution camera entity, and the capture button.  We can find
+  // either sibling by device alone — no entity_id / icon string matching
+  // (those break on user renames or HA mdi mapping changes).
+  _findSiblingOnDevice(hass, cameraEntityId, domainPrefix) {
     if (!hass?.entities || !cameraEntityId) return null;
     const cameraEntry = hass.entities[cameraEntityId];
     if (!cameraEntry?.device_id) return null;
-    // Camera and its capture button share the same per-camera sub-device.
-    // There is exactly one mdi:camera button per camera device.
     const bucket = this._entitiesByDeviceId(hass).get(cameraEntry.device_id) || [];
     for (const eid of bucket) {
-      if (!eid.startsWith("button.")) continue;
-      const stateObj = hass.states[eid];
-      if (stateObj?.attributes?.icon === "mdi:camera") return eid;
+      if (eid === cameraEntityId) continue;
+      if (eid.startsWith(domainPrefix)) return eid;
     }
     return null;
   }
 
+  _findCaptureButton(hass, cameraEntityId) {
+    return this._findSiblingOnDevice(hass, cameraEntityId, "button.");
+  }
+
   _findFullEntity(hass, cameraEntityId) {
-    if (!hass?.entities || !cameraEntityId) return null;
-    const cameraEntry = hass.entities[cameraEntityId];
-    if (!cameraEntry?.device_id) return null;
-    // The full-resolution entity shares the same device and has a "_full_image" suffix.
-    const bucket = this._entitiesByDeviceId(hass).get(cameraEntry.device_id) || [];
-    for (const eid of bucket) {
-      if (!eid.startsWith("camera.")) continue;
-      if (eid === cameraEntityId) continue;
-      if (eid.endsWith("_full_image")) return eid;
-    }
-    return null;
+    return this._findSiblingOnDevice(hass, cameraEntityId, "camera.");
   }
 
   getCardSize() { return 3; }

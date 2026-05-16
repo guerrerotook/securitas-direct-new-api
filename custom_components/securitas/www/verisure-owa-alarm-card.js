@@ -459,19 +459,17 @@ class VerisureOwaAlarmCard extends HTMLElement {
   _findRefreshEntity() {
     if (!this._hass) return null;
     if (this._config.refresh_entity) return this._config.refresh_entity;
-    // Find any button on the same device that has "refresh" in its entity_id.
-    // Covers both the pre-v5 entity_id pattern (button.refresh_<alias>) and
-    // the v5.0.0+ pattern (button.<alias>_refresh, where has_entity_name=True
-    // makes HA prepend the device name to the short "Refresh" entity name).
+    // The installation's main device only carries one button — the refresh
+    // button.  Match on device alone; entity_id matching (/refresh/i) broke
+    // on user renames in either language direction.
     const entities = this._hass.entities;
     if (!entities) return null;
     const panelEntry = entities[this._config.entity];
-    if (!panelEntry || !panelEntry.device_id) return null;
+    if (!panelEntry?.device_id) return null;
     const match = Object.keys(entities).find(
-      e =>
+      (e) =>
         e.startsWith("button.") &&
-        /refresh/i.test(e) &&
-        entities[e].device_id === panelEntry.device_id
+        entities[e]?.device_id === panelEntry.device_id,
     );
     return match || null;
   }
