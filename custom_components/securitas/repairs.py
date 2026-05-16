@@ -18,6 +18,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import issue_registry as ir
 
+from .const import DOMAIN
+
 ISSUE_RESTART_REQUIRED = "restart_required_after_migration"
 
 
@@ -41,7 +43,7 @@ class _RestartFlow(RepairsFlow):
     ) -> FlowResult:
         """Show the confirmation form, then clear the issue and restart HA."""
         if user_input is not None:
-            ir.async_delete_issue(self.hass, "verisure_owa", ISSUE_RESTART_REQUIRED)
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_RESTART_REQUIRED)
             self.hass.async_create_task(self.hass.async_stop(RESTART_EXIT_CODE))
             return self.async_create_entry(data={})
         return self.async_show_form(step_id="confirm", data_schema=vol.Schema({}))
