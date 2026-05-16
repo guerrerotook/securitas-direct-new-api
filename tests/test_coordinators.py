@@ -628,6 +628,74 @@ class TestCameraCoordinator:
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
 
+    @pytest.mark.asyncio
+    async def test_concurrent_capture_thumbnail_not_overwritten_by_older_poll(self):
+        """Race: a capture flow runs DURING a long-running periodic poll.
+
+        Timeline:
+            T0  poll starts, snapshots self.data
+            T1  capture flow finishes, calls async_set_updated_data() with
+                a fresh thumbnail (timestamp 20:50:04) — self.data updated
+            T2  poll's _fetch_thumbnails finally returns; its thumbnail for
+                the same zone is OLDER (timestamp 20:42:00) because the
+                CDN was lagging at the moment the poll's get_thumbnail ran
+            T3  poll computes new CameraData and writes it back —
+                overwriting the capture's fresh thumbnail with the stale
+                fetched one.
+
+        With the fix in place, the poll's write merges per-zone: a fetched
+        thumbnail strictly older than what's currently in self.data is
+        dropped in favour of the existing one (and its full image too).
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        cameras = self._make_cameras(1)
+
+        # Pre-existing baseline so the poll's "previous" snapshot isn't empty.
+        baseline_thumb = ThumbnailResponse(
+            id_signal="baseline", image="b64-old", timestamp="2026-05-16 19:00:00"
+        )
+        coord = self._make_coordinator(hass, client, queue, installation, cameras)
+        coord.data = CameraData(thumbnails={"zone0": baseline_thumb}, full_images={})
+
+        # Capture-stored thumbnail (the user just clicked capture):
+        capture_thumb = ThumbnailResponse(
+            id_signal="from-capture",
+            image="b64-fresh",
+            timestamp="2026-05-16 20:50:04",
+        )
+        capture_full = b"\xff\xd8fresh"
+
+        # Poll's fetched thumbnail is OLDER than capture-stored (CDN lag):
+        stale_fetched = ThumbnailResponse(
+            id_signal="stale-from-cdn",
+            image="b64-stale",
+            timestamp="2026-05-16 20:42:00",
+        )
+
+        async def _slow_get_thumbnail(*_args, **_kwargs):
+            # Simulate the poll's get_thumbnail taking long enough for a
+            # capture to land while we're awaiting.
+            coord.data = CameraData(
+                thumbnails={"zone0": capture_thumb},
+                full_images={"zone0": capture_full},
+            )
+            return stale_fetched
+
+        client.get_thumbnail.side_effect = _slow_get_thumbnail
+
+        result = await coord._async_update_data()
+
+        # The capture-stored thumbnail must win — it's strictly newer.
+        assert result.thumbnails["zone0"] is capture_thumb, (
+            f"poll overwrote capture-stored fresh thumbnail with stale fetched one "
+            f"(got id_signal={result.thumbnails['zone0'].id_signal})"
+        )
+        # And its corresponding full image must be preserved, not refetched.
+        assert result.full_images.get("zone0") == capture_full
+
 
 # ── TestCoordinatorCapabilities ──────────────────────────────────────────────
 

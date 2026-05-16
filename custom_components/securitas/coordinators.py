@@ -398,6 +398,22 @@ class LockCoordinator(DataUpdateCoordinator[LockData]):
 # ── CameraCoordinator ────────────────────────────────────────────────────────
 
 
+def _thumbnail_is_strictly_newer(a: ThumbnailResponse, b: ThumbnailResponse) -> bool:
+    """Return True iff ``a`` is strictly newer than ``b``.
+
+    Lexicographic compare on the server's ISO timestamp format
+    (``YYYY-MM-DD HH:MM:SS``) — equivalent to chronological order, no
+    timezone math needed since both come from the same server clock.
+    A null/missing timestamp on either side returns False (we don't
+    know which is newer; defer to the caller's default).
+    """
+    a_ts = a.timestamp if a else None
+    b_ts = b.timestamp if b else None
+    if not a_ts or not b_ts:
+        return False
+    return a_ts > b_ts
+
+
 class CameraCoordinator(DataUpdateCoordinator[CameraData]):
     """Coordinator for camera thumbnails.
 
@@ -534,20 +550,44 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
     async def _async_update_data(self) -> CameraData:
         """Fetch camera thumbnails and full images for any that changed."""
         previous = self.data
-        thumbnails = await _fetch_with_session_recovery(
+        fetched = await _fetch_with_session_recovery(
             self._client,
             lambda: self._fetch_thumbnails(previous),
             "Camera",
         )
 
-        # Carry forward previous full images
-        full_images: dict[str, bytes] = {}
-        if previous:
-            full_images = dict(previous.full_images)
+        # Re-read self.data AFTER the fetch — a capture flow may have
+        # called async_set_updated_data() with a strictly newer thumbnail
+        # while we were awaiting get_thumbnail.  Without this merge the
+        # capture's fresh frame gets overwritten by whatever the CDN
+        # served the poll mid-flight (often an older cached frame).
+        current = self.data
+        thumbnails: dict[str, ThumbnailResponse] = {}
+        kept_from_current: set[str] = set()
+        for zone_id, fetched_thumb in fetched.items():
+            current_thumb = current.thumbnails.get(zone_id) if current else None
+            if current_thumb is not None and _thumbnail_is_strictly_newer(
+                current_thumb, fetched_thumb
+            ):
+                thumbnails[zone_id] = current_thumb
+                kept_from_current.add(zone_id)
+            else:
+                thumbnails[zone_id] = fetched_thumb
 
-        # Fetch full images for thumbnails whose id_signal changed
+        # Carry forward full images.  A zone whose thumbnail we kept from
+        # `current` (capture-stored) already has its matching full image
+        # in current.full_images — copy it across; don't re-fetch.
+        full_images: dict[str, bytes] = {}
+        if current:
+            full_images = dict(current.full_images)
+
+        # Fetch full images for thumbnails whose id_signal changed since
+        # the poll-start snapshot.  Skip zones where we kept the
+        # capture-stored thumbnail — that full image is already present.
         prev_thumbnails = previous.thumbnails if previous else {}
         for zone_id, thumb in thumbnails.items():
+            if zone_id in kept_from_current:
+                continue
             prev_thumb = prev_thumbnails.get(zone_id)
             prev_signal = prev_thumb.id_signal if prev_thumb else None
             if thumb.id_signal and thumb.id_signal != prev_signal:
