@@ -79,13 +79,16 @@ jobs:
         run: |
           git add custom_components/securitas/manifest.json
           if git diff --cached --quiet; then
-            echo "Manifests already at $VERSION — refusing to tag without a release commit." >&2
-            echo "Investigate prior state (hand-edited manifest? partial earlier run?) before re-running." >&2
-            exit 1
+            # Manifest already at the requested version — happens when a
+            # branch has been hand-bumped pre-release (e.g. a long-lived
+            # PR landed with the manifest already updated).  Tag the
+            # current HEAD; no chore-bump commit needed.
+            echo "Manifest already at $VERSION — tagging current HEAD without a release commit."
+          else
+            git commit -m "chore: release $VERSION"
+            git push origin "HEAD:$BRANCH"
           fi
-          git commit -m "chore: release $VERSION"
           git tag -a "v$VERSION" -m "Release $VERSION"
-          git push origin "HEAD:$BRANCH"
           git push origin "v$VERSION"
 
       - name: Create GitHub release
