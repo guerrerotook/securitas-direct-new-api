@@ -5,7 +5,7 @@ from pathlib import Path
 
 from homeassistant.const import Platform
 
-DOMAIN = "verisure_owa"
+DOMAIN = "securitas"
 SIGNAL_CAMERA_STATE = f"{DOMAIN}_camera_state"  # state-only update, no token rotation
 
 
