@@ -18,7 +18,7 @@ from custom_components.securitas.entity import camera_device_info
 class TestCameraDeviceInfo:
     def test_identifiers_include_zone_id(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
-        assert (DOMAIN, "v5_verisure_owa.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
 
     def test_name_is_camera_device_name(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
@@ -34,7 +34,7 @@ class TestCameraDeviceInfo:
 
     def test_via_device_points_to_installation(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
-        assert info["via_device"] == (DOMAIN, "v5_verisure_owa.2654190")
+        assert info["via_device"] == (DOMAIN, "v4_securitas_direct.2654190")
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ class TestVerisureCamera:
         from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
-        assert cam.unique_id == "v5_verisure_owa.2654190_camera_QR10"
+        assert cam.unique_id == "v4_securitas_direct.2654190_camera_QR10"
 
     def test_has_entity_name(
         self, mock_coordinator, mock_hub, installation, camera_device
@@ -252,8 +252,8 @@ class TestVerisureCamera:
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         info = cam.device_info
-        assert (DOMAIN, "v5_verisure_owa.2654190_camera_QR10") in info["identifiers"]
-        assert info.get("via_device") == (DOMAIN, "v5_verisure_owa.2654190")
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
 
     def test_extra_state_attributes_timestamp(
         self,
@@ -350,7 +350,7 @@ class TestVerisureCaptureButton:
         from custom_components.securitas.button import VerisureCaptureButton
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
-        assert btn.unique_id == "v5_verisure_owa.2654190_capture_QR10"
+        assert btn.unique_id == "v4_securitas_direct.2654190_capture_QR10"
 
     def test_has_entity_name(self, mock_hub, installation, camera_device):
         from custom_components.securitas.button import VerisureCaptureButton
@@ -401,8 +401,8 @@ class TestVerisureCaptureButton:
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         info = btn.device_info
-        assert (DOMAIN, "v5_verisure_owa.2654190_camera_QR10") in info["identifiers"]
-        assert info.get("via_device") == (DOMAIN, "v5_verisure_owa.2654190")
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
 
 
 class TestVerisureCameraFull:
@@ -414,7 +414,7 @@ class TestVerisureCameraFull:
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
         )
-        assert cam.unique_id == "v5_verisure_owa.2654190_camera_full_QR10"
+        assert cam.unique_id == "v4_securitas_direct.2654190_camera_full_QR10"
 
     def test_has_entity_name(
         self, mock_coordinator, mock_hub, installation, camera_device
@@ -520,7 +520,7 @@ class TestVerisureCameraFull:
         )
         assert (
             DOMAIN,
-            "v5_verisure_owa.2654190_camera_QR10",
+            "v4_securitas_direct.2654190_camera_QR10",
         ) in full_cam.device_info["identifiers"]
 
     def test_handle_coordinator_update_rotates_token(
@@ -581,7 +581,7 @@ class TestCameraV5Schema:
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert (
             cam._attr_unique_id
-            == f"v5_verisure_owa.{installation.number}_camera_{camera_device.zone_id}"
+            == f"v4_securitas_direct.{installation.number}_camera_{camera_device.zone_id}"
         )
 
     def test_camera_full_unique_id_uses_v5_schema(
@@ -594,5 +594,5 @@ class TestCameraV5Schema:
         )
         assert (
             cam._attr_unique_id
-            == f"v5_verisure_owa.{installation.number}_camera_full_{camera_device.zone_id}"
+            == f"v4_securitas_direct.{installation.number}_camera_full_{camera_device.zone_id}"
         )

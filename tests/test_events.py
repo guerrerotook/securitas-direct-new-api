@@ -45,30 +45,31 @@ def _make_event(id_signal: str, **overrides) -> ActivityEvent:
 
 
 class TestFireActivityEvents:
-    def test_fires_one_event_per_activity(self):
-        """Each activity fires one bus event: the canonical verisure_owa_activity."""
+    def test_fires_under_both_names_per_activity(self):
+        """Each activity fires both verisure_owa_activity and securitas_activity."""
         hass = MagicMock()
         events = [_make_event("999"), _make_event("998", type=720, alias="Disarmed")]
 
         fire_activity_events(hass, "2654190", events)
 
-        # 2 events × 1 fire each = 2
-        assert hass.bus.async_fire.call_count == 2
+        # 2 events × 2 names each = 4 fires
+        assert hass.bus.async_fire.call_count == 4
 
-    def test_event_type_is_verisure_owa_activity(self):
-        """The canonical event type is verisure_owa_activity."""
+    def test_both_event_types_are_emitted(self):
+        """Both verisure_owa_activity (recommended) and securitas_activity fire."""
         hass = MagicMock()
         fire_activity_events(hass, "2654190", [_make_event("999")])
 
         all_types = [call[0][0] for call in hass.bus.async_fire.call_args_list]
-        assert "verisure_owa_activity" in all_types
+        assert all_types == ["verisure_owa_activity", "securitas_activity"]
         assert ACTIVITY_EVENT_TYPE == "verisure_owa_activity"
 
     def test_payload_includes_numinst(self):
         hass = MagicMock()
         fire_activity_events(hass, "2654190", [_make_event("999")])
 
-        payload = hass.bus.async_fire.call_args[0][1]
+        # Same payload on both fires; inspect the first call.
+        payload = hass.bus.async_fire.call_args_list[0][0][1]
         assert payload["numinst"] == "2654190"
 
     def test_payload_includes_event_fields(self):
@@ -77,7 +78,7 @@ class TestFireActivityEvents:
 
         fire_activity_events(hass, "2654190", [ev])
 
-        payload = hass.bus.async_fire.call_args[0][1]
+        payload = hass.bus.async_fire.call_args_list[0][0][1]
         assert payload["id_signal"] == "16215212397"
         assert payload["type"] == 701
         assert payload["alias"] == "Armed"
@@ -91,7 +92,7 @@ class TestFireActivityEvents:
 
         fire_activity_events(hass, "2654190", [ev])
 
-        payload = hass.bus.async_fire.call_args[0][1]
+        payload = hass.bus.async_fire.call_args_list[0][0][1]
         assert payload["category"] == "armed"
 
     def test_empty_list_fires_nothing(self):
@@ -100,7 +101,7 @@ class TestFireActivityEvents:
         hass.bus.async_fire.assert_not_called()
 
     def test_each_event_gets_its_own_call(self):
-        """Multiple events each get a distinct fire with their own payload."""
+        """Multiple events each get a distinct pair of fires (one per name)."""
         hass = MagicMock()
         ev1 = _make_event("1", alias="Armed")
         ev2 = _make_event("2", alias="Disarmed", type=720, signal_type=720)
@@ -108,12 +109,16 @@ class TestFireActivityEvents:
         fire_activity_events(hass, "2654190", [ev1, ev2])
 
         calls = hass.bus.async_fire.call_args_list
-        assert [c[0][0] for c in calls] == ["verisure_owa_activity"] * 2
-        payloads = [call[0][1] for call in calls]
-        ids = [p["id_signal"] for p in payloads]
-        aliases = [p["alias"] for p in payloads]
-        assert ids == ["1", "2"]
-        assert aliases == ["Armed", "Disarmed"]
+        # Pair per event: (verisure_owa_activity, securitas_activity) × 2
+        assert [c[0][0] for c in calls] == [
+            "verisure_owa_activity",
+            "securitas_activity",
+            "verisure_owa_activity",
+            "securitas_activity",
+        ]
+        # First and second call share id_signal "1", third and fourth share "2".
+        ids = [c[0][1]["id_signal"] for c in calls]
+        assert ids == ["1", "1", "2", "2"]
 
 
 class TestAttachActivityListener:
@@ -129,7 +134,7 @@ class TestAttachActivityListener:
         assert unsub is unsub_sentinel
 
     def test_registered_callback_fires_new_events(self):
-        """Callback fires one canonical event per new ActivityEvent."""
+        """Callback fires both names per new ActivityEvent."""
         hass = MagicMock()
         coord = MagicMock(spec=ActivityCoordinator)
         new_event = _make_event("999")
@@ -139,11 +144,11 @@ class TestAttachActivityListener:
         callback = coord.async_add_listener.call_args[0][0]
         callback()
 
-        # 1 event × 1 fire = 1
-        assert hass.bus.async_fire.call_count == 1
-        first_call = hass.bus.async_fire.call_args_list[0]
-        assert first_call[0][0] == "verisure_owa_activity"
-        payload = first_call[0][1]
+        # 1 event × 2 names = 2 fires
+        assert hass.bus.async_fire.call_count == 2
+        types = [c[0][0] for c in hass.bus.async_fire.call_args_list]
+        assert types == ["verisure_owa_activity", "securitas_activity"]
+        payload = hass.bus.async_fire.call_args_list[0][0][1]
         assert payload["numinst"] == "2654190"
         assert payload["id_signal"] == "999"
 

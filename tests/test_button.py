@@ -61,13 +61,13 @@ class TestVerisureRefreshButtonInit:
     def test_unique_id_format(self):
         """unique_id follows the v5 schema."""
         button = make_button()
-        assert button._attr_unique_id == "v5_verisure_owa.123456_refresh_button"
+        assert button._attr_unique_id == "v4_securitas_direct.123456_refresh_button"
 
     def test_device_info_identifiers(self):
         """device_info contains correct identifiers, manufacturer, and model."""
         button = make_button()
         info = button._attr_device_info
-        assert (DOMAIN, "v5_verisure_owa.123456") in info["identifiers"]  # type: ignore[typeddict-item]
+        assert (DOMAIN, "v4_securitas_direct.123456") in info["identifiers"]  # type: ignore[typeddict-item]
         assert info["manufacturer"] == "Verisure"  # type: ignore[typeddict-item]
         assert info["model"] == "SDVFAST"  # type: ignore[typeddict-item]
         assert info["name"] == "Home"  # type: ignore[typeddict-item]
@@ -231,7 +231,7 @@ class TestAsyncSetupEntry:
         assert len(buttons) == 1
         assert isinstance(buttons[0], VerisureRefreshButton)
         assert buttons[0]._attr_name == "Refresh"
-        assert buttons[0]._attr_unique_id == "v5_verisure_owa.333_refresh_button"
+        assert buttons[0]._attr_unique_id == "v4_securitas_direct.333_refresh_button"
 
     async def test_update_flag_passed_to_async_add_entities(self):
         """async_add_entities is called with update_before_add=True."""
@@ -293,5 +293,5 @@ def test_capture_button_unique_id_uses_v5_schema():
     btn = VerisureCaptureButton(hub, installation, camera_device)
     assert (
         btn._attr_unique_id
-        == f"v5_verisure_owa.{installation.number}_capture_{camera_device.zone_id}"
+        == f"v4_securitas_direct.{installation.number}_capture_{camera_device.zone_id}"
     )
