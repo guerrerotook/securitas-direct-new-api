@@ -25,7 +25,7 @@ import logging
 import re
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
@@ -70,7 +70,7 @@ async def migrate_unique_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
     on an already-migrated entry is a no-op.
     """
 
-    @er.callback
+    @callback
     def _maybe_rewrite(registry_entry: er.RegistryEntry) -> dict[str, str] | None:
         # async_migrate_entries already filters by config_entry_id, but
         # defensively skip rows whose integration isn't us.
