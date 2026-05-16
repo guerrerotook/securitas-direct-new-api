@@ -125,7 +125,7 @@ class VerisureDevice:
     def device_info(self) -> DeviceInfo:
         """Return a device description for device registry."""
         return DeviceInfo(
-            identifiers={(DOMAIN, f"v5_verisure_owa.{self.installation.number}")},
+            identifiers={(DOMAIN, f"v4_securitas_direct.{self.installation.number}")},
             manufacturer="Verisure",
             model=self.installation.panel,
             hw_version=self.installation.type,

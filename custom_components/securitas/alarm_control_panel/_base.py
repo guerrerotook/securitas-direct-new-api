@@ -158,7 +158,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         VerisureEntity.__init__(self, installation, client)
         self._device: str = installation.address
         self._attr_name = installation.alias
-        self._attr_unique_id: str | None = f"v5_verisure_owa.{installation.number}"
+        self._attr_unique_id: str | None = f"v4_securitas_direct.{installation.number}"
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}

@@ -53,7 +53,7 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
     ) -> None:
         """Initialize the refresh button."""
         super().__init__(installation, client)
-        self._attr_unique_id = f"v5_verisure_owa.{installation.number}_refresh_button"
+        self._attr_unique_id = f"v4_securitas_direct.{installation.number}_refresh_button"
         self._entry_id = entry_id
         self.hass = hass
 
@@ -143,7 +143,7 @@ class VerisureCaptureButton(VerisureEntity, ButtonEntity):
         super().__init__(installation, client)
         self._camera_device = camera_device
         self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}_capture_{camera_device.zone_id}"
+            f"v4_securitas_direct.{installation.number}_capture_{camera_device.zone_id}"
         )
         self._attr_device_info = camera_device_info(installation, camera_device)
 

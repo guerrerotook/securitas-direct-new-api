@@ -109,7 +109,7 @@ class SentinelSensorBase(  # type: ignore[override]
         super().__init__(coordinator)
         self._attr_device_info = securitas_device_info(installation)
         self._attr_unique_id = (
-            f"v5_verisure_owa.{installation.number}"
+            f"v4_securitas_direct.{installation.number}"
             f"_{self._unique_id_suffix}_{service_id}"
         )
 
@@ -231,7 +231,7 @@ class ActivityLogSensor(  # type: ignore[override]
         super().__init__(coordinator)
         self._installation = installation
         self._attr_device_info = securitas_device_info(installation)
-        self._attr_unique_id = f"v5_verisure_owa.{installation.number}_activity_log"
+        self._attr_unique_id = f"v4_securitas_direct.{installation.number}_activity_log"
         self._attr_name = f"{installation.alias} Activity Log"
         # Memoise extra_state_attributes — HA reads it from the recorder, the
         # frontend, the template engine, and websocket subscribers, often
