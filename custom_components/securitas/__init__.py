@@ -586,7 +586,7 @@ def _register_verisure_owa_entity_service(
                 f"Platform '{component_domain}' is not loaded; cannot "
                 f"dispatch verisure_owa.{service_name}"
             )
-        entity_ids = await async_extract_entity_ids(hass, call)
+        entity_ids = await async_extract_entity_ids(call)
         method_kwargs = {k: v for k, v in call.data.items() if k != "entity_id"}
         responses: dict[str, Any] = {}
         for eid in entity_ids:
