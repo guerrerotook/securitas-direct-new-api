@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -349,7 +350,9 @@ class TestCaptureImage:
         ]
 
         inst = _make_installation()
-        result = await client.capture_image(inst, 1, "QR", "QR01")
+        result = await client.capture_image(
+            inst, 1, "QR", "QR01", status_poll_delay=0.0
+        )
 
         assert isinstance(result, ThumbnailResponse)
         assert result.id_signal == "new-sig"
@@ -383,7 +386,9 @@ class TestCaptureImage:
         transport.execute.side_effect = _side_effect
 
         inst = _make_installation()
-        result = await client.capture_image(inst, 1, "QR", "QR01")
+        result = await client.capture_image(
+            inst, 1, "QR", "QR01", status_poll_delay=0.0
+        )
 
         assert result.id_signal == "new-sig"
         assert poll_count == 2  # First raised transient, second succeeded
@@ -410,7 +415,9 @@ class TestCaptureImage:
         transport.execute.side_effect = _side_effect
 
         inst = _make_installation()
-        result = await client.capture_image(inst, 1, "QR", "QR01", capture_timeout=0.1)
+        result = await client.capture_image(
+            inst, 1, "QR", "QR01", capture_timeout=0.1, status_poll_delay=0.0
+        )
 
         assert isinstance(result, ThumbnailResponse)
         assert result.id_signal == "new-sig"
@@ -572,6 +579,49 @@ class TestCaptureImage:
 
         assert result.id_signal == "sig"
         assert thumbnail_calls == 1
+
+    async def test_status_polling_default_delay_is_at_least_5s(self, client, transport):
+        """Image-status polling must default to >=5s.  Pre-refactor (before
+        173ca0e on 2026-04-09) the code explicitly slept ``max(5, ...)``
+        between RequestImagesStatus polls; the unification onto
+        _poll_operation dropped that floor and started using the general
+        2s poll_delay, producing ~40 status calls per 80s capture and
+        risking rate-limiting.  This test pins the floor back in place.
+        """
+        from unittest.mock import patch as _patch
+
+        recorded_delays: list[float] = []
+        original_sleep = asyncio.sleep
+
+        async def _record_sleep(delay: float, *args, **kwargs):
+            recorded_delays.append(delay)
+            await original_sleep(0)  # zero-wait — we only care about the value
+
+        async def _side_effect(*args, **_kwargs):
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                # WAIT then OK so the polling loop sleeps at least once.
+                if not recorded_delays:
+                    return request_images_status_response(
+                        res="OK", msg="processing image"
+                    )
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                return thumbnail_response(id_signal="sig", timestamp="2024-06-15 10:30")
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        with _patch("asyncio.sleep", _record_sleep):
+            await client.capture_image(inst, 1, "QR", "QR01")
+
+        assert any(d >= 5.0 for d in recorded_delays), (
+            f"expected at least one sleep >= 5s, got {recorded_delays}"
+        )
 
     async def test_wait_for_fresh_returns_stale_on_timeout(self, client, transport):
         """If the CDN never publishes anything newer, return the last fetch."""
