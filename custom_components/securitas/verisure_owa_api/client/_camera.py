@@ -96,9 +96,10 @@ class _CameraMixin(_ClientBase):
         zone_id: str,
         *,
         capture_timeout: float = 90.0,
+        status_poll_delay: float = 5.0,
         wait_for_fresh: bool = False,
         freshness_timeout: float = 30.0,
-        freshness_poll_interval: float = 2.0,
+        freshness_poll_interval: float = 5.0,
     ) -> ThumbnailResponse:
         """Request a new image capture, then fetch the resulting thumbnail.
 
@@ -128,12 +129,17 @@ class _CameraMixin(_ClientBase):
             zone_id: Camera zone ID.
             capture_timeout: Wall-clock timeout for the status poll
                 (default 90s).
+            status_poll_delay: Delay between xSRequestImagesStatus polls
+                (default 5s).  Image captures take 30-90s server-side, so
+                the integration-wide poll_delay (typically 2s, tuned for
+                arm/disarm) over-polls and risks rate-limiting.
             wait_for_fresh: When True, pre-fetch a baseline thumbnail and
                 poll until a strictly newer one is published.  When False,
                 returns the first post-status fetch (legacy behaviour).
             freshness_timeout: Wall-clock budget for waiting for the CDN
                 to publish a fresh frame after status reports success.
-            freshness_poll_interval: Delay between freshness retries.
+            freshness_poll_interval: Delay between freshness retries
+                (default 5s).
 
         Returns:
             The latest ThumbnailResponse — the freshly captured frame
@@ -205,7 +211,9 @@ class _CameraMixin(_ClientBase):
             return {"res": res, "msg": msg}
 
         try:
-            await self._poll_operation(_check, timeout=capture_timeout)
+            await self._poll_operation(
+                _check, timeout=capture_timeout, delay=status_poll_delay
+            )
         except OperationTimeoutError:
             _LOGGER.warning(
                 "Image capture timed out after %.0f seconds for %s",

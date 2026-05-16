@@ -498,6 +498,7 @@ class _ClientBase:
         check_fn: Any,
         *,
         timeout: float | None = None,
+        delay: float | None = None,
         continue_on_msg: str | None = None,
     ) -> dict[str, Any]:
         """Poll check_fn until result is no longer WAIT.
@@ -505,6 +506,10 @@ class _ClientBase:
         Args:
             check_fn: Async callable that returns a dict with at least 'res' key.
             timeout: Wall-clock timeout in seconds (defaults to poll_timeout).
+            delay: Sleep between polls in seconds (defaults to poll_delay).
+                Operations with known long latency (e.g. image capture, which
+                routinely takes 30-90s on the server) can pass a larger value
+                to reduce API call volume and avoid rate-limiting.
             continue_on_msg: If set, also continue polling when response 'msg'
                 matches this value.
 
@@ -517,6 +522,8 @@ class _ClientBase:
         """
         if timeout is None:
             timeout = self.poll_timeout
+        if delay is None:
+            delay = self.poll_delay
 
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -530,7 +537,7 @@ class _ClientBase:
                     f"last response: {result}"
                 )
             if not first:
-                await asyncio.sleep(self.poll_delay)
+                await asyncio.sleep(delay)
             try:
                 result = await check_fn()
             except (ClientConnectorError, asyncio.TimeoutError) as err:
