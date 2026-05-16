@@ -33,33 +33,75 @@ _KNOWN_PANEL_ERROR_CODES: dict[str, str] = {
     "status_not_found": "Status not found",
 }
 
+# Map of panel ``error.type`` values to human-readable labels. Used as the
+# label when the ``msg`` is a terse bare code (e.g. ``alarm-manager.errdca3``)
+# and the structured ``error_*#zone`` form isn't available.
+_ERROR_TYPE_LABELS: dict[str, str] = {
+    "BLOCKING": "Blocking error",
+    "NON_BLOCKING": "Non-blocking error",
+    "TECHNICAL_ERROR": "Technical error",
+}
+
+# All known error-shaped msgs start with this prefix (covers both
+# ``alarm-manager.error_<word>...`` and ``alarm-manager.errdca3``-style
+# bare codes). ``alarm-manager.processed.request`` and
+# ``alarm-manager.processing.request`` are success codes that don't start
+# with ``err`` and pass through unchanged.
+_ALARM_ERR_PREFIX = "alarm-manager.err"
 _ALARM_ERROR_PREFIX = "alarm-manager.error_"
 
 
-def humanize_panel_error_msg(msg: str) -> str:
-    """Convert a raw ``alarm-manager.error_<code>[#zone_id]`` string into a
-    short label suitable for a notification.
+def humanize_panel_error_msg(msg: str, error: dict[str, Any] | None = None) -> str:
+    """Convert a raw panel error to a short label suitable for a notification.
 
-    Pre-v5 (and v5.0.0/.1) surfaced these raw codes directly to the user
-    via the ``arm_failed`` notification (``{error}`` placeholder), which
-    produced messages like
-    ``Arm command failed: alarm-manager.error_mg_open_zone#Pl_Home_Cocina_Puertajardi``.
-    This helper turns those into something a user can read while keeping
-    enough information to identify the offending zone.
+    Three input shapes the panel actually emits in the wild:
 
-    Strings that don't look like panel error codes pass through unchanged
-    so non-panel error messages (network errors, library exceptions, etc.)
-    aren't mangled.
+    1. ``alarm-manager.error_<code>[#zone_id]`` — the structured form. Known
+       codes get a curated label; unknown ones get the code title-cased.
+       If a ``#zone_id`` suffix is present, the underscore-separated path
+       is shown in parens.
+    2. ``alarm-manager.<bare-code>`` (e.g. ``alarm-manager.errdca3``) —
+       terse internal codes with no human-readable suffix. When the caller
+       passes ``error`` (the structured ``error`` field from the response)
+       and it has a ``type``, we surface the type label and keep the raw
+       code in parens for support. Without the error dict, we fall back
+       to title-casing the bare code.
+    3. Anything else — passed through unchanged so non-panel error
+       messages (network errors, library exceptions, etc.) aren't mangled.
+
+    Pre-v5 (and v5.0.0/.1) surfaced shapes 1 and 2 raw via the
+    ``arm_failed`` notification, producing user-facing text like
+    ``Arm command failed: alarm-manager.error_mg_open_zone#Pl_Home_Cocina_Puertajardi``
+    or ``Arm command failed: alarm-manager.errdca3``.
     """
-    if not msg or not msg.startswith(_ALARM_ERROR_PREFIX):
-        return msg
-    body = msg[len(_ALARM_ERROR_PREFIX) :]
-    code, sep, suffix = body.partition("#")
-    label = _KNOWN_PANEL_ERROR_CODES.get(code) or code.replace("_", " ").capitalize()
-    if sep and suffix:
-        zone_path = " / ".join(suffix.split("_"))
-        return f"{label} ({zone_path})"
-    return label
+    if not msg:
+        return msg or ""
+
+    # Shape 1 — structured error_<code>[#zone] form.
+    if msg.startswith(_ALARM_ERROR_PREFIX):
+        body = msg[len(_ALARM_ERROR_PREFIX) :]
+        code, sep, suffix = body.partition("#")
+        label = (
+            _KNOWN_PANEL_ERROR_CODES.get(code) or code.replace("_", " ").capitalize()
+        )
+        if sep and suffix:
+            zone_path = " / ".join(suffix.split("_"))
+            return f"{label} ({zone_path})"
+        return label
+
+    # Shape 2 — bare alarm-manager.err<code>. Use error.type as the label
+    # when available; otherwise strip the alarm-manager. prefix and
+    # title-case what's left.
+    if msg.startswith(_ALARM_ERR_PREFIX):
+        if error and (error_type := error.get("type")):
+            type_label = _ERROR_TYPE_LABELS.get(
+                error_type, error_type.replace("_", " ").capitalize()
+            )
+            return f"{type_label} ({msg})"
+        return msg[len("alarm-manager.") :].capitalize()
+
+    # Shape 3 — pass through.
+    return msg
 
 
 class _AlarmMixin(_ClientBase):
@@ -147,7 +189,7 @@ class _AlarmMixin(_ClientBase):
             if error_info.get("type") != "NON_BLOCKING":
                 raw_msg = raw.get("msg", "unknown error")
                 raise VerisureOwaError(
-                    f"Arm command failed: {humanize_panel_error_msg(raw_msg)}"
+                    f"Arm command failed: {humanize_panel_error_msg(raw_msg, error)}"
                 )
 
         if raw.get("protomResponse"):
@@ -207,11 +249,12 @@ class _AlarmMixin(_ClientBase):
 
         # ── Process result ──
         if raw.get("res") == "ERROR":
-            error_info = raw.get("error") or {}
+            error = raw.get("error")
+            error_info = error or {}
             if error_info.get("type") != "NON_BLOCKING":
                 raw_msg = raw.get("msg", "unknown error")
                 raise VerisureOwaError(
-                    f"Disarm command failed: {humanize_panel_error_msg(raw_msg)}"
+                    f"Disarm command failed: {humanize_panel_error_msg(raw_msg, error)}"
                 )
 
         if raw.get("protomResponse"):
