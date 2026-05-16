@@ -227,16 +227,9 @@
         }
     },
     "issues": {
-        "restart_required_after_migration": {
-            "title": "Restart required to finish Verisure OWA upgrade",
-            "fix_flow": {
-                "step": {
-                    "confirm": {
-                        "title": "Restart Home Assistant?",
-                        "description": "Your Securitas Direct integration has been migrated to Verisure OWA. Restarting brings the migrated entries online — your devices, entities, and customisations are preserved. Click the Learn more link for the renamed services, events, and Lovelace cards."
-                    }
-                }
-            }
+        "orphan_verisure_owa_directory": {
+            "title": "Leftover verisure_owa folder",
+            "description": "An obsolete `verisure_owa` directory was left at `{path}` by an earlier (broken) upgrade. It does nothing now and can be safely deleted. Remove the directory and restart Home Assistant to clear this notice."
         }
     }
 }

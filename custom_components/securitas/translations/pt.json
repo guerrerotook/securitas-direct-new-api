@@ -221,16 +221,9 @@
         }
     },
     "issues": {
-        "restart_required_after_migration": {
-            "title": "Reinício necessário para concluir a atualização para Verisure OWA",
-            "fix_flow": {
-                "step": {
-                    "confirm": {
-                        "title": "Reiniciar o Home Assistant?",
-                        "description": "O Home Assistant será reiniciado para que as entradas migradas para Verisure OWA fiquem ativas. Os seus dispositivos, entidades e personalizações são preservados."
-                    }
-                }
-            }
+        "orphan_verisure_owa_directory": {
+            "title": "Pasta verisure_owa obsoleta",
+            "description": "Uma pasta obsoleta `verisure_owa` ficou em `{path}` de uma atualização anterior. Já não faz nada e pode ser apagada com segurança. Apague a pasta e reinicie o Home Assistant para limpar este aviso."
         }
     }
 }
