@@ -21,11 +21,14 @@ if TYPE_CHECKING:
     from .coordinators import ActivityCoordinator
 
 
+# Every event the integration fires is emitted under BOTH
+# ``verisure_owa_<suffix>`` and ``securitas_<suffix>`` via ``fire_event``
+# below. Both forms are functionally identical; docs steer users toward
+# the ``verisure_owa_*`` form for forward compatibility with the deferred
+# domain rename (see docs/MIGRATION_PLAN.md). The constants below name
+# the verisure_owa form since that's the recommended one.
 ACTIVITY_EVENT_TYPE = "verisure_owa_activity"
-
 ARMING_EXCEPTION_EVENT_TYPE = "verisure_owa_arming_exception"
-# Deprecated alias — fires alongside the canonical event, removed in v6.0.0.
-LEGACY_ARMING_EXCEPTION_EVENT_TYPE = "securitas_arming_exception"
 
 # Fired when the force-arm context times out (180 s) without the user
 # acting on the action buttons. Built-in handler updates the mobile
@@ -37,6 +40,17 @@ FORCE_ARM_EXPIRED_EVENT_TYPE = "verisure_owa_force_arm_expired"
 # those are the canonical resolutions). Built-in handler dismisses the
 # persistent + mobile notifications.
 ARMING_EXCEPTION_DISMISSED_EVENT_TYPE = "verisure_owa_arming_exception_dismissed"
+
+
+def fire_event(hass: HomeAssistant, suffix: str, payload: dict) -> None:
+    """Fire ``verisure_owa_<suffix>`` and ``securitas_<suffix>`` in the same tick.
+
+    Both events carry identical payloads. Subscribers that match either
+    name will see the event. New automations should subscribe to the
+    ``verisure_owa_*`` form (see docs/MIGRATION_PLAN.md).
+    """
+    hass.bus.async_fire(f"verisure_owa_{suffix}", payload)
+    hass.bus.async_fire(f"securitas_{suffix}", payload)
 
 # Closed set of `reason` values for the dismissed event. Kept as
 # constants so callers can't typo a string and silently break user
@@ -76,14 +90,15 @@ HA_INJECTABLE_CATEGORIES: frozenset[ActivityCategory] = frozenset(
 def fire_activity_events(
     hass: HomeAssistant, numinst: str, events: list[ActivityEvent]
 ) -> None:
-    """Fire one ``verisure_owa_activity`` HA event per ActivityEvent.
+    """Fire one activity HA event per ActivityEvent under both event names.
 
     Each ``event_data`` carries the originating ``numinst`` so multi-installation
-    users can disambiguate.
+    users can disambiguate. Fires both ``verisure_owa_activity`` and
+    ``securitas_activity`` via ``fire_event``.
     """
     for event in events:
         payload: dict[str, object] = {"numinst": numinst, **event.model_dump()}
-        hass.bus.async_fire(ACTIVITY_EVENT_TYPE, payload)
+        fire_event(hass, "activity", payload)
 
 
 async def resolve_ha_user(hass: HomeAssistant, context: Context | None) -> str:
