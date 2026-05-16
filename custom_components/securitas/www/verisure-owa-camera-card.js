@@ -109,12 +109,34 @@ const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars)
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
+// Marker substring in VerisureCameraFull's unique_id (set in camera.py).
+// We match on this — not on entity_id — so the filter survives HA's
+// auto-disambiguation (camera.salon_full_image_2) and user renames.
+const _FULL_IMAGE_UNIQUE_ID_MARKER = "_camera_full_";
+
+function _findFullImageEntityIds(hass) {
+  const ids = [];
+  for (const [eid, entry] of Object.entries(hass?.entities || {})) {
+    if (!eid.startsWith("camera.")) continue;
+    if ((entry?.unique_id || "").includes(_FULL_IMAGE_UNIQUE_ID_MARKER)) {
+      ids.push(eid);
+    }
+  }
+  return ids;
+}
+
 class VerisureOwaCameraCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
+    // Cache the exclude list keyed to hass.entities identity — the editor's
+    // hass setter fires on every HA state change, but the entity registry
+    // changes far less often (HA replaces hass.entities atomically when it
+    // does).  Avoids re-walking the registry on every push.
+    this._fullImageIdsCache = null;
+    this._fullImageIdsRef = null;
   }
 
   set hass(hass) {
@@ -122,8 +144,6 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
     const entityForm = this.shadowRoot.getElementById("entity-form");
     if (entityForm) {
       entityForm.hass = hass;
-      // Re-compute schema so the exclude list reflects the current entity
-      // registry (newly-added cameras land in the picker without re-render).
       entityForm.schema = this._buildEntitySchema();
     }
   }
@@ -142,16 +162,14 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
   }
 
   _buildEntitySchema() {
-    // Hide the per-camera full-resolution entities — they share the same
-    // device as the thumbnail entity and aren't meant to be picked as the
-    // card's primary entity.  Pattern matches camera.py's _attr_name for
-    // VerisureCameraFull ("Full Image"), which HA slugifies to a
-    // "_full_image" entity_id suffix.
-    const fullImageIds = Object.keys(this._hass?.states || {}).filter(
-      (e) => e.startsWith("camera.") && e.endsWith("_full_image"),
-    );
+    if (this._fullImageIdsRef !== this._hass?.entities) {
+      this._fullImageIdsCache = _findFullImageEntityIds(this._hass);
+      this._fullImageIdsRef = this._hass?.entities;
+    }
     const entitySelector = { domain: "camera" };
-    if (fullImageIds.length) entitySelector.exclude_entities = fullImageIds;
+    if (this._fullImageIdsCache.length) {
+      entitySelector.exclude_entities = this._fullImageIdsCache;
+    }
     return [{ name: "entity", selector: { entity: entitySelector } }];
   }
 
@@ -474,8 +492,9 @@ class VerisureOwaCameraCard extends HTMLElement {
   }
 
   static getStubConfig(hass) {
+    const fullImageIds = new Set(_findFullImageEntityIds(hass));
     const entity = Object.keys(hass?.states || {}).find(
-      (e) => e.startsWith("camera.") && !e.endsWith("_full_image"),
+      (e) => e.startsWith("camera.") && !fullImageIds.has(e),
     );
     return { entity: entity || "" };
   }
