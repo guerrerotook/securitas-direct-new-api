@@ -1,11 +1,18 @@
+# Service descriptions for the picker (Developer Tools → Actions, automation
+# editor). Translation entries in translations/<lang>.json override these per
+# language; this file is the English fallback and also documents the
+# services for developers reading the source.
+#
+# The verisure_owa.* aliases get their picker descriptions programmatically
+# via async_set_service_schema in __init__.py (no per-domain services.yaml
+# is possible for a foreign domain).
+
 force_arm:
   description: |
-    Force-arm the alarm even when sensors are open.
+    Deprecated — use `verisure_owa.force_arm` instead.
 
-    NOTE: prefer calling this as `verisure_owa.force_arm` in new
-    automations — the `securitas.force_arm` form documented here is
-    functionally identical but will eventually move to a separate
-    integration (see docs/MIGRATION_PLAN.md). Both forms work today.
+    Force-arm the alarm, overriding non-blocking exceptions (e.g. open
+    windows) from a previous failed arm attempt.
   target:
     entity:
       integration: securitas
@@ -19,10 +26,9 @@ force_arm:
 
 force_arm_cancel:
   description: |
-    Cancel a pending force-arm.
+    Deprecated — use `verisure_owa.force_arm_cancel` instead.
 
-    NOTE: prefer calling this as `verisure_owa.force_arm_cancel` in
-    new automations.
+    Cancel a pending force-arm and dismiss the arming-exception notification.
   target:
     entity:
       integration: securitas
@@ -30,10 +36,9 @@ force_arm_cancel:
 
 refresh_activity_log:
   description: |
-    Foreground-refresh the activity timeline for an installation.
+    Deprecated — use `verisure_owa.refresh_activity_log` instead.
 
-    NOTE: prefer calling this as `verisure_owa.refresh_activity_log`
-    in new automations.
+    Foreground-refresh the activity timeline for an installation.
   target:
     entity:
       integration: securitas
@@ -41,12 +46,11 @@ refresh_activity_log:
 
 fetch_activity_image:
   description: |
-    On-demand historical image fetch for image-request events. Returns
-    base64-encoded image bytes plus a `mime_type` field so the
-    Lovelace card can render the image inline.
+    Deprecated — use `verisure_owa.fetch_activity_image` instead.
 
-    NOTE: prefer calling this as `verisure_owa.fetch_activity_image`
-    in new automations.
+    On-demand historical image fetch for image-request events. Returns
+    base64-encoded image bytes plus a `mime_type` field so the Lovelace
+    card can render the image inline.
   target:
     entity:
       integration: securitas

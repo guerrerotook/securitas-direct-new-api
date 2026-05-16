@@ -199,11 +199,11 @@
     "services": {
         "force_arm": {
             "name": "Força l'armat",
-            "description": "Força l'armat de l'alarma, ignorant les excepcions no bloquejants (p. ex. finestres obertes) d'un intent d'armat fallit anterior."
+            "description": "Obsolet — utilitza `verisure_owa.force_arm` en lloc d'aquest.\n\nForça l'armat de l'alarma, ignorant les excepcions no bloquejants (p. ex. finestres obertes) d'un intent d'armat fallit anterior."
         },
         "force_arm_cancel": {
             "name": "Cancel·la l'armat forçat",
-            "description": "Cancel·la un armat forçat pendent i descarta la notificació d'excepció d'armat."
+            "description": "Obsolet — utilitza `verisure_owa.force_arm_cancel` en lloc d'aquest.\n\nCancel·la un armat forçat pendent i descarta la notificació d'excepció d'armat."
         }
     },
     "exceptions": {
