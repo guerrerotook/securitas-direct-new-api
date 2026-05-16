@@ -4712,10 +4712,12 @@ class TestExecuteTransitionRefusesUnknownState:
         assert args[2] == "arm_failed"
         assert "'Z'" in args[3]["error"]
 
-    async def test_arm_failure_injects_communication_failed_event(self):
-        """When the API rejects an arm, inject a HA-side COMMUNICATION_FAILED
+    async def test_arm_failure_injects_arming_failed_event(self):
+        """When the API rejects an arm, inject a HA-side ARMING_FAILED
         event so the activity log surfaces it with HA-user attribution
-        (instead of the panel's later polled type-501 'Sorry' message)."""
+        (instead of the panel's later polled type-5xx 'Error conectando'
+        message — which dedups against this synthetic row via the
+        HA_INJECTABLE_CATEGORIES filter in the coordinator)."""
         from custom_components.securitas.verisure_owa_api.models import (
             ActivityCategory,
         )
@@ -4738,7 +4740,7 @@ class TestExecuteTransitionRefusesUnknownState:
 
         mock_inject.assert_awaited_once()
         kwargs = mock_inject.await_args.kwargs
-        assert kwargs["category"] == ActivityCategory.COMMUNICATION_FAILED
+        assert kwargs["category"] == ActivityCategory.ARMING_FAILED
         assert "Arm failed" in kwargs["alias"]
 
     async def test_disarm_failure_injects_communication_failed_event(self):

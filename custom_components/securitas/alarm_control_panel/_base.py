@@ -888,7 +888,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             await inject_ha_event(
                 self.hass,
                 self._installation,
-                category=ActivityCategory.COMMUNICATION_FAILED,
+                category=ActivityCategory.ARMING_FAILED,
                 alias=f"Arm failed: {err}",
                 context=user_context,
             )
