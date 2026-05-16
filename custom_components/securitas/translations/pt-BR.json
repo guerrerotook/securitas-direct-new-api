@@ -199,11 +199,11 @@
     "services": {
         "force_arm": {
             "name": "Forçar armar",
-            "description": "Forçar o armar do alarme, ignorando exceções não bloqueantes (ex. janelas abertas) de uma tentativa de armar anterior falhada."
+            "description": "Obsoleto — use `verisure_owa.force_arm` em vez disso.\n\nForçar o armar do alarme, ignorando exceções não bloqueantes (ex. janelas abertas) de uma tentativa de armar anterior falhada."
         },
         "force_arm_cancel": {
             "name": "Cancelar armar forçado",
-            "description": "Cancelar um armar forçado pendente e dispensar a notificação de exceção de armação."
+            "description": "Obsoleto — use `verisure_owa.force_arm_cancel` em vez disso.\n\nCancelar um armar forçado pendente e dispensar a notificação de exceção de armação."
         }
     },
     "exceptions": {

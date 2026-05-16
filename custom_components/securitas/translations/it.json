@@ -199,11 +199,11 @@
     "services": {
         "force_arm": {
             "name": "Forzare attivazione",
-            "description": "Forzare l'attivazione dell'allarme, ignorando le eccezioni non bloccanti (es. finestre aperte) da un precedente tentativo di attivazione fallito."
+            "description": "Deprecato — usa `verisure_owa.force_arm` al suo posto.\n\nForzare l'attivazione dell'allarme, ignorando le eccezioni non bloccanti (es. finestre aperte) da un precedente tentativo di attivazione fallito."
         },
         "force_arm_cancel": {
             "name": "Annullare attivazione forzata",
-            "description": "Annullare un'attivazione forzata in sospeso e chiudere la notifica di eccezione di attivazione."
+            "description": "Deprecato — usa `verisure_owa.force_arm_cancel` al suo posto.\n\nAnnullare un'attivazione forzata in sospeso e chiudere la notifica di eccezione di attivazione."
         }
     },
     "exceptions": {

@@ -199,7 +199,7 @@
     "services": {
         "force_arm": {
             "name": "Force arm",
-            "description": "Force-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt.",
+            "description": "Deprecated — use `verisure_owa.force_arm` instead.\n\nForce-arm the alarm, overriding non-blocking exceptions (e.g. open windows) from a previous failed arm attempt.",
             "fields": {
                 "code": {
                     "name": "PIN code",
@@ -209,7 +209,7 @@
         },
         "force_arm_cancel": {
             "name": "Cancel force arm",
-            "description": "Cancel a pending force-arm and dismiss the arming-exception notification."
+            "description": "Deprecated — use `verisure_owa.force_arm_cancel` instead.\n\nCancel a pending force-arm and dismiss the arming-exception notification."
         }
     },
     "exceptions": {

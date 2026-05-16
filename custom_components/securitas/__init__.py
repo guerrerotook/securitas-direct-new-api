@@ -505,16 +505,20 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
         "force_arm",
         SupportsResponse.NONE,
         {
-            "name": "Force arm (Verisure OWA)",
+            "name": "Force arm",
             "description": (
-                "Force-arm the alarm even when sensors are open. Recommended form — "
-                "the equivalent securitas.force_arm service is also available for "
-                "backward compatibility."
+                "Force-arm the alarm, overriding non-blocking exceptions (e.g. "
+                "open windows) from a previous failed arm attempt."
             ),
             "fields": {
                 "code": {
-                    "name": "Code",
-                    "description": "Optional alarm code (if your installation requires one).",
+                    "name": "PIN code",
+                    "description": (
+                        "Optional. If supplied, validated against the configured "
+                        "PIN before completing the force-arm. Most callers don't "
+                        "need this — the prior arm attempt that produced the "
+                        "force-arm context already validated the PIN."
+                    ),
                     "example": "1234",
                     "selector": {"text": {"type": "password"}},
                 },
@@ -528,10 +532,10 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
         "force_arm_cancel",
         SupportsResponse.NONE,
         {
-            "name": "Cancel force-arm (Verisure OWA)",
+            "name": "Cancel force arm",
             "description": (
-                "Cancel a pending force-arm. Recommended form — the equivalent "
-                "securitas.force_arm_cancel service is also available."
+                "Cancel a pending force-arm and dismiss the arming-exception "
+                "notification."
             ),
             "fields": {},
             "target": {
@@ -543,10 +547,9 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
         "refresh_activity_log",
         SupportsResponse.NONE,
         {
-            "name": "Refresh activity log (Verisure OWA)",
+            "name": "Refresh activity log",
             "description": (
-                "Foreground-refresh the activity timeline. Recommended form — the "
-                "equivalent securitas.refresh_activity_log service is also available."
+                "Foreground-refresh the activity timeline for an installation."
             ),
             "fields": {},
             "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
@@ -556,10 +559,11 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
         "fetch_activity_image",
         SupportsResponse.ONLY,
         {
-            "name": "Fetch activity image (Verisure OWA)",
+            "name": "Fetch activity image",
             "description": (
-                "On-demand historical image fetch for image-request events. Returns "
-                "base64-encoded image bytes plus a mime_type field. Recommended form."
+                "On-demand historical image fetch for image-request events. "
+                "Returns base64-encoded image bytes plus a mime_type field so "
+                "the Lovelace card can render the image inline."
             ),
             "fields": {
                 "id_signal": {
