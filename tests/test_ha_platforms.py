@@ -233,7 +233,7 @@ class TestSentinelTemperature:
     def test_unique_id_uses_v5_schema(self):
         coordinator = _make_sentinel_coordinator()
         sensor = SentinelTemperature(coordinator, make_installation(), 5)
-        assert sensor._attr_unique_id == "v5_verisure_owa.123456_temperature_5"
+        assert sensor._attr_unique_id == "v4_securitas_direct.123456_temperature_5"
 
 
 # ===========================================================================
@@ -301,7 +301,7 @@ class TestSentinelHumidity:
     def test_unique_id_uses_v5_schema(self):
         coordinator = _make_sentinel_coordinator()
         sensor = SentinelHumidity(coordinator, make_installation(), 5)
-        assert sensor._attr_unique_id == "v5_verisure_owa.123456_humidity_5"
+        assert sensor._attr_unique_id == "v4_securitas_direct.123456_humidity_5"
 
 
 # ===========================================================================
@@ -369,7 +369,7 @@ class TestSentinelAirQuality:
     def test_unique_id_uses_v5_schema(self):
         coordinator = _make_sentinel_coordinator()
         sensor = SentinelAirQuality(coordinator, make_installation(), 5)
-        assert sensor._attr_unique_id == "v5_verisure_owa.123456_airquality_5"
+        assert sensor._attr_unique_id == "v4_securitas_direct.123456_airquality_5"
 
 
 class TestSentinelAirQualityStatus:
@@ -475,7 +475,7 @@ class TestSentinelAirQualityStatus:
     def test_unique_id_uses_v5_schema(self):
         coordinator = _make_sentinel_coordinator()
         sensor = SentinelAirQualityStatus(coordinator, make_installation(), 5)
-        assert sensor._attr_unique_id == "v5_verisure_owa.123456_airquality_status_5"
+        assert sensor._attr_unique_id == "v4_securitas_direct.123456_airquality_status_5"
 
 
 # ===========================================================================
@@ -751,11 +751,11 @@ class TestVerisureLockConfig:
 
     def test_unique_id_includes_device_id(self):
         lock = make_lock(device_id="01")
-        assert lock._attr_unique_id == "v5_verisure_owa.123456_lock_01"
+        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_01"
 
     def test_unique_id_different_device(self):
         lock = make_lock(device_id="02")
-        assert lock._attr_unique_id == "v5_verisure_owa.123456_lock_02"
+        assert lock._attr_unique_id == "v4_securitas_direct.123456_lock_02"
 
     def test_device_info_creates_separate_lock_device_with_config(self):
         """Lock with config gets its own device with metadata."""
@@ -769,9 +769,9 @@ class TestVerisureLockConfig:
         info = lock._attr_device_info
         assert info is not None
         assert info["identifiers"] == {
-            ("verisure_owa", "v5_verisure_owa.123456_lock_01")
+            ("securitas", "v4_securitas_direct.123456_lock_01")
         }
-        assert info["via_device"] == ("verisure_owa", "v5_verisure_owa.123456")
+        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
         assert info["name"] == "Front Door"
         assert info["model"] == "DR"
         assert info["serial_number"] == "SN001"
@@ -783,9 +783,9 @@ class TestVerisureLockConfig:
         info = lock._attr_device_info
         assert info is not None
         assert info["identifiers"] == {
-            ("verisure_owa", "v5_verisure_owa.123456_lock_01")
+            ("securitas", "v4_securitas_direct.123456_lock_01")
         }
-        assert info["via_device"] == ("verisure_owa", "v5_verisure_owa.123456")
+        assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
         assert info["name"] == "Home Lock 01"
         assert info["manufacturer"] == "Verisure"
 
@@ -885,21 +885,21 @@ class TestVerisureLockV5Schema:
 
     def test_unique_id_uses_v5_schema(self):
         lk = make_lock(device_id="01")
-        assert lk._attr_unique_id == "v5_verisure_owa.123456_lock_01"
+        assert lk._attr_unique_id == "v4_securitas_direct.123456_lock_01"
 
     def test_device_identifier_uses_v5_schema(self):
         lk = make_lock(device_id="01")
         from custom_components.securitas import DOMAIN
 
         info = lk._attr_device_info
-        assert (DOMAIN, "v5_verisure_owa.123456_lock_01") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.123456_lock_01") in info["identifiers"]
 
     def test_via_device_uses_v5_schema(self):
         lk = make_lock(device_id="01")
         from custom_components.securitas import DOMAIN
 
         info = lk._attr_device_info
-        assert info["via_device"] == (DOMAIN, "v5_verisure_owa.123456")
+        assert info["via_device"] == (DOMAIN, "v4_securitas_direct.123456")
 
     def test_update_lock_config_keeps_v5_schema(self):
         from custom_components.securitas.verisure_owa_api.models import (
@@ -912,8 +912,8 @@ class TestVerisureLockV5Schema:
         from custom_components.securitas import DOMAIN
 
         info = lk._attr_device_info
-        assert (DOMAIN, "v5_verisure_owa.123456_lock_02") in info["identifiers"]
-        assert info["via_device"] == (DOMAIN, "v5_verisure_owa.123456")
+        assert (DOMAIN, "v4_securitas_direct.123456_lock_02") in info["identifiers"]
+        assert info["via_device"] == (DOMAIN, "v4_securitas_direct.123456")
 
 
 class TestVerisureLockActions:

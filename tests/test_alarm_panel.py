@@ -1110,7 +1110,7 @@ class TestProperties:
     def test_unique_id_uses_v5_schema(self):
         """unique_id follows the v5 schema."""
         alarm = make_alarm()
-        assert alarm._attr_unique_id == "v5_verisure_owa.123456"
+        assert alarm._attr_unique_id == "v4_securitas_direct.123456"
 
     def test_device_info(self):
         """device_info contains correct manufacturer, model, and name."""
@@ -1439,7 +1439,7 @@ class TestForceState:
         assert call[1]["domain"] == "persistent_notification"
         assert call[1]["service"] == "dismiss"
         assert call[1]["service_data"]["notification_id"] == (
-            f"verisure_owa.rate_limited_{alarm.installation.number}"
+            f"securitas.rate_limited_{alarm.installation.number}"
         )
 
 
@@ -1470,23 +1470,19 @@ class TestAsyncWillRemoveFromHass:
         await alarm.async_will_remove_from_hass()
 
     async def test_unsubscribes_arming_event_listener(self):
-        """Calls both _arming_event_unsub_new() and _arming_event_unsub_legacy() when set."""
+        """Calls _arming_event_unsub_new() when set on teardown."""
         alarm = make_alarm()
         new_unsub_mock = MagicMock()
-        legacy_unsub_mock = MagicMock()
         alarm._arming_event_unsub_new = new_unsub_mock
-        alarm._arming_event_unsub_legacy = legacy_unsub_mock
 
         await alarm.async_will_remove_from_hass()
 
         new_unsub_mock.assert_called_once()
-        legacy_unsub_mock.assert_called_once()
 
     async def test_handles_none_arming_event_unsub_gracefully(self):
-        """Handles None _arming_event_unsub_new/_legacy gracefully (no crash)."""
+        """Handles None _arming_event_unsub_new gracefully (no crash)."""
         alarm = make_alarm()
         alarm._arming_event_unsub_new = None
-        alarm._arming_event_unsub_legacy = None
         alarm._mobile_action_unsub = None
 
         # Should not raise
@@ -2613,7 +2609,7 @@ class TestForceArmExpiredMobileNotification:
         # mobile OS replaces the existing card in place).
         assert (
             sd["data"]["tag"]
-            == f"verisure_owa.arming_exception_{alarm.installation.number}"
+            == f"securitas.arming_exception_{alarm.installation.number}"
         )
         # No actions array — buttons removed.
         assert "actions" not in sd["data"]
@@ -3768,7 +3764,7 @@ class TestCompoundArmCommands:
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm._execute_step(step)
 
-        assert excinfo.value.translation_domain == "verisure_owa"
+        assert excinfo.value.translation_domain == "securitas"
         assert excinfo.value.translation_key == "no_supported_command"
 
     async def test_all_alternatives_fail_raises_unsupported_alarm_mode(self):
@@ -3784,7 +3780,7 @@ class TestCompoundArmCommands:
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
-        assert excinfo.value.translation_domain == "verisure_owa"
+        assert excinfo.value.translation_domain == "securitas"
         assert excinfo.value.translation_key == "unsupported_alarm_mode"
         # Tried compound ARMNIGHT1PERI1 then ARMNIGHT1 (first sub-cmd of ARMNIGHT1+PERI1)
         assert alarm.client.arm_alarm.call_count == 2
@@ -4288,7 +4284,7 @@ class TestDynamicDisarm:
         with pytest.raises(HomeAssistantError) as excinfo:
             await alarm.async_alarm_disarm()
 
-        assert excinfo.value.translation_domain == "verisure_owa"
+        assert excinfo.value.translation_domain == "securitas"
         assert excinfo.value.translation_key == "unsupported_alarm_mode"
         assert alarm.client.disarm_alarm.call_count == 2
         assert alarm._state == AlarmControlPanelState.ARMED_HOME
@@ -4893,7 +4889,7 @@ class TestNotificationContent:
         sd = pn_call[1]["service_data"]
         assert sd["title"] == "TITLE"
         assert "- Kitchen Door" in sd["message"]
-        assert sd["notification_id"] == "verisure_owa.arming_exception_123456"
+        assert sd["notification_id"] == "securitas.arming_exception_123456"
 
     async def test_persistent_notification_unknown_sensor_fallback(self):
         """When zones list is empty, sensor_list placeholder uses unknown-sensor fallback."""
@@ -4931,7 +4927,7 @@ class TestNotificationContent:
             if c[1]["domain"] == "notify"
         )
         data = mobile_call[1]["service_data"]["data"]
-        assert data["tag"] == "verisure_owa.arming_exception_123456"
+        assert data["tag"] == "securitas.arming_exception_123456"
 
     async def test_mobile_notification_action_buttons_translated(self):
         """Mobile action button titles come from translations."""
@@ -5033,7 +5029,7 @@ class TestNotificationContent:
         sd = calls[0][1]["service_data"]
         assert sd["title"] == "TITLE"
         assert "Kitchen Door" in sd["message"]
-        assert sd["notification_id"] == "verisure_owa.arming_exception_123456"
+        assert sd["notification_id"] == "securitas.arming_exception_123456"
 
     def test_event_handler_schedules_async_helper(self):
         """The sync event handler schedules the async helper via async_create_task."""
@@ -5065,7 +5061,7 @@ class TestDismissNotification:
         pn_call = next(c for c in calls if c[1]["domain"] == "persistent_notification")
         assert pn_call[1]["service"] == "dismiss"
         assert pn_call[1]["service_data"] == {
-            "notification_id": "verisure_owa.arming_exception_123456"
+            "notification_id": "securitas.arming_exception_123456"
         }
 
     def test_dismiss_mobile_notification_with_notify_group(self):
@@ -5080,7 +5076,7 @@ class TestDismissNotification:
         assert mobile_call[1]["service"] == "mobile_app_phone"
         assert mobile_call[1]["service_data"] == {
             "message": "clear_notification",
-            "data": {"tag": "verisure_owa.arming_exception_123456"},
+            "data": {"tag": "securitas.arming_exception_123456"},
         }
 
     def test_dismiss_no_mobile_without_notify_group(self):
@@ -5117,7 +5113,7 @@ class TestDismissNotification:
         assert mobile_call[1]["service_data"]["message"] == "clear_notification"
         assert (
             mobile_call[1]["service_data"]["data"]["tag"]
-            == "verisure_owa.arming_exception_123456"
+            == "securitas.arming_exception_123456"
         )
         # Context should be cleared
         assert alarm._force_context is None
@@ -5143,14 +5139,19 @@ class TestAsyncAddedToHass:
         )
 
     async def test_registers_arming_exception_listener(self):
-        """async_added_to_hass registers listener for securitas_arming_exception."""
+        """async_added_to_hass registers listener for verisure_owa_arming_exception.
+
+        fire_event always emits both names, so subscribing only to the
+        recommended verisure_owa_arming_exception form catches every
+        emission the integration produces.
+        """
         alarm = make_alarm()
 
         await alarm.async_added_to_hass()
 
         listen_calls = alarm.hass.bus.async_listen.call_args_list
         arming_exc_calls = [
-            c for c in listen_calls if c[0][0] == "securitas_arming_exception"
+            c for c in listen_calls if c[0][0] == "verisure_owa_arming_exception"
         ]
         assert len(arming_exc_calls) == 1
 
@@ -5273,7 +5274,7 @@ class TestForceArmWorkflow:
         )
         assert (
             pn_dismiss[1]["service_data"]["notification_id"]
-            == "verisure_owa.arming_exception_123456"
+            == "securitas.arming_exception_123456"
         )
 
     async def test_full_cancel_workflow(self):
@@ -5606,7 +5607,7 @@ class TestSubPanelSuggestedObjectId:
         dev_reg = dr.async_get(hass)
         device = dev_reg.async_get_or_create(
             config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, "v5_verisure_owa.12345")},
+            identifiers={(DOMAIN, "v4_securitas_direct.12345")},
             name="TestHome",
             manufacturer="Verisure",
         )
@@ -6778,31 +6779,32 @@ class TestSubPanelSetup:
 # ===========================================================================
 
 
-async def test_legacy_force_arm_service_forwards_to_new(hass, caplog):
-    """securitas.force_arm calls the same handler as verisure_owa.force_arm."""
-    import logging
-    from custom_components.securitas import register_legacy_service_aliases
+async def test_verisure_owa_force_arm_alias_forwards_to_securitas(hass):
+    """verisure_owa.force_arm proxies to securitas.force_arm with the same payload.
 
-    new_called = []
+    Inverse of the v5.0.1 direction: the canonical service is now
+    securitas.force_arm (manifest domain), and register_service_aliases
+    exposes verisure_owa.force_arm as a symmetric alias that forwards
+    to it. Both names are equal-weight in HA's eyes; the alias is for
+    forward-compat with the deferred domain rename (see
+    docs/MIGRATION_PLAN.md).
+    """
+    from custom_components.securitas import register_service_aliases
+
+    canonical_called = []
 
     async def fake_handler(call):
-        new_called.append(dict(call.data))
+        canonical_called.append(dict(call.data))
 
-    hass.services.async_register("verisure_owa", "force_arm", fake_handler)
-    register_legacy_service_aliases(hass)
-    with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
-        await hass.services.async_call(
-            "securitas",
-            "force_arm",
-            {"entity_id": "alarm_control_panel.x"},
-            blocking=True,
-        )
-    assert new_called == [{"entity_id": "alarm_control_panel.x"}]
-    # Deprecation warning was logged.
-    assert any(
-        "deprecated" in r.message.lower() and "force_arm" in r.message
-        for r in caplog.records
+    hass.services.async_register("securitas", "force_arm", fake_handler)
+    register_service_aliases(hass)
+    await hass.services.async_call(
+        "verisure_owa",
+        "force_arm",
+        {"entity_id": "alarm_control_panel.x"},
+        blocking=True,
     )
+    assert canonical_called == [{"entity_id": "alarm_control_panel.x"}]
 
 
 async def test_arming_exception_fires_both_legacy_and_new_events(hass):
@@ -7175,7 +7177,7 @@ class TestCombinedPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation.number}",
+            f"v4_securitas_direct.{installation.number}",
             suggested_object_id="corso_vittorio_emanuele_252_roma_main_corso_vittorio_emanuele_252_roma",
             config_entry=entry,
         )
@@ -7187,7 +7189,7 @@ class TestCombinedPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}",
+                f"v4_securitas_direct.{installation.number}",
             )
             == canonical
         )
@@ -7219,7 +7221,7 @@ class TestCombinedPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation.number}",
+            f"v4_securitas_direct.{installation.number}",
             suggested_object_id=slugify(installation.alias),
             config_entry=entry,
         )
@@ -7230,7 +7232,7 @@ class TestCombinedPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}",
+                f"v4_securitas_direct.{installation.number}",
             )
             == canonical
         )
@@ -7267,7 +7269,7 @@ class TestCombinedPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            "v5_verisure_owa.legacy-stub",
+            "v4_securitas_direct.legacy-stub",
             suggested_object_id=slugify(installation.alias),
             config_entry=entry,
         )
@@ -7275,7 +7277,7 @@ class TestCombinedPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation.number}",
+            f"v4_securitas_direct.{installation.number}",
             suggested_object_id=slugify(installation.alias),
             config_entry=entry,
         )
@@ -7284,7 +7286,7 @@ class TestCombinedPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}",
+                f"v4_securitas_direct.{installation.number}",
             )
             == f"{canonical}_2"
         )
@@ -7294,7 +7296,7 @@ class TestCombinedPanelEntityIdHealer:
         # Squatter gone; ours reclaimed the canonical slot.
         assert (
             ent_reg.async_get_entity_id(
-                "alarm_control_panel", DOMAIN, "v5_verisure_owa.legacy-stub"
+                "alarm_control_panel", DOMAIN, "v4_securitas_direct.legacy-stub"
             )
             is None
         )
@@ -7302,7 +7304,7 @@ class TestCombinedPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}",
+                f"v4_securitas_direct.{installation.number}",
             )
             == canonical
         )
@@ -7343,7 +7345,7 @@ class TestCombinedPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation.number}",
+            f"v4_securitas_direct.{installation.number}",
             suggested_object_id=slugify(installation.alias),
             config_entry=entry,
         )
@@ -7361,7 +7363,7 @@ class TestCombinedPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}",
+                f"v4_securitas_direct.{installation.number}",
             )
             == f"{canonical}_2"
         )
@@ -7414,7 +7416,7 @@ class TestSubPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation.number}{suffix}",
+            f"v4_securitas_direct.{installation.number}{suffix}",
             suggested_object_id=broken,
             config_entry=entry,
         )
@@ -7426,7 +7428,7 @@ class TestSubPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}{suffix}",
+                f"v4_securitas_direct.{installation.number}{suffix}",
             )
             == canonical
         )
@@ -7458,7 +7460,7 @@ class TestSubPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation.number}_interior",
+            f"v4_securitas_direct.{installation.number}_interior",
             suggested_object_id=f"{slugify(installation.alias)}_interior",
             config_entry=entry,
         )
@@ -7469,7 +7471,7 @@ class TestSubPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}_interior",
+                f"v4_securitas_direct.{installation.number}_interior",
             )
             == canonical
         )
@@ -7511,7 +7513,7 @@ class TestSubPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation_b_number}_interior",
+            f"v4_securitas_direct.{installation_b_number}_interior",
             suggested_object_id=f"{alias_slug}_interior",
             config_entry=entry,
         )
@@ -7519,7 +7521,7 @@ class TestSubPanelEntityIdHealer:
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
-            f"v5_verisure_owa.{installation_a.number}_interior",
+            f"v4_securitas_direct.{installation_a.number}_interior",
             suggested_object_id=f"{alias_slug}_interior_{alias_slug}",
             config_entry=entry,
         )
@@ -7531,7 +7533,7 @@ class TestSubPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation_b_number}_interior",
+                f"v4_securitas_direct.{installation_b_number}_interior",
             )
             == canonical
         )
@@ -7541,7 +7543,7 @@ class TestSubPanelEntityIdHealer:
             ent_reg.async_get_entity_id(
                 "alarm_control_panel",
                 DOMAIN,
-                f"v5_verisure_owa.{installation_a.number}_interior",
+                f"v4_securitas_direct.{installation_a.number}_interior",
             )
             == f"alarm_control_panel.{alias_slug}_interior_{alias_slug}"
         )
@@ -7598,7 +7600,7 @@ class TestSubPanelEntityIdHealer:
         )
         ent_reg = er.async_get(hass)
         alias_slug = slugify(installation.alias)
-        unique_id = f"v5_verisure_owa.{installation.number}{suffix}"
+        unique_id = f"v4_securitas_direct.{installation.number}{suffix}"
         broken = f"alarm_control_panel.{alias_slug}{suffix}_{alias_slug}"
         canonical = f"alarm_control_panel.{alias_slug}{suffix}"
 

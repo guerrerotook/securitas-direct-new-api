@@ -42,7 +42,7 @@ class TestWifiConnectedSensorInit:
 
     def test_unique_id_format(self):
         sensor = make_sensor()
-        assert sensor._attr_unique_id == "v5_verisure_owa.123456_wifi_connected"
+        assert sensor._attr_unique_id == "v4_securitas_direct.123456_wifi_connected"
 
     def test_name_is_short_form_without_alias(self):
         """Modern pattern: device name carries the alias; entity name is the suffix only."""

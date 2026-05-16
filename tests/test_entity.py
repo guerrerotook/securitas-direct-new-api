@@ -33,7 +33,7 @@ def test_securitas_device_info_uses_v5_schema():
 
     inst = _make_installation()
     info = securitas_device_info(inst)
-    assert (DOMAIN, "v5_verisure_owa.100001") in info["identifiers"]
+    assert (DOMAIN, "v4_securitas_direct.100001") in info["identifiers"]
     assert info["manufacturer"] == "Verisure"
 
 
@@ -44,6 +44,6 @@ def test_camera_device_info_uses_v5_schema():
     inst = _make_installation()
     cam = _make_camera_device()
     info = camera_device_info(inst, cam)
-    assert (DOMAIN, "v5_verisure_owa.100001_camera_YR08") in info["identifiers"]
-    assert info["via_device"] == (DOMAIN, "v5_verisure_owa.100001")
+    assert (DOMAIN, "v4_securitas_direct.100001_camera_YR08") in info["identifiers"]
+    assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
     assert info["manufacturer"] == "Verisure"
