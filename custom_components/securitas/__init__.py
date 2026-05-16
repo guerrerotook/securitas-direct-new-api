@@ -633,7 +633,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     panel_dir,
                     cache_headers=False,
                 ),
-                # Deprecated alias — removed in v6.0.0.
+                # Kept indefinitely so anyone who hardcoded the
+                # /securitas_panel/... path into a Markdown card,
+                # picture-glance, or external link doesn't break.
                 StaticPathConfig(
                     "/securitas_panel",
                     panel_dir,
