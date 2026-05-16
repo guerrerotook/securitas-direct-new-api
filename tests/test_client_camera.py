@@ -415,6 +415,199 @@ class TestCaptureImage:
         assert isinstance(result, ThumbnailResponse)
         assert result.id_signal == "new-sig"
 
+    async def test_wait_for_fresh_uses_pre_fetch_as_baseline(self, client, transport):
+        """When wait_for_fresh=True, pre-fetch a thumbnail to learn the
+        CDN's current frame, then poll until something strictly newer
+        appears.  Comparing against a stale cached timestamp is wrong:
+        the CDN may already be serving a newer-but-still-stale frame
+        which would satisfy a cache-based check but isn't the freshly
+        captured image either.
+        """
+        pre_fetch_ts = "2026-05-16 19:19:08"  # what CDN serves right now
+        fresh_ts = "2026-05-16 19:20:12"  # what our request produces
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                # Calls: 1=pre-fetch (baseline), 2=stale, 3=fresh
+                if thumbnail_calls <= 2:
+                    return thumbnail_response(
+                        id_signal="sig-stale", timestamp=pre_fetch_ts
+                    )
+                return thumbnail_response(id_signal="sig-fresh", timestamp=fresh_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        assert result.timestamp == fresh_ts
+        assert thumbnail_calls == 3  # pre-fetch + stale + fresh
+
+    async def test_wait_for_fresh_null_timestamp_treated_as_stale(
+        self, client, transport
+    ):
+        """A null-timestamp post-fetch is treated as stale and triggers retry."""
+        pre_fetch_ts = "2026-05-16 19:19:08"
+        fresh_ts = "2026-05-16 19:20:12"
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                if thumbnail_calls == 1:
+                    return thumbnail_response(timestamp=pre_fetch_ts)
+                if thumbnail_calls == 2:
+                    return thumbnail_response(id_signal=None, timestamp=None)
+                return thumbnail_response(id_signal="sig-fresh", timestamp=fresh_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        assert result.timestamp == fresh_ts
+        assert thumbnail_calls == 3
+
+    async def test_wait_for_fresh_unparseable_pre_fetch_falls_through(
+        self, client, transport
+    ):
+        """If pre-fetch returns null/unparseable timestamp, skip the freshness
+        guarantee — we have no baseline to compare against."""
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                if thumbnail_calls == 1:
+                    # Pre-fetch comes back with no metadata.
+                    return thumbnail_response(timestamp=None)
+                return thumbnail_response(
+                    id_signal="sig", timestamp="2026-05-16 19:20:12"
+                )
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        # Pre-fetch + one post-fetch only (no baseline to keep polling against).
+        assert thumbnail_calls == 2
+        assert result.id_signal == "sig"
+
+    async def test_wait_for_fresh_false_keeps_legacy_single_fetch(
+        self, client, transport
+    ):
+        """Default wait_for_fresh=False: no pre-fetch, no polling, one fetch."""
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                return thumbnail_response(
+                    id_signal="sig", timestamp="2026-05-16 19:02:32"
+                )
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(inst, 1, "QR", "QR01")
+
+        assert result.id_signal == "sig"
+        assert thumbnail_calls == 1
+
+    async def test_wait_for_fresh_returns_stale_on_timeout(self, client, transport):
+        """If the CDN never publishes anything newer, return the last fetch."""
+        pre_fetch_ts = "2026-05-16 19:19:08"
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                return thumbnail_response(id_signal="sig-stale", timestamp=pre_fetch_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=0.1,
+            freshness_poll_interval=0.0,
+        )
+
+        # Returns stale rather than raising — caller chose a budget, we honor it.
+        assert result.timestamp == pre_fetch_ts
+        assert thumbnail_calls >= 2  # at least pre-fetch + 1 post-fetch
+
 
 # ── get_thumbnail tests ──────────────────────────────────────────────────────
 
