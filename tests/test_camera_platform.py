@@ -579,9 +579,13 @@ class TestVerisureCameraFull:
 class TestCameraV5Schema:
     """Camera unique_ids use the v5 schema."""
 
-    def test_camera_unique_id_uses_v5_schema(
+    def test_camera_unique_id_uses_canonical_schema(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
+        """New entities use the canonical v4_securitas_direct.<num>_<type>
+        form. Pre-v5 installs (with v4_<num>_<type>) are rewritten by
+        migrate_unique_ids on first load — see tests/test_migrate_unique_ids.py.
+        """
         from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
@@ -590,9 +594,10 @@ class TestCameraV5Schema:
             == f"v4_securitas_direct.{installation.number}_camera_{camera_device.zone_id}"
         )
 
-    def test_camera_full_unique_id_uses_v5_schema(
+    def test_camera_full_unique_id_uses_canonical_schema(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
+        """New entities use the canonical schema."""
         from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(

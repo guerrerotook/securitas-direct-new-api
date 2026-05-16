@@ -59,7 +59,11 @@ class TestVerisureRefreshButtonInit:
         assert button._attr_has_entity_name is True
 
     def test_unique_id_format(self):
-        """unique_id follows the v5 schema."""
+        """New entities use the canonical v4_securitas_direct.<num>_<type>
+        form. Pre-v5 entities (with the older v4_refresh_button_<num>
+        ordering) are rewritten to this form by migrate_unique_ids on
+        first load — see tests/test_migrate_unique_ids.py.
+        """
         button = make_button()
         assert button._attr_unique_id == "v4_securitas_direct.123456_refresh_button"
 
@@ -270,11 +274,11 @@ class TestHassNoneGuardsButton:
 
 
 # ===========================================================================
-# Capture button unique_id v5 schema
+# Capture button unique_id pre-v5 schema (preserved across v5.0.2 upgrade)
 # ===========================================================================
 
 
-def test_capture_button_unique_id_uses_v5_schema():
+def test_capture_button_unique_id_uses_canonical_schema():
     from custom_components.securitas.button import VerisureCaptureButton
     from custom_components.securitas.verisure_owa_api.models import (
         CameraDevice,
