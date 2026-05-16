@@ -64,6 +64,65 @@ class TestUnknownErrorCodes:
         assert humanize_panel_error_msg("alarm-manager.error_foo") == "Foo"
 
 
+class TestBareAlarmManagerCodeWithErrorType:
+    """The panel also returns terse codes like ``alarm-manager.errdca3`` (no
+    ``error_`` prefix, no human-readable suffix). For these, the ``error``
+    dict's ``type`` field is the only useful context we have — surface it
+    alongside the raw code so the user can quote both to support."""
+
+    def test_technical_error_with_bare_code(self) -> None:
+        """User-reported case: TECHNICAL_ERROR with a 5-char bare code."""
+        out = humanize_panel_error_msg(
+            "alarm-manager.errdca3",
+            error={"code": "alarm-manager.errdca3", "type": "TECHNICAL_ERROR"},
+        )
+        assert out == "Technical error (alarm-manager.errdca3)"
+
+    def test_blocking_with_bare_code(self) -> None:
+        """A BLOCKING terse code, in case the panel emits one."""
+        out = humanize_panel_error_msg(
+            "alarm-manager.errxyz",
+            error={"code": "alarm-manager.errxyz", "type": "BLOCKING"},
+        )
+        assert out == "Blocking error (alarm-manager.errxyz)"
+
+    def test_unknown_error_type_with_bare_code(self) -> None:
+        """Unknown error type → title-case fallback for the label."""
+        out = humanize_panel_error_msg(
+            "alarm-manager.errqqq",
+            error={"code": "alarm-manager.errqqq", "type": "WEIRD_NEW_TYPE"},
+        )
+        assert out == "Weird new type (alarm-manager.errqqq)"
+
+    def test_bare_code_without_error_dict(self) -> None:
+        """If the caller doesn't pass the error dict, we have no context —
+        strip the ``alarm-manager.`` prefix and title-case the rest."""
+        assert humanize_panel_error_msg("alarm-manager.errdca3") == "Errdca3"
+
+    def test_bare_code_with_error_dict_missing_type(self) -> None:
+        """error dict present but no ``type`` key — same fallback as no dict."""
+        assert (
+            humanize_panel_error_msg(
+                "alarm-manager.errdca3", error={"code": "alarm-manager.errdca3"}
+            )
+            == "Errdca3"
+        )
+
+
+class TestStructuredErrorFormStillWorks:
+    """The ``error`` dict is also passed when the structured ``error_*#zone``
+    form is used. The dict must NOT interfere with that path — the structured
+    form's parsed output should win."""
+
+    def test_structured_form_ignores_error_dict(self) -> None:
+        out = humanize_panel_error_msg(
+            "alarm-manager.error_mg_open_zone#Pl_Home_Cocina_Puertajardi",
+            error={"code": "alarm-manager.usm3", "type": "BLOCKING"},
+        )
+        # The structured form's curated label wins; the error dict is ignored.
+        assert out == "Open zone (Pl / Home / Cocina / Puertajardi)"
+
+
 class TestPassThroughForNonPanelMessages:
     """Messages that don't look like panel error codes pass through unchanged."""
 
