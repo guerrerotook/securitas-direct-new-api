@@ -77,9 +77,9 @@ class ActivityCategory(StrEnum):
 _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # Armed — user-initiated arm commands and the panel-emitted arm signals
     2: ActivityCategory.ARMED,
-    31: ActivityCategory.ARMED,  # "Conexión" (Web-initiated interior arm on a Spanish panel; pair with 32 disarmed)
+    31: ActivityCategory.ARMED,  # Spanish panel: armed interior ("Conexión")
     37: ActivityCategory.ARMED,
-    40: ActivityCategory.ARMED,  # "Conexión modo exterior" (Web-initiated perimeter arm)
+    40: ActivityCategory.ARMED,  # Spanish panel: armed exterior ("Conexión modo exterior")
     46: ActivityCategory.ARMED,
     701: ActivityCategory.ARMED,
     721: ActivityCategory.ARMED,
@@ -109,7 +109,7 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     546: ActivityCategory.ARMING_FAILED,  # "Error conectando la alarma en modo parcial noche"
     # Disarmed — user-initiated disarm commands and the panel-emitted disarm signal
     1: ActivityCategory.DISARMED,
-    32: ActivityCategory.DISARMED,
+    32: ActivityCategory.DISARMED,  # Spanish panel: disarmed interior (pair with 31 armed)
     107: ActivityCategory.DISARMED,
     700: ActivityCategory.DISARMED,
     720: ActivityCategory.DISARMED,
