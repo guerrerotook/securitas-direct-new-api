@@ -92,7 +92,7 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
         # Surface the button's HA context to the alarm entity so the
         # downstream inject_ha_event call attributes the action to the
         # user who pressed the button.
-        alarm_entity._context = self._context  # noqa: SLF001  # pylint: disable=protected-access
+        alarm_entity.async_set_context(self._context)
         await alarm_entity.async_manual_refresh()
 
 
@@ -142,5 +142,5 @@ class VerisureCaptureButton(VerisureEntity, ButtonEntity):
         )
         if self._camera_entity is None:
             return
-        self._camera_entity._context = self._context  # noqa: SLF001  # pylint: disable=protected-access
+        self._camera_entity.async_set_context(self._context)
         await self._camera_entity.async_manual_capture()

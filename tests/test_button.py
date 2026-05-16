@@ -122,7 +122,7 @@ class TestVerisureRefreshButtonAsyncPress:
 
         await button.async_press()
 
-        assert alarm_entity._context is ctx
+        alarm_entity.async_set_context.assert_called_once_with(ctx)
 
     async def test_logs_deprecation_warning(self, caplog):
         button = make_button()
