@@ -40,7 +40,7 @@ jobs:
           pip install -r requirements_test.txt pylint
 
       - name: Pylint
-        run: pylint custom_components/verisure_owa/ custom_components/securitas/
+        run: pylint custom_components/securitas/
 
   typecheck:
     name: Pyright
