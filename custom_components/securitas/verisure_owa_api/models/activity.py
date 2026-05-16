@@ -118,7 +118,8 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     107: ActivityCategory.DISARMED,
     700: ActivityCategory.DISARMED,
     720: ActivityCategory.DISARMED,
-    800: ActivityCategory.DISARMED,  # "Disattivazione" — generic Italian disarm (fires after 801/802)
+    # "Disattivazione" — generic Italian disarm (fires after 801/802)
+    800: ActivityCategory.DISARMED,
     820: ActivityCategory.DISARMED,  # "Disattivazione Perimetrale" — perimeter-only disarm
     822: ActivityCategory.DISARMED,  # "Disattivazione Perimetrale + Principale" — perimeter + main
     # Alarms
