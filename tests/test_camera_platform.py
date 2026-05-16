@@ -5,14 +5,14 @@ import base64
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
-from custom_components.verisure_owa.verisure_owa_api import Installation
-from custom_components.verisure_owa import DOMAIN
-from custom_components.verisure_owa.coordinators import CameraCoordinator, CameraData
-from custom_components.verisure_owa.entity import camera_device_info
+from custom_components.securitas.verisure_owa_api import Installation
+from custom_components.securitas import DOMAIN
+from custom_components.securitas.coordinators import CameraCoordinator, CameraData
+from custom_components.securitas.entity import camera_device_info
 
 
 class TestCameraDeviceInfo:
@@ -77,7 +77,7 @@ def mock_coordinator():
 @pytest.fixture
 def placeholder_bytes():
     """Pre-populate the camera module's lazy placeholder cache for assertions."""
-    from custom_components.verisure_owa import camera as cam_module
+    from custom_components.securitas import camera as cam_module
 
     bytes_ = b"\xff\xd8\xff\xe0test-placeholder"
     cam_module._PLACEHOLDER_IMAGE = bytes_
@@ -97,7 +97,7 @@ def jpeg_thumbnail():
 
 class TestVerisureCamera:
     def test_unique_id(self, mock_coordinator, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert cam.unique_id == "v5_verisure_owa.2654190_camera_QR10"
@@ -105,7 +105,7 @@ class TestVerisureCamera:
     def test_has_entity_name(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert cam._attr_has_entity_name is True
@@ -115,7 +115,7 @@ class TestVerisureCamera:
     ):
         """Camera is the primary entity of its device -- no name suffix is set."""
         from homeassistant.helpers.entity import UNDEFINED
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert cam.name is UNDEFINED
@@ -123,7 +123,7 @@ class TestVerisureCamera:
     def test_should_not_poll(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert cam.should_poll is False
@@ -132,7 +132,7 @@ class TestVerisureCamera:
     async def test_camera_image_returns_stored_bytes(
         self, mock_coordinator, mock_hub, installation, camera_device, jpeg_thumbnail
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         mock_coordinator.data = CameraData(
             thumbnails={"QR10": jpeg_thumbnail}, full_images={}
@@ -150,7 +150,7 @@ class TestVerisureCamera:
         camera_device,
         placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         mock_coordinator.data = CameraData(thumbnails={}, full_images={})
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
@@ -166,7 +166,7 @@ class TestVerisureCamera:
         camera_device,
         placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         mock_coordinator.data = None
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
@@ -182,7 +182,7 @@ class TestVerisureCamera:
         camera_device,
         placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         # Non-JPEG data (e.g. a file path encoded as base64)
         non_jpeg = ThumbnailResponse(
@@ -200,7 +200,7 @@ class TestVerisureCamera:
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
         """First placeholder access uses hass.async_add_executor_job and caches the result."""
-        from custom_components.verisure_owa import camera as cam_module
+        from custom_components.securitas import camera as cam_module
 
         cam_module._PLACEHOLDER_IMAGE = None
 
@@ -225,7 +225,7 @@ class TestVerisureCamera:
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
         """Subsequent placeholder accesses return the cached bytes without re-reading."""
-        from custom_components.verisure_owa import camera as cam_module
+        from custom_components.securitas import camera as cam_module
 
         placeholder_bytes = b"\xff\xd8cached-placeholder"
         cam_module._PLACEHOLDER_IMAGE = placeholder_bytes
@@ -247,8 +247,8 @@ class TestVerisureCamera:
     def test_device_info_uses_camera_sub_device(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas.camera import VerisureCamera
+        from custom_components.securitas import DOMAIN
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         info = cam.device_info
@@ -263,7 +263,7 @@ class TestVerisureCamera:
         camera_device,
         jpeg_thumbnail,
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         mock_coordinator.data = CameraData(
             thumbnails={"QR10": jpeg_thumbnail}, full_images={}
@@ -276,7 +276,7 @@ class TestVerisureCamera:
     def test_extra_state_attributes_no_data(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         mock_coordinator.data = None
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
@@ -286,7 +286,7 @@ class TestVerisureCamera:
     def test_handle_coordinator_update_rotates_token(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         cam.async_update_token = MagicMock()
@@ -300,7 +300,7 @@ class TestVerisureCamera:
     async def test_async_added_to_hass_subscribes_to_state_signal(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         mock_hass = MagicMock()
@@ -313,19 +313,19 @@ class TestVerisureCamera:
             return MagicMock()
 
         with patch(
-            "custom_components.verisure_owa.camera.async_dispatcher_connect",
+            "custom_components.securitas.camera.async_dispatcher_connect",
             side_effect=_capture_connect,
         ):
             await cam.async_added_to_hass()
 
-        from custom_components.verisure_owa.const import SIGNAL_CAMERA_STATE
+        from custom_components.securitas.const import SIGNAL_CAMERA_STATE
 
         assert SIGNAL_CAMERA_STATE in connected_signal
 
     def test_handle_state_writes_for_matching_camera(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         cam.async_write_ha_state = MagicMock()
@@ -336,7 +336,7 @@ class TestVerisureCamera:
     def test_handle_state_ignores_other_camera(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         cam.async_write_ha_state = MagicMock()
@@ -347,33 +347,33 @@ class TestVerisureCamera:
 
 class TestVerisureCaptureButton:
     def test_unique_id(self, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.button import VerisureCaptureButton
+        from custom_components.securitas.button import VerisureCaptureButton
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         assert btn.unique_id == "v5_verisure_owa.2654190_capture_QR10"
 
     def test_has_entity_name(self, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.button import VerisureCaptureButton
+        from custom_components.securitas.button import VerisureCaptureButton
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         assert btn._attr_has_entity_name is True
 
     def test_name_is_capture(self, mock_hub, installation, camera_device):
         """Button name is the entity-specific suffix; device name is prepended by HA."""
-        from custom_components.verisure_owa.button import VerisureCaptureButton
+        from custom_components.securitas.button import VerisureCaptureButton
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         assert btn.name == "Capture"
 
     def test_icon(self, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.button import VerisureCaptureButton
+        from custom_components.securitas.button import VerisureCaptureButton
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         assert btn.icon == "mdi:camera"
 
     @pytest.mark.asyncio
     async def test_press_calls_capture(self, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.button import VerisureCaptureButton
+        from custom_components.securitas.button import VerisureCaptureButton
 
         # capture_image now returns a (bytes, ThumbnailResponse|None) 2-tuple.
         mock_hub.capture_image = AsyncMock(return_value=(b"\xff\xd8", None))
@@ -383,8 +383,8 @@ class TestVerisureCaptureButton:
 
     @pytest.mark.asyncio
     async def test_press_handles_error(self, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.button import VerisureCaptureButton
-        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+        from custom_components.securitas.button import VerisureCaptureButton
+        from custom_components.securitas.verisure_owa_api.exceptions import (
             VerisureOwaError,
         )
 
@@ -396,8 +396,8 @@ class TestVerisureCaptureButton:
     def test_device_info_uses_camera_sub_device(
         self, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.button import VerisureCaptureButton
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas.button import VerisureCaptureButton
+        from custom_components.securitas import DOMAIN
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         info = btn.device_info
@@ -409,7 +409,7 @@ class TestVerisureCameraFull:
     """Tests for the VerisureCameraFull entity."""
 
     def test_unique_id(self, mock_coordinator, mock_hub, installation, camera_device):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
@@ -419,7 +419,7 @@ class TestVerisureCameraFull:
     def test_has_entity_name(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
@@ -429,7 +429,7 @@ class TestVerisureCameraFull:
     def test_name_is_full_image(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
@@ -439,7 +439,7 @@ class TestVerisureCameraFull:
     def test_should_not_poll(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
@@ -450,7 +450,7 @@ class TestVerisureCameraFull:
     async def test_camera_image_returns_stored_bytes(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         image_bytes = b"\xff\xd8\xff\xe0full_jpeg"
         mock_coordinator.data = CameraData(
@@ -471,7 +471,7 @@ class TestVerisureCameraFull:
         camera_device,
         placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         mock_coordinator.data = CameraData(thumbnails={}, full_images={})
         cam = VerisureCameraFull(
@@ -489,7 +489,7 @@ class TestVerisureCameraFull:
         camera_device,
         placeholder_bytes,
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         mock_coordinator.data = None
         cam = VerisureCameraFull(
@@ -502,11 +502,11 @@ class TestVerisureCameraFull:
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
         """Both camera entities must share the same HA device (same identifiers)."""
-        from custom_components.verisure_owa.camera import (
+        from custom_components.securitas.camera import (
             VerisureCamera,
             VerisureCameraFull,
         )
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         thumb_cam = VerisureCamera(
             mock_coordinator, mock_hub, installation, camera_device
@@ -526,7 +526,7 @@ class TestVerisureCameraFull:
     def test_handle_coordinator_update_rotates_token(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device
@@ -546,7 +546,7 @@ class TestVerisureCameraFull:
         camera_device,
         jpeg_thumbnail,
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         mock_coordinator.data = CameraData(
             thumbnails={"QR10": jpeg_thumbnail}, full_images={}
@@ -560,7 +560,7 @@ class TestVerisureCameraFull:
     def test_extra_state_attributes_no_data(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         mock_coordinator.data = None
         cam = VerisureCameraFull(
@@ -576,7 +576,7 @@ class TestCameraV5Schema:
     def test_camera_unique_id_uses_v5_schema(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCamera
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert (
@@ -587,7 +587,7 @@ class TestCameraV5Schema:
     def test_camera_full_unique_id_uses_v5_schema(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.verisure_owa.camera import VerisureCameraFull
+        from custom_components.securitas.camera import VerisureCameraFull
 
         cam = VerisureCameraFull(
             mock_coordinator, mock_hub, installation, camera_device

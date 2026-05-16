@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.verisure_owa.coordinators import (
+from custom_components.securitas.coordinators import (
     ActivityCoordinator,
     ActivityData,
 )
-from custom_components.verisure_owa.events import (
+from custom_components.securitas.events import (
     ACTIVITY_EVENT_TYPE,
     attach_activity_listener,
     fire_activity_events,
@@ -18,9 +18,9 @@ from custom_components.verisure_owa.events import (
     make_synthetic_event,
     resolve_ha_user,
 )
-from custom_components.verisure_owa.const import DOMAIN
-from custom_components.verisure_owa.verisure_owa_api.models import Installation
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.const import DOMAIN
+from custom_components.securitas.verisure_owa_api.models import Installation
+from custom_components.securitas.verisure_owa_api.models import (
     ActivityCategory,
     ActivityEvent,
     ActivityException,

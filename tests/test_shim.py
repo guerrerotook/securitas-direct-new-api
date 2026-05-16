@@ -114,7 +114,7 @@ async def test_repair_flow_confirm_clears_issue_and_restarts(hass: HomeAssistant
     stop call so it doesn't reappear on the next boot."""
     from unittest.mock import AsyncMock, patch
 
-    from custom_components.verisure_owa.repairs import _RestartFlow
+    from custom_components.securitas.repairs import _RestartFlow
 
     # Pre-create the issue so we can observe it being cleared.
     ir.async_create_issue(

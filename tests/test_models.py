@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     UnexpectedStateError,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     ActivityCategory,
     ActivityEvent,
     ActivityException,

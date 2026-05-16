@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiohttp import ClientConnectorDNSError
 
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     WAFBlockedError,
 )
-from custom_components.verisure_owa.verisure_owa_api.http_transport import (
+from custom_components.securitas.verisure_owa_api.http_transport import (
     HttpTransport,
 )
 
@@ -99,7 +99,7 @@ class TestHttpTransport:
         _mock_post(session, [dns_err, ok])
 
         with patch(
-            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             result = await transport.execute(content={}, headers={})
@@ -119,7 +119,7 @@ class TestHttpTransport:
         _mock_post(session, [dns_err1, dns_err2])
 
         with patch(
-            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ):
             with pytest.raises(VerisureOwaError, match="Connection error"):
@@ -136,7 +136,7 @@ class TestHttpTransport:
         _mock_post(session, [fail, ok])
 
         with patch(
-            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             result = await transport.execute(content={}, headers={})
@@ -193,7 +193,7 @@ class TestHttpTransport:
         _mock_post(session, [fail, ok])
 
         with patch(
-            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             await transport.execute(content={}, headers={})
@@ -215,7 +215,7 @@ class TestHttpTransport:
         _mock_post(session, [fail, ok])
 
         with patch(
-            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             await transport.execute(content={}, headers={})
@@ -229,7 +229,7 @@ class TestHttpTransport:
         _mock_post(session, [fail, ok])
 
         with patch(
-            "custom_components.verisure_owa.verisure_owa_api.http_transport.asyncio.sleep",
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
             new_callable=AsyncMock,
         ) as mock_sleep:
             await transport.execute(content={}, headers={})
@@ -253,7 +253,7 @@ class TestSanitizeResponseForLog:
     """Tests for _sanitize_response_for_log."""
 
     def test_truncates_known_keys(self):
-        from custom_components.verisure_owa.verisure_owa_api.http_transport import (
+        from custom_components.securitas.verisure_owa_api.http_transport import (
             _sanitize_response_for_log,
         )
 
@@ -265,7 +265,7 @@ class TestSanitizeResponseForLog:
         assert sanitized["image"] == "..."
 
     def test_non_json_returns_as_is(self):
-        from custom_components.verisure_owa.verisure_owa_api.http_transport import (
+        from custom_components.securitas.verisure_owa_api.http_transport import (
             _sanitize_response_for_log,
         )
 

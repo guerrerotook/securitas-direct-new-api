@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
     Attribute,
@@ -15,23 +15,23 @@ from custom_components.verisure_owa.verisure_owa_api.models import (
     SmartLockMode,
     SmartLockModeStatus,
 )
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
-from custom_components.verisure_owa.sensor import (
+from custom_components.securitas.sensor import (
     ActivityLogSensor,
     SentinelAirQuality,
     SentinelAirQualityStatus,
     SentinelHumidity,
     SentinelTemperature,
 )
-from custom_components.verisure_owa.coordinators import (
+from custom_components.securitas.coordinators import (
     ActivityData,
     LockData,
     SentinelData,
 )
-from custom_components.verisure_owa.api_queue import ApiQueue
-from custom_components.verisure_owa.lock import VerisureLock
+from custom_components.securitas.api_queue import ApiQueue
+from custom_components.securitas.lock import VerisureLock
 
 
 # ---------------------------------------------------------------------------
@@ -889,27 +889,27 @@ class TestVerisureLockV5Schema:
 
     def test_device_identifier_uses_v5_schema(self):
         lk = make_lock(device_id="01")
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         info = lk._attr_device_info
         assert (DOMAIN, "v5_verisure_owa.123456_lock_01") in info["identifiers"]
 
     def test_via_device_uses_v5_schema(self):
         lk = make_lock(device_id="01")
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         info = lk._attr_device_info
         assert info["via_device"] == (DOMAIN, "v5_verisure_owa.123456")
 
     def test_update_lock_config_keeps_v5_schema(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             SmartLock,
         )
 
         lk = make_lock(device_id="02")
         new_cfg = SmartLock(location="Front", family="DANALOCK", serial_number="sn")
         lk.update_lock_config(new_cfg)
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         info = lk._attr_device_info
         assert (DOMAIN, "v5_verisure_owa.123456_lock_02") in info["identifiers"]
@@ -1287,7 +1287,7 @@ class TestVerisureLockAlarmListener:
         return coord
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -1312,7 +1312,7 @@ class TestVerisureLockAlarmListener:
         lock._handle_alarm_coordinator_update()
 
         # Baseline must be recorded as currently TOTAL.
-        from custom_components.verisure_owa.const import CIRCUIT_INTERIOR
+        from custom_components.securitas.const import CIRCUIT_INTERIOR
 
         assert CIRCUIT_INTERIOR in (lock._alarm_baseline or set())
         # And no lock action was attempted.
@@ -1321,8 +1321,8 @@ class TestVerisureLockAlarmListener:
         assert lock._state == "1"
 
     def test_armed_circuits_helper_excludes_off_modes(self):
-        from custom_components.verisure_owa.lock import _armed_circuits
-        from custom_components.verisure_owa.const import (
+        from custom_components.securitas.lock import _armed_circuits
+        from custom_components.securitas.const import (
             CIRCUIT_INTERIOR,
             CIRCUIT_PERIMETER,
             CIRCUIT_ANNEX,
@@ -1357,7 +1357,7 @@ class TestVerisureLockAutoLockOnArm:
         return coord
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -1490,7 +1490,7 @@ class TestVerisureLockAutoLockFailure:
     """Tests for the persistent-notification surface on auto-lock failure."""
 
     async def test_persistent_notification_created_on_lock_failure(self):
-        from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+        from custom_components.securitas.verisure_owa_api import VerisureOwaError
 
         lock = make_lock(initial_status="1", poll_status="1")  # stays unlocked
         lock._client.change_lock_mode = AsyncMock(
@@ -1533,7 +1533,7 @@ class TestVerisureLockUnlockDisarm:
     """Tests for unlock→disarm flow (success paths)."""
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -1657,7 +1657,7 @@ class TestVerisureLockUnlockDisarmFailure:
     """Tests for unlock-disarm failure surfaces."""
 
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -1699,7 +1699,7 @@ class TestVerisureLockUnlockDisarmFailure:
         lock._client.change_lock_mode.assert_awaited_once()
 
     async def test_unlock_failure_after_successful_disarm_notifies(self):
-        from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
+        from custom_components.securitas.verisure_owa_api import VerisureOwaError
 
         lock = make_lock(initial_status="2", poll_status="2")  # stays locked
         lock._client.change_lock_mode = AsyncMock(side_effect=VerisureOwaError("nope"))
@@ -1750,7 +1750,7 @@ class TestVerisureLockSetupAndTeardown:
     """Tests for async_added_to_hass / async_will_remove_from_hass wiring."""
 
     async def test_loads_per_lock_options_and_subscribes(self):
-        from custom_components.verisure_owa.const import (
+        from custom_components.securitas.const import (
             CONF_LOCK_AUTOMATIONS,
         )
 
@@ -1759,7 +1759,7 @@ class TestVerisureLockSetupAndTeardown:
         unsub = MagicMock()
         alarm_coord = MagicMock()
         alarm_coord.async_add_listener = MagicMock(return_value=unsub)
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -1779,7 +1779,7 @@ class TestVerisureLockSetupAndTeardown:
                 }
             }
         }
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         lock.hass.data = {
             DOMAIN: {
@@ -1808,7 +1808,7 @@ class TestVerisureLockSetupAndTeardown:
         lock = make_lock()
         alarm_coord = MagicMock()
         alarm_coord.async_add_listener = MagicMock(return_value=lambda: None)
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -1820,7 +1820,7 @@ class TestVerisureLockSetupAndTeardown:
         entry = MagicMock()
         entry.entry_id = "entry-1"
         entry.options = {}
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         lock.hass.data = {
             DOMAIN: {

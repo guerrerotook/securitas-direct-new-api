@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.verisure_owa.migrate import (
+from custom_components.securitas.migrate import (
     old_to_new_identifier,
     old_to_new_unique_id,
     migrate_legacy_entry,

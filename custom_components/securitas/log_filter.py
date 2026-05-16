@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 
-_COORDINATORS_LOGGER = "custom_components.verisure_owa.coordinators"
+_COORDINATORS_LOGGER = "custom_components.securitas.coordinators"
 
 # Phrases identifying transient backend conditions that HA's DataUpdateCoordinator
 # already retries automatically. We demote these from ERROR to WARNING so a

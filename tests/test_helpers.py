@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import jwt
 import pytest
 
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
 
@@ -160,7 +160,7 @@ class TestPollOperation:
 
     async def test_timeout_raises(self, api):
         """Should raise OperationTimeoutError when wall-clock timeout is exceeded."""
-        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+        from custom_components.securitas.verisure_owa_api.exceptions import (
             OperationTimeoutError,
         )
 

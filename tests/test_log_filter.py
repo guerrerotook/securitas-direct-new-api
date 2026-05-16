@@ -2,7 +2,7 @@
 
 import logging
 
-from custom_components.verisure_owa.log_filter import (
+from custom_components.securitas.log_filter import (
     SensitiveDataFilter,
     TransientCoordinatorErrorFilter,
 )
@@ -10,7 +10,7 @@ from custom_components.verisure_owa.log_filter import (
 
 def _coord_record(msg: str, *, level: int = logging.ERROR) -> logging.LogRecord:
     return logging.LogRecord(
-        name="custom_components.verisure_owa.coordinators",
+        name="custom_components.securitas.coordinators",
         level=level,
         pathname="",
         lineno=0,
@@ -53,7 +53,7 @@ def test_transient_filter_ignores_non_coordinator_logger():
     its ERROR level so we don't accidentally suppress unrelated messages."""
     f = TransientCoordinatorErrorFilter()
     record = logging.LogRecord(
-        name="custom_components.verisure_owa.hub",
+        name="custom_components.securitas.hub",
         level=logging.ERROR,
         pathname="",
         lineno=0,

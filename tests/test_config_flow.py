@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.verisure_owa import (
+from custom_components.securitas import (
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
@@ -20,13 +20,13 @@ from custom_components.verisure_owa import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
-from custom_components.verisure_owa.const import (
+from custom_components.securitas.const import (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_REFRESH_TOKEN,
 )
-from custom_components.verisure_owa.verisure_owa_api import (
+from custom_components.securitas.verisure_owa_api import (
     AccountBlockedError,
     Attribute,
     AuthenticationError,
@@ -105,9 +105,9 @@ MOCK_PHONES = [
     OtpPhone(id=1, phone="555-5678"),
 ]
 
-PATCH_HUB = "custom_components.verisure_owa.config_flow.VerisureHub"
-PATCH_SESSION = "custom_components.verisure_owa.config_flow.async_get_clientsession"
-PATCH_UUID = "custom_components.verisure_owa.config_flow.generate_uuid"
+PATCH_HUB = "custom_components.securitas.config_flow.VerisureHub"
+PATCH_SESSION = "custom_components.securitas.config_flow.async_get_clientsession"
+PATCH_UUID = "custom_components.securitas.config_flow.generate_uuid"
 
 
 def _hub_factory(*, two_fa: bool = False, **overrides):
@@ -464,7 +464,7 @@ async def test_phone_list_fallback_selection_by_phone_name(hass):
     We test the fallback logic directly on the flow handler since the
     phone_list form uses a select validator that rejects invalid keys.
     """
-    from custom_components.verisure_owa.config_flow import FlowHandler
+    from custom_components.securitas.config_flow import FlowHandler
 
     mock_hub = _hub_factory()
     flow = FlowHandler()
@@ -662,7 +662,7 @@ async def test_create_client_creates_hub_when_password_present(hass):
 
 async def test_create_client_with_real_hub_init(hass):
     """_create_client with real VerisureHub.__init__ — catches missing config keys."""
-    from custom_components.verisure_owa.config_flow import FlowHandler
+    from custom_components.securitas.config_flow import FlowHandler
 
     flow = FlowHandler()
     flow.hass = hass
@@ -682,7 +682,7 @@ async def test_create_client_with_real_hub_init(hass):
 
 async def test_create_client_raises_value_error_when_password_none(hass):
     """_create_client raises ValueError when password is None."""
-    from custom_components.verisure_owa.config_flow import FlowHandler
+    from custom_components.securitas.config_flow import FlowHandler
 
     flow = FlowHandler()
     flow.hass = hass
@@ -781,13 +781,13 @@ async def test_options_init_reads_from_options_first(hass):
 
 def test_subpanels_note_empty_when_no_capability(hass):
     """No peri/annex → no note."""
-    from custom_components.verisure_owa.config_flow import _subpanels_note
+    from custom_components.securitas.config_flow import _subpanels_note
 
     assert _subpanels_note(hass, has_peri=False, has_annex=False) == ""
 
 
 def test_subpanels_note_peri_only_lists_interior_and_perimeter(hass):
-    from custom_components.verisure_owa.config_flow import _subpanels_note
+    from custom_components.securitas.config_flow import _subpanels_note
 
     note = _subpanels_note(hass, has_peri=True, has_annex=False)
     assert "Interior-only" in note
@@ -797,7 +797,7 @@ def test_subpanels_note_peri_only_lists_interior_and_perimeter(hass):
 
 
 def test_subpanels_note_annex_only_lists_interior_and_annex(hass):
-    from custom_components.verisure_owa.config_flow import _subpanels_note
+    from custom_components.securitas.config_flow import _subpanels_note
 
     note = _subpanels_note(hass, has_peri=False, has_annex=True)
     assert "Interior-only" in note
@@ -806,7 +806,7 @@ def test_subpanels_note_annex_only_lists_interior_and_annex(hass):
 
 
 def test_subpanels_note_both_lists_all_three(hass):
-    from custom_components.verisure_owa.config_flow import _subpanels_note
+    from custom_components.securitas.config_flow import _subpanels_note
 
     note = _subpanels_note(hass, has_peri=True, has_annex=True)
     assert "Interior-only" in note
@@ -816,7 +816,7 @@ def test_subpanels_note_both_lists_all_three(hass):
 
 def test_subpanels_note_picks_locale_from_hass_config_language(hass):
     """The helper looks up by hass.config.language and falls back to English."""
-    from custom_components.verisure_owa.config_flow import _subpanels_note
+    from custom_components.securitas.config_flow import _subpanels_note
 
     hass.config.language = "es"
     note = _subpanels_note(hass, has_peri=True, has_annex=False)
@@ -1075,7 +1075,7 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
 
 async def test_options_get_reads_from_options_first(hass):
     """_get should return from options when key exists there."""
-    from custom_components.verisure_owa.config_flow import VerisureOptionsFlowHandler
+    from custom_components.securitas.config_flow import VerisureOptionsFlowHandler
 
     handler = VerisureOptionsFlowHandler()
     mock_entry = MagicMock()
@@ -1094,7 +1094,7 @@ async def test_options_get_reads_from_options_first(hass):
 
 async def test_options_get_falls_back_to_data(hass):
     """_get should fall back to data when key is not in options."""
-    from custom_components.verisure_owa.config_flow import VerisureOptionsFlowHandler
+    from custom_components.securitas.config_flow import VerisureOptionsFlowHandler
 
     handler = VerisureOptionsFlowHandler()
     mock_entry = MagicMock()
@@ -1224,7 +1224,7 @@ async def test_initial_flow_persists_panel_toggles_to_entry_options(hass):
 
 async def test_resolve_flow_capabilities_uses_coordinator_when_populated(hass):
     """When the coordinator has populated capabilities, prefer it."""
-    from custom_components.verisure_owa import _resolve_flow_capabilities
+    from custom_components.securitas import _resolve_flow_capabilities
 
     coord = MagicMock()
     coord.capabilities_populated = True
@@ -1248,7 +1248,7 @@ async def test_resolve_flow_capabilities_uses_coordinator_when_populated(hass):
 
 async def test_resolve_flow_capabilities_falls_back_to_cache_when_coord_missing(hass):
     """When entry.entry_id isn't yet in hass.data, fall back to the cache."""
-    from custom_components.verisure_owa import _resolve_flow_capabilities
+    from custom_components.securitas import _resolve_flow_capabilities
 
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -1266,7 +1266,7 @@ async def test_resolve_flow_capabilities_falls_back_to_cache_when_coord_missing(
 async def test_resolve_flow_capabilities_falls_back_when_coord_unpopulated(hass):
     """A coordinator that hasn't run yet has has_peri=False as the
     default — that's not authoritative.  Fall back to the cache."""
-    from custom_components.verisure_owa import _resolve_flow_capabilities
+    from custom_components.securitas import _resolve_flow_capabilities
 
     coord = MagicMock()
     coord.capabilities_populated = False
@@ -1289,7 +1289,7 @@ async def test_resolve_flow_capabilities_falls_back_when_coord_unpopulated(hass)
 
 async def test_resolve_flow_capabilities_returns_false_when_nothing_known(hass):
     """No coordinator and no cache → (False, False) — current behaviour."""
-    from custom_components.verisure_owa import _resolve_flow_capabilities
+    from custom_components.securitas import _resolve_flow_capabilities
 
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -1481,7 +1481,7 @@ async def test_abort_opts_out_of_reload_on_update(hass):
     """
     from homeassistant import config_entries as ha_config_entries
 
-    from custom_components.verisure_owa.config_flow import FlowHandler
+    from custom_components.securitas.config_flow import FlowHandler
 
     # Pre-existing entry on a *different* installation so the pre-step filter
     # doesn't drop the available one — the abort path inside
@@ -2117,7 +2117,7 @@ def _make_entry_with_locks(
     entry_options: dict | None = None,
 ):
     """Create MockConfigEntry and inject registered_locks + circuit options into hass.data."""
-    from custom_components.verisure_owa.const import (
+    from custom_components.securitas.const import (
         CONF_ENABLE_ANNEX_PANEL,
         CONF_ENABLE_INTERIOR_PANEL,
         CONF_ENABLE_PERIMETER_PANEL,
@@ -2265,7 +2265,7 @@ async def test_lock_automations_interior_always_present_even_when_panel_disabled
 
 async def test_lock_automations_submission_persists_per_lock_config(hass):
     """Submitting the form should save per-lock config in CONF_LOCK_AUTOMATIONS."""
-    from custom_components.verisure_owa.const import CONF_LOCK_AUTOMATIONS
+    from custom_components.securitas.const import CONF_LOCK_AUTOMATIONS
 
     entry = _make_entry_with_locks(
         hass,
@@ -2297,7 +2297,7 @@ async def test_lock_automations_submission_persists_per_lock_config(hass):
 
 async def test_lock_automations_re_edit_prefills_existing_values(hass):
     """Re-opening options flow should prefill previously saved lock automation values."""
-    from custom_components.verisure_owa.const import CONF_LOCK_AUTOMATIONS
+    from custom_components.securitas.const import CONF_LOCK_AUTOMATIONS
 
     entry = _make_entry_with_locks(
         hass,
@@ -2370,7 +2370,7 @@ class TestNotifyServiceDropdown:
 
     def test_persistent_notification_not_in_dropdown(self):
         """`notify.persistent_notification` is filtered out of the dropdown."""
-        from custom_components.verisure_owa.config_flow import _get_notify_options
+        from custom_components.securitas.config_flow import _get_notify_options
 
         hass = MagicMock()
         hass.services.async_services = MagicMock(
@@ -2395,7 +2395,7 @@ class TestNotifyServiceDropdown:
 
     def test_dropdown_keeps_existing_exclusions(self):
         """Pre-existing exclusions (`notify`, `send_message`) still apply."""
-        from custom_components.verisure_owa.config_flow import _get_notify_options
+        from custom_components.securitas.config_flow import _get_notify_options
 
         hass = MagicMock()
         hass.services.async_services = MagicMock(

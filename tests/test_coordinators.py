@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.verisure_owa.coordinators import (
+from custom_components.securitas.coordinators import (
     ActivityCoordinator,
     ActivityData,
     AlarmCoordinator,
@@ -24,16 +24,16 @@ from custom_components.verisure_owa.coordinators import (
     SentinelCoordinator,
     SentinelData,
 )
-from custom_components.verisure_owa.api_queue import ApiQueue
-from custom_components.verisure_owa.verisure_owa_api.client import (
+from custom_components.securitas.api_queue import ApiQueue
+from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     SessionExpiredError,
     WAFBlockedError,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
     CameraDevice,
@@ -685,7 +685,7 @@ class TestCoordinatorCapabilities:
         """_populate_capabilities sets has_peri=True when services include PERI attr."""
         from unittest.mock import MagicMock as _MM
 
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             Attribute,
         )
 
@@ -787,7 +787,7 @@ class TestCoordinatorCapabilities:
         """The sync path used by async_setup_entry populates from given data."""
         from unittest.mock import MagicMock as _MM
 
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             Attribute,
         )
 
@@ -822,7 +822,7 @@ class TestCoordinatorCapabilities:
         """If populate_capabilities_from_data ran first, _populate_capabilities is a no-op."""
         from unittest.mock import MagicMock as _MM
 
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             Attribute,
         )
 
@@ -1181,7 +1181,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.verisure_owa.coordinators import ActivityCoordinator
+        from custom_components.securitas.coordinators import ActivityCoordinator
 
         # Patch Store with an in-memory stub for both coordinator instances
         stub: dict = {"data": None}
@@ -1196,7 +1196,7 @@ class TestActivityCoordinator:
             async def async_save(self, data):
                 stub["data"] = data
 
-        import custom_components.verisure_owa.coordinators as cm
+        import custom_components.securitas.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1236,7 +1236,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.verisure_owa.coordinators import ActivityCoordinator
+        from custom_components.securitas.coordinators import ActivityCoordinator
 
         # Persisted store contains one injected event from a prior run
         persisted_event = _make_event("ha-1", alias="Armed by Clinton")
@@ -1251,7 +1251,7 @@ class TestActivityCoordinator:
             async def async_save(self, _data):
                 pass
 
-        import custom_components.verisure_owa.coordinators as cm
+        import custom_components.securitas.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1285,7 +1285,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.verisure_owa.coordinators import ActivityCoordinator
+        from custom_components.securitas.coordinators import ActivityCoordinator
 
         persisted_event = _make_event(
             "ha-1", time="2026-05-05 14:00:00", alias="Armed by Clinton"
@@ -1301,7 +1301,7 @@ class TestActivityCoordinator:
             async def async_save(self, _data):
                 pass
 
-        import custom_components.verisure_owa.coordinators as cm
+        import custom_components.securitas.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
@@ -1337,7 +1337,7 @@ class TestActivityCoordinator:
         queue = _make_queue()
         installation = _make_installation()
 
-        from custom_components.verisure_owa.coordinators import ActivityCoordinator
+        from custom_components.securitas.coordinators import ActivityCoordinator
 
         load_calls = 0
 
@@ -1353,7 +1353,7 @@ class TestActivityCoordinator:
             async def async_save(self, _data):
                 pass
 
-        import custom_components.verisure_owa.coordinators as cm
+        import custom_components.securitas.coordinators as cm
 
         original_store = cm.Store
         cm.Store = _StubStore  # type: ignore[assignment]
