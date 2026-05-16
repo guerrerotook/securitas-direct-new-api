@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def securitas_device_info(installation: Installation) -> DeviceInfo:
     """Build DeviceInfo that groups entities under the installation device."""
     return DeviceInfo(
-        identifiers={(DOMAIN, f"v5_verisure_owa.{installation.number}")},
+        identifiers={(DOMAIN, f"v4_securitas_direct.{installation.number}")},
         manufacturer="Verisure",
         model=installation.panel,
         name=installation.alias,
@@ -33,13 +33,13 @@ def camera_device_info(
         identifiers={
             (
                 DOMAIN,
-                f"v5_verisure_owa.{installation.number}_camera_{camera_device.zone_id}",
+                f"v4_securitas_direct.{installation.number}_camera_{camera_device.zone_id}",
             )
         },
         name=camera_device.name,
         manufacturer="Verisure",
         model="Camera",
-        via_device=(DOMAIN, f"v5_verisure_owa.{installation.number}"),
+        via_device=(DOMAIN, f"v4_securitas_direct.{installation.number}"),
     )
 
 

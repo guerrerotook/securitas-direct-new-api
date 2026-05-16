@@ -117,15 +117,15 @@ class VerisureLock(  # type: ignore[override]
             else f"{installation.alias} Lock {device_id}"
         )
         self._attr_name = name
-        self._attr_unique_id = f"v5_verisure_owa.{installation.number}_lock_{device_id}"
+        self._attr_unique_id = f"v4_securitas_direct.{installation.number}_lock_{device_id}"
 
         # Override device_info: each lock gets its own device, linked to
         # the installation device via via_device.
         self._attr_device_info = DeviceInfo(
             identifiers={
-                (DOMAIN, f"v5_verisure_owa.{installation.number}_lock_{device_id}")
+                (DOMAIN, f"v4_securitas_direct.{installation.number}_lock_{device_id}")
             },
-            via_device=(DOMAIN, f"v5_verisure_owa.{installation.number}"),
+            via_device=(DOMAIN, f"v4_securitas_direct.{installation.number}"),
             name=name,
             manufacturer="Verisure",
             model=lock_config.family if lock_config and lock_config.family else None,
@@ -169,10 +169,10 @@ class VerisureLock(  # type: ignore[override]
             identifiers={
                 (
                     DOMAIN,
-                    f"v5_verisure_owa.{self._installation.number}_lock_{self._device_id}",
+                    f"v4_securitas_direct.{self._installation.number}_lock_{self._device_id}",
                 )
             },
-            via_device=(DOMAIN, f"v5_verisure_owa.{self._installation.number}"),
+            via_device=(DOMAIN, f"v4_securitas_direct.{self._installation.number}"),
             name=self._attr_name,
             manufacturer="Verisure",
             model=lock_config.family or None,

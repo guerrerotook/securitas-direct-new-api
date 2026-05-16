@@ -87,7 +87,7 @@ async def _heal_combined_panel_entity_id(
         ent_reg = er.async_get(hass)
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
-    our_unique_id = f"v5_verisure_owa.{installation.number}"
+    our_unique_id = f"v4_securitas_direct.{installation.number}"
     canonical = f"alarm_control_panel.{slugify(installation.alias)}"
 
     _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical)
@@ -155,7 +155,7 @@ async def _heal_subpanel_entity_id(
         ent_reg = er.async_get(hass)
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
-    our_unique_id = f"v5_verisure_owa.{installation.number}{suffix}"
+    our_unique_id = f"v4_securitas_direct.{installation.number}{suffix}"
     canonical = f"alarm_control_panel.{slugify(installation.alias)}{suffix}"
 
     # Rewrite the tombstone first — if the entity is also live (a partial

@@ -24,7 +24,7 @@ NEW_DOMAIN = "verisure_owa"
 
 V4_PREFIX = "v4_"
 V4_PREFIX_BRANDED = "v4_securitas_direct."
-V5_PREFIX = "v5_verisure_owa."
+V5_PREFIX = "v4_securitas_direct."
 
 _MIGRATION_FLAG = "migrated_from_securitas"
 _SCHEMA_FLAG = "unique_id_schema"
@@ -32,7 +32,7 @@ _SCHEMA_VALUE = "v5_verisure_owa"
 
 
 def old_to_new_unique_id(old: str) -> str:
-    """Map a legacy unique_id to the v5_verisure_owa.* form.
+    """Map a legacy unique_id to the v4_securitas_direct.* form.
 
     Handles all entity formats from v4. Idempotent on already-v5 inputs.
     Raises ValueError on inputs that don't match any known format.
@@ -41,16 +41,16 @@ def old_to_new_unique_id(old: str) -> str:
         return old
 
     if old.startswith(V4_PREFIX_BRANDED):
-        # v4_securitas_direct.{rest} → v5_verisure_owa.{rest}
+        # v4_securitas_direct.{rest} → v4_securitas_direct.{rest}
         return V5_PREFIX + old[len(V4_PREFIX_BRANDED) :]
 
-    # v4_refresh_button_{numinst} → v5_verisure_owa.{numinst}_refresh_button
+    # v4_refresh_button_{numinst} → v4_securitas_direct.{numinst}_refresh_button
     if old.startswith("v4_refresh_button_"):
         numinst = old[len("v4_refresh_button_") :]
         return f"{V5_PREFIX}{numinst}_refresh_button"
 
     if old.startswith(V4_PREFIX):
-        # v4_{rest} → v5_verisure_owa.{rest}
+        # v4_{rest} → v4_securitas_direct.{rest}
         return V5_PREFIX + old[len(V4_PREFIX) :]
 
     raise ValueError(f"Unrecognized legacy unique_id format: {old!r}")
