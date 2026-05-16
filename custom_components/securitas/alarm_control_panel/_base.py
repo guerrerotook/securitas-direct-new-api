@@ -50,8 +50,8 @@ from ..events import (
     DISMISSAL_REASON_USER_ARM,
     DISMISSAL_REASON_USER_DISARM,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
-    LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
     DismissalReason,
+    fire_event,
     inject_ha_event,
 )
 from ..notification_translations import get_notification_strings
@@ -227,7 +227,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_arm_expiry_unsub: Callable[[], None] | None = None
         self._mobile_action_unsub = None
         self._arming_event_unsub_new = None
-        self._arming_event_unsub_legacy = None
         self._force_arm_expired_event_unsub = None
         self._arming_exception_dismissed_event_unsub = None
         self._last_handled_event_id: str | None = None
@@ -274,8 +273,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._cancel_force_arm_expiry()
         if self._arming_event_unsub_new:
             self._arming_event_unsub_new()
-        if self._arming_event_unsub_legacy:
-            self._arming_event_unsub_legacy()
         if self._force_arm_expired_event_unsub:
             self._force_arm_expired_event_unsub()
         if self._arming_exception_dismissed_event_unsub:
@@ -920,11 +917,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     def _fire_arming_exception_event(
         self, exc: ArmingExceptionError, mode: str
     ) -> None:
-        """Fire the arming-exception event on both new and legacy buses.
+        """Fire the arming-exception event under both ``verisure_owa_*`` and ``securitas_*``.
 
-        The legacy `securitas_arming_exception` event is removed in v6.0.0.
-        Until then we fire both with identical payloads so user automations
-        listening to either name continue to work.
+        ``fire_event`` emits both names with identical payloads. User
+        automations listening to either name continue to work; docs
+        recommend the ``verisure_owa_arming_exception`` form.
         """
         zones = [e.get("alias", "unknown") for e in exc.exceptions]
         payload = {
@@ -937,12 +934,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             },
             "_event_id": str(uuid.uuid4()),
         }
-        self.hass.bus.async_fire(ARMING_EXCEPTION_EVENT_TYPE, payload)
-        # Deprecated alias — removed in v6.0.0.
-        self.hass.bus.async_fire(LEGACY_ARMING_EXCEPTION_EVENT_TYPE, payload)
+        fire_event(self.hass, "arming_exception", payload)
 
     def _fire_force_arm_expired_event(self) -> None:
-        """Fire the verisure_owa_force_arm_expired event from the saved context.
+        """Fire force_arm_expired event under both ``verisure_owa_*`` and ``securitas_*``.
 
         Must be called BEFORE the context is wiped — derives the payload from
         the still-live _force_context snapshot.
@@ -962,7 +957,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             },
             "_event_id": str(uuid.uuid4()),
         }
-        self.hass.bus.async_fire(FORCE_ARM_EXPIRED_EVENT_TYPE, payload)
+        fire_event(self.hass, "force_arm_expired", payload)
 
     def _fire_arming_exception_dismissed_event(
         self, *, reason: DismissalReason, new_mode: str | None
@@ -984,7 +979,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             "details": {"installation": self.installation.number},
             "_event_id": str(uuid.uuid4()),
         }
-        self.hass.bus.async_fire(ARMING_EXCEPTION_DISMISSED_EVENT_TYPE, payload)
+        fire_event(self.hass, "arming_exception_dismissed", payload)
 
     _FORCE_ARM_TTL = datetime.timedelta(seconds=180)
 
@@ -1189,12 +1184,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 return
             self._dismiss_arming_exception_notification()
 
+        # Subscribe only to the verisure_owa_* form — fire_event always
+        # emits both names, so a single listener catches every emission
+        # the integration itself produces. A user-fired securitas_*
+        # event won't trigger this listener; user-facing code should fire
+        # the verisure_owa_* form.
         self._arming_event_unsub_new = self.hass.bus.async_listen(
             ARMING_EXCEPTION_EVENT_TYPE,
-            _handle_arming_exception_event,
-        )
-        self._arming_event_unsub_legacy = self.hass.bus.async_listen(
-            LEGACY_ARMING_EXCEPTION_EVENT_TYPE,
             _handle_arming_exception_event,
         )
         self._force_arm_expired_event_unsub = self.hass.bus.async_listen(
