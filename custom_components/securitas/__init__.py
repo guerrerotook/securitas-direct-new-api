@@ -821,23 +821,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"verisure_owa_discover_{entry.entry_id}",
         )
 
-        # First successful load after the legacy securitas → verisure_owa
-        # migration: surface a one-shot persistent notification with a link
-        # to the breaking-changes section in the README. Cleared once shown
-        # so reloads / future restarts don't re-pop it.
-        if entry.data.get("migrated_from_securitas"):
-            domain_data = hass.data.setdefault(DOMAIN, {})
-            if not domain_data.get("post_migration_notice_shown"):
-                _notify(hass, "migration_complete", "migration_complete")
-                domain_data["post_migration_notice_shown"] = True
-            hass.config_entries.async_update_entry(
-                entry,
-                data={
-                    k: v
-                    for k, v in entry.data.items()
-                    if k != "migrated_from_securitas"
-                },
-            )
         return True
     raise ConfigEntryNotReady(
         "Config entry missing device IDs. Delete and re-add the integration."
