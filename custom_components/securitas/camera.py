@@ -10,10 +10,7 @@ from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity_platform import (
-    AddEntitiesCallback,
-    async_get_current_platform,
-)
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, SIGNAL_CAMERA_STATE, VerisureHub
@@ -58,18 +55,12 @@ async def async_setup_entry(
 
     No API calls are made here.  Camera devices are discovered
     asynchronously after startup and added via the stored callback.
+    The verisure_owa.capture_image entity service is registered
+    globally in __init__.py via register_v5_entity_services — it
+    dispatches to this platform's entities' async_manual_capture method.
     """
     entry_data = hass.data[DOMAIN][entry.entry_id]
     entry_data["camera_add_entities"] = async_add_entities
-    # Request a fresh capture from any camera entity — supersedes the
-    # deprecated VerisureCaptureButton.  Registered on the platform so
-    # it's available regardless of when individual camera entities are
-    # added (camera discovery runs asynchronously after startup).
-    async_get_current_platform().async_register_entity_service(
-        "capture_image",
-        {},
-        "async_manual_capture",
-    )
 
 
 class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):

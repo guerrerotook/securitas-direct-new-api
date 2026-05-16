@@ -33,6 +33,31 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _format_graphql_error(
+    field_name: str, response: dict[str, Any], fallback: str
+) -> str:
+    """Build a human-readable error string from a GraphQL response.
+
+    Prefers the first entry of the response's ``errors`` array (message
+    + err code), falling back to ``fallback`` when no errors array is
+    present.  Used by ``_extract_response_data`` so logs surface
+    server-side reasons like ``Invalid Session (err=60067)`` rather
+    than the misleading ``response is None``.
+    """
+    errors = response.get("errors") if isinstance(response, dict) else None
+    if isinstance(errors, list) and errors:
+        first = errors[0] if isinstance(errors[0], dict) else {}
+        message = first.get("message")
+        data = first.get("data") if isinstance(first.get("data"), dict) else {}
+        code = data.get("err") if isinstance(data, dict) else None
+        if message and code:
+            return f"{field_name} failed: {message} (err={code})"
+        if message:
+            return f"{field_name} failed: {message}"
+    return fallback
+
+
 T = TypeVar("T", bound=BaseModel)
 
 # API protocol constants
@@ -275,16 +300,29 @@ class _ClientBase:
     ) -> dict[str, Any]:
         """Extract and validate response['data'][field_name].
 
-        Raises VerisureOwaError if the data is missing or None.
+        Raises VerisureOwaError if the data is missing or None.  When the
+        response carries a GraphQL `errors` array, the exception message
+        surfaces the first error's message + err code so callers (and
+        logs) see the actual server-side reason instead of "response is
+        None" — important for reauth signals like err=60067 "Invalid
+        Session" on xSRefreshLogin.
         """
         data = response.get("data")
         if data is None:
-            _err = VerisureOwaError(f"{field_name}: no data in response")
+            _err = VerisureOwaError(
+                _format_graphql_error(
+                    field_name, response, f"{field_name}: no data in response"
+                )
+            )
             _err.response_body = response
             raise _err
         result = data.get(field_name)
         if result is None:
-            _err = VerisureOwaError(f"{field_name} response is None")
+            _err = VerisureOwaError(
+                _format_graphql_error(
+                    field_name, response, f"{field_name} response is None"
+                )
+            )
             _err.response_body = response
             raise _err
         return result
