@@ -3,16 +3,16 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.verisure_owa.button import (
+from custom_components.securitas.button import (
     VerisureRefreshButton,
     async_setup_entry,
 )
-from custom_components.verisure_owa import DOMAIN
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas import DOMAIN
+from custom_components.securitas.verisure_owa_api.exceptions import (
     OperationTimeoutError,
     VerisureOwaError,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     OperationStatus,
 )
 
@@ -159,7 +159,7 @@ class TestVerisureRefreshButtonAsyncPress:
         }
 
         with patch(
-            "custom_components.verisure_owa.button._async_notify",
+            "custom_components.securitas.button._async_notify",
             AsyncMock(),
         ) as mock_async_notify:
             await button.async_press()
@@ -190,7 +190,7 @@ class TestAsyncSetupEntry:
 
     async def test_creates_one_button_per_device(self):
         """Creates one button per device in hass.data."""
-        from custom_components.verisure_owa import VerisureDevice
+        from custom_components.securitas import VerisureDevice
 
         hass = MagicMock()
         hass.data = {}
@@ -212,7 +212,7 @@ class TestAsyncSetupEntry:
 
     async def test_calls_async_add_entities_with_correct_buttons(self):
         """Calls async_add_entities with VerisureRefreshButton instances."""
-        from custom_components.verisure_owa import VerisureDevice
+        from custom_components.securitas import VerisureDevice
 
         hass = MagicMock()
         hass.data = {}
@@ -235,7 +235,7 @@ class TestAsyncSetupEntry:
 
     async def test_update_flag_passed_to_async_add_entities(self):
         """async_add_entities is called with update_before_add=True."""
-        from custom_components.verisure_owa import VerisureDevice
+        from custom_components.securitas import VerisureDevice
 
         hass = MagicMock()
         hass.data = {}
@@ -275,8 +275,8 @@ class TestHassNoneGuardsButton:
 
 
 def test_capture_button_unique_id_uses_v5_schema():
-    from custom_components.verisure_owa.button import VerisureCaptureButton
-    from custom_components.verisure_owa.verisure_owa_api.models import (
+    from custom_components.securitas.button import VerisureCaptureButton
+    from custom_components.securitas.verisure_owa_api.models import (
         CameraDevice,
     )
 

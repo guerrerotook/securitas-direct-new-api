@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.verisure_owa.verisure_owa_api.client import (
+from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     OperationTimeoutError,
 )
-from custom_components.verisure_owa.verisure_owa_api.http_transport import (
+from custom_components.securitas.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     Installation,
     SmartLock,
     SmartLockMode,
@@ -379,7 +379,7 @@ class TestGetLockConfig:
 
     async def test_smartlock_exception_falls_back_to_danalock(self, client, transport):
         """If smartlock query raises an exception, falls back to danalock."""
-        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+        from custom_components.securitas.verisure_owa_api.exceptions import (
             VerisureOwaError,
         )
 

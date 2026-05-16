@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 
-from custom_components.verisure_owa.verisure_owa_api.client import (
+from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
 
@@ -55,7 +55,7 @@ class TestGetSupportedCommands:
 class TestDetectPeri:
     def test_jwt_cap_signal(self):
         """Granvia (Spanish + peri) — JWT advertises PERI."""
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_peri,
         )
 
@@ -66,7 +66,7 @@ class TestDetectPeri:
 
     def test_alarm_partition_signal(self):
         """Italy (SDVECU) — only the alarm-partition signal fires."""
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_peri,
         )
 
@@ -87,7 +87,7 @@ class TestDetectPeri:
 
     def test_negative_when_no_signals(self):
         """Tetuan (Spanish, no peri) — all signals absent."""
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_peri,
         )
 
@@ -105,10 +105,10 @@ class TestDetectPeri:
 
     def test_active_peri_service_signal(self):
         """A service entry with request='PERI' and active=True → has peri."""
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_peri,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import Service
+        from custom_components.securitas.verisure_owa_api.models import Service
 
         class FakeInstallation:
             alarm_partitions = []
@@ -137,10 +137,10 @@ class TestDetectPeri:
         )
 
     def test_inactive_peri_service_does_not_signal(self):
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_peri,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import Service
+        from custom_components.securitas.verisure_owa_api.models import Service
 
         class FakeInstallation:
             alarm_partitions = []
@@ -170,10 +170,10 @@ class TestDetectPeri:
 
     def test_sch_attr_signal(self):
         """Existing detection via SCH service attribute named PERI."""
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_peri,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             Attribute,
             Service,
         )
@@ -207,21 +207,21 @@ class TestDetectPeri:
 
 class TestDetectAnnex:
     def test_both_present(self):
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_annex,
         )
 
         assert detect_annex(frozenset(["ARMANNEX", "DARMANNEX", "ARM"])) is True
 
     def test_only_arm_annex(self):
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_annex,
         )
 
         assert detect_annex(frozenset(["ARMANNEX", "ARM"])) is False
 
     def test_neither(self):
-        from custom_components.verisure_owa.verisure_owa_api.capabilities import (
+        from custom_components.securitas.verisure_owa_api.capabilities import (
             detect_annex,
         )
 

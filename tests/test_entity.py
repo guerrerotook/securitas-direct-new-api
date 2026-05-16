@@ -1,6 +1,6 @@
 """Tests for the shared entity helpers in entity.py."""
 
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     Installation,
 )
@@ -28,8 +28,8 @@ def _make_camera_device():
 
 
 def test_securitas_device_info_uses_v5_schema():
-    from custom_components.verisure_owa import DOMAIN
-    from custom_components.verisure_owa.entity import securitas_device_info
+    from custom_components.securitas import DOMAIN
+    from custom_components.securitas.entity import securitas_device_info
 
     inst = _make_installation()
     info = securitas_device_info(inst)
@@ -38,8 +38,8 @@ def test_securitas_device_info_uses_v5_schema():
 
 
 def test_camera_device_info_uses_v5_schema():
-    from custom_components.verisure_owa import DOMAIN
-    from custom_components.verisure_owa.entity import camera_device_info
+    from custom_components.securitas import DOMAIN
+    from custom_components.securitas.entity import camera_device_info
 
     inst = _make_installation()
     cam = _make_camera_device()

@@ -29,7 +29,7 @@ from ..http_transport import HttpTransport
 from ..models import Installation, OtpPhone
 
 if TYPE_CHECKING:
-    from custom_components.verisure_owa.log_filter import SensitiveDataFilter
+    from custom_components.securitas.log_filter import SensitiveDataFilter
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ import pytest
 
 from .mock_graphql import MockGraphQLServer
 
-from custom_components.verisure_owa import (
+from custom_components.securitas import (
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
@@ -27,17 +27,17 @@ from custom_components.verisure_owa import (
     VerisureDevice,
     VerisureHub,
 )
-from custom_components.verisure_owa.verisure_owa_api.client import (
+from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
-from custom_components.verisure_owa.verisure_owa_api.http_transport import (
+from custom_components.securitas.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.verisure_owa.verisure_owa_api.const import (
+from custom_components.securitas.verisure_owa_api.const import (
     PERI_DEFAULTS,
     STD_DEFAULTS,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import Installation
+from custom_components.securitas.verisure_owa_api.models import Installation
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,

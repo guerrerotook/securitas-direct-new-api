@@ -74,7 +74,7 @@ class MockGraphQLServer:
         mock_http = MagicMock()
         mock_http.post = server.post
 
-        with patch("custom_components.verisure_owa.async_get_clientsession",
+        with patch("custom_components.securitas.async_get_clientsession",
                    return_value=mock_http):
             await hass.config_entries.async_setup(entry.entry_id)
 

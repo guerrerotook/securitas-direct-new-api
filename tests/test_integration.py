@@ -14,8 +14,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
-from custom_components.verisure_owa import DOMAIN, async_setup_entry, async_unload_entry
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
+from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
 
@@ -73,7 +73,7 @@ async def _setup(
     entry = _make_entry(hass)
     mock_http = server.make_http_client()
     with patch(
-        "custom_components.verisure_owa.async_get_clientsession",
+        "custom_components.securitas.async_get_clientsession",
         return_value=mock_http,
     ):
         with patch(
@@ -145,14 +145,14 @@ async def test_setup_makes_only_expected_api_calls(
     mock_http = mock_server.make_http_client()
     with (
         patch(
-            "custom_components.verisure_owa.async_get_clientsession",
+            "custom_components.securitas.async_get_clientsession",
             return_value=mock_http,
         ),
         patch(
             "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
         ) as mock_fwd,
         patch(
-            "custom_components.verisure_owa._async_discover_devices",
+            "custom_components.securitas._async_discover_devices",
         ),
     ):
         mock_fwd.return_value = True
@@ -331,7 +331,7 @@ async def test_setup_login_error_raises_auth_failed(
     mock_http = mock_server.make_http_client()
     with (
         patch(
-            "custom_components.verisure_owa.async_get_clientsession",
+            "custom_components.securitas.async_get_clientsession",
             return_value=mock_http,
         ),
         patch.object(hass, "async_create_task", MagicMock(side_effect=_close_coro)),
@@ -367,7 +367,7 @@ async def test_setup_2fa_error_raises_auth_failed(
     mock_http = mock_server.make_http_client()
     with (
         patch(
-            "custom_components.verisure_owa.async_get_clientsession",
+            "custom_components.securitas.async_get_clientsession",
             return_value=mock_http,
         ),
         patch.object(hass, "async_create_task", MagicMock(side_effect=_close_coro)),
@@ -393,7 +393,7 @@ async def test_setup_connection_error_raises_not_ready(
             raise ClientConnectorError(_conn_key, OSError("connection refused"))
 
     with patch(
-        "custom_components.verisure_owa.async_get_clientsession",
+        "custom_components.securitas.async_get_clientsession",
         return_value=_FailPost(),
     ):
         with pytest.raises(ConfigEntryNotReady):

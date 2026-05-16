@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.verisure_owa.verisure_owa_api.domains import ApiDomains
+from custom_components.securitas.verisure_owa_api.domains import ApiDomains
 
 
 class TestGetUrl:

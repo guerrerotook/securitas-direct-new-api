@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.const import EntityCategory
 
-from custom_components.verisure_owa.binary_sensor import WifiConnectedSensor
-from custom_components.verisure_owa.coordinators import (
+from custom_components.securitas.binary_sensor import WifiConnectedSensor
+from custom_components.securitas.coordinators import (
     AlarmCoordinator,
     AlarmStatusData,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import SStatus
+from custom_components.securitas.verisure_owa_api.models import SStatus
 
 from tests.conftest import make_installation
 

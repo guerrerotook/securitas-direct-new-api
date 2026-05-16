@@ -19,38 +19,38 @@ from homeassistant.helpers import entity_registry as _er_for_feature_detect
 from homeassistant.helpers.entity_registry import DeletedRegistryEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     Installation,
     OperationStatus,
     SStatus,
 )
-from custom_components.verisure_owa.verisure_owa_api.const import (
+from custom_components.securitas.verisure_owa_api.const import (
     PERI_DEFAULTS,
     STATE_TO_COMMAND,
     STD_DEFAULTS,
     VerisureOwaState,
 )
-from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+from custom_components.securitas.verisure_owa_api.exceptions import (
     ArmingExceptionError,
     VerisureOwaError,
 )
-from custom_components.verisure_owa.alarm_control_panel import (
+from custom_components.securitas.alarm_control_panel import (
     CombinedVerisureOwaAlarmPanel,
 )
-from custom_components.verisure_owa.coordinators import (
+from custom_components.securitas.coordinators import (
     AlarmCoordinator,
     AlarmStatusData,
 )
-from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
+from custom_components.securitas.verisure_owa_api.command_resolver import (
     AlarmState,
     InteriorMode,
     PerimeterMode,
 )
-from custom_components.verisure_owa.const import (
+from custom_components.securitas.const import (
     CONF_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
 )
-from custom_components.verisure_owa.events import (
+from custom_components.securitas.events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
 )
@@ -92,7 +92,7 @@ class TestNotificationTranslationsPersistentMessageTrim:
     }
 
     def test_message_does_not_mention_mobile_notification(self):
-        from custom_components.verisure_owa.notification_translations import (
+        from custom_components.securitas.notification_translations import (
             NOTIFICATION_TRANSLATIONS,
         )
 
@@ -107,7 +107,7 @@ class TestNotificationTranslationsPersistentMessageTrim:
 
     def test_message_still_mentions_alarm_card(self):
         """Sanity: the alarm-card guidance must still be present per locale."""
-        from custom_components.verisure_owa.notification_translations import (
+        from custom_components.securitas.notification_translations import (
             NOTIFICATION_TRANSLATIONS,
         )
 
@@ -135,7 +135,7 @@ class TestForceArmExpiredMobileMessageTranslation:
     LOCALES = ("en", "es", "fr", "it", "pt", "pt-BR", "ca")
 
     def test_mobile_message_present_for_all_locales(self):
-        from custom_components.verisure_owa.notification_translations import (
+        from custom_components.securitas.notification_translations import (
             NOTIFICATION_TRANSLATIONS,
         )
 
@@ -457,7 +457,7 @@ def setup_alarm_entry_data(alarm, *, sub_panels=()):
     tests that exercise `_siblings_on_installation` and the cross-panel
     dismissal helper, both of which walk these registries.
     """
-    from custom_components.verisure_owa import DOMAIN
+    from custom_components.securitas import DOMAIN
 
     alarm.hass.data = {DOMAIN: {}}
     alarm.hass.data[DOMAIN]["entry-id-1"] = {
@@ -865,7 +865,7 @@ class TestAsyncAlarmDisarm:
         alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("API down"))
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm("1234")
 
@@ -1037,7 +1037,7 @@ class TestSetArmState:
         alarm.client.arm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_CUSTOM_BYPASS)
 
@@ -1349,7 +1349,7 @@ class TestForceState:
         )
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm("1234")
 
@@ -1372,7 +1372,7 @@ class TestForceState:
         )
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -1636,7 +1636,7 @@ class TestHandleCoordinatorUpdate:
 
     def test_scan_interval_zero_keeps_force_context_retention(self):
         """scan_interval=0 still uses DEFAULT_SCAN_INTERVAL for force_context retention."""
-        from custom_components.verisure_owa import DEFAULT_SCAN_INTERVAL
+        from custom_components.securitas import DEFAULT_SCAN_INTERVAL
 
         alarm = make_alarm(
             config={
@@ -1952,7 +1952,7 @@ class TestForceArmContext:
         """_notify_force_arm_expired calls _notify with the force_arm_expired translation key."""
         alarm = make_alarm()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             alarm._notify_force_arm_expired()
 
@@ -2305,7 +2305,7 @@ class TestForceArmExpiredEventFire:
         alarm = make_alarm()
         exc = ArmingExceptionError("ref-x", "suid-x", [{"alias": "Door"}])
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later"
+            "custom_components.securitas.alarm_control_panel._base.async_call_later"
         ) as mock_call_later:
             mock_call_later.return_value = MagicMock()
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_HOME)
@@ -2355,7 +2355,7 @@ class TestForceArmExpiryTimer:
         alarm = make_alarm()
         exc = self._make_exception()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later"
+            "custom_components.securitas.alarm_control_panel._base.async_call_later"
         ) as mock_call_later:
             mock_call_later.return_value = MagicMock()
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2374,7 +2374,7 @@ class TestForceArmExpiryTimer:
         exc = self._make_exception()
         unsub_mock = MagicMock()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
             return_value=unsub_mock,
         ):
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2390,7 +2390,7 @@ class TestForceArmExpiryTimer:
         exc = self._make_exception()
         unsub_mock = MagicMock()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
             return_value=unsub_mock,
         ) as mock_call_later:
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2426,7 +2426,7 @@ class TestForceArmExpiryTimer:
         exc = self._make_exception()
         unsub_mock = MagicMock()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
             return_value=unsub_mock,
         ) as mock_call_later:
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2454,7 +2454,7 @@ class TestForceArmExpiryTimer:
         exc = self._make_exception()
         unsub_mock = MagicMock()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
             return_value=unsub_mock,
         ):
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2476,7 +2476,7 @@ class TestForceArmExpiryTimer:
 
     async def test_dismissed_path_cancels_timer(self):
         """_dismiss_pending_force_context_on_siblings cancels the timer."""
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         alarm = make_alarm()
         # Wire up the entry-data shape the dismissal helper walks.
@@ -2488,7 +2488,7 @@ class TestForceArmExpiryTimer:
         exc = self._make_exception()
         unsub_mock = MagicMock()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
             return_value=unsub_mock,
         ):
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2562,7 +2562,7 @@ class TestArmingExceptionDismissedOnEntityRemoval:
         exc = ArmingExceptionError("ref-x", "suid-x", [{"alias": "Door"}])
         unsub_mock = MagicMock()
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.async_call_later",
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
             return_value=unsub_mock,
         ):
             alarm._set_force_context(exc, AlarmControlPanelState.ARMED_AWAY)
@@ -2618,7 +2618,7 @@ class TestForceArmExpiredMobileNotification:
         # No actions array — buttons removed.
         assert "actions" not in sd["data"]
         # Body is the mobile_message from the force_arm_expired translation.
-        from custom_components.verisure_owa.notification_translations import (
+        from custom_components.securitas.notification_translations import (
             get_notification_strings,
         )
 
@@ -2742,7 +2742,7 @@ class TestSiblingPanelLookup:
 
     def test_lookup_skips_other_installations(self):
         """Only panels for THIS installation number are returned."""
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         alarm = make_alarm()
         # Another combined panel for a different installation in the same
@@ -2770,7 +2770,7 @@ class TestSiblingPanelLookup:
         Defensive: setup ordering means the entry data dict could be
         missing during very early registration paths.
         """
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         alarm = make_alarm()
         alarm.hass.data = {DOMAIN: {}}
@@ -2787,7 +2787,7 @@ class TestSiblingPanelLookup:
         account), each with its own installation. The helper walks every
         entry's bucket so cross-installation arm/disarm coordination works.
         """
-        from custom_components.verisure_owa import DOMAIN
+        from custom_components.securitas import DOMAIN
 
         alarm = make_alarm()
         # A second installation living in a different config entry.
@@ -3350,7 +3350,7 @@ class TestUnmappedProtoCodeLogging:
             protom_response="T",
             protom_response_date="",
         )
-        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
             alarm.update_status_alarm(status)
 
         msg = caplog.text
@@ -3375,7 +3375,7 @@ class TestUnmappedProtoCodeLogging:
             protom_response="Z",
             protom_response_date="",
         )
-        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
             alarm.update_status_alarm(status)
 
         msg = caplog.text
@@ -3402,7 +3402,7 @@ class TestUnmappedProtoCodeLogging:
             protom_response="T",
             protom_response_date="",
         )
-        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
             alarm.update_status_alarm(status)
             alarm.update_status_alarm(status)
 
@@ -3437,7 +3437,7 @@ class TestUnmappedProtoCodeLogging:
             protom_response="D",
             protom_response_date="",
         )
-        with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+        with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
             alarm.update_status_alarm(unmapped)
             alarm.update_status_alarm(disarmed)
             alarm.update_status_alarm(unmapped)
@@ -3741,7 +3741,7 @@ class TestCompoundArmCommands:
         alarm.client.arm_alarm = arm_side_effect
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_NIGHT)
 
@@ -3755,7 +3755,7 @@ class TestCompoundArmCommands:
 
     async def test_all_commands_already_unsupported_raises_no_supported_command(self):
         """When every command in a step is already marked unsupported, raise translated HomeAssistantError."""
-        from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
+        from custom_components.securitas.verisure_owa_api.command_resolver import (
             CommandStep,
         )
 
@@ -4307,7 +4307,7 @@ class TestDynamicDisarm:
         )
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -4333,7 +4333,7 @@ class TestDynamicDisarm:
         alarm.client.disarm_alarm = AsyncMock(side_effect=_err)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -4687,7 +4687,7 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm.client.disarm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
@@ -4706,7 +4706,7 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm.client.arm_alarm = AsyncMock()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base._notify"
+            "custom_components.securitas.alarm_control_panel._base._notify"
         ) as mock_notify:
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
@@ -4720,10 +4720,10 @@ class TestExecuteTransitionRefusesUnknownState:
         """When the API rejects an arm, inject a HA-side COMMUNICATION_FAILED
         event so the activity log surfaces it with HA-user attribution
         (instead of the panel's later polled type-501 'Sorry' message)."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             ActivityCategory,
         )
-        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+        from custom_components.securitas.verisure_owa_api.exceptions import (
             VerisureOwaError,
         )
 
@@ -4733,9 +4733,9 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
 
         with (
-            patch("custom_components.verisure_owa.alarm_control_panel._base._notify"),
+            patch("custom_components.securitas.alarm_control_panel._base._notify"),
             patch(
-                "custom_components.verisure_owa.alarm_control_panel._base.inject_ha_event"
+                "custom_components.securitas.alarm_control_panel._base.inject_ha_event"
             ) as mock_inject,
         ):
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
@@ -4749,10 +4749,10 @@ class TestExecuteTransitionRefusesUnknownState:
         """A failed disarm round-trip (panel-side comms error) injects
         COMMUNICATION_FAILED so the timeline picks up the failure with HA
         context."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             ActivityCategory,
         )
-        from custom_components.verisure_owa.verisure_owa_api.exceptions import (
+        from custom_components.securitas.verisure_owa_api.exceptions import (
             VerisureOwaError,
         )
 
@@ -4762,7 +4762,7 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.inject_ha_event"
+            "custom_components.securitas.alarm_control_panel._base.inject_ha_event"
         ) as mock_inject:
             await alarm.async_alarm_disarm()
 
@@ -4883,7 +4883,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -4901,7 +4901,7 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -4920,7 +4920,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -4940,7 +4940,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -4964,7 +4964,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -4984,7 +4984,7 @@ class TestNotificationContent:
         event = self._make_event(zones=["Kitchen Door", "Bedroom Window"])
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -5006,7 +5006,7 @@ class TestNotificationContent:
         event = self._make_event(zones=[])
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -5023,7 +5023,7 @@ class TestNotificationContent:
         event = self._make_event()
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel._base.get_notification_strings",
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
             return_value=_FAKE_NOTIFICATION_ENTRY,
         ):
             await alarm._async_notify_arm_exceptions(event)
@@ -5400,7 +5400,7 @@ class TestHassNoneGuardsAlarm:
 
 class TestPanelHooks:
     def test_base_resolve_target_state_raises(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             BaseVerisureOwaAlarmPanel,
         )
 
@@ -5408,10 +5408,10 @@ class TestPanelHooks:
             BaseVerisureOwaAlarmPanel._resolve_target_state(None, "armed_home")  # type: ignore[arg-type]
 
     def test_base_extract_state_raises(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             BaseVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -5432,10 +5432,10 @@ def _make_interior_panel(
     current_state=None,
 ):
     """Build an InteriorVerisureOwaAlarmPanel with mocked dependencies."""
-    from custom_components.verisure_owa.alarm_control_panel import (
+    from custom_components.securitas.alarm_control_panel import (
         InteriorVerisureOwaAlarmPanel,
     )
-    from custom_components.verisure_owa.verisure_owa_api.models import (
+    from custom_components.securitas.verisure_owa_api.models import (
         AnnexMode,
         InteriorMode,
         PerimeterMode,
@@ -5483,10 +5483,10 @@ def _make_perimeter_panel(
     current_state=None,
 ):
     """Build a PerimeterVerisureOwaAlarmPanel with mocked dependencies."""
-    from custom_components.verisure_owa.alarm_control_panel import (
+    from custom_components.securitas.alarm_control_panel import (
         PerimeterVerisureOwaAlarmPanel,
     )
-    from custom_components.verisure_owa.verisure_owa_api.models import (
+    from custom_components.securitas.verisure_owa_api.models import (
         AnnexMode,
         InteriorMode,
         PerimeterMode,
@@ -5596,7 +5596,7 @@ class TestSubPanelSuggestedObjectId:
         from homeassistant.helpers import device_registry as dr
         from homeassistant.helpers import entity_registry as er
 
-        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.securitas.const import DOMAIN
 
         entry = MockConfigEntry(domain=DOMAIN, data={"unsupported_commands": []})
         entry.add_to_hass(hass)
@@ -5708,10 +5708,10 @@ class TestInteriorSubPanel:
         Shared helper for the resolver-hydration tests below (flat-list
         back-compat and per-installation dict format).
         """
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             InteriorVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -5783,10 +5783,10 @@ class TestInteriorSubPanel:
 
     def test_no_persisted_data_starts_empty(self):
         """Missing key entirely should yield an empty resolver."""
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             InteriorVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -5824,10 +5824,10 @@ class TestInteriorSubPanel:
         notification must use a sub-panel-specific translation key — not
         the main-panel one that points the user at the (non-existent)
         mappings UI."""
-        from custom_components.verisure_owa.verisure_owa_api import (
+        from custom_components.securitas.verisure_owa_api import (
             VerisureOwaError,
         )
-        from custom_components.verisure_owa.verisure_owa_api.command_resolver import (
+        from custom_components.securitas.verisure_owa_api.command_resolver import (
             CommandStep,
         )
 
@@ -5842,7 +5842,7 @@ class TestInteriorSubPanel:
         assert excinfo.value.translation_key == "unsupported_alarm_mode_subpanel"
 
     def test_resolve_target_state_armed_away(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -5864,7 +5864,7 @@ class TestInteriorSubPanel:
 
     def test_resolve_target_disarmed_preserves_perimeter_and_annex(self):
         """Disarming the interior sub-panel must NOT touch perimeter or annex."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -5884,7 +5884,7 @@ class TestInteriorSubPanel:
         assert target.annex == AnnexMode.ON  # preserved
 
     def test_extract_state_only_reads_interior(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -5952,7 +5952,7 @@ class TestPerimeterSubPanel:
         assert panel._attr_supported_features == panel.supported_features
 
     def test_resolve_target_armed_away(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -5973,7 +5973,7 @@ class TestPerimeterSubPanel:
 
     def test_resolve_target_disarmed_preserves_interior_and_annex(self):
         """Disarming the perimeter sub-panel must NOT touch interior or annex."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -5999,7 +5999,7 @@ class TestPerimeterSubPanel:
         (full disarm) and on fallback DARM1, which on SDVFAST disarms everything
         — wiping interior even though the user only meant to disarm perimeter.
         """
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -6036,7 +6036,7 @@ class TestPerimeterSubPanel:
         assert target.annex == AnnexMode.OFF  # preserved
 
     def test_extract_state(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -6073,10 +6073,10 @@ def _make_annex_panel(
     current_state=None,
 ):
     """Build an AnnexVerisureOwaAlarmPanel with mocked dependencies."""
-    from custom_components.verisure_owa.alarm_control_panel import (
+    from custom_components.securitas.alarm_control_panel import (
         AnnexVerisureOwaAlarmPanel,
     )
-    from custom_components.verisure_owa.verisure_owa_api.models import (
+    from custom_components.securitas.verisure_owa_api.models import (
         AnnexMode,
         InteriorMode,
         PerimeterMode,
@@ -6149,7 +6149,7 @@ class TestAnnexSubPanel:
         assert panel._attr_supported_features == panel.supported_features
 
     def test_resolve_armed_away_preserves_other_axes(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -6170,7 +6170,7 @@ class TestAnnexSubPanel:
 
     def test_resolve_target_disarmed_preserves_interior_and_perimeter(self):
         """Disarming the annex sub-panel must NOT touch interior or perimeter."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -6190,7 +6190,7 @@ class TestAnnexSubPanel:
         assert s.perimeter == PerimeterMode.ON  # preserved
 
     def test_extract_state(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
@@ -6236,7 +6236,7 @@ class TestSubPanelStateExtraction:
 
     def test_interior_update_from_coordinator_uses_extract_state(self):
         """Interior panel derives state from joint state, ignoring user mapping."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6262,7 +6262,7 @@ class TestSubPanelStateExtraction:
 
     def test_interior_update_from_coordinator_disarmed(self):
         """Interior panel shows DISARMED when joint interior axis is OFF."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6285,7 +6285,7 @@ class TestSubPanelStateExtraction:
 
     def test_interior_update_status_alarm_uses_extract_state(self):
         """update_status_alarm uses _extract_state after a successful arm operation."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6317,7 +6317,7 @@ class TestSubPanelStateExtraction:
 
     def test_perimeter_update_from_coordinator_uses_extract_state(self):
         """Perimeter panel derives state from perimeter axis only."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6339,7 +6339,7 @@ class TestSubPanelStateExtraction:
 
     def test_perimeter_update_from_coordinator_off(self):
         """Perimeter panel shows DISARMED when perimeter axis is OFF."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6362,7 +6362,7 @@ class TestSubPanelStateExtraction:
 
     def test_annex_update_from_coordinator_uses_extract_state(self):
         """Annex panel derives state from annex axis only."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6384,7 +6384,7 @@ class TestSubPanelStateExtraction:
 
     def test_annex_update_from_coordinator_off(self):
         """Annex panel shows DISARMED when annex axis is OFF."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6424,7 +6424,7 @@ class TestSubPanelStateExtraction:
         wouldn't update and the resolver could compute transitions from
         a stale state.
         """
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6453,7 +6453,7 @@ class TestSubPanelStateExtraction:
         code isn't recognised. Without guarding, _extract_state would then
         report DISARMED — wrong if the system is actually armed.
         """
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AnnexMode,
             InteriorMode,
             PerimeterMode,
@@ -6509,8 +6509,8 @@ class TestSubPanelSetup:
 
     def _setup_kwargs(self, *, options: dict, has_peri: bool, has_annex: bool):
         """Build hass/entry/coordinator suitable for invoking async_setup_entry."""
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas import (
             VerisureDevice,
         )
 
@@ -6557,7 +6557,7 @@ class TestSubPanelSetup:
 
     @pytest.mark.asyncio
     async def test_only_combined_when_no_toggles(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
             CombinedVerisureOwaAlarmPanel,
         )
@@ -6569,7 +6569,7 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         assert len(added) == 1
@@ -6586,11 +6586,11 @@ class TestSubPanelSetup:
         refresh sees the entity ready to serve. Otherwise the user has to
         reload the integration to recover.
         """
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
             PerimeterVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.const import CONF_ENABLE_PERIMETER_PANEL
+        from custom_components.securitas.const import CONF_ENABLE_PERIMETER_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_PERIMETER_PANEL: True},
@@ -6603,7 +6603,7 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         assert any(isinstance(p, PerimeterVerisureOwaAlarmPanel) for p in added)
@@ -6615,11 +6615,11 @@ class TestSubPanelSetup:
         """See test_perimeter_panel_created_when_toggle_on_even_if_caps_not_yet_detected
         for the rationale — saved toggle is the source of truth.
         """
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
             AnnexVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.const import CONF_ENABLE_ANNEX_PANEL
+        from custom_components.securitas.const import CONF_ENABLE_ANNEX_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_ANNEX_PANEL: True},
@@ -6632,7 +6632,7 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         assert any(isinstance(p, AnnexVerisureOwaAlarmPanel) for p in added)
@@ -6647,11 +6647,11 @@ class TestSubPanelSetup:
         capability-gated (not toggle-gated) in the options flow; the
         entity-creation guard must match.
         """
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
             InteriorVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.const import CONF_ENABLE_INTERIOR_PANEL
+        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_INTERIOR_PANEL: True},
@@ -6664,7 +6664,7 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         assert any(isinstance(p, InteriorVerisureOwaAlarmPanel) for p in added)
@@ -6678,11 +6678,11 @@ class TestSubPanelSetup:
         (the toggle is hidden in options otherwise). Don't let a transient
         capability-detection failure at startup permanently hide the entity.
         """
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
             InteriorVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.const import CONF_ENABLE_INTERIOR_PANEL
+        from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
 
         hass, entry = self._setup_kwargs(
             options={CONF_ENABLE_INTERIOR_PANEL: True},
@@ -6695,17 +6695,17 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         assert any(isinstance(p, InteriorVerisureOwaAlarmPanel) for p in added)
 
     @pytest.mark.asyncio
     async def test_all_three_subpanels_with_full_capabilities(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
         )
-        from custom_components.verisure_owa.const import (
+        from custom_components.securitas.const import (
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
             CONF_ENABLE_ANNEX_PANEL,
@@ -6726,7 +6726,7 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         types = {type(p).__name__ for p in added}
@@ -6740,11 +6740,11 @@ class TestSubPanelSetup:
     @pytest.mark.asyncio
     async def test_alarm_entities_lookup_only_combined(self):
         """Combined panel is the one registered in alarm_entities for force_arm services."""
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             async_setup_entry,
             CombinedVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa.const import (
+        from custom_components.securitas.const import (
             DOMAIN,
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
@@ -6766,7 +6766,7 @@ class TestSubPanelSetup:
             added.extend(entities)
 
         with patch(
-            "custom_components.verisure_owa.alarm_control_panel.async_get_current_platform"
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
         lookup = hass.data[DOMAIN]["alarm_entities"]
@@ -6781,7 +6781,7 @@ class TestSubPanelSetup:
 async def test_legacy_force_arm_service_forwards_to_new(hass, caplog):
     """securitas.force_arm calls the same handler as verisure_owa.force_arm."""
     import logging
-    from custom_components.verisure_owa import register_legacy_service_aliases
+    from custom_components.securitas import register_legacy_service_aliases
 
     new_called = []
 
@@ -6790,7 +6790,7 @@ async def test_legacy_force_arm_service_forwards_to_new(hass, caplog):
 
     hass.services.async_register("verisure_owa", "force_arm", fake_handler)
     register_legacy_service_aliases(hass)
-    with caplog.at_level(logging.WARNING, logger="custom_components.verisure_owa"):
+    with caplog.at_level(logging.WARNING, logger="custom_components.securitas"):
         await hass.services.async_call(
             "securitas",
             "force_arm",
@@ -6840,10 +6840,10 @@ class TestBuildPartialDisarmTarget:
     """Tests for the partial-disarm target-state builder."""
 
     def test_disarm_interior_only_keeps_perimeter_and_annex(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             build_partial_disarm_target,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -6861,10 +6861,10 @@ class TestBuildPartialDisarmTarget:
         assert target.annex == AnnexMode.ON
 
     def test_disarm_multiple_circuits(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             build_partial_disarm_target,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -6882,10 +6882,10 @@ class TestBuildPartialDisarmTarget:
         assert target.annex == AnnexMode.OFF
 
     def test_disarm_empty_list_returns_unchanged(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             build_partial_disarm_target,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -6901,10 +6901,10 @@ class TestBuildPartialDisarmTarget:
         assert target == current
 
     def test_disarm_unknown_circuit_is_ignored(self):
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             build_partial_disarm_target,
         )
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -6927,7 +6927,7 @@ class TestExecutePartialDisarm:
     """Tests for CombinedVerisureOwaAlarmPanel.execute_partial_disarm."""
 
     async def test_returns_true_on_success_and_calls_execute_transition(self):
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -6956,8 +6956,8 @@ class TestExecutePartialDisarm:
         assert target.annex == AnnexMode.ON
 
     async def test_returns_false_on_verisure_error(self):
-        from custom_components.verisure_owa.verisure_owa_api import VerisureOwaError
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api import VerisureOwaError
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -6986,7 +6986,7 @@ class TestExecutePartialDisarm:
         so the UI reflects an in-flight auto-disarm instead of jumping silently
         from armed to disarmed when the next coordinator poll arrives.
         """
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -7020,7 +7020,7 @@ class TestExecutePartialDisarm:
         """After a successful partial disarm we trigger a coordinator refresh so
         any other entity (sub-panel, lock) sees the new state immediately
         rather than waiting for the next poll."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
@@ -7048,13 +7048,13 @@ class TestExecutePartialDisarm:
         execute_partial_disarm should drive its state through DISARMING and into
         the post-result state too — so users see the same animation as a direct
         sub-panel disarm."""
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             InteriorMode,
             PerimeterMode,
             AnnexMode,
         )
-        from custom_components.verisure_owa.const import DOMAIN
+        from custom_components.securitas.const import DOMAIN
         from homeassistant.components.alarm_control_panel.const import (
             AlarmControlPanelState,
         )
@@ -7153,11 +7153,11 @@ class TestCombinedPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_combined_panel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7196,11 +7196,11 @@ class TestCombinedPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_combined_panel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7243,11 +7243,11 @@ class TestCombinedPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_combined_panel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7312,11 +7312,11 @@ class TestCombinedPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_combined_panel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7390,11 +7390,11 @@ class TestSubPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_subpanel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7435,11 +7435,11 @@ class TestSubPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_subpanel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7485,11 +7485,11 @@ class TestSubPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_subpanel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7580,11 +7580,11 @@ class TestSubPanelEntityIdHealer:
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
 
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             _heal_subpanel_entity_id,
         )
-        from custom_components.verisure_owa.const import DOMAIN
-        from custom_components.verisure_owa.verisure_owa_api.models import (
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
             Installation,
         )
 
@@ -7653,7 +7653,7 @@ class TestCombinedPanelRegistration:
 
     def _make_client(self):
         from unittest.mock import MagicMock
-        from custom_components.verisure_owa.verisure_owa_api.const import STD_DEFAULTS
+        from custom_components.securitas.verisure_owa_api.const import STD_DEFAULTS
 
         client = MagicMock()
         client.config = {
@@ -7665,8 +7665,8 @@ class TestCombinedPanelRegistration:
         return client
 
     def _make_device(self, number, alias):
-        from custom_components.verisure_owa.hub import VerisureDevice
-        from custom_components.verisure_owa.verisure_owa_api.models import Installation
+        from custom_components.securitas.hub import VerisureDevice
+        from custom_components.securitas.verisure_owa_api.models import Installation
 
         installation = Installation(
             number=number,
@@ -7680,7 +7680,7 @@ class TestCombinedPanelRegistration:
 
     async def _run_setup(self, hass, entry, async_add_entities):
         from unittest.mock import MagicMock, patch
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
             async_setup_entry,
         )
@@ -7697,12 +7697,12 @@ class TestCombinedPanelRegistration:
                 MagicMock(),
             ),
             patch(
-                "custom_components.verisure_owa.alarm_control_panel"
+                "custom_components.securitas.alarm_control_panel"
                 ".async_get_current_platform",
                 return_value=MagicMock(),
             ),
             patch(
-                "custom_components.verisure_owa.alarm_control_panel"
+                "custom_components.securitas.alarm_control_panel"
                 "._heal_combined_panel_entity_id",
                 AsyncMock(),
             ),
@@ -7712,11 +7712,11 @@ class TestCombinedPanelRegistration:
     async def test_combined_panels_keyed_by_installation_number_multi(self):
         """With two installations, combined_alarm_panels must be a dict with one entry per installation."""
         from unittest.mock import MagicMock
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa import DOMAIN
-        from custom_components.verisure_owa.coordinators import AlarmCoordinator
+        from custom_components.securitas import DOMAIN
+        from custom_components.securitas.coordinators import AlarmCoordinator
 
         device_a = self._make_device("111111", "Main Home")
         device_b = self._make_device("222222", "Annex")
@@ -7761,11 +7761,11 @@ class TestCombinedPanelRegistration:
     async def test_combined_panel_per_installation_with_single_install(self):
         """With one installation, combined_alarm_panels must be a dict with exactly one entry."""
         from unittest.mock import MagicMock
-        from custom_components.verisure_owa.alarm_control_panel import (
+        from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
         )
-        from custom_components.verisure_owa import DOMAIN
-        from custom_components.verisure_owa.coordinators import AlarmCoordinator
+        from custom_components.securitas import DOMAIN
+        from custom_components.securitas.coordinators import AlarmCoordinator
 
         device = self._make_device("654321", "Test Home")
 

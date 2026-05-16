@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 
-from custom_components.verisure_owa.verisure_owa_api.client import (
+from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
-from custom_components.verisure_owa.verisure_owa_api.http_transport import (
+from custom_components.securitas.verisure_owa_api.http_transport import (
     HttpTransport,
 )
-from custom_components.verisure_owa.verisure_owa_api.models import (
+from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     Installation,
     ThumbnailResponse,

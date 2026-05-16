@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from custom_components.verisure_owa.migrate import old_to_new_unique_id
+from custom_components.securitas.migrate import old_to_new_unique_id
 
 PLATFORM_DIR = Path(__file__).parent.parent / "custom_components" / "verisure_owa"
 
