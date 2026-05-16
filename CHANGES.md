@@ -2,6 +2,35 @@
 
 The most recent release is at the top; append new entries above the previous one with each release.
 
+## v5.0.2
+
+### Bug fixes
+
+- **HACS upgrade from any prior version now works.** v5.0.1 introduced a second `custom_components/verisure_owa/` directory alongside the legacy `custom_components/securitas/` shim. HACS only ever manages one directory per repository ([hacs/integration#385](https://github.com/hacs/integration/issues/385)) — HACS users only got the shim, the new directory was never deployed, and Home Assistant refused to load the `securitas` integration because its declared dependency `verisure_owa` was missing. v5.0.2 collapses everything back into a single `custom_components/securitas/` directory and stays on the `securitas` domain. The full domain rename is deferred until it can ship via a separate HACS repository; see [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md).
+
+### Service and event naming
+
+Every service is now registered under BOTH `securitas.<X>` AND `verisure_owa.<X>`, and every event the integration fires is emitted under BOTH `securitas_<X>` AND `verisure_owa_<X>`. Both forms are functionally identical and equal-weight in HA's eyes — no deprecation, no warnings, no scheduled removal.
+
+**Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write going forward.** When the deferred domain rename completes (see `docs/MIGRATION_PLAN.md`), the `securitas.*` form will move to a separate compatibility integration; automations using the `verisure_owa` form will keep working unchanged. The Lovelace card picker only offers the `custom:verisure-owa-*` forms; old dashboards using `custom:securitas-*` types continue to render via aliased custom-element registrations.
+
+The `services.yaml` descriptions and the README explicitly recommend the verisure_owa form. The `verisure_owa.*` services also get a programmatic UI schema via `async_set_service_schema` so they appear in the Developer Tools service picker with full field validation, identical to the securitas form.
+
+### Cleanup notice
+
+- If your `/config/custom_components/` still contains a `verisure_owa/` directory left behind by the failed v5.0.1 upgrade attempt, a Repairs issue will prompt you to delete it. The folder does nothing now; deleting it and restarting Home Assistant clears the notice.
+
+### What stays the same
+
+- "Verisure OWA" remains the integration display name and the Lovelace card brand.
+- All v5.0.0 / v5.0.1 features are preserved (sub-panels, autolock, activity log, refresh-token auth, force-arm event API, sub-panel feature gating, etc.).
+- Entity unique_ids stay on the v4 schema (`v4_securitas_direct.<...>`) — no entity churn on upgrade.
+
+### Removed
+
+- `custom_components/securitas/migrate.py` and the `restart_required_after_migration` Repairs flow — the forward migration from `securitas` to `verisure_owa` is no longer applicable.
+- The `console.warn` deprecation message on `custom:securitas-*-card` Lovelace types — both names are kept indefinitely as equal aliases.
+
 ## v5.0.1
 
 ### Bug fixes
