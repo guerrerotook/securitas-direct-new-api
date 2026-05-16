@@ -505,13 +505,19 @@ class VerisureOwaAlarmCard extends HTMLElement {
   _findRefreshEntity() {
     if (!this._hass) return null;
     if (this._config.refresh_entity) return this._config.refresh_entity;
-    // Find the refresh button on the same device as the configured entity
+    // Find any button on the same device that has "refresh" in its entity_id.
+    // Covers both the pre-v5 entity_id pattern (button.refresh_<alias>) and
+    // the v5.0.0+ pattern (button.<alias>_refresh, where has_entity_name=True
+    // makes HA prepend the device name to the short "Refresh" entity name).
     const entities = this._hass.entities;
     if (!entities) return null;
     const panelEntry = entities[this._config.entity];
     if (!panelEntry || !panelEntry.device_id) return null;
     const match = Object.keys(entities).find(
-      e => e.startsWith("button.refresh_") && entities[e].device_id === panelEntry.device_id
+      e =>
+        e.startsWith("button.") &&
+        /refresh/i.test(e) &&
+        entities[e].device_id === panelEntry.device_id
     );
     return match || null;
   }
@@ -568,9 +574,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
             </div>
             <div class="title-block">
               <div class="entity-name">${this._esc(name)}</div>
-              <div class="state-pill">${cfg.label}</div>
+              <div class="state-row">
+                <div class="state-pill">${cfg.label}</div>
+                ${refreshEntity ? `<button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
+              </div>
             </div>
-            ${refreshEntity ? `<button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
           </div>
 
           <!-- ── Unavailable notice ── -->
@@ -893,8 +901,19 @@ class VerisureOwaAlarmCard extends HTMLElement {
         color: ${cfg.color};
       }
       .title-block { flex: 1; }
+      /* Wraps state-pill + refresh-btn on the same row inside title-block,
+         keeping the refresh button away from the card's top-right corner
+         (where HA's modal close X appears when the card is opened from a
+         mushroom chip or badge). */
+      .state-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 3px;
+      }
+      .state-pill { margin-top: 0; }
       .refresh-btn {
-        width: 36px; height: 36px;
+        width: 28px; height: 28px;
         border: none;
         border-radius: 50%;
         background: transparent;
@@ -906,7 +925,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
       .refresh-btn:hover { background: var(--secondary-background-color); }
       .refresh-btn:active { transform: scale(0.9); }
       .refresh-btn ha-icon {
-        --mdc-icon-size: 20px;
+        --mdc-icon-size: 18px;
         color: var(--secondary-text-color);
       }
       .refresh-btn.spinning ha-icon {
