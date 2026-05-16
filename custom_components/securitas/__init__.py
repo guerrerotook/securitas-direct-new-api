@@ -92,6 +92,7 @@ from .discovery import (  # noqa: F401 — re-exported for backwards compatibili
     _schedule_lock_config_retry,
 )
 from .events import attach_activity_listener
+from .migrate_unique_ids import migrate_unique_ids
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     VerisureDevice,
     VerisureHub,
@@ -651,6 +652,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG00
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Establish connection with Verisure."""
+    # One-shot per-entry: rewrite any pre-v5 entity unique_ids to the
+    # canonical v4_securitas_direct.<...> form so HACS upgraders don't
+    # get duplicated entities with _2 suffixes. Idempotent; safe to run
+    # on every setup.
+    await migrate_unique_ids(hass, entry)
+
     config, need_sign_in = _build_config_dict(entry)
 
     # Register card static path + Lovelace resource early so the card
