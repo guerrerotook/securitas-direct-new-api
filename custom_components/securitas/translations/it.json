@@ -221,16 +221,9 @@
         }
     },
     "issues": {
-        "restart_required_after_migration": {
-            "title": "Riavvio necessario per completare l'aggiornamento a Verisure OWA",
-            "fix_flow": {
-                "step": {
-                    "confirm": {
-                        "title": "Riavviare Home Assistant?",
-                        "description": "Home Assistant verrà riavviato per attivare le voci migrate a Verisure OWA. Dispositivi, entità e personalizzazioni vengono conservati."
-                    }
-                }
-            }
+        "orphan_verisure_owa_directory": {
+            "title": "Cartella verisure_owa obsoleta",
+            "description": "Una cartella obsoleta `verisure_owa` è rimasta in `{path}` da un precedente aggiornamento. Non fa più nulla e può essere eliminata in sicurezza. Eliminala e riavvia Home Assistant per rimuovere questo avviso."
         }
     }
 }

@@ -221,16 +221,9 @@
         }
     },
     "issues": {
-        "restart_required_after_migration": {
-            "title": "Cal reiniciar per completar l'actualització a Verisure OWA",
-            "fix_flow": {
-                "step": {
-                    "confirm": {
-                        "title": "Reiniciar Home Assistant?",
-                        "description": "Es reiniciarà Home Assistant per activar les entrades migrades a Verisure OWA. Els vostres dispositius, entitats i personalitzacions es conserven."
-                    }
-                }
-            }
+        "orphan_verisure_owa_directory": {
+            "title": "Carpeta verisure_owa sobrant",
+            "description": "S'ha trobat una carpeta obsoleta `verisure_owa` a `{path}` d'una actualització anterior. Ja no fa res i es pot esborrar amb seguretat. Elimina-la i reinicia Home Assistant per amagar aquest avís."
         }
     }
 }

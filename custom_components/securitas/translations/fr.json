@@ -221,16 +221,9 @@
         }
     },
     "issues": {
-        "restart_required_after_migration": {
-            "title": "Redémarrage nécessaire pour terminer la mise à niveau Verisure OWA",
-            "fix_flow": {
-                "step": {
-                    "confirm": {
-                        "title": "Redémarrer Home Assistant ?",
-                        "description": "Home Assistant va redémarrer pour activer les entrées migrées vers Verisure OWA. Vos appareils, entités et personnalisations sont préservés."
-                    }
-                }
-            }
+        "orphan_verisure_owa_directory": {
+            "title": "Dossier verisure_owa obsolète",
+            "description": "Un dossier obsolète `verisure_owa` a été laissé dans `{path}` par une mise à jour précédente. Il ne sert plus à rien et peut être supprimé sans risque. Supprimez le dossier et redémarrez Home Assistant pour effacer cette notification."
         }
     }
 }

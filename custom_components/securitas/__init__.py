@@ -618,6 +618,33 @@ def register_service_aliases(hass: HomeAssistant) -> None:
         async_set_service_schema(hass, ALIAS_DOMAIN, service_name, schema)
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001  # pylint: disable=unused-argument
+    """Integration-wide setup, called once regardless of config entries.
+
+    Surfaces a Repairs issue if an orphaned ``custom_components/verisure_owa/``
+    directory is left on disk from a failed v5.0.1 upgrade — the v5.0.1 shim
+    installed under ``custom_components/securitas/`` depended on a
+    ``verisure_owa`` integration directory that HACS never deployed
+    (one-directory-per-repo limit). After upgrading to v5.0.2 the stale
+    ``verisure_owa/`` folder no longer does anything; the Repair tells the
+    user to delete it manually.
+    """
+    orphan = Path(hass.config.path("custom_components", "verisure_owa"))
+    if orphan.is_dir():
+        from homeassistant.helpers import issue_registry as ir
+
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            "orphan_verisure_owa_directory",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="orphan_verisure_owa_directory",
+            translation_placeholders={"path": str(orphan)},
+        )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Establish connection with Verisure."""
     config, need_sign_in = _build_config_dict(entry)
