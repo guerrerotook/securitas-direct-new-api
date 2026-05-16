@@ -1,5 +1,5 @@
 {
-    "domain": "verisure_owa",
+    "domain": "securitas",
     "name": "Verisure OWA",
     "codeowners": [
         "@guerrerotook"
@@ -10,5 +10,5 @@
     "iot_class": "cloud_polling",
     "issue_tracker": "https://github.com/guerrerotook/securitas-direct-new-api/issues",
     "requirements": [],
-    "version": "5.0.1"
+    "version": "5.0.2"
 }
