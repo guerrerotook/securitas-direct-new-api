@@ -349,6 +349,88 @@ class TestVerisureCamera:
         cam.async_write_ha_state.assert_not_called()
 
 
+@pytest.mark.asyncio
+class TestAsyncManualCapture:
+    """VerisureCamera.async_manual_capture backs both the
+    `verisure_owa.capture_image` entity service and the deprecated
+    VerisureCaptureButton.  The button delegates here; the card calls
+    the service which calls here.
+    """
+
+    async def test_delegates_to_hub_capture_image(
+        self, mock_coordinator, mock_hub, installation, camera_device
+    ):
+        from custom_components.securitas.camera import VerisureCamera
+
+        mock_hub.capture_image = AsyncMock(
+            return_value=(
+                b"\xff\xd8",
+                ThumbnailResponse(id_signal="sig", signal_type="16"),
+            )
+        )
+        cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
+
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new=AsyncMock(),
+        ):
+            await cam.async_manual_capture()
+
+        mock_hub.capture_image.assert_awaited_once_with(installation, camera_device)
+
+    async def test_injects_image_request_event_with_server_ids(
+        self, mock_coordinator, mock_hub, installation, camera_device
+    ):
+        """When the capture returns a thumbnail with real server ids, the
+        injected activity event uses them so the activity-log card can
+        fetch the image (id_signal must be real; img=1 follows from that)."""
+        from custom_components.securitas.camera import VerisureCamera
+        from custom_components.securitas.verisure_owa_api.models import ActivityCategory
+
+        mock_hub.capture_image = AsyncMock(
+            return_value=(
+                b"\xff\xd8",
+                ThumbnailResponse(id_signal="real-id", signal_type="16"),
+            )
+        )
+        cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
+
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new=AsyncMock(),
+        ) as mock_inject:
+            await cam.async_manual_capture()
+
+        mock_inject.assert_awaited_once()
+        kwargs = mock_inject.await_args.kwargs
+        assert kwargs["category"] == ActivityCategory.IMAGE_REQUEST
+        assert kwargs["id_signal"] == "real-id"
+        assert kwargs["signal_type"] == "16"
+        assert kwargs["device"] == camera_device.zone_id
+        assert kwargs["device_name"] == camera_device.name
+
+    async def test_no_event_on_capture_error(
+        self, mock_coordinator, mock_hub, installation, camera_device
+    ):
+        """When the capture itself fails, no activity event is injected —
+        the failure was already logged by the hub layer."""
+        from custom_components.securitas.camera import VerisureCamera
+        from custom_components.securitas.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+
+        mock_hub.capture_image = AsyncMock(side_effect=VerisureOwaError("boom"))
+        cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
+
+        with patch(
+            "custom_components.securitas.camera.inject_ha_event",
+            new=AsyncMock(),
+        ) as mock_inject:
+            await cam.async_manual_capture()  # must not raise
+
+        mock_inject.assert_not_awaited()
+
+
 class TestVerisureCaptureButton:
     def test_unique_id(self, mock_hub, installation, camera_device):
         from custom_components.securitas.button import VerisureCaptureButton
@@ -376,26 +458,50 @@ class TestVerisureCaptureButton:
         assert btn.icon == "mdi:camera"
 
     @pytest.mark.asyncio
-    async def test_press_calls_capture(self, mock_hub, installation, camera_device):
+    async def test_press_delegates_to_camera_entity(
+        self, mock_hub, installation, camera_device
+    ):
+        """Button is a thin wrapper around camera.async_manual_capture."""
         from custom_components.securitas.button import VerisureCaptureButton
 
-        # capture_image now returns a (bytes, ThumbnailResponse|None) 2-tuple.
-        mock_hub.capture_image = AsyncMock(return_value=(b"\xff\xd8", None))
-        btn = VerisureCaptureButton(mock_hub, installation, camera_device)
-        await btn.async_press()
-        mock_hub.capture_image.assert_called_once_with(installation, camera_device)
-
-    @pytest.mark.asyncio
-    async def test_press_handles_error(self, mock_hub, installation, camera_device):
-        from custom_components.securitas.button import VerisureCaptureButton
-        from custom_components.securitas.verisure_owa_api.exceptions import (
-            VerisureOwaError,
+        camera_entity = MagicMock()
+        camera_entity.async_manual_capture = AsyncMock()
+        btn = VerisureCaptureButton(
+            mock_hub, installation, camera_device, camera_entity=camera_entity
         )
 
-        mock_hub.capture_image = AsyncMock(side_effect=VerisureOwaError("fail"))
-        btn = VerisureCaptureButton(mock_hub, installation, camera_device)
-        # Should not raise
         await btn.async_press()
+
+        camera_entity.async_manual_capture.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_press_no_op_without_camera_entity(
+        self, mock_hub, installation, camera_device
+    ):
+        """If the button was constructed without a camera reference (legacy
+        callers in tests), the press is a no-op rather than crashing."""
+        from custom_components.securitas.button import VerisureCaptureButton
+
+        btn = VerisureCaptureButton(mock_hub, installation, camera_device)
+        await btn.async_press()  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_press_forwards_context_to_camera_entity(
+        self, mock_hub, installation, camera_device
+    ):
+        from custom_components.securitas.button import VerisureCaptureButton
+
+        camera_entity = MagicMock()
+        camera_entity.async_manual_capture = AsyncMock()
+        btn = VerisureCaptureButton(
+            mock_hub, installation, camera_device, camera_entity=camera_entity
+        )
+        ctx = MagicMock()
+        btn._context = ctx
+
+        await btn.async_press()
+
+        assert camera_entity._context is ctx
 
     def test_device_info_uses_camera_sub_device(
         self, mock_hub, installation, camera_device

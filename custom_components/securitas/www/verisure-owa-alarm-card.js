@@ -426,9 +426,8 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._hass = hass;
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
-    const refreshKey = this._findRefreshEntity() || "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${refreshKey}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -455,24 +454,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._render();
   }
 
-  // ── Find the refresh button entity for this alarm panel ─────────────────────
-  _findRefreshEntity() {
-    if (!this._hass) return null;
-    if (this._config.refresh_entity) return this._config.refresh_entity;
-    // The installation's main device only carries one button — the refresh
-    // button.  Match on device alone; entity_id matching (/refresh/i) broke
-    // on user renames in either language direction.
-    const entities = this._hass.entities;
-    if (!entities) return null;
-    const panelEntry = entities[this._config.entity];
-    if (!panelEntry?.device_id) return null;
-    const match = Object.keys(entities).find(
-      (e) =>
-        e.startsWith("button.") &&
-        entities[e]?.device_id === panelEntry.device_id,
-    );
-    return match || null;
-  }
+  // Refresh formerly required finding a separate button entity on the
+  // panel's device.  The verisure_owa.refresh_alarm entity service now
+  // backs the refresh action directly on the alarm panel entity, so
+  // there's nothing to look up.
 
   // ── Main render ─────────────────────────────────────────────────────────────
   _render() {
@@ -488,7 +473,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
     const state    = stateObj.state;
     const attrs    = stateObj.attributes;
-    const refreshEntity = this._findRefreshEntity();
     const stateCfg = STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
     const cfg      = { icon: stateCfg.icon, color: this._getColor(state), label: _t(lang, STATE_LABEL_KEYS[state] || state) };
     const name     = this._config.name || attrs.friendly_name || this._config.entity;
@@ -528,7 +512,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
               <div class="entity-name">${escHtml(name)}</div>
               <div class="state-row">
                 <div class="state-pill">${cfg.label}</div>
-                ${refreshEntity ? `<button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>` : ""}
+                <button class="refresh-btn" type="button" data-action="refresh" title="${_t(lang, "refresh")}" aria-label="${_t(lang, "refresh")}"><ha-icon icon="mdi:refresh"></ha-icon></button>
               </div>
             </div>
           </div>
@@ -706,20 +690,18 @@ class VerisureOwaAlarmCard extends HTMLElement {
   }
 
   _handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity) {
-    // Refresh
+    // Refresh — call the entity service directly on the alarm panel.
     if (action === "refresh") {
-      const refreshEntity = this._findRefreshEntity();
-      if (refreshEntity) {
-        const btn = this.shadowRoot.querySelector(".refresh-btn");
-        if (btn) btn.classList.add("spinning");
-        this._hass.callService("button", "press", { entity_id: refreshEntity })
-          .finally(() => {
-            setTimeout(() => {
-              const b = this.shadowRoot?.querySelector(".refresh-btn");
-              if (b) b.classList.remove("spinning");
-            }, 2000);
-          });
-      }
+      const btn = this.shadowRoot.querySelector(".refresh-btn");
+      if (btn) btn.classList.add("spinning");
+      this._hass
+        .callService("verisure_owa", "refresh_alarm", { entity_id: entity })
+        .finally(() => {
+          setTimeout(() => {
+            const b = this.shadowRoot?.querySelector(".refresh-btn");
+            if (b) b.classList.remove("spinning");
+          }, 2000);
+        });
       return;
     }
     // Force-arm / cancel

@@ -235,7 +235,6 @@ class VerisureOwaCameraCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._config = {};
     this._hass = null;
-    this._captureEntityId = null;
     this._fullEntityId = null;
     this._refreshing = false;
     this._fallbackTimer = null;
@@ -254,7 +253,6 @@ class VerisureOwaCameraCard extends HTMLElement {
     const prevToken = this._hass?.states[this._config.entity]?.attributes?.access_token;
     const newToken = hass?.states[this._config.entity]?.attributes?.access_token;
     this._hass = hass;
-    this._captureEntityId = this._findCaptureButton(hass, this._config.entity);
     this._fullEntityId = this._findFullEntity(hass, this._config.entity);
     // Clear spinner when the image token rotates (new image available) and
     // the capture is no longer in progress (capturing=false means final image).
@@ -293,7 +291,6 @@ class VerisureOwaCameraCard extends HTMLElement {
     const name = this._config.name || deviceName || stateObj.attributes.friendly_name || entityId;
     const timestamp = stateObj.attributes.image_timestamp;
     const { relative, absolute } = this._formatTimestamp(timestamp, lang);
-    const hasCapture = !!this._captureEntityId;
     // Only use the full entity if it has a real image (non-null timestamp).
     // PIR cameras may not support full-resolution images.
     const fullState = this._fullEntityId ? this._hass?.states[this._fullEntityId] : null;
@@ -371,7 +368,7 @@ class VerisureOwaCameraCard extends HTMLElement {
           <span class="name">${escHtml(name)}</span>
           ${timestamp ? `<span class="timestamp" title="${escHtml(absolute)}">${escHtml(relative)}</span>` : ""}
         </div>
-        <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn" ${hasCapture ? "" : "hidden"}>
+        <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn">
           <ha-icon icon="mdi:refresh"></ha-icon>
         </button>
       </div>
@@ -385,7 +382,7 @@ class VerisureOwaCameraCard extends HTMLElement {
 
     // Refresh button
     const refreshBtn = this.shadowRoot.getElementById("refresh-btn");
-    if (refreshBtn && !refreshBtn.hasAttribute("hidden")) {
+    if (refreshBtn) {
       refreshBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         this._handleRefresh();
@@ -418,14 +415,14 @@ class VerisureOwaCameraCard extends HTMLElement {
 
   async _handleRefresh() {
     clearTimeout(this._fallbackTimer);
-    if (!this._captureEntityId || this._refreshing) return;
+    if (this._refreshing) return;
     this._refreshing = true;
     // Update just the button class — avoid full re-render which destroys the
     // focused element and causes the page to jump to the top.
     this.shadowRoot.getElementById("refresh-btn")?.classList.add("spinning");
     try {
-      await this._hass.callService("button", "press", {
-        entity_id: this._captureEntityId,
+      await this._hass.callService("verisure_owa", "capture_image", {
+        entity_id: this._config.entity,
       });
     } finally {
       // Fallback: clear spinner after 15s if no token rotation arrives
@@ -457,28 +454,20 @@ class VerisureOwaCameraCard extends HTMLElement {
     return index;
   }
 
-  // Camera sub-device only ever holds: the thumbnail camera entity, the
-  // full-resolution camera entity, and the capture button.  We can find
-  // either sibling by device alone — no entity_id / icon string matching
-  // (those break on user renames or HA mdi mapping changes).
-  _findSiblingOnDevice(hass, cameraEntityId, domainPrefix) {
+  // Camera sub-device holds exactly two camera entities (thumbnail +
+  // full); the "full" one is the other camera on the same device.  No
+  // entity_id / unique_id pattern matching needed — both names break
+  // on renames or HA's auto-disambiguation.
+  _findFullEntity(hass, cameraEntityId) {
     if (!hass?.entities || !cameraEntityId) return null;
     const cameraEntry = hass.entities[cameraEntityId];
     if (!cameraEntry?.device_id) return null;
     const bucket = this._entitiesByDeviceId(hass).get(cameraEntry.device_id) || [];
     for (const eid of bucket) {
       if (eid === cameraEntityId) continue;
-      if (eid.startsWith(domainPrefix)) return eid;
+      if (eid.startsWith("camera.")) return eid;
     }
     return null;
-  }
-
-  _findCaptureButton(hass, cameraEntityId) {
-    return this._findSiblingOnDevice(hass, cameraEntityId, "button.");
-  }
-
-  _findFullEntity(hass, cameraEntityId) {
-    return this._findSiblingOnDevice(hass, cameraEntityId, "camera.");
   }
 
   getCardSize() { return 3; }

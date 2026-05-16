@@ -7804,3 +7804,74 @@ class TestCombinedPanelRegistration:
         panel = panels["654321"]
         assert isinstance(panel, CombinedVerisureOwaAlarmPanel)
         assert panel.installation.number == "654321"
+
+
+class TestAsyncManualRefresh:
+    """Tests for BaseVerisureOwaAlarmPanel.async_manual_refresh.
+
+    This is the canonical implementation of "refresh this alarm panel"
+    that backs both the deprecated VerisureRefreshButton and the new
+    `verisure_owa.refresh_alarm` entity service.  The button delegates
+    here; the card calls the service which calls here.
+    """
+
+    async def test_calls_refresh_alarm_status_on_client(self):
+        from custom_components.securitas.verisure_owa_api.models import OperationStatus
+
+        alarm = make_alarm()
+        status = OperationStatus(operation_status="OK", protom_response="T", status="")
+        alarm._client.refresh_alarm_status = AsyncMock(return_value=status)
+
+        await alarm.async_manual_refresh()
+
+        alarm._client.refresh_alarm_status.assert_awaited_once_with(alarm._installation)
+
+    async def test_updates_protom_response_on_success(self):
+        from custom_components.securitas.verisure_owa_api.models import OperationStatus
+
+        alarm = make_alarm()
+        status = OperationStatus(operation_status="OK", protom_response="T", status="")
+        alarm._client.refresh_alarm_status = AsyncMock(return_value=status)
+
+        await alarm.async_manual_refresh()
+
+        assert alarm._client.client.protom_response == "T"
+
+    async def test_clears_refresh_failed_on_success(self):
+        from custom_components.securitas.verisure_owa_api.models import OperationStatus
+
+        alarm = make_alarm()
+        # Pre-populate the failed flag so we can see it cleared.
+        alarm._attr_extra_state_attributes["refresh_failed"] = True
+        status = OperationStatus(operation_status="OK", protom_response="T", status="")
+        alarm._client.refresh_alarm_status = AsyncMock(return_value=status)
+
+        await alarm.async_manual_refresh()
+
+        assert "refresh_failed" not in alarm._attr_extra_state_attributes
+
+    async def test_sets_refresh_failed_on_timeout(self):
+        from custom_components.securitas.verisure_owa_api.exceptions import (
+            OperationTimeoutError,
+        )
+
+        alarm = make_alarm()
+        alarm._client.refresh_alarm_status = AsyncMock(
+            side_effect=OperationTimeoutError("timed out")
+        )
+
+        await alarm.async_manual_refresh()
+
+        assert alarm._attr_extra_state_attributes.get("refresh_failed") is True
+
+    async def test_sets_waf_blocked_on_403(self):
+        alarm = make_alarm()
+        # _async_notify routes through hass.services.async_call which must
+        # be awaitable in our test context.
+        alarm.hass.services.async_call = AsyncMock()
+        err = VerisureOwaError("blocked", http_status=403)
+        alarm._client.refresh_alarm_status = AsyncMock(side_effect=err)
+
+        await alarm.async_manual_refresh()
+
+        assert alarm._attr_extra_state_attributes.get("waf_blocked") is True

@@ -86,12 +86,12 @@ async def _discover_cameras(
             camera_add is not None,
             button_add is not None,
         )
+        thumbnail_entities = [
+            VerisureCamera(camera_coord, hub, installation, cam) for cam in cameras
+        ]
         if camera_add:
             camera_add(
-                [
-                    VerisureCamera(camera_coord, hub, installation, cam)
-                    for cam in cameras
-                ]
+                thumbnail_entities
                 + [
                     VerisureCameraFull(camera_coord, hub, installation, cam)
                     for cam in cameras
@@ -100,7 +100,10 @@ async def _discover_cameras(
             )
         if button_add:
             button_add(
-                [VerisureCaptureButton(hub, installation, cam) for cam in cameras],
+                [
+                    VerisureCaptureButton(hub, installation, cam, camera_entity=thumb)
+                    for cam, thumb in zip(cameras, thumbnail_entities, strict=True)
+                ],
                 True,
             )
 
