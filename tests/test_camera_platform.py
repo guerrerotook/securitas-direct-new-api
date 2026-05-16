@@ -18,7 +18,9 @@ from custom_components.securitas.entity import camera_device_info
 class TestCameraDeviceInfo:
     def test_identifiers_include_zone_id(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info[
+            "identifiers"
+        ]
 
     def test_name_is_camera_device_name(self, installation, camera_device):
         info = camera_device_info(installation, camera_device)
@@ -252,7 +254,9 @@ class TestVerisureCamera:
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         info = cam.device_info
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info[
+            "identifiers"
+        ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
 
     def test_extra_state_attributes_timestamp(
@@ -401,7 +405,9 @@ class TestVerisureCaptureButton:
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         info = btn.device_info
-        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info["identifiers"]
+        assert (DOMAIN, "v4_securitas_direct.2654190_camera_QR10") in info[
+            "identifiers"
+        ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
 
 
