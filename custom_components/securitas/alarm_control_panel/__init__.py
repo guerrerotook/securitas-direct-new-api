@@ -331,3 +331,11 @@ async def async_setup_entry(
         {},
         "async_force_arm_cancel",
     )
+    # Authoritative round-trip refresh — supersedes the deprecated
+    # VerisureRefreshButton entity.  Cards call this directly on the
+    # configured alarm panel entity instead of looking up the button.
+    platform.async_register_entity_service(
+        "refresh_alarm",
+        {},
+        "async_manual_refresh",
+    )

@@ -10,14 +10,19 @@ from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+    async_get_current_platform,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, SIGNAL_CAMERA_STATE, VerisureHub
 from .coordinators import CameraCoordinator
 from .entity import camera_device_info
+from .events import inject_ha_event
 from .verisure_owa_api import Installation
-from .verisure_owa_api.models import CameraDevice
+from .verisure_owa_api.exceptions import VerisureOwaError
+from .verisure_owa_api.models import ActivityCategory, CameraDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +61,15 @@ async def async_setup_entry(
     """
     entry_data = hass.data[DOMAIN][entry.entry_id]
     entry_data["camera_add_entities"] = async_add_entities
+    # Request a fresh capture from any camera entity — supersedes the
+    # deprecated VerisureCaptureButton.  Registered on the platform so
+    # it's available regardless of when individual camera entities are
+    # added (camera discovery runs asynchronously after startup).
+    async_get_current_platform().async_register_entity_service(
+        "capture_image",
+        {},
+        "async_manual_capture",
+    )
 
 
 class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
@@ -130,6 +144,38 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
                 self._installation.number, self._camera_device.zone_id
             )
         return attrs
+
+    async def async_manual_capture(self) -> None:
+        """Request a new image capture and inject the activity event.
+
+        Backs both the `verisure_owa.capture_image` entity service and the
+        deprecated VerisureCaptureButton.  Errors from the hub layer are
+        swallowed (already logged there) — we just skip the event injection.
+        """
+        try:
+            _, thumbnail = await self._client.capture_image(
+                self._installation, self._camera_device
+            )
+        except VerisureOwaError as err:
+            _LOGGER.warning(
+                "Failed to capture image from %s: %s",
+                self._camera_device.name,
+                err,
+            )
+            return
+        id_signal = thumbnail.id_signal if thumbnail else None
+        signal_type = thumbnail.signal_type if thumbnail else None
+        await inject_ha_event(
+            self.hass,
+            self._installation,
+            category=ActivityCategory.IMAGE_REQUEST,
+            alias="Image request",
+            device=self._camera_device.zone_id,
+            device_name=self._camera_device.name,
+            context=self._context,
+            id_signal=id_signal,
+            signal_type=signal_type,
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:

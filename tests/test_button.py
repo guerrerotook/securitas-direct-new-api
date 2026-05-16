@@ -1,20 +1,13 @@
 """Tests for button entity (VerisureRefreshButton)."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.button import (
     VerisureRefreshButton,
     async_setup_entry,
 )
 from custom_components.securitas import DOMAIN
-from custom_components.securitas.verisure_owa_api.exceptions import (
-    OperationTimeoutError,
-    VerisureOwaError,
-)
-from custom_components.securitas.verisure_owa_api.models import (
-    OperationStatus,
-)
 
 from tests.conftest import (
     make_installation,
@@ -96,92 +89,72 @@ class TestVerisureRefreshButtonInit:
 
 @pytest.mark.asyncio
 class TestVerisureRefreshButtonAsyncPress:
-    """Tests for VerisureRefreshButton.async_press."""
+    """VerisureRefreshButton.async_press is a deprecated thin wrapper that
+    delegates to alarm_entity.async_manual_refresh.  The full refresh
+    behaviour is exercised in TestAsyncManualRefresh in test_alarm_panel.py
+    — here we only verify the delegation contract.
+    """
 
-    async def test_calls_refresh_alarm_status(self):
-        """async_press calls hub.refresh_alarm_status for authoritative round-trip."""
+    async def test_delegates_to_alarm_entity_manual_refresh(self):
         button = make_button()
-        status = OperationStatus(operation_status="OK", protom_response="T", status="")
-        button._client.refresh_alarm_status = AsyncMock(return_value=status)
-        button.hass.data = {DOMAIN: {"alarm_entities": {}}}  # type: ignore[attr-defined]
-
-        await button.async_press()
-
-        button._client.refresh_alarm_status.assert_awaited_once_with(
-            button._installation
-        )
-
-    async def test_updates_protom_response_on_success(self):
-        """async_press updates client.protom_response from the result."""
-        button = make_button()
-        status = OperationStatus(operation_status="OK", protom_response="T", status="")
-        button._client.refresh_alarm_status = AsyncMock(return_value=status)
-        button.hass.data = {DOMAIN: {"alarm_entities": {}}}  # type: ignore[attr-defined]
-
-        await button.async_press()
-
-        assert button._client.client.protom_response == "T"
-
-    async def test_clears_refresh_failed_on_success(self):
-        """async_press clears refresh_failed on the alarm entity."""
-        button = make_button()
-        status = OperationStatus(operation_status="OK", protom_response="T", status="")
-        button._client.refresh_alarm_status = AsyncMock(return_value=status)
         alarm_entity = MagicMock()
+        alarm_entity.async_manual_refresh = AsyncMock()
         button.hass.data = {  # type: ignore[attr-defined]
             DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
         }
 
         await button.async_press()
 
-        alarm_entity._set_refresh_failed.assert_called_with(False)
-        alarm_entity.async_write_ha_state.assert_called()
+        alarm_entity.async_manual_refresh.assert_awaited_once_with()
 
-    async def test_sets_refresh_failed_on_timeout(self):
-        """async_press sets refresh_failed on timeout."""
+    async def test_forwards_context_to_alarm_entity(self):
+        """The HA user/context that pressed the button is surfaced to the
+        alarm entity so downstream activity-log injection attributes the
+        action correctly."""
         button = make_button()
-        button._client.refresh_alarm_status = AsyncMock(
-            side_effect=OperationTimeoutError("timed out")
-        )
+        ctx = MagicMock()
+        button._context = ctx
         alarm_entity = MagicMock()
+        alarm_entity.async_manual_refresh = AsyncMock()
         button.hass.data = {  # type: ignore[attr-defined]
             DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
         }
 
         await button.async_press()
 
-        alarm_entity._set_refresh_failed.assert_called_with(True)
+        assert alarm_entity._context is ctx
 
-    async def test_sets_waf_blocked_on_403(self):
-        """async_press sets waf_blocked on 403 error and triggers a translated rate-limit notification."""
+    async def test_logs_deprecation_warning(self, caplog):
         button = make_button()
-        err = VerisureOwaError("blocked", http_status=403)
-        button._client.refresh_alarm_status = AsyncMock(side_effect=err)
         alarm_entity = MagicMock()
+        alarm_entity.async_manual_refresh = AsyncMock()
         button.hass.data = {  # type: ignore[attr-defined]
             DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
         }
 
-        with patch(
-            "custom_components.securitas.button._async_notify",
-            AsyncMock(),
-        ) as mock_async_notify:
+        import logging
+
+        with caplog.at_level(
+            logging.WARNING, logger="custom_components.securitas.button"
+        ):
             await button.async_press()
 
-        alarm_entity._set_waf_blocked.assert_called_with(True)
-        mock_async_notify.assert_awaited_once_with(
-            button.hass,
-            f"rate_limited_{button._installation.number}",
-            "rate_limited",
-        )
+        assert any("deprecated" in r.message.lower() for r in caplog.records)
+        assert any("refresh_alarm" in r.message for r in caplog.records)
+
+    async def test_no_op_when_alarm_entity_missing(self):
+        """If the alarm entity hasn't been registered yet (race during
+        startup or after config-entry unload), the press is a no-op."""
+        button = make_button()
+        button.hass.data = {DOMAIN: {"alarm_entities": {}}}  # type: ignore[attr-defined]
+
+        await button.async_press()  # must not raise
 
     async def test_no_crash_when_hass_is_none(self):
-        """async_press does not crash when hass is None."""
         button = make_button()
         button.hass = None
 
-        # Should not raise
-        await button.async_press()
+        await button.async_press()  # must not raise
 
 
 # ===========================================================================

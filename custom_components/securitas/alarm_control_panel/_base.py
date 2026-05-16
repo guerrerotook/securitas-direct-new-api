@@ -33,6 +33,7 @@ from .. import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _async_notify,
     _notify,
 )
 from ..const import (
@@ -67,6 +68,7 @@ from ..verisure_owa_api import (
     VerisureOwaState,
     is_proto_letter,
 )
+from ..verisure_owa_api.exceptions import OperationTimeoutError
 from ..verisure_owa_api.__version__ import __url__ as _PROJECT_URL
 from ..verisure_owa_api.command_resolver import (
     AlarmState,
@@ -721,6 +723,57 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         the resolver. No-op on the Combined Main panel where features are
         driven by the user's state mapping rather than panel capabilities.
         """
+
+    async def async_manual_refresh(self) -> None:
+        """Full alarm-status refresh via CheckAlarm + poll.
+
+        Authoritative round-trip with the panel, not just a lightweight
+        xSStatus read.  Backs both the `verisure_owa.refresh_alarm`
+        entity service and the deprecated VerisureRefreshButton.
+        """
+        try:
+            alarm_status = await self._client.refresh_alarm_status(self._installation)
+            self._client.client.protom_response = alarm_status.protom_response
+            _LOGGER.info(
+                "Status of the Alarm via API: %s installation id: %s",
+                alarm_status.protom_response,
+                self._installation.number,
+            )
+            self._set_refresh_failed(False)
+            self.async_write_ha_state()
+            self.async_schedule_update_ha_state(force_refresh=True)
+        except OperationTimeoutError as err:
+            _LOGGER.warning("Refresh timed out for %s", self._installation.number)
+            self._set_refresh_failed(True)
+            self.async_write_ha_state()
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.COMMUNICATION_FAILED,
+                alias=f"Refresh timed out: {err}",
+                context=self._context,
+            )
+        except VerisureOwaError as err:
+            _LOGGER.error(
+                "Error refreshing alarm status for %s: %s",
+                self._installation.number,
+                err.log_detail(),
+            )
+            if getattr(err, "http_status", None) == 403:
+                await _async_notify(
+                    self.hass,
+                    f"rate_limited_{self._installation.number}",
+                    "rate_limited",
+                )
+                self._set_waf_blocked(True)
+                self.async_write_ha_state()
+            await inject_ha_event(
+                self.hass,
+                self._installation,
+                category=ActivityCategory.COMMUNICATION_FAILED,
+                alias=f"Refresh failed: {err}",
+                context=self._context,
+            )
 
     def _set_refresh_failed(self, failed: bool) -> None:
         """Track whether the last manual refresh timed out."""

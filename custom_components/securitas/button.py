@@ -1,21 +1,23 @@
-"""Support for Verisure OWA refresh and capture buttons."""
+"""Support for Verisure OWA refresh and capture buttons (both deprecated).
+
+These button entities are kept so existing automations and Lovelace
+button cards continue to work.  New code paths (cards, services) use
+the `verisure_owa.refresh_alarm` and `verisure_owa.capture_image`
+entity services on the alarm panel / camera entities directly.
+"""
 
 import logging
+from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import DOMAIN, VerisureDevice, VerisureHub, _async_notify
+from . import DOMAIN, VerisureDevice, VerisureHub
 from .entity import VerisureEntity, camera_device_info
-from .events import inject_ha_event
-from .verisure_owa_api import (
-    Installation,
-    VerisureOwaError,
-)
-from .verisure_owa_api.exceptions import OperationTimeoutError
-from .verisure_owa_api.models import ActivityCategory, CameraDevice
+from .verisure_owa_api import Installation
+from .verisure_owa_api.models import CameraDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +41,13 @@ async def async_setup_entry(
 
 
 class VerisureRefreshButton(VerisureEntity, ButtonEntity):
-    """Representation of a Verisure OWA refresh button."""
+    """Verisure OWA refresh button — DEPRECATED.
+
+    Superseded by the ``verisure_owa.refresh_alarm`` entity service on
+    the alarm panel entity, which the alarm card now calls directly.
+    Kept so existing automations and Lovelace button cards continue to
+    work; will be removed in a future release.
+    """
 
     _attr_has_entity_name = True
     _attr_name = "Refresh"
@@ -65,71 +73,37 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
         return alarm_entities.get(self._installation.number)
 
     async def async_press(self) -> None:
-        """Full alarm status refresh via CheckAlarm + poll.
+        """Delegate to the alarm panel's async_manual_refresh.
 
-        This triggers an authoritative round-trip with the panel, not just
-        a lightweight xSStatus read.
+        Logs a one-line deprecation notice; automations and button cards
+        that still call ``button.press`` continue to work.
         """
+        _LOGGER.warning(
+            "%s: button.press is deprecated — call "
+            "verisure_owa.refresh_alarm on the alarm_control_panel "
+            "entity instead.  This button will be removed in a future release.",
+            self.entity_id or self._attr_unique_id,
+        )
         if self.hass is None:
             return
-        try:
-            alarm_status = await self._client.refresh_alarm_status(self._installation)
-
-            self._client.client.protom_response = alarm_status.protom_response
-
-            _LOGGER.info(
-                "Status of the Alarm via API: %s installation id: %s",
-                alarm_status.protom_response,
-                self._installation.number,
-            )
-
-            alarm_entity = self._get_alarm_entity()
-            if alarm_entity is not None:
-                alarm_entity._set_refresh_failed(False)  # noqa: SLF001  # pylint: disable=protected-access
-                alarm_entity.async_write_ha_state()
-                alarm_entity.async_schedule_update_ha_state(force_refresh=True)
-
-        except OperationTimeoutError as err:
-            _LOGGER.warning("Refresh timed out for %s", self._installation.number)
-            alarm_entity = self._get_alarm_entity()
-            if alarm_entity is not None:
-                alarm_entity._set_refresh_failed(True)  # noqa: SLF001  # pylint: disable=protected-access
-                alarm_entity.async_write_ha_state()
-            await inject_ha_event(
-                self.hass,
-                self._installation,
-                category=ActivityCategory.COMMUNICATION_FAILED,
-                alias=f"Refresh timed out: {err}",
-                context=self._context,
-            )
-
-        except VerisureOwaError as err:
-            _LOGGER.error(
-                "Error refreshing alarm status for %s: %s",
-                self._installation.number,
-                err.log_detail(),
-            )
-            if getattr(err, "http_status", None) == 403:
-                await _async_notify(
-                    self.hass,
-                    f"rate_limited_{self._installation.number}",
-                    "rate_limited",
-                )
-                alarm_entity = self._get_alarm_entity()
-                if alarm_entity is not None:
-                    alarm_entity._set_waf_blocked(True)  # noqa: SLF001  # pylint: disable=protected-access
-                    alarm_entity.async_write_ha_state()
-            await inject_ha_event(
-                self.hass,
-                self._installation,
-                category=ActivityCategory.COMMUNICATION_FAILED,
-                alias=f"Refresh failed: {err}",
-                context=self._context,
-            )
+        alarm_entity = self._get_alarm_entity()
+        if alarm_entity is None:
+            return
+        # Surface the button's HA context to the alarm entity so the
+        # downstream inject_ha_event call attributes the action to the
+        # user who pressed the button.
+        alarm_entity._context = self._context  # noqa: SLF001  # pylint: disable=protected-access
+        await alarm_entity.async_manual_refresh()
 
 
 class VerisureCaptureButton(VerisureEntity, ButtonEntity):
-    """Button to capture a new image from a Verisure camera."""
+    """Capture button for a Verisure camera — DEPRECATED.
+
+    Superseded by the ``verisure_owa.capture_image`` entity service on
+    the camera entity, which the camera card now calls directly.
+    Kept so existing automations and Lovelace button cards continue to
+    work; will be removed in a future release.
+    """
 
     _attr_icon = "mdi:camera"
     _attr_has_entity_name = True
@@ -140,43 +114,33 @@ class VerisureCaptureButton(VerisureEntity, ButtonEntity):
         client: VerisureHub,
         installation: Installation,
         camera_device: CameraDevice,
+        *,
+        camera_entity: Any | None = None,
     ) -> None:
-        """Initialize the capture button."""
+        """Initialize the capture button.
+
+        ``camera_entity`` is the matching VerisureCamera (thumbnail mode)
+        the button delegates to.  Optional only so legacy tests that
+        instantiate the button without one continue to work — production
+        wiring in discovery.py always supplies it.
+        """
         super().__init__(installation, client)
         self._camera_device = camera_device
+        self._camera_entity = camera_entity
         self._attr_unique_id = (
             f"v4_securitas_direct.{installation.number}_capture_{camera_device.zone_id}"
         )
         self._attr_device_info = camera_device_info(installation, camera_device)
 
     async def async_press(self) -> None:
-        """Request a new image capture."""
-        # Capture the calling user's context up-front — HA expires
-        # `self._context` ~1 s after async_set_context.
-        user_context = self._context
-        try:
-            _, thumbnail = await self._client.capture_image(
-                self._installation, self._camera_device
-            )
-        except VerisureOwaError as err:
-            _LOGGER.warning(
-                "Failed to capture image from %s: %s",
-                self._camera_device.name,
-                err,
-            )
-            return
-        # Use the real server-side ids (when available) so the card's
-        # follow-up xSGetPhotoImages fetch resolves to this capture.
-        id_signal = thumbnail.id_signal if thumbnail else None
-        signal_type = thumbnail.signal_type if thumbnail else None
-        await inject_ha_event(
-            self.hass,
-            self._installation,
-            category=ActivityCategory.IMAGE_REQUEST,
-            alias="Image request",
-            device=self._camera_device.zone_id,
-            device_name=self._camera_device.name,
-            context=user_context,
-            id_signal=id_signal,
-            signal_type=signal_type,
+        """Delegate to the camera entity's async_manual_capture."""
+        _LOGGER.warning(
+            "%s: button.press is deprecated — call "
+            "verisure_owa.capture_image on the camera entity instead.  "
+            "This button will be removed in a future release.",
+            self.entity_id or self._attr_unique_id,
         )
+        if self._camera_entity is None:
+            return
+        self._camera_entity._context = self._context  # noqa: SLF001  # pylint: disable=protected-access
+        await self._camera_entity.async_manual_capture()
