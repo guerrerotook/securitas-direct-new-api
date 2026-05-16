@@ -1,6 +1,7 @@
 """Constants for the Verisure OWA integration."""
 
 import hashlib
+import json
 from pathlib import Path
 
 from homeassistant.const import Platform
@@ -14,18 +15,31 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:8]
 
 
+def _integration_version() -> str:
+    """Read the integration version from manifest.json.
+
+    Bundled into card URLs so every release shifts the cache key even
+    when a card's bytes are unchanged — protects against
+    browser/Lovelace-resource caches that latched the previous URL.
+    """
+    with open(Path(__file__).parent / "manifest.json", encoding="utf-8") as f:
+        return json.load(f)["version"]
+
+
 _WWW = Path(__file__).parent / "www"
+_VERSION = _integration_version()
+
+
+def _card_url(filename: str) -> str:
+    return f"/verisure-owa-panel/{filename}?v={_file_hash(_WWW / filename)}-{_VERSION}"
+
+
 CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-alarm-card.js"
-CARD_URL = f"{CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-alarm-card.js')}"
+CARD_URL = _card_url("verisure-owa-alarm-card.js")
 CAMERA_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-camera-card.js"
-CAMERA_CARD_URL = (
-    f"{CAMERA_CARD_BASE_URL}?v={_file_hash(_WWW / 'verisure-owa-camera-card.js')}"
-)
+CAMERA_CARD_URL = _card_url("verisure-owa-camera-card.js")
 ACTIVITY_LOG_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-activity-log-card.js"
-ACTIVITY_LOG_CARD_URL = (
-    f"{ACTIVITY_LOG_CARD_BASE_URL}"
-    f"?v={_file_hash(_WWW / 'verisure-owa-activity-log-card.js')}"
-)
+ACTIVITY_LOG_CARD_URL = _card_url("verisure-owa-activity-log-card.js")
 
 CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
