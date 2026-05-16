@@ -4,7 +4,47 @@ The most recent release is at the top; append new entries above the previous one
 
 ## v5.0.2
 
+### New: refresh & capture as entity services
+
+The refresh button (on alarm panels) and capture button (on cameras) used to be plain HA `button.*` entities that the alarm and camera cards had to *discover* on the device, then trigger via `button.press`. That discovery was fragile — HA entity_id disambiguation (`button.refresh_2`), user renames, or icon changes broke the lookup. The bundled cards now call entity services directly on the configured panel / camera entity:
+
+- **`verisure_owa.refresh_alarm`** (target: `alarm_control_panel`) — supersedes pressing `VerisureRefreshButton`. Same authoritative `CheckAlarm` + status-poll round-trip, same `refresh_failed` / `waf_blocked` semantics, same `verisure_owa_activity` event injection on failure.
+- **`verisure_owa.capture_image`** (target: `camera`) — supersedes pressing `VerisureCaptureButton`. Same fresh-image wait, same `verisure_owa_activity` event injection with the real server `id_signal` so the activity-log card can fetch the photo.
+
+These services exist only under the `verisure_owa.*` domain — they were never released under `securitas.*` so there's no backwards-compat twin.
+
+`VerisureRefreshButton` and `VerisureCaptureButton` remain as deprecated thin delegating wrappers so existing automations and Lovelace button cards continue to work; pressing them logs a one-line deprecation warning and will be removed in a future release.
+
+### Activity-log services no longer dual-registered
+
+`refresh_activity_log` and `fetch_activity_image` are now registered only under `verisure_owa.*` (previously also as `securitas.refresh_activity_log` / `securitas.fetch_activity_image` for symmetry with the older services). These two services are v5+ only, so there's no pre-v5 automation to keep working. If you scripted against the `securitas.*` form, switch to `verisure_owa.*`. `verisure_owa.force_arm` and `verisure_owa.force_arm_cancel` keep their dual `securitas.*` aliases — those pre-date v5.
+
+### New event category: `communication_restored`
+
+Activity-log type code `3121` ("Estado de las comunicaciones" on Spanish firmware) — fires when the panel's link to the central / website returns to normal after a period of being unreachable. Mirrors the existing `communication_failed` category. New icon (`mdi:lan-connect`) + success-green color in the activity-log card, with translations in all seven supported locales.
+
 ### Bug fixes
+
+- **Camera refresh button: spinner stuck for 15s after the API succeeded.** The hub cleared the `capturing` flag in a `finally` block AFTER the coordinator update had already written entity state, so the published state kept reporting `capturing=true` until the next 30-min poll. The camera card's spinner-clear condition never fired and the spinner only cleared via the 15s fallback timer. The flag is now cleared *before* the state-writing coordinator update.
+
+- **Camera refresh button: returned image was sometimes the previous frame.** `xSGetThumbnail` immediately after the alarm-manager's `photo-request.success` could return a frame timestamped well before the request — the CDN serves the previous frame for tens of seconds after capture acknowledges. The client now pre-fetches a baseline thumbnail at click time and then polls until something strictly newer is published (5s cadence, 30s budget). Lexicographic string compare on the server's ISO timestamp — no timezone math needed since both come from the same server clock.
+
+- **Camera refresh button: stale-image polling cadence was hammering the API.** Pre-v5 the image-status poll used `max(5, delay_check_operation)` — a hard 5s minimum. A refactor on 2026-04-09 (the unification onto a generic `_poll_operation`) silently dropped that floor and let the integration-wide `poll_delay` (typically 2s, tuned for arm/disarm UX) drive image-status polling too, producing ~40 status calls per ~80s capture and risking WAF rate-limiting. Restored the 5s minimum for image capture without changing arm/disarm cadence.
+
+- **Camera coordinator overwrote a freshly-captured frame with a stale one.** Race between the user clicking capture and a concurrent in-flight 30-min coordinator poll: the poll started before the capture (snapshotting `self.data`), the capture wrote a fresh thumbnail+image to `self.data`, then the poll's `_fetch_thumbnails` returned an older frame for the same zone and overwrote. The poll now re-reads `self.data` after fetching and merges per-zone — a fetched thumbnail strictly older than what's currently stored is dropped in favour of the existing one, and its corresponding full image is preserved.
+
+- **Activity log: HA-injected image-request rows didn't show the image.** The activity-log card's lazy image fetch is gated on the event's `img=1` flag; HA-injected `IMAGE_REQUEST` events were leaving `img=0`. With this and the fresh-frame fix above, the injected event now uses the real server `id_signal` AND sets `img=1`, so the activity-log card renders the captured photo inline. Same fix dedupes the polled echo of the same event (it now matches the injected event's real id).
+
+- **Camera card editor: full-image variants appeared in the entity picker.** The picker was filtering by entity_id suffix (`endsWith("_full_image")`), which missed HA's disambiguation suffix (`camera.salon_full_image_2`) and any user-renamed entities. Now filters via the entity registry's platform + entity_id regex.
+
+- **Stale `xSRefreshLogin response is None` log message obscured Verisure's reauth signal.** The integration logged "response is None" even when the GraphQL response carried a perfectly readable `Invalid Session (err=60067)` in `errors[]`. `_extract_response_data` now surfaces the first GraphQL error's message + err code in the raised exception (`xSRefreshLogin failed: Invalid Session (err=60067)`), so reauth failures are debuggable from logs alone.
+
+### Internal cleanups
+
+- All in-card lookups that previously walked the entity_id space looking for "the right button" or "the right full-image entity" now match on `device_id` + entity-domain prefix. Each Verisure sub-device only ever holds the expected entities (camera sub-device: thumbnail + full + capture button; installation device: alarm panel + refresh button + activity log sensor), so device matching alone is sufficient. Survives any future HA entity_id-generation change.
+- Drop the deprecated `hass` positional argument to `async_extract_entity_ids` (removed in HA Core 2026.10).
+
+### HACS bug fix
 
 - **HACS upgrade from any prior version now works.** v5.0.1 introduced a second `custom_components/verisure_owa/` directory alongside the legacy `custom_components/securitas/` shim. HACS only ever manages one directory per repository ([hacs/integration#385](https://github.com/hacs/integration/issues/385)) — HACS users only got the shim, the new directory was never deployed, and Home Assistant refused to load the `securitas` integration because its declared dependency `verisure_owa` was missing. v5.0.2 collapses everything back into a single `custom_components/securitas/` directory and stays on the `securitas` domain. The full domain rename is deferred until it can ship via a separate HACS repository; see [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md).
 
