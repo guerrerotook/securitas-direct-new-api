@@ -120,9 +120,12 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const entityForm = this.shadowRoot.getElementById("entity-form");
-    if (entityForm) entityForm.hass = hass;
-    const fullForm = this.shadowRoot.getElementById("full-entity-form");
-    if (fullForm) fullForm.hass = hass;
+    if (entityForm) {
+      entityForm.hass = hass;
+      // Re-compute schema so the exclude list reflects the current entity
+      // registry (newly-added cameras land in the picker without re-render).
+      entityForm.schema = this._buildEntitySchema();
+    }
   }
 
   setConfig(config) {
@@ -138,6 +141,20 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
     }
   }
 
+  _buildEntitySchema() {
+    // Hide the per-camera full-resolution entities — they share the same
+    // device as the thumbnail entity and aren't meant to be picked as the
+    // card's primary entity.  Pattern matches camera.py's _attr_name for
+    // VerisureCameraFull ("Full Image"), which HA slugifies to a
+    // "_full_image" entity_id suffix.
+    const fullImageIds = Object.keys(this._hass?.states || {}).filter(
+      (e) => e.startsWith("camera.") && e.endsWith("_full_image"),
+    );
+    const entitySelector = { domain: "camera" };
+    if (fullImageIds.length) entitySelector.exclude_entities = fullImageIds;
+    return [{ name: "entity", selector: { entity: entitySelector } }];
+  }
+
   _render() {
     const lang = this._hass?.language || "en";
     this.shadowRoot.innerHTML = `
@@ -150,13 +167,11 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
         <div id="name-slot"></div>
       </div>`;
 
-    // Entity picker — filtered to camera domain
+    // Entity picker — camera domain, full-image variants excluded.
     const entityForm = this.shadowRoot.getElementById("entity-form");
     entityForm.hass = this._hass;
     entityForm.data = { entity: this._config.entity || "" };
-    entityForm.schema = [
-      { name: "entity", selector: { entity: { domain: "camera" } } },
-    ];
+    entityForm.schema = this._buildEntitySchema();
     entityForm.computeLabel = () => _t(lang, "editor_entity");
     entityForm.addEventListener("value-changed", (e) => {
       const newEntity = e.detail.value?.entity;
@@ -459,7 +474,9 @@ class VerisureOwaCameraCard extends HTMLElement {
   }
 
   static getStubConfig(hass) {
-    const entity = Object.keys(hass?.states || {}).find(e => e.startsWith("camera."));
+    const entity = Object.keys(hass?.states || {}).find(
+      (e) => e.startsWith("camera.") && !e.endsWith("_full_image"),
+    );
     return { entity: entity || "" };
   }
 }
