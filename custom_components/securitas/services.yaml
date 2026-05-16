@@ -34,33 +34,8 @@ force_arm_cancel:
       integration: securitas
       domain: alarm_control_panel
 
-refresh_activity_log:
-  description: |
-    Deprecated — use `verisure_owa.refresh_activity_log` instead.
-
-    Foreground-refresh the activity timeline for an installation.
-  target:
-    entity:
-      integration: securitas
-      domain: sensor
-
-fetch_activity_image:
-  description: |
-    Deprecated — use `verisure_owa.fetch_activity_image` instead.
-
-    On-demand historical image fetch for image-request events. Returns
-    base64-encoded image bytes plus a `mime_type` field so the Lovelace
-    card can render the image inline.
-  target:
-    entity:
-      integration: securitas
-      domain: sensor
-  fields:
-    id_signal:
-      required: true
-      selector:
-        text:
-    signal_type:
-      required: true
-      selector:
-        text:
+## refresh_activity_log, fetch_activity_image, refresh_alarm and
+## capture_image are v5+ services available ONLY under verisure_owa.*
+## (registered programmatically in __init__.py via _register_verisure_owa_entity_service).
+## No securitas.* twin exists; backwards-compat isn't needed since none
+## of them existed under securitas.* in any released version.

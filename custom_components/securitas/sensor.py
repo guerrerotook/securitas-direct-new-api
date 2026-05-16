@@ -4,17 +4,12 @@ import base64
 import logging
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTemperature
-from homeassistant.core import HomeAssistant, SupportsResponse
-from homeassistant.helpers.entity_platform import (
-    AddEntitiesCallback,
-    async_get_current_platform,
-)
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN
@@ -55,26 +50,10 @@ async def async_setup_entry(
     activity_coord: ActivityCoordinator | None = entry_data.get("activity_coordinator")
     if activity_coord is not None:
         sensors.append(ActivityLogSensor(activity_coord, activity_coord.installation))
-        platform = async_get_current_platform()
-        # Refresh button — FOREGROUND-priority refresh of the timeline.
-        platform.async_register_entity_service(
-            "refresh_activity_log",
-            {},
-            "async_manual_refresh",
-        )
-        # On-demand historical image fetch for image-request events.
-        # Returns base64-encoded image bytes (any format the panel supplies
-        # — JPEG/PNG/GIF/WebP) plus a sniffed `mime_type` field so the card
-        # can render inline.
-        platform.async_register_entity_service(
-            "fetch_activity_image",
-            {
-                vol.Required("id_signal"): str,
-                vol.Required("signal_type"): vol.All(vol.Coerce(str)),
-            },
-            "async_fetch_image",
-            supports_response=SupportsResponse.ONLY,
-        )
+        # The verisure_owa.refresh_activity_log and verisure_owa.fetch_activity_image
+        # entity services are registered globally in __init__.py via
+        # register_v5_entity_services — they dispatch to ActivityLogSensor's
+        # async_manual_refresh / async_fetch_image methods.
 
     if sensors:
         async_add_entities(sensors, False)

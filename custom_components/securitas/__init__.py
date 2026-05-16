@@ -17,7 +17,11 @@ import voluptuous as vol
 from homeassistant.components import frontend  # noqa: F401 — re-exported so tests can patch
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -29,7 +33,11 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.service import async_set_service_schema
+from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.service import (
+    async_extract_entity_ids,
+    async_set_service_schema,
+)
 
 from .api_queue import ApiQueue
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
@@ -543,10 +551,113 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             },
         },
     ),
-    (
+)
+
+
+def _register_verisure_owa_entity_service(
+    hass: HomeAssistant,
+    service_name: str,
+    component_domain: str,
+    method_name: str,
+    *,
+    schema: dict | None = None,
+    voluptuous_schema: vol.Schema | None = None,
+    supports_response: SupportsResponse = SupportsResponse.NONE,
+) -> None:
+    """Register an entity service directly under ``verisure_owa.<service_name>``.
+
+    EntityPlatform.async_register_entity_service is bound to the platform's
+    DOMAIN (= "securitas"), so it can only create securitas.<X> services.
+    For v5+ services that have no backwards-compat reason to also exist as
+    securitas.<X>, we register a regular hass service under verisure_owa
+    whose handler does the entity-id-to-entity dispatch itself (the same
+    job platform.async_register_entity_service does internally).
+
+    ``component_domain`` is the entity-platform domain ("alarm_control_panel",
+    "camera", "sensor") whose EntityComponent owns the target entities.
+    """
+    if hass.services.has_service(ALIAS_DOMAIN, service_name):
+        return
+
+    async def _handler(call: ServiceCall):
+        component: EntityComponent | None = hass.data.get(component_domain)
+        if component is None:
+            raise HomeAssistantError(
+                f"Platform '{component_domain}' is not loaded; cannot "
+                f"dispatch verisure_owa.{service_name}"
+            )
+        entity_ids = await async_extract_entity_ids(hass, call)
+        method_kwargs = {k: v for k, v in call.data.items() if k != "entity_id"}
+        responses: dict[str, Any] = {}
+        for eid in entity_ids:
+            entity = component.get_entity(eid)
+            if entity is None:
+                continue
+            method = getattr(entity, method_name, None)
+            if method is None:
+                continue
+            entity.async_set_context(call.context)
+            result = await method(**method_kwargs)
+            if supports_response == SupportsResponse.ONLY:
+                responses[eid] = result
+        return responses if supports_response == SupportsResponse.ONLY else None
+
+    hass.services.async_register(
+        ALIAS_DOMAIN,
+        service_name,
+        _handler,
+        schema=voluptuous_schema,
+        supports_response=supports_response,
+    )
+    if schema is not None:
+        async_set_service_schema(hass, ALIAS_DOMAIN, service_name, schema)
+
+
+def register_v5_entity_services(hass: HomeAssistant) -> None:
+    """Register v5+ entity services under verisure_owa.* only.
+
+    These services never had a securitas.* form in any released version,
+    so no backwards-compat alias is needed.  Idempotent — safe to call
+    on every config-entry setup.
+    """
+    _register_verisure_owa_entity_service(
+        hass,
+        "refresh_alarm",
+        "alarm_control_panel",
+        "async_manual_refresh",
+        schema={
+            "name": "Refresh alarm",
+            "description": (
+                "Full alarm-status round-trip refresh — supersedes the "
+                "deprecated VerisureRefreshButton entity."
+            ),
+            "fields": {},
+            "target": {
+                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
+            },
+        },
+    )
+    _register_verisure_owa_entity_service(
+        hass,
+        "capture_image",
+        "camera",
+        "async_manual_capture",
+        schema={
+            "name": "Capture image",
+            "description": (
+                "Request a fresh image capture from a Verisure camera — "
+                "supersedes the deprecated VerisureCaptureButton entity."
+            ),
+            "fields": {},
+            "target": {"entity": {"integration": "securitas", "domain": "camera"}},
+        },
+    )
+    _register_verisure_owa_entity_service(
+        hass,
         "refresh_activity_log",
-        SupportsResponse.NONE,
-        {
+        "sensor",
+        "async_manual_refresh",
+        schema={
             "name": "Refresh activity log",
             "description": (
                 "Foreground-refresh the activity timeline for an installation."
@@ -554,11 +665,20 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             "fields": {},
             "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
         },
-    ),
-    (
+    )
+    _register_verisure_owa_entity_service(
+        hass,
         "fetch_activity_image",
-        SupportsResponse.ONLY,
-        {
+        "sensor",
+        "async_fetch_image",
+        voluptuous_schema=vol.Schema(
+            {
+                vol.Required("id_signal"): str,
+                vol.Required("signal_type"): vol.All(vol.Coerce(str)),
+            },
+            extra=vol.ALLOW_EXTRA,
+        ),
+        schema={
             "name": "Fetch activity image",
             "description": (
                 "On-demand historical image fetch for image-request events. "
@@ -581,8 +701,8 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             },
             "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
         },
-    ),
-)
+        supports_response=SupportsResponse.ONLY,
+    )
 
 
 def register_service_aliases(hass: HomeAssistant) -> None:
@@ -702,6 +822,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # the verisure_owa form for forward compatibility with the deferred domain
     # rename (see docs/MIGRATION_PLAN.md).
     register_service_aliases(hass)
+    # v5+ entity services that only ever existed under verisure_owa.*
+    # (refresh_alarm, capture_image, refresh_activity_log, fetch_activity_image).
+    # Registered manually because platform.async_register_entity_service is
+    # bound to the integration's DOMAIN (securitas).
+    register_v5_entity_services(hass)
 
     hass.data.setdefault(DOMAIN, {})
 

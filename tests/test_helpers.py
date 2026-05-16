@@ -83,6 +83,43 @@ class TestExtractResponseData:
         with pytest.raises(VerisureOwaError, match="xSFoo"):
             api._extract_response_data(response, "xSFoo")
 
+    def test_surfaces_graphql_error_message_and_code(self, api):
+        """When data.field is None but errors[] carries server-side context,
+        the raised exception must include that context (not just say
+        'response is None').  Regression: misleading logs were obscuring
+        Verisure's "Invalid Session / err=60067" reauth signal.
+        """
+        response = {
+            "errors": [
+                {
+                    "message": "Invalid Session",
+                    "name": "ApiError",
+                    "data": {"res": "ERROR", "err": "60067"},
+                    "path": ["xSRefreshLogin"],
+                }
+            ],
+            "data": {"xSRefreshLogin": None},
+        }
+        with pytest.raises(VerisureOwaError) as excinfo:
+            api._extract_response_data(response, "xSRefreshLogin")
+        msg = str(excinfo.value)
+        assert "Invalid Session" in msg
+        assert "60067" in msg
+        assert "xSRefreshLogin" in msg
+
+    def test_surfaces_graphql_error_when_data_key_missing(self, api):
+        """Same surfacing for the response-has-no-data branch."""
+        response = {
+            "errors": [
+                {"message": "Bad Request", "data": {"err": "12345"}},
+            ]
+        }
+        with pytest.raises(VerisureOwaError) as excinfo:
+            api._extract_response_data(response, "xSFoo")
+        msg = str(excinfo.value)
+        assert "Bad Request" in msg
+        assert "12345" in msg
+
 
 # ── _poll_operation() ────────────────────────────────────────────────────────
 
