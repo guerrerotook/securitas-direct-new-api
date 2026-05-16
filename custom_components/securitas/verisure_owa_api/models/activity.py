@@ -77,8 +77,9 @@ class ActivityCategory(StrEnum):
 _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # Armed — user-initiated arm commands and the panel-emitted arm signals
     2: ActivityCategory.ARMED,
+    31: ActivityCategory.ARMED,  # "Conexión" (Web-initiated interior arm on a Spanish panel; pair with 32 disarmed)
     37: ActivityCategory.ARMED,
-    40: ActivityCategory.ARMED,
+    40: ActivityCategory.ARMED,  # "Conexión modo exterior" (Web-initiated perimeter arm)
     46: ActivityCategory.ARMED,
     701: ActivityCategory.ARMED,
     721: ActivityCategory.ARMED,
