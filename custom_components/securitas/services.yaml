@@ -1,7 +1,14 @@
 force_arm:
+  description: |
+    Force-arm the alarm even when sensors are open.
+
+    NOTE: prefer calling this as `verisure_owa.force_arm` in new
+    automations — the `securitas.force_arm` form documented here is
+    functionally identical but will eventually move to a separate
+    integration (see docs/MIGRATION_PLAN.md). Both forms work today.
   target:
     entity:
-      integration: verisure_owa
+      integration: securitas
       domain: alarm_control_panel
   fields:
     code:
@@ -11,7 +18,45 @@ force_arm:
           type: password
 
 force_arm_cancel:
+  description: |
+    Cancel a pending force-arm.
+
+    NOTE: prefer calling this as `verisure_owa.force_arm_cancel` in
+    new automations.
   target:
     entity:
-      integration: verisure_owa
+      integration: securitas
       domain: alarm_control_panel
+
+refresh_activity_log:
+  description: |
+    Foreground-refresh the activity timeline for an installation.
+
+    NOTE: prefer calling this as `verisure_owa.refresh_activity_log`
+    in new automations.
+  target:
+    entity:
+      integration: securitas
+      domain: sensor
+
+fetch_activity_image:
+  description: |
+    On-demand historical image fetch for image-request events. Returns
+    base64-encoded image bytes plus a `mime_type` field so the
+    Lovelace card can render the image inline.
+
+    NOTE: prefer calling this as `verisure_owa.fetch_activity_image`
+    in new automations.
+  target:
+    entity:
+      integration: securitas
+      domain: sensor
+  fields:
+    id_signal:
+      required: true
+      selector:
+        text:
+    signal_type:
+      required: true
+      selector:
+        text:

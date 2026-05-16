@@ -27,8 +27,9 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service import async_set_service_schema
 
 from .api_queue import ApiQueue
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
@@ -490,35 +491,131 @@ async def _fetch_and_cache_installations(
     return devices
 
 
-LEGACY_DOMAIN = "securitas"
-_LEGACY_SERVICES = ("force_arm", "force_arm_cancel")
+ALIAS_DOMAIN = "verisure_owa"
+
+# Tuples of (service_name, supports_response, schema_for_async_set_service_schema).
+# Every service the integration registers under `DOMAIN` (= "securitas") via
+# platform.async_register_entity_service is also exposed under `verisure_owa.<X>`
+# below — both are equal first-class names in HA's eyes. Docs/services.yaml
+# steer users toward the verisure_owa.* form so a future domain rename costs
+# them less (see docs/MIGRATION_PLAN.md).
+_ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
+    (
+        "force_arm",
+        SupportsResponse.NONE,
+        {
+            "name": "Force arm (Verisure OWA)",
+            "description": (
+                "Force-arm the alarm even when sensors are open. Recommended form — "
+                "the equivalent securitas.force_arm service is also available for "
+                "backward compatibility."
+            ),
+            "fields": {
+                "code": {
+                    "name": "Code",
+                    "description": "Optional alarm code (if your installation requires one).",
+                    "example": "1234",
+                    "selector": {"text": {"type": "password"}},
+                },
+            },
+            "target": {"entity": {"integration": "securitas", "domain": "alarm_control_panel"}},
+        },
+    ),
+    (
+        "force_arm_cancel",
+        SupportsResponse.NONE,
+        {
+            "name": "Cancel force-arm (Verisure OWA)",
+            "description": (
+                "Cancel a pending force-arm. Recommended form — the equivalent "
+                "securitas.force_arm_cancel service is also available."
+            ),
+            "fields": {},
+            "target": {"entity": {"integration": "securitas", "domain": "alarm_control_panel"}},
+        },
+    ),
+    (
+        "refresh_activity_log",
+        SupportsResponse.NONE,
+        {
+            "name": "Refresh activity log (Verisure OWA)",
+            "description": (
+                "Foreground-refresh the activity timeline. Recommended form — the "
+                "equivalent securitas.refresh_activity_log service is also available."
+            ),
+            "fields": {},
+            "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
+        },
+    ),
+    (
+        "fetch_activity_image",
+        SupportsResponse.ONLY,
+        {
+            "name": "Fetch activity image (Verisure OWA)",
+            "description": (
+                "On-demand historical image fetch for image-request events. Returns "
+                "base64-encoded image bytes plus a mime_type field. Recommended form."
+            ),
+            "fields": {
+                "id_signal": {
+                    "name": "Signal ID",
+                    "description": "The id_signal of the activity event.",
+                    "required": True,
+                    "selector": {"text": {}},
+                },
+                "signal_type": {
+                    "name": "Signal type",
+                    "description": "The signal_type of the activity event.",
+                    "required": True,
+                    "selector": {"text": {}},
+                },
+            },
+            "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
+        },
+    ),
+)
 
 
-def register_legacy_service_aliases(hass: HomeAssistant) -> None:
-    """Register securitas.force_arm[_cancel] as deprecated aliases.
+def register_service_aliases(hass: HomeAssistant) -> None:
+    """Register every service under both ``securitas.*`` and ``verisure_owa.*``.
 
-    Forwards to the canonical verisure_owa.* services. Removed in v6.0.0.
+    The ``securitas.*`` form is what platform.async_register_entity_service
+    creates automatically (manifest domain). This function also registers
+    each service under ``verisure_owa.*`` with a handler that forwards to
+    the ``securitas.*`` implementation. ``async_set_service_schema`` attaches
+    a rich UI description so the verisure_owa form shows up in the picker
+    with full field validation, identical to the securitas form.
+
+    The two are functionally equal in HA's eyes; docs/services.yaml steer
+    users toward the ``verisure_owa.*`` form so the deferred completion of
+    the domain rename (see docs/MIGRATION_PLAN.md) is a low-cost change
+    for their automations.
     """
-    if hass.services.has_service(LEGACY_DOMAIN, _LEGACY_SERVICES[0]):
+    if hass.services.has_service(ALIAS_DOMAIN, _ALIASED_SERVICES[0][0]):
         return  # already registered
 
-    for name in _LEGACY_SERVICES:
+    for service_name, supports_response, schema in _ALIASED_SERVICES:
 
-        async def _alias_handler(call: ServiceCall, _name: str = name) -> None:
-            _LOGGER.warning(
-                "Service 'securitas.%s' is deprecated; use 'verisure_owa.%s'. "
-                "The legacy alias will be removed in v6.0.0.",
-                _name,
-                _name,
-            )
-            await hass.services.async_call(
+        async def _alias_handler(
+            call: ServiceCall,
+            _name: str = service_name,
+            _supports_response: SupportsResponse = supports_response,
+        ) -> dict[str, Any] | None:
+            return await hass.services.async_call(
                 DOMAIN,
                 _name,
                 dict(call.data),
                 blocking=True,
+                return_response=_supports_response == SupportsResponse.ONLY,
             )
 
-        hass.services.async_register(LEGACY_DOMAIN, name, _alias_handler)
+        hass.services.async_register(
+            ALIAS_DOMAIN,
+            service_name,
+            _alias_handler,
+            supports_response=supports_response,
+        )
+        async_set_service_schema(hass, ALIAS_DOMAIN, service_name, schema)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -556,8 +653,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
-    # Register legacy securitas.* service aliases (deprecated, removed in v6.0.0).
-    register_legacy_service_aliases(hass)
+    # Register verisure_owa.* service aliases alongside the securitas.* primary
+    # registrations. Both forms are functionally equal; docs steer users toward
+    # the verisure_owa form for forward compatibility with the deferred domain
+    # rename (see docs/MIGRATION_PLAN.md).
+    register_service_aliases(hass)
 
     hass.data.setdefault(DOMAIN, {})
 
@@ -798,14 +898,13 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
             hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
         )
 
-        # Tear down the deprecation-window service aliases that
-        # register_legacy_service_aliases set up at the legacy domain — leaving
-        # them registered after the integration unloads would mean a service
-        # call to securitas.force_arm proxies to a verisure_owa domain that
-        # no longer exists.
-        for name in _LEGACY_SERVICES:
-            if hass.services.has_service(LEGACY_DOMAIN, name):
-                hass.services.async_remove(LEGACY_DOMAIN, name)
+        # Tear down the verisure_owa.* service aliases on full unload —
+        # leaving them registered after the integration's last entry
+        # unloads would mean a service call to verisure_owa.force_arm
+        # proxies to a securitas service that no longer exists.
+        for service_name, _supports_response, _schema in _ALIASED_SERVICES:
+            if hass.services.has_service(ALIAS_DOMAIN, service_name):
+                hass.services.async_remove(ALIAS_DOMAIN, service_name)
 
         hass.data.pop(DOMAIN, None)
 
