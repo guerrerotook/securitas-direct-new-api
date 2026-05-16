@@ -54,21 +54,18 @@ jobs:
           python3 <<'PY'
           import os, re, sys
           new_version = os.environ["VERSION"]
-          for path in (
-              "custom_components/verisure_owa/manifest.json",
-              "custom_components/securitas/manifest.json",
-          ):
-              with open(path) as f:
-                  content = f.read()
-              updated, n = re.subn(
-                  r'("version"\s*:\s*)"[^"]+"',
-                  lambda m: m.group(1) + f'"{new_version}"',
-                  content,
-              )
-              if n != 1:
-                  sys.exit(f"Expected exactly one version field in {path}, found {n}")
-              with open(path, "w") as f:
-                  f.write(updated)
+          path = "custom_components/securitas/manifest.json"
+          with open(path) as f:
+              content = f.read()
+          updated, n = re.subn(
+              r'("version"\s*:\s*)"[^"]+"',
+              lambda m: m.group(1) + f'"{new_version}"',
+              content,
+          )
+          if n != 1:
+              sys.exit(f"Expected exactly one version field in {path}, found {n}")
+          with open(path, "w") as f:
+              f.write(updated)
           PY
           git diff --stat
           git diff
@@ -80,7 +77,7 @@ jobs:
 
       - name: Commit, tag, push
         run: |
-          git add custom_components/verisure_owa/manifest.json custom_components/securitas/manifest.json
+          git add custom_components/securitas/manifest.json
           if git diff --cached --quiet; then
             echo "Manifests already at $VERSION — refusing to tag without a release commit." >&2
             echo "Investigate prior state (hand-edited manifest? partial earlier run?) before re-running." >&2
