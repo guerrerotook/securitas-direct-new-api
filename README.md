@@ -102,6 +102,12 @@ The wizard takes you through:
 
 Locks and cameras are discovered in the background after setup. The **Lock automation** screen for auto-lock and auto-disarm appears under **Configure** once locks are registered.
 
+### Naming: `securitas` vs `verisure_owa`
+
+For historical reasons, this integration's Home Assistant domain is `securitas`, but every service call, event, asset URL, and Lovelace card type is also registered under the `verisure_owa` name. **Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write today** — both work identically. The `verisure_owa` form is the one that will survive the eventual domain rename (see [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) for the planned split into a separate HACS repository). Old automations using the `securitas` form will keep working until that migration ships, with no deprecation warnings in the meantime.
+
+The Lovelace card picker only offers the `custom:verisure-owa-alarm-card` / `-camera-card` / `-activity-log-card` forms; dashboards with the older `custom:securitas-alarm-card` / `-camera-card` types continue to render via aliased custom-element registrations.
+
 ## Options
 
 After setup, change settings via **Settings → Integrations → Verisure OWA → Configure**. The dialog walks you through three screens — or four if you have locks: a settings page, the [alarm state mappings](#alarm-state-mappings), and (when locks are present) the [lock automation](#lock-automations) page.
