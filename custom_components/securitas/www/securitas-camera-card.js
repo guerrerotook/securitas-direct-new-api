@@ -466,23 +466,11 @@ if (!customElements.get("verisure-owa-camera-card-editor")) {
   customElements.define("verisure-owa-camera-card-editor", VerisureOwaCameraCardEditor);
 }
 
-// Deprecated legacy tag-name shims — kept registered for the v5 deprecation
-// window so that user dashboards with `type: custom:securitas-camera-card`
-// continue to render. Removed in v6. The shim classes emit a one-time
-// console.warn per element instance pointing the user at the new name.
-function _makeLegacyShim(canonicalClass, oldTag, newTag) {
-  return class extends canonicalClass {
-    connectedCallback() {
-      if (super.connectedCallback) super.connectedCallback();
-      if (!this._verisureOwaDeprecationLogged) {
-        console.warn(
-          `Lovelace card type 'custom:${oldTag}' is deprecated and will be ` +
-          `removed in v6. Update your dashboard to 'custom:${newTag}'.`
-        );
-        this._verisureOwaDeprecationLogged = true;
-      }
-    }
-  };
+// `securitas-camera-card` tag-name alias for `verisure-owa-camera-card`.
+// Kept registered indefinitely — both names are equal-weight, no
+// deprecation. The card picker only offers the verisure-owa form.
+function _makeLegacyShim(canonicalClass, _oldTag, _newTag) {
+  return class extends canonicalClass {};
 }
 
 if (!customElements.get("securitas-camera-card")) {
