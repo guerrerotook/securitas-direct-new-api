@@ -796,7 +796,7 @@ All four entities subscribe to the same `AlarmCoordinator`; commands from any en
 
 ## Force-arm with sub-panels
 
-The event-driven force-arm architecture generalizes naturally: each panel owns its own force context, fires `securitas_arming_exception` with its own `entity_id`, and the built-in handler filters by entity_id so notifications mention the specific panel that triggered the exception.
+The event-driven force-arm architecture generalizes naturally: each panel owns its own force context, fires `verisure_owa_arming_exception` (and the equivalent `securitas_arming_exception` — both are emitted by `events.fire_event`) with its own `entity_id`, and the built-in handler filters by entity_id so notifications mention the specific panel that triggered the exception. Subscribe to whichever name you prefer in your own automations; the `verisure_owa_*` form is recommended for forward compatibility with the deferred domain rename (see `docs/MIGRATION_PLAN.md`).
 
 ## Configuration
 
@@ -1135,6 +1135,6 @@ Three parallel jobs run on every PR and push to main:
 | `verisure_owa_api/const.py` | 107 | `VerisureOwaState`, command/protocol mappings, defaults |
 | `verisure_owa_api/domains.py` | 50 | Country-to-URL routing |
 | `verisure_owa_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
-| `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Legacy filename `securitas-alarm-card.js` is a byte-identical copy retained as a deprecation shim served at the legacy `/securitas_panel/` URL prefix; both removed in v6.) |
+| `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Filename `securitas-alarm-card.js` is a byte-identical copy retained indefinitely as an alias served at the `/securitas_panel/` URL prefix so old user dashboards keep loading; the card picker only offers the `custom:verisure-owa-alarm-card` form.) |
 | `www/verisure-owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
 | `www/verisure-owa-activity-log-card.js` | — | Custom Lovelace **Activity Log** card showing recent alarm-panel activity. |
