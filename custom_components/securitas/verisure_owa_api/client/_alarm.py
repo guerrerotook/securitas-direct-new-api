@@ -24,6 +24,43 @@ from ..responses import (
 )
 from ._base import ALARM_STATUS_SERVICE_ID, _ClientBase
 
+# Map of known ``alarm-manager.error_<code>`` codes to human-readable labels
+# shown in the user-facing arm/disarm-failed notification.
+# Unknown codes fall back to the title-cased raw code via ``humanize_panel_error_msg``.
+_KNOWN_PANEL_ERROR_CODES: dict[str, str] = {
+    "mg_open_zone": "Open zone",
+    "no_response_to_request": "No response from panel",
+    "status_not_found": "Status not found",
+}
+
+_ALARM_ERROR_PREFIX = "alarm-manager.error_"
+
+
+def humanize_panel_error_msg(msg: str) -> str:
+    """Convert a raw ``alarm-manager.error_<code>[#zone_id]`` string into a
+    short label suitable for a notification.
+
+    Pre-v5 (and v5.0.0/.1) surfaced these raw codes directly to the user
+    via the ``arm_failed`` notification (``{error}`` placeholder), which
+    produced messages like
+    ``Arm command failed: alarm-manager.error_mg_open_zone#Pl_Home_Cocina_Puertajardi``.
+    This helper turns those into something a user can read while keeping
+    enough information to identify the offending zone.
+
+    Strings that don't look like panel error codes pass through unchanged
+    so non-panel error messages (network errors, library exceptions, etc.)
+    aren't mangled.
+    """
+    if not msg or not msg.startswith(_ALARM_ERROR_PREFIX):
+        return msg
+    body = msg[len(_ALARM_ERROR_PREFIX) :]
+    code, sep, suffix = body.partition("#")
+    label = _KNOWN_PANEL_ERROR_CODES.get(code) or code.replace("_", " ").capitalize()
+    if sep and suffix:
+        zone_path = " / ".join(suffix.split("_"))
+        return f"{label} ({zone_path})"
+    return label
+
 
 class _AlarmMixin(_ClientBase):
     """Arm/disarm/check_alarm/status helpers + arming-exception fetcher."""
@@ -108,8 +145,9 @@ class _AlarmMixin(_ClientBase):
                 raise ArmingExceptionError(error_ref, error_suid, exceptions)
             error_info = error or {}
             if error_info.get("type") != "NON_BLOCKING":
+                raw_msg = raw.get("msg", "unknown error")
                 raise VerisureOwaError(
-                    f"Arm command failed: {raw.get('msg', 'unknown error')}"
+                    f"Arm command failed: {humanize_panel_error_msg(raw_msg)}"
                 )
 
         if raw.get("protomResponse"):
@@ -171,8 +209,9 @@ class _AlarmMixin(_ClientBase):
         if raw.get("res") == "ERROR":
             error_info = raw.get("error") or {}
             if error_info.get("type") != "NON_BLOCKING":
+                raw_msg = raw.get("msg", "unknown error")
                 raise VerisureOwaError(
-                    f"Disarm command failed: {raw.get('msg', 'unknown error')}"
+                    f"Disarm command failed: {humanize_panel_error_msg(raw_msg)}"
                 )
 
         if raw.get("protomResponse"):
