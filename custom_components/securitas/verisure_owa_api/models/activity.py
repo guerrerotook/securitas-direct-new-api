@@ -83,9 +83,10 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     46: ActivityCategory.ARMED,
     701: ActivityCategory.ARMED,
     721: ActivityCategory.ARMED,
-    802: ActivityCategory.ARMED,  # "Connection Main partial"
-    821: ActivityCategory.ARMED,  # "Connection Exterior"
-    823: ActivityCategory.ARMED,  # "Connection Exterior + Main total"
+    801: ActivityCategory.ARMED,  # "Attivazione modalità totale" — Italian interior total arm
+    802: ActivityCategory.ARMED,  # "Attivazione modalità parziale" / "Connection Main partial"
+    821: ActivityCategory.ARMED,  # "Attivazione Perimetrale" — Italian perimeter arm
+    823: ActivityCategory.ARMED,  # "Attivazione Perimetrale + Totale" — perimeter + total
     824: ActivityCategory.ARMED,  # "Connection Exterior + Main partial"
     # Force-armed with sensor exceptions bypassed (NOT an alarm — the panel
     # armed despite open zones or dead batteries; bypassed zones in `exceptions[]`)
@@ -113,8 +114,9 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     107: ActivityCategory.DISARMED,
     700: ActivityCategory.DISARMED,
     720: ActivityCategory.DISARMED,
+    800: ActivityCategory.DISARMED,  # "Disattivazione" — generic Italian disarm (fires after 801/802)
     820: ActivityCategory.DISARMED,  # "Disattivazione Perimetrale" — perimeter-only disarm
-    822: ActivityCategory.DISARMED,  # "Disconnection Exterior + Main"
+    822: ActivityCategory.DISARMED,  # "Disattivazione Perimetrale + Principale" — perimeter + main
     # Alarms
     13: ActivityCategory.ALARM,
     14: ActivityCategory.ALARM,  # "Allarme Foto" — photo-detector alarm (img=1 carries the image)
