@@ -17,7 +17,7 @@ A Home Assistant integration for **Verisure** (formerly Securitas Direct in some
 - **Configurable mappings** — choose which Verisure mode each HA button (Home, Away, Night, Vacation, Custom) activates.
 - **Per-circuit sub-panels** — optional Interior-only, Perimeter-only, and Annex-only panels alongside the main one, for installations with the corresponding sensors.
 - **Force arming (panel-dependent)** — when arming is blocked by an open sensor, you can force-arm from a mobile notification, the custom alarm card, an automation, or the `verisure_owa.force_arm` service. Whether force-arming is offered at all is decided by your panel firmware: some installations (Spain has been observed) always refuse, in which case you'll get a "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
-- **Refresh button** — request an immediate alarm status check.
+- **Refresh** — request an immediate alarm status check via the bundled alarm card's refresh button (or `verisure_owa.refresh_alarm` from an automation).
 
 ### Lovelace cards
 
@@ -303,9 +303,11 @@ When something goes wrong, you get a persistent notification:
 
 ## Cameras
 
-Each Verisure camera produces two entities — `camera.<name>` for the thumbnail and `camera.<name>_full_image` for the full-resolution image — plus a **Capture** button to request a fresh shot. The thumbnail entity exposes a `capturing` attribute (true while a request is in flight) so dashboards and automations can react to it.
+Each Verisure camera produces two entities — `camera.<name>` for the thumbnail and `camera.<name>_full_image` for the full-resolution image. To request a fresh image, call the **`verisure_owa.capture_image`** service on the thumbnail entity from an automation, the Developer Tools, or the bundled camera card's refresh button. The thumbnail entity exposes a `capturing` attribute (true while a request is in flight) so dashboards and automations can react to it.
 
-Captures can take up to 30 seconds to appear, depending on how busy the API is.
+Captures can take up to 30 seconds to appear, depending on how busy the API is — the integration waits for a frame strictly newer than the one being displayed before completing.
+
+A **Capture** button entity (`button.<name>_capture`) is also exposed for backwards compatibility with v5.0.1 dashboards and automations. It still works but is deprecated; pressing it logs a one-line deprecation warning. New automations should call `verisure_owa.capture_image` directly.
 
 ### Custom Camera Card
 
@@ -346,7 +348,7 @@ The integration surfaces this history in three places:
 
 Each entry carries a **category** — a stable label for the type of event. The full list:
 
-`armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `alarm`, `alarm_resolved`, `tampering`, `sabotage`, `image_request`, `power_cut`, `power_restored`, `status_check`, `communication_failed`, `unknown`.
+`armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `alarm`, `alarm_resolved`, `tampering`, `sabotage`, `image_request`, `power_cut`, `power_restored`, `status_check`, `communication_failed`, `communication_restored`, `unknown`.
 
 ### Activity events vs the alarm panel entity
 
@@ -436,6 +438,21 @@ Replace `alarm_arm_away` with the action for the mode you want:
 > **Important:** Only actions for modes you have mapped in the [Alarm State Mappings](#alarm-state-mappings) will work. If you try to arm with an unmapped mode (e.g. calling `alarm_arm_home` when Home is left blank), the action will fail with an error. Check your mappings in **Settings → Integrations → Verisure OWA → Configure → Submit** (second page).
 
 You can test which actions are available for your alarm in **Settings → Developer Tools → Actions** — type "arm alarm" to see the list.
+
+### Integration services
+
+| Service | Target | Description |
+|---|---|---|
+| `verisure_owa.refresh_alarm` | `alarm_control_panel.*` | Authoritative status round-trip with the panel (not a lightweight read). Same as the alarm card's refresh button. |
+| `verisure_owa.capture_image` | `camera.*` (thumbnail) | Request a fresh image capture. Waits up to 30 s for a strictly newer frame before completing. Injects an `image_request` activity event. |
+| `verisure_owa.refresh_activity_log` | `sensor.*_activity_log` | Foreground-refresh the activity timeline (instead of waiting for the 60 s polling cycle). Same as the activity log card's refresh button. |
+| `verisure_owa.fetch_activity_image` | `sensor.*_activity_log` | On-demand historical image fetch for an activity event. Returns base64-encoded bytes + `mime_type` (response service). Takes required `id_signal` + `signal_type` fields. |
+| `verisure_owa.force_arm` | `alarm_control_panel.*` | Force-arm overriding non-blocking exceptions from a previous failed arm. See [Force Arming](#force-arming-advanced). |
+| `verisure_owa.force_arm_cancel` | `alarm_control_panel.*` | Cancel a pending force-arm context and dismiss the arming-exception notification. |
+
+The `force_arm` and `force_arm_cancel` services are also registered under `securitas.*` as equal-weight aliases (kept indefinitely for backwards compatibility with v4-era automations). All other services exist only under `verisure_owa.*`.
+
+The `VerisureRefreshButton` (one per installation) and `VerisureCaptureButton` (one per camera) entities still exist and continue to dispatch the same logic on press, but are deprecated; pressing one logs a one-line deprecation warning. New automations should call the equivalent service directly.
 
 ## Force Arming (advanced)
 

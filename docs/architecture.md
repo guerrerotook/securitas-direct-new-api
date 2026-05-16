@@ -93,7 +93,7 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 - `_extract_response_data(response, field_name)` — Extracts `response["data"][field_name]`, raising `VerisureOwaError` if the data is missing or `None`. Used by poll-status callbacks that work with raw dicts.
 
-- `_poll_operation(check_fn, *, timeout, continue_on_msg)` — Polls `check_fn()` in a loop until the result is no longer `"WAIT"`. Handles transient errors (connection errors, timeouts, 409 "server busy") by retrying. Raises `OperationTimeoutError` after `timeout` seconds (default `poll_timeout`). Used by arm, disarm, status check, exception fetch, lock, and camera operations.
+- `_poll_operation(check_fn, *, timeout, delay, continue_on_msg)` — Polls `check_fn()` in a loop until the result is no longer `"WAIT"`. Handles transient errors (connection errors, timeouts, 409 "server busy") by retrying. Raises `OperationTimeoutError` after `timeout` seconds (default `poll_timeout`). The `delay` parameter overrides the integration-wide `poll_delay` for callers with known long latency — image capture passes `delay=5.0` to avoid hammering the API on captures that routinely take 30-90 s server-side. Used by arm, disarm, status check, exception fetch, lock, and camera operations.
 
 - `_ensure_auth(installation)` — Checks both the authentication token and the per-installation capabilities token, refreshing them as needed before executing a request.
 
@@ -101,7 +101,7 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 **Polling pattern:** Arm, disarm, status-check, exception-fetch, lock, and camera operations are asynchronous on the server side. The client sends the initial request, receives a `referenceId`, then polls a status endpoint via `_poll_operation()` (sleeping `poll_delay` seconds between attempts) until the response changes from `"WAIT"` to a final state or a wall-clock timeout is reached. Transient errors during polling — connection failures, timeouts, and 409 "server busy" responses — are automatically retried rather than failing the operation. After polling completes, `arm()` and `disarm()` check for `res: "ERROR"` with non-`NON_BLOCKING` error types (e.g. `TECHNICAL_ERROR`) and raise `VerisureOwaError`, enabling the command resolver's fallback chain.
 
-**Camera capture:** `capture_image()` submits the capture request, then polls `RequestImagesStatus` at 10-second intervals until the status transitions from "processing" to done. Once done, it fetches the updated thumbnail. The entire flow has a 90-second `asyncio.wait_for` deadline. If the deadline fires, it fetches one final thumbnail as a fallback (the CDN may have caught up). `get_full_image()` fetches full-resolution photos via `xSGetPhotoImages`, selects the largest BINARY image, base64-decodes it, and validates JPEG magic bytes.
+**Camera capture:** `capture_image()` (in the client) submits the capture request, then polls `RequestImagesStatus` at 5-second intervals (kept distinct from the integration-wide `poll_delay` to avoid hammering the API on long captures) until the status transitions from "processing" to done. When called with `wait_for_fresh=True` (the default from the hub), it also pre-fetches a baseline thumbnail at request time, then after status-success polls `xSGetThumbnail` every 5 s for up to 30 s until a frame strictly newer than the baseline appears — lexicographic compare on the server's ISO timestamp, no timezone math needed since both sides come from the same server clock. Without that loop the CDN's tens-of-seconds lag after capture-acknowledge returns the previous frame. The whole status-poll has a 90-second deadline; if it fires, the freshness-poll still runs against whatever the CDN has caught up to. `get_full_image()` fetches full-resolution photos via `xSGetPhotoImages`, selects the largest BINARY image, base64-decodes it, and validates JPEG magic bytes.
 
 **Device spoofing:** The client identifies itself as a Samsung Galaxy S22 running the Verisure mobile app v10.102.0. Device identity consists of three IDs generated at setup time: `device_id` (FCM-format token), `uuid` (16-char hex), and `id_device_indigitall` (UUID v4).
 
@@ -342,7 +342,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 |----------|---------|-----------|
 | alarm_control_panel | `CombinedVerisureOwaAlarmPanel` entities (CoordinatorEntity) | None (coordinator-driven) |
 | binary_sensor | WifiConnectedSensor entities (CoordinatorEntity) | None (coordinator-driven) |
-| button | `VerisureRefreshButton` entities | None (stores callback for capture buttons) |
+| button | `VerisureRefreshButton` entities (deprecated wrappers around `async_manual_refresh`) | None (stores callback for capture buttons) |
 | camera | Nothing | None (stores callback) |
 | sensor | Sentinel sensors (CoordinatorEntity) | None (coordinator-driven) |
 | lock | Nothing | None (stores callback) |
@@ -741,12 +741,13 @@ Two camera entity types per discovered camera, both using `CoordinatorEntity[Cam
 
 Both entities are grouped under a per-camera child device (via `camera_device_info()`), linked to the installation device as parent via `via_device`.
 
-**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `VerisureCamera` + `VerisureCameraFull` + `VerisureCaptureButton` are created using stored `async_add_entities` callbacks. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
+**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `VerisureCamera` + `VerisureCameraFull` + `VerisureCaptureButton` are created using stored `async_add_entities` callbacks. The buttons are constructed with a `camera_entity=<thumbnail_entity>` reference so their deprecated `async_press` can delegate directly to `camera_entity.async_manual_capture()` instead of doing a runtime entity-id lookup. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
 
 **Image lifecycle:**
 1. On coordinator refresh (every 30 minutes), thumbnails are fetched for all cameras
 2. When a thumbnail's `id_signal` changes, `CameraCoordinator` auto-fetches the full-resolution image (skips thumbnails older than 1 hour)
-3. When `VerisureCaptureButton` is pressed, `hub.capture_image()` triggers a new capture via the client, validates/stores the result, pushes the new data into the `CameraCoordinator`, and launches a background task to fetch the full-resolution image
+3. When `verisure_owa.capture_image` fires on a camera entity (from the camera card's refresh button, an automation, or — for backwards compat — a press on the deprecated `VerisureCaptureButton`), the camera entity's `async_manual_capture` calls `hub.capture_image()` which triggers a new capture via the client, validates/stores the result, pushes the new data into the `CameraCoordinator`, and launches a background task to fetch the full-resolution image. The capture flow waits for a strictly-newer frame before completing (see "Camera capture" above).
+4. If a periodic coordinator poll completes mid-capture and the poll's fetched thumbnail is OLDER than what the capture stored, the coordinator's per-zone merge drops the fetched thumbnail and preserves the capture-stored fresh one and its full image — race fix for a real-world bug where the older frame from a concurrent poll overwrote the just-captured fresh one.
 
 **Signals:**
 - `SIGNAL_CAMERA_STATE` — capturing state changed (camera entity writes state without rotating token, so the frontend shows the capturing spinner)
@@ -755,12 +756,25 @@ Both entities are grouped under a per-camera child device (via `camera_device_in
 
 ### Buttons (`button.py`)
 
-**`VerisureRefreshButton`** — Triggers a manual alarm status refresh via `hub.refresh_alarm_status()`, which calls `VerisureOwaClient.check_alarm()` (authoritative `CheckAlarm` + `CheckAlarmStatus` polling round-trip to the panel, not just a lightweight `xSStatus` read). One per installation.
-- On success: updates `protom_response` on the client, clears `refresh_failed` on the alarm entity, triggers a state write
-- On timeout: sets `refresh_failed` on the alarm entity (card shows stale data banner)
-- On 403: creates "Rate limited" persistent notification and sets `waf_blocked` on the alarm entity
+Both button entities below are now **deprecated thin wrappers** that delegate to entity methods on the corresponding alarm-panel / camera entities. The bundled Lovelace cards (alarm card, camera card) invoke those methods directly via `verisure_owa.refresh_alarm` / `verisure_owa.capture_image` and don't look up these buttons at all. Both buttons remain registered so existing automations and Lovelace button cards continue to work; pressing one logs a one-line deprecation warning and will be removed in a future release.
 
-**`VerisureCaptureButton`** — Requests a new image capture from a Verisure camera. One per camera device, discovered alongside cameras in the background task. Calls `hub.capture_image()` which requests the capture, polls for completion, and stores the resulting image. Grouped under the per-camera child device.
+**`VerisureRefreshButton`** (deprecated) — `async_press` forwards the current HA context to the alarm entity and calls `alarm_entity.async_manual_refresh()`. The real implementation lives on `BaseVerisureOwaAlarmPanel`:
+- On success: updates `protom_response` on the client, clears `refresh_failed`, triggers a state write
+- On timeout: sets `refresh_failed` (card shows stale data banner), injects a `COMMUNICATION_FAILED` activity event
+- On 403: creates "Rate limited" persistent notification, sets `waf_blocked`, injects `COMMUNICATION_FAILED`
+
+`async_manual_refresh` is also registered as the `verisure_owa.refresh_alarm` entity service (target: `alarm_control_panel`) — the canonical entry point.
+
+**`VerisureCaptureButton`** (deprecated) — `async_press` forwards the current HA context to the matching camera entity (the thumbnail variant, captured at button construction) and calls `camera_entity.async_manual_capture()`. The real implementation lives on `VerisureCamera`: triggers `hub.capture_image()` (which requests the capture, polls for completion, and waits for a strictly-newer frame), then injects an `IMAGE_REQUEST` activity event with the real server `id_signal` so the activity-log card can fetch the photo.
+
+`async_manual_capture` is also registered as the `verisure_owa.capture_image` entity service (target: `camera`) — the canonical entry point.
+
+### Service registration: dual-domain (`securitas.*` + `verisure_owa.*`) vs v5+ (`verisure_owa.*` only)
+
+Two service-registration paths coexist in `__init__.py`:
+
+- `register_service_aliases` (uses `_ALIASED_SERVICES`) — registers each named service under `verisure_owa.<X>` as a thin forwarder to the `securitas.<X>` implementation that `platform.async_register_entity_service` produces. Used for `force_arm` and `force_arm_cancel` only — both pre-date the v5 rebrand and have existing automations against the `securitas.*` form to honour.
+- `register_v5_entity_services` (uses `_V5_ENTITY_SERVICES` + `_register_verisure_owa_entity_service`) — registers each named service **only** under `verisure_owa.<X>`, with a manual entity-id dispatcher that looks up the target entity via `EntityComponent.get_entity(eid)` and calls the named method on it. Used for `refresh_alarm`, `capture_image`, `refresh_activity_log`, `fetch_activity_image`. The manual dispatcher exists because `EntityPlatform.async_register_entity_service` is bound to the integration's DOMAIN (= "securitas") and there's no way to use it directly under a foreign domain. Each handler sets the call's context on the entity via `entity.async_set_context()` before dispatching, mirroring HA's own machinery.
 
 ## Three-axis alarm model
 
