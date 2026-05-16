@@ -16,7 +16,7 @@ A Home Assistant integration for **Verisure** (formerly Securitas Direct in some
 - **Main panel** — arm, disarm, and monitor your alarm from HA, one per installation.
 - **Configurable mappings** — choose which Verisure mode each HA button (Home, Away, Night, Vacation, Custom) activates.
 - **Per-circuit sub-panels** — optional Interior-only, Perimeter-only, and Annex-only panels alongside the main one, for installations with the corresponding sensors.
-- **Force arming** — when arming is blocked by an open sensor, you can force-arm from a mobile notification, the custom alarm card, an automation, or the `verisure_owa.force_arm` service.
+- **Force arming (panel-dependent)** — when arming is blocked by an open sensor, you can force-arm from a mobile notification, the custom alarm card, an automation, or the `verisure_owa.force_arm` service. Whether force-arming is offered at all is decided by your panel firmware: some installations (Spain has been observed) always refuse, in which case you'll get a "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
 - **Refresh button** — request an immediate alarm status check.
 
 ### Lovelace cards

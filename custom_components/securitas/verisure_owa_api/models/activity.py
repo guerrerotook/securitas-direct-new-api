@@ -96,6 +96,16 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     5802: ActivityCategory.ARMING_FAILED,
     5823: ActivityCategory.ARMING_FAILED,  # 823 mirror — Exterior + Main total
     5824: ActivityCategory.ARMING_FAILED,
+    # Spanish-firmware arming-failure codes — emitted as "Error conectando ..."
+    # in the panel timeline. Without these mappings the rows show as
+    # "Unknown event" AND escape the polled-echo dedup filter (which requires
+    # category ∈ HA_INJECTABLE_CATEGORIES), so every HA-initiated arm
+    # rejection appears twice in the activity log. Add more codes here as
+    # they're observed on other panels.
+    531: ActivityCategory.ARMING_FAILED,  # "Error conectando la alarma en modo parcial día"
+    537: ActivityCategory.ARMING_FAILED,  # "Error conectando interior + exterior"
+    540: ActivityCategory.ARMING_FAILED,  # "Error conectando la alarma perimetral"
+    546: ActivityCategory.ARMING_FAILED,  # "Error conectando la alarma en modo parcial noche"
     # Disarmed — user-initiated disarm commands and the panel-emitted disarm signal
     1: ActivityCategory.DISARMED,
     32: ActivityCategory.DISARMED,
