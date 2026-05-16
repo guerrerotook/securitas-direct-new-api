@@ -117,7 +117,9 @@ class VerisureLock(  # type: ignore[override]
             else f"{installation.alias} Lock {device_id}"
         )
         self._attr_name = name
-        self._attr_unique_id = f"v4_securitas_direct.{installation.number}_lock_{device_id}"
+        self._attr_unique_id = (
+            f"v4_securitas_direct.{installation.number}_lock_{device_id}"
+        )
 
         # Override device_info: each lock gets its own device, linked to
         # the installation device via via_device.

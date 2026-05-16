@@ -53,7 +53,9 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
     ) -> None:
         """Initialize the refresh button."""
         super().__init__(installation, client)
-        self._attr_unique_id = f"v4_securitas_direct.{installation.number}_refresh_button"
+        self._attr_unique_id = (
+            f"v4_securitas_direct.{installation.number}_refresh_button"
+        )
         self._entry_id = entry_id
         self.hass = hass
 

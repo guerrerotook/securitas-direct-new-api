@@ -4,7 +4,6 @@ Repairs issue prompting the user to remove it manually."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest

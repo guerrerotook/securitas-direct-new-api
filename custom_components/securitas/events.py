@@ -52,6 +52,7 @@ def fire_event(hass: HomeAssistant, suffix: str, payload: dict) -> None:
     hass.bus.async_fire(f"verisure_owa_{suffix}", payload)
     hass.bus.async_fire(f"securitas_{suffix}", payload)
 
+
 # Closed set of `reason` values for the dismissed event. Kept as
 # constants so callers can't typo a string and silently break user
 # automations that match the documented values.

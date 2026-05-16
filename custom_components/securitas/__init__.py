@@ -518,7 +518,9 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
                     "selector": {"text": {"type": "password"}},
                 },
             },
-            "target": {"entity": {"integration": "securitas", "domain": "alarm_control_panel"}},
+            "target": {
+                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
+            },
         },
     ),
     (
@@ -531,7 +533,9 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
                 "securitas.force_arm_cancel service is also available."
             ),
             "fields": {},
-            "target": {"entity": {"integration": "securitas", "domain": "alarm_control_panel"}},
+            "target": {
+                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
+            },
         },
     ),
     (

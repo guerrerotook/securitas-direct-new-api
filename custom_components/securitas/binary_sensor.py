@@ -52,7 +52,9 @@ class WifiConnectedSensor(  # type: ignore[override]
     ) -> None:
         super().__init__(coordinator)
         self._installation = installation
-        self._attr_unique_id = f"v4_securitas_direct.{installation.number}_wifi_connected"
+        self._attr_unique_id = (
+            f"v4_securitas_direct.{installation.number}_wifi_connected"
+        )
         self._attr_device_info = securitas_device_info(installation)
 
     @property

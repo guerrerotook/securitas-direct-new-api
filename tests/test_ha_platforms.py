@@ -475,7 +475,9 @@ class TestSentinelAirQualityStatus:
     def test_unique_id_uses_v5_schema(self):
         coordinator = _make_sentinel_coordinator()
         sensor = SentinelAirQualityStatus(coordinator, make_installation(), 5)
-        assert sensor._attr_unique_id == "v4_securitas_direct.123456_airquality_status_5"
+        assert (
+            sensor._attr_unique_id == "v4_securitas_direct.123456_airquality_status_5"
+        )
 
 
 # ===========================================================================
