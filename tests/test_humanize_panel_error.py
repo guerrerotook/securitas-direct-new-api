@@ -5,7 +5,6 @@ something a user can read in a notification."""
 from __future__ import annotations
 
 from custom_components.securitas.verisure_owa_api.client._alarm import (
-    PANEL_REJECTION_TEMPLATE,
     humanize_panel_error_msg,
 )
 
@@ -138,29 +137,38 @@ class TestPanelRejectionBareCode:
     def test_usm9_arm_failure(self) -> None:
         """Real case: day-mode arm rejected because no sensors are
         assigned to that mode in the panel configuration."""
-        msg = "alarm-manager.usm9"
-        assert humanize_panel_error_msg(msg) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+        assert humanize_panel_error_msg("alarm-manager.usm9") == (
+            "Unsupported operation `alarm-manager.usm9` — check the Alarm "
+            "State Mappings in Settings > Devices > Verisure OWA > ⚙️"
+        )
 
     def test_usm8_disarm_failure(self) -> None:
         """Real case: disarm-with-annex rejected on a panel that doesn't
         support the requested combination."""
-        msg = "alarm-manager.usm8"
-        assert humanize_panel_error_msg(msg) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+        assert humanize_panel_error_msg("alarm-manager.usm8") == (
+            "Unsupported operation `alarm-manager.usm8` — check the Alarm "
+            "State Mappings in Settings > Devices > Verisure OWA > ⚙️"
+        )
 
     def test_unknown_bare_code_gets_same_treatment(self) -> None:
         """Any bare ``alarm-manager.<single-token>`` that isn't an err* or
         error_* shape gets the panel-rejection message — we don't try to
         decode each code individually."""
-        msg = "alarm-manager.something_new"
-        assert humanize_panel_error_msg(msg) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+        assert humanize_panel_error_msg("alarm-manager.something_new") == (
+            "Unsupported operation `alarm-manager.something_new` — check "
+            "the Alarm State Mappings in Settings > Devices > Verisure OWA > ⚙️"
+        )
 
     def test_error_dict_does_not_break_bare_code_handling(self) -> None:
         """A bare non-err code should not pick up the err* error.type
         fallback path even when an error dict is passed in."""
-        msg = "alarm-manager.usm9"
         assert humanize_panel_error_msg(
-            msg, error={"code": msg, "type": "BLOCKING"}
-        ) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+            "alarm-manager.usm9",
+            error={"code": "alarm-manager.usm9", "type": "BLOCKING"},
+        ) == (
+            "Unsupported operation `alarm-manager.usm9` — check the Alarm "
+            "State Mappings in Settings > Devices > Verisure OWA > ⚙️"
+        )
 
 
 class TestPassThroughForNonPanelMessages:
