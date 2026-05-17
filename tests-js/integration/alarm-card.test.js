@@ -219,39 +219,29 @@ describe("verisure-owa-alarm-card service calls", () => {
 
     expect(
       card.shadowRoot.querySelector("input[type='password'], input[type='text']"),
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 });
 
 describe("verisure-owa-alarm-card error paths", () => {
-  it("does not throw and swallows rejection when callService fails", async () => {
-    // The card fires service calls without .catch() (HA framework convention).
-    // Capture the expected unhandled rejection at the test scope so vitest
-    // doesn't fail the whole run on this intentionally-rejected mock.
-    const swallowed = [];
-    const handler = (reason) => {
-      swallowed.push(reason);
-    };
-    process.on("unhandledRejection", handler);
+  it("does not throw when callService rejects on Arm Away", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    hass.callService.mockRejectedValueOnce(new Error("boom"));
+    const card = mountAlarmCard({ hass });
 
-    try {
-      const hass = makeHass({
-        states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
-      });
-      hass.callService.mockRejectedValueOnce(new Error("boom"));
-      const card = mountAlarmCard({ hass });
+    const armBtn = Array.from(card.shadowRoot.querySelectorAll("button")).find((b) =>
+      /Arm Away/i.test(b.textContent.trim()),
+    );
+    expect(armBtn).not.toBeUndefined();
+    expect(() => armBtn.click()).not.toThrow();
 
-      const armBtn = card.shadowRoot.querySelector("button");
-      expect(() => armBtn.click()).not.toThrow();
+    // Let any async work settle before asserting on the spy.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-      // Let the rejected promise settle so the unhandledRejection event fires.
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
-      // Verify the rejection happened and the card called the service.
-      expect(hass.callService).toHaveBeenCalled();
-      expect(swallowed.map((e) => e.message)).toContain("boom");
-    } finally {
-      process.off("unhandledRejection", handler);
-    }
+    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_arm_away", {
+      entity_id: ENTITY,
+    });
   });
 });
