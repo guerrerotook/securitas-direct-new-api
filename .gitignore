@@ -141,3 +141,6 @@ docs/superpowers/
 # Raw HAR captures (contain auth tokens — only sanitised fixtures committed)
 tests/fixtures/*-events.json
 tests/fixtures/*.har
+
+# Local pyright config (user-specific venv path)
+pyrightconfig.json

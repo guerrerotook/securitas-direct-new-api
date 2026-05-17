@@ -7241,8 +7241,8 @@ class TestCombinedPanelEntityIdHealer:
 
     async def test_evicts_squatting_orphan_in_our_domain(self, hass):
         """When a stale verisure_owa entity holds the canonical slot and ours
-        is languishing at `_2`, the healer removes the squatter and renames
-        ours into the freed slot.
+        is on the broken doubled-alias slug, the healer removes the squatter
+        and renames ours into the freed slot.
         """
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
@@ -7266,31 +7266,23 @@ class TestCombinedPanelEntityIdHealer:
         entry = MockConfigEntry(domain=DOMAIN, data={})
         entry.add_to_hass(hass)
         ent_reg = er.async_get(hass)
-        canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+        alias_slug = slugify(installation.alias)
+        canonical = f"alarm_control_panel.{alias_slug}"
         # Stale verisure_owa entity squatting on the canonical slot.
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
             "v4_securitas_direct.legacy-stub",
-            suggested_object_id=slugify(installation.alias),
+            suggested_object_id=alias_slug,
             config_entry=entry,
         )
-        # Ours, pushed to `_2`.
+        # Ours, on the broken doubled-alias slug.
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
             f"v4_securitas_direct.{installation.number}",
-            suggested_object_id=slugify(installation.alias),
+            suggested_object_id=f"{alias_slug}_main_{alias_slug}",
             config_entry=entry,
-        )
-        # Sanity: HA assigned `_2` to ours.
-        assert (
-            ent_reg.async_get_entity_id(
-                "alarm_control_panel",
-                DOMAIN,
-                f"v4_securitas_direct.{installation.number}",
-            )
-            == f"{canonical}_2"
         )
 
         await _heal_combined_panel_entity_id(hass, installation)
@@ -7335,26 +7327,29 @@ class TestCombinedPanelEntityIdHealer:
         entry = MockConfigEntry(domain=DOMAIN, data={})
         entry.add_to_hass(hass)
         ent_reg = er.async_get(hass)
-        canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+        alias_slug = slugify(installation.alias)
+        canonical = f"alarm_control_panel.{alias_slug}"
+        broken = f"{alias_slug}_main_{alias_slug}"
         # An unrelated integration's entity occupies the slot.
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             "manual_alarm",
             "manual-alarm-unique-id",
-            suggested_object_id=slugify(installation.alias),
+            suggested_object_id=alias_slug,
             config_entry=entry,
         )
+        # Ours, on the broken doubled-alias slug.
         ent_reg.async_get_or_create(
             "alarm_control_panel",
             DOMAIN,
             f"v4_securitas_direct.{installation.number}",
-            suggested_object_id=slugify(installation.alias),
+            suggested_object_id=broken,
             config_entry=entry,
         )
 
         await _heal_combined_panel_entity_id(hass, installation)
 
-        # Other-domain entity still there; ours stays at `_2`.
+        # Other-domain entity still there; ours stays on the broken slug.
         assert (
             ent_reg.async_get_entity_id(
                 "alarm_control_panel", "manual_alarm", "manual-alarm-unique-id"
@@ -7367,8 +7362,207 @@ class TestCombinedPanelEntityIdHealer:
                 DOMAIN,
                 f"v4_securitas_direct.{installation.number}",
             )
+            == f"alarm_control_panel.{broken}"
+        )
+
+    async def test_does_not_evict_another_installation_with_same_alias(self, hass):
+        """Two combined panels sharing an alias must not clobber each other.
+
+        Installation A registers first and takes the canonical slot;
+        installation B (same alias) collides → HA assigns ``<canonical>_2``.
+        Both are legitimately live. Heal for B must NOT treat ``_2`` as a
+        broken upgrade artifact and evict A — that would silently delete A's
+        combined panel on every restart.
+        """
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+
+        from custom_components.securitas.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation_a = Installation(
+            number="100001",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        installation_b = Installation(
+            number="100002",
+            alias="Home",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        alias_slug = slugify(installation_a.alias)
+        canonical = f"alarm_control_panel.{alias_slug}"
+        # A is correctly registered at the canonical slot.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v4_securitas_direct.{installation_a.number}",
+            suggested_object_id=alias_slug,
+            config_entry=entry,
+        )
+        # B collided and landed on `<canonical>_2`.
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v4_securitas_direct.{installation_b.number}",
+            suggested_object_id=alias_slug,
+            config_entry=entry,
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation_b)
+
+        # A must still be at canonical.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v4_securitas_direct.{installation_a.number}",
+            )
+            == canonical
+        )
+        # B stays where it landed.
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v4_securitas_direct.{installation_b.number}",
+            )
             == f"{canonical}_2"
         )
+
+    async def test_preserves_user_customized_entity_id(self, hass):
+        """A user-customized entity_id (renamed via HA UI) must survive the
+        healer. The healer is only allowed to relocate entities that sit on
+        the known-broken ``<alias>_main_<alias>`` upgrade slug — any other
+        non-canonical slug is treated as user customization and left alone.
+        """
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        custom_slug = "chiesa_nuova_alarm_corso_vittorio_emanuele_252_roma"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v4_securitas_direct.{installation.number}",
+            suggested_object_id=custom_slug,
+            config_entry=entry,
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation)
+
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v4_securitas_direct.{installation.number}",
+            )
+            == f"alarm_control_panel.{custom_slug}"
+        )
+
+    @pytest.mark.skipif(
+        not _DELETED_REGISTRY_ENTRY_HAS_ALIASES,
+        reason=(
+            "DeletedRegistryEntry.aliases field was added after our "
+            "minimum-supported HA (2025.2); the test seeds a tombstone via "
+            "the dataclass constructor so its kwargs have to match the live "
+            "HA's attr fields."
+        ),
+    )
+    async def test_preserves_user_customized_tombstone(self, hass):
+        """A tombstone holding a user-customized entity_id must NOT be
+        rewritten to canonical. Otherwise a delete/re-add cycle would silently
+        discard the user's chosen slug on re-add.
+        """
+        from datetime import datetime, timezone
+
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.alarm_control_panel import (
+            _heal_combined_panel_entity_id,
+        )
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        ent_reg = er.async_get(hass)
+        unique_id = f"v4_securitas_direct.{installation.number}"
+        custom_entity_id = (
+            "alarm_control_panel.chiesa_nuova_alarm_corso_vittorio_emanuele_252_roma"
+        )
+
+        now = datetime.now(timezone.utc)
+        ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
+            DeletedRegistryEntry(
+                entity_id=custom_entity_id,
+                unique_id=unique_id,
+                platform=DOMAIN,
+                aliases=set(),
+                area_id=None,
+                categories={},
+                config_entry_id=None,
+                config_subentry_id=None,
+                created_at=now,
+                device_class=None,
+                disabled_by=None,
+                hidden_by=None,
+                icon=None,
+                id="some-id",
+                labels=set(),
+                modified_at=now,
+                name=None,
+                options={},
+                orphaned_timestamp=None,
+            )
+        )
+
+        await _heal_combined_panel_entity_id(hass, installation)
+
+        tombstone = ent_reg.deleted_entities.get(
+            ("alarm_control_panel", DOMAIN, unique_id)
+        )
+        assert tombstone is not None
+        assert tombstone.entity_id == custom_entity_id
 
 
 # ===========================================================================
@@ -7645,6 +7839,131 @@ class TestSubPanelEntityIdHealer:
         assert tombstone.entity_id == canonical, (
             f"tombstone still has broken entity_id {tombstone.entity_id!r}"
         )
+
+    @pytest.mark.parametrize(
+        "suffix",
+        ["_interior", "_perimeter", "_annex"],
+    )
+    async def test_preserves_user_customized_entity_id(self, hass, suffix):
+        """A user-customized sub-panel entity_id must survive the healer.
+        Only known-broken patterns (``<alias>_<circuit>_<alias>`` or
+        ``<alias>_<circuit>_<N>`` collision suffix) may be relocated.
+        """
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        ent_reg = er.async_get(hass)
+        circuit = suffix.lstrip("_")
+        custom_slug = f"chiesa_nuova_{circuit}"
+        ent_reg.async_get_or_create(
+            "alarm_control_panel",
+            DOMAIN,
+            f"v4_securitas_direct.{installation.number}{suffix}",
+            suggested_object_id=custom_slug,
+            config_entry=entry,
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, suffix)
+
+        assert (
+            ent_reg.async_get_entity_id(
+                "alarm_control_panel",
+                DOMAIN,
+                f"v4_securitas_direct.{installation.number}{suffix}",
+            )
+            == f"alarm_control_panel.{custom_slug}"
+        )
+
+    @pytest.mark.skipif(
+        not _DELETED_REGISTRY_ENTRY_HAS_ALIASES,
+        reason=(
+            "DeletedRegistryEntry.aliases field was added after our "
+            "minimum-supported HA (2025.2); see the doubled-alias tombstone "
+            "test above for the rationale."
+        ),
+    )
+    @pytest.mark.parametrize(
+        "suffix",
+        ["_interior", "_perimeter", "_annex"],
+    )
+    async def test_preserves_user_customized_tombstone(self, hass, suffix):
+        """A sub-panel tombstone holding a user-customized entity_id must NOT
+        be rewritten to canonical.
+        """
+        from datetime import datetime, timezone
+
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.alarm_control_panel import (
+            _heal_subpanel_entity_id,
+        )
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            Installation,
+        )
+
+        installation = Installation(
+            number="100001",
+            alias="Corso Vittorio Emanuele 252 Roma",
+            panel="SDVFAST",
+            type="PLUS",
+            address="",
+            city="",
+        )
+        ent_reg = er.async_get(hass)
+        unique_id = f"v4_securitas_direct.{installation.number}{suffix}"
+        circuit = suffix.lstrip("_")
+        custom_entity_id = f"alarm_control_panel.chiesa_nuova_{circuit}"
+
+        now = datetime.now(timezone.utc)
+        ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
+            DeletedRegistryEntry(
+                entity_id=custom_entity_id,
+                unique_id=unique_id,
+                platform=DOMAIN,
+                aliases=set(),
+                area_id=None,
+                categories={},
+                config_entry_id=None,
+                config_subentry_id=None,
+                created_at=now,
+                device_class=None,
+                disabled_by=None,
+                hidden_by=None,
+                icon=None,
+                id=f"some-id-{suffix}",
+                labels=set(),
+                modified_at=now,
+                name=None,
+                options={},
+                orphaned_timestamp=None,
+            )
+        )
+
+        await _heal_subpanel_entity_id(hass, installation, suffix)
+
+        tombstone = ent_reg.deleted_entities.get(
+            ("alarm_control_panel", DOMAIN, unique_id)
+        )
+        assert tombstone is not None
+        assert tombstone.entity_id == custom_entity_id
 
 
 # ===========================================================================

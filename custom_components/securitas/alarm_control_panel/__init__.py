@@ -57,6 +57,28 @@ __all__ = [
 ]
 
 
+def _is_broken_upgrade_slug(entity_id: str, alias_slug: str, middle: str) -> bool:
+    """Return True when ``entity_id`` matches the known upgrade-path-broken slug.
+
+    Heals exactly one pattern:
+    ``alarm_control_panel.<alias_slug>_<middle>_<alias_slug>`` — the v5
+    doubled-alias bug where HA slugified the friendly name
+    ``<Middle> - <alias>`` and prepended the device name, ending up with the
+    alias twice. ``middle`` is ``"main"`` for the combined panel and the
+    circuit name (``"interior"`` / ``"perimeter"`` / ``"annex"``) for the axis
+    sub-panels.
+
+    A ``<canonical>_<N>`` collision-suffix heal used to exist for the v4→v5
+    upgrade scenario where a stale v4 entity squatted on the canonical slot.
+    That window has closed, and matching ``_<N>`` had a false-positive failure
+    mode: two installations sharing an alias legitimately produce
+    ``<canonical>_<N>`` for the second one, which is NOT broken. Anything
+    other than the doubled-alias pattern is treated as user customization (or
+    a legitimate collision) and left alone.
+    """
+    return entity_id == f"alarm_control_panel.{alias_slug}_{middle}_{alias_slug}"
+
+
 async def _heal_combined_panel_entity_id(
     hass: HomeAssistant, installation: Installation
 ) -> None:
@@ -69,16 +91,23 @@ async def _heal_combined_panel_entity_id(
     canonical slot which pushes the new entity to ``_2``.
 
     Also rewrites the ``deleted_entities`` tombstone if one is present with
-    a non-canonical entity_id, so a delete/re-add cycle doesn't reintroduce
+    a known-broken entity_id, so a delete/re-add cycle doesn't reintroduce
     a stale slug from HA's ``async_get_or_create`` restoration path.
+
+    The healer is **pattern-precise** — it only relocates entity_ids matching
+    the two known-broken patterns enumerated in ``_is_broken_upgrade_slug``.
+    Anything else (notably entity_ids the user renamed via HA's UI) is treated
+    as user customization and left where it is.
 
     This helper:
 
     1. Finds the entity registered under our v5 unique_id for this installation.
     2. If it is already at the canonical slot, returns.
-    3. If the canonical slot is held by another verisure_owa entity (an orphan
+    3. If its current entity_id is NOT a known-broken pattern, returns
+       (user-customized slug, do not touch).
+    4. If the canonical slot is held by another verisure_owa entity (an orphan
        from a previous setup), removes the orphan to free the slot.
-    4. Renames our entity into the canonical slot.
+    5. Renames our entity into the canonical slot.
 
     A non-verisure_owa entity holding the slot is left untouched (we log a
     warning and skip the rename).
@@ -88,9 +117,10 @@ async def _heal_combined_panel_entity_id(
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
     our_unique_id = f"v4_securitas_direct.{installation.number}"
-    canonical = f"alarm_control_panel.{slugify(installation.alias)}"
+    alias_slug = slugify(installation.alias)
+    canonical = f"alarm_control_panel.{alias_slug}"
 
-    _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical)
+    _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical, alias_slug, "main")
 
     try:
         our_entity_id = ent_reg.async_get_entity_id(
@@ -99,6 +129,9 @@ async def _heal_combined_panel_entity_id(
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         return
     if our_entity_id is None or our_entity_id == canonical:
+        return
+    if not _is_broken_upgrade_slug(our_entity_id, alias_slug, "main"):
+        # User-customized entity_id — leave it alone.
         return
 
     occupant = ent_reg.async_get(canonical)
@@ -156,12 +189,14 @@ async def _heal_subpanel_entity_id(
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
     our_unique_id = f"v4_securitas_direct.{installation.number}{suffix}"
-    canonical = f"alarm_control_panel.{slugify(installation.alias)}{suffix}"
+    alias_slug = slugify(installation.alias)
+    canonical = f"alarm_control_panel.{alias_slug}{suffix}"
+    circuit = suffix.lstrip("_")
 
     # Rewrite the tombstone first — if the entity is also live (a partial
     # state where both exist on different ids), the live-rename below picks
     # up the canonical slot afterwards.
-    _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical)
+    _rewrite_tombstone_entity_id(ent_reg, our_unique_id, canonical, alias_slug, circuit)
 
     try:
         our_entity_id = ent_reg.async_get_entity_id(
@@ -170,6 +205,9 @@ async def _heal_subpanel_entity_id(
     except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
         return
     if our_entity_id is None or our_entity_id == canonical:
+        return
+    if not _is_broken_upgrade_slug(our_entity_id, alias_slug, circuit):
+        # User-customized sub-panel entity_id — leave it alone.
         return
 
     occupant = ent_reg.async_get(canonical)
@@ -198,9 +236,13 @@ async def _heal_subpanel_entity_id(
 
 
 def _rewrite_tombstone_entity_id(
-    ent_reg: er.EntityRegistry, unique_id: str, canonical: str
+    ent_reg: er.EntityRegistry,
+    unique_id: str,
+    canonical: str,
+    alias_slug: str,
+    middle: str,
 ) -> None:
-    """Rewrite a non-canonical ``entity_id`` on a deleted-entity tombstone.
+    """Rewrite a known-broken ``entity_id`` on a deleted-entity tombstone.
 
     HA stores deleted entities in ``ent_reg.deleted_entities`` so that user
     customisations (area, name, options) survive a delete/re-add cycle. On
@@ -213,6 +255,11 @@ def _rewrite_tombstone_entity_id(
     (preserving every other field) so the next re-add lands on the correct
     slot from the first registration, not after a follow-up restart's
     healer pass.
+
+    Only rewrites when the tombstone's entity_id matches a known upgrade-path-
+    broken pattern (see ``_is_broken_upgrade_slug``). A tombstone holding a
+    user-customized entity_id is left untouched so a delete/re-add cycle
+    preserves the user's chosen slug.
     """
     import attr
 
@@ -222,6 +269,8 @@ def _rewrite_tombstone_entity_id(
     key = ("alarm_control_panel", DOMAIN, unique_id)
     tombstone = deleted.get(key)
     if tombstone is None or tombstone.entity_id == canonical:
+        return
+    if not _is_broken_upgrade_slug(tombstone.entity_id, alias_slug, middle):
         return
     _LOGGER.info(
         "Rewriting deleted alarm-panel tombstone: %s -> %s",
