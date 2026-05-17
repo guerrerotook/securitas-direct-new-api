@@ -206,13 +206,28 @@ const ARM_ACTIONS = [
 // ── Gesture helpers ───────────────────────────────────────────────────────────
 
 /**
- * Returns the first arm state key supported by the entity, or "arm_away".
- * Used as the fallback arm_state for arm_or_disarm when none is configured.
+ * Returns the first arm state key supported by the entity (and present in
+ * `configStates`, if provided), or the first supported key as a fallback,
+ * or "arm_away" if nothing is supported.
+ *
+ * @param {object} hass         - Home Assistant hass object
+ * @param {string} entityId     - Alarm entity id
+ * @param {string[]} [configStates] - Optional user-configured `states` list
+ *                                    (the card's `_config.states`). When
+ *                                    present, the result is constrained to
+ *                                    keys also in this list; if the
+ *                                    intersection is empty, falls back to the
+ *                                    first supported key so gestures still
+ *                                    produce a valid call.
  */
-function _defaultArmState(hass, entityId) {
+function _defaultArmState(hass, entityId, configStates) {
   const features = hass.states[entityId]?.attributes?.supported_features || 0;
-  const first = ARM_ACTIONS.find(a => features & a.feature);
-  return first ? first.key : "arm_away";
+  const supported = ARM_ACTIONS.filter(a => features & a.feature);
+  const filtered = Array.isArray(configStates)
+    ? supported.filter(a => configStates.includes(a.key))
+    : supported;
+  const pool = filtered.length > 0 ? filtered : supported;
+  return pool.length > 0 ? pool[0].key : "arm_away";
 }
 
 /**
