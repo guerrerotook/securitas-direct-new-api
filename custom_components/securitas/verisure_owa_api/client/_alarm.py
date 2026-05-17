@@ -42,32 +42,43 @@ _ERROR_TYPE_LABELS: dict[str, str] = {
     "TECHNICAL_ERROR": "Technical error",
 }
 
-# All known error-shaped msgs start with this prefix (covers both
-# ``alarm-manager.error_<word>...`` and ``alarm-manager.errdca3``-style
-# bare codes). ``alarm-manager.processed.request`` and
-# ``alarm-manager.processing.request`` are success codes that don't start
-# with ``err`` and pass through unchanged.
-_ALARM_ERR_PREFIX = "alarm-manager.err"
-_ALARM_ERROR_PREFIX = "alarm-manager.error_"
+_ALARM_MANAGER_PREFIX = "alarm-manager."
+
+# Surfaced when the panel rejects an arm/disarm because the user's
+# state mapping asks for a mode the panel isn't configured to support.
+# Exported so tests can build the same expected message without
+# duplicating the wording.
+PANEL_REJECTION_TEMPLATE = (
+    "Unsupported operation `{msg}` — check the Alarm State Mappings "
+    "in Settings > Devices > Verisure OWA > ⚙️"
+)
 
 
 def humanize_panel_error_msg(msg: str, error: dict[str, Any] | None = None) -> str:
     """Convert a raw panel error to a short label suitable for a notification.
 
-    Three input shapes the panel actually emits in the wild:
+    Four input shapes the panel actually emits in the wild, all under the
+    ``alarm-manager.`` namespace plus a pass-through for anything else:
 
     1. ``alarm-manager.error_<code>[#zone_id]`` — the structured form. Known
        codes get a curated label; unknown ones get the code title-cased.
        If a ``#zone_id`` suffix is present, the underscore-separated path
        is shown in parens.
-    2. ``alarm-manager.<bare-code>`` (e.g. ``alarm-manager.errdca3``) —
+    2. ``alarm-manager.err<bare-code>`` (e.g. ``alarm-manager.errdca3``) —
        terse internal codes with no human-readable suffix. When the caller
        passes ``error`` (the structured ``error`` field from the response)
        and it has a ``type``, we surface the type label and keep the raw
        code in parens for support. Without the error dict, we fall back
        to title-casing the bare code.
-    3. Anything else — passed through unchanged so non-panel error
-       messages (network errors, library exceptions, etc.) aren't mangled.
+    3. ``alarm-manager.<single-token>`` outside the err* family (e.g.
+       ``usm8``, ``usm9``) — panel rejected the requested action because
+       the user's alarm state mappings ask for a mode the panel isn't
+       configured to support. Point the user at the mappings rather than
+       guessing at each code's meaning. The dot-free body check excludes
+       success/progress messages like ``alarm-manager.processed.request``.
+    4. Anything else — passed through unchanged so non-panel error
+       messages (network errors, library exceptions, etc.) and
+       alarm-manager success messages aren't mangled.
 
     Pre-v5 (and v5.0.0/.1) surfaced shapes 1 and 2 raw via the
     ``arm_failed`` notification, producing user-facing text like
@@ -75,12 +86,13 @@ def humanize_panel_error_msg(msg: str, error: dict[str, Any] | None = None) -> s
     or ``Arm command failed: alarm-manager.errdca3``.
     """
     if not msg:
-        return msg or ""
+        return ""
+    if not msg.startswith(_ALARM_MANAGER_PREFIX):
+        return msg
+    body = msg.removeprefix(_ALARM_MANAGER_PREFIX)
 
-    # Shape 1 — structured error_<code>[#zone] form.
-    if msg.startswith(_ALARM_ERROR_PREFIX):
-        body = msg[len(_ALARM_ERROR_PREFIX) :]
-        code, sep, suffix = body.partition("#")
+    if body.startswith("error_"):
+        code, sep, suffix = body.removeprefix("error_").partition("#")
         label = (
             _KNOWN_PANEL_ERROR_CODES.get(code) or code.replace("_", " ").capitalize()
         )
@@ -89,18 +101,20 @@ def humanize_panel_error_msg(msg: str, error: dict[str, Any] | None = None) -> s
             return f"{label} ({zone_path})"
         return label
 
-    # Shape 2 — bare alarm-manager.err<code>. Use error.type as the label
-    # when available; otherwise strip the alarm-manager. prefix and
-    # title-case what's left.
-    if msg.startswith(_ALARM_ERR_PREFIX):
+    # err* must be checked before the dot-free fallback — bare err codes
+    # like ``errdca3`` also have no dot in the body and would otherwise be
+    # captured by the panel-rejection shape.
+    if body.startswith("err"):
         if error and (error_type := error.get("type")):
             type_label = _ERROR_TYPE_LABELS.get(
                 error_type, error_type.replace("_", " ").capitalize()
             )
             return f"{type_label} ({msg})"
-        return msg[len("alarm-manager.") :].capitalize()
+        return body.capitalize()
 
-    # Shape 3 — pass through.
+    if "." not in body:
+        return PANEL_REJECTION_TEMPLATE.format(msg=msg)
+
     return msg
 
 
