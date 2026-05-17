@@ -594,6 +594,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
             composed: true,
           })),
           startPinEntry: (svcAction) => this._startPinEntry(svcAction),
+          cardStates: this._config.states,
         },
       );
     }
@@ -1504,7 +1505,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     const badgeEl = this.shadowRoot.getElementById("badge");
     const gestureConfig = {
       tap_action:        this._config.tap_action        || { action: "more-info" },
-      hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: _defaultArmState(this._hass, this._config.entity) },
+      hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states) },
       double_tap_action: this._config.double_tap_action || { action: "none" },
     };
 
@@ -1517,6 +1518,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
       {
         onMoreInfo:    () => this._openDialog(),
         startPinEntry: (svcAction) => this._startBadgePinEntry(svcAction),
+        cardStates:    this._config.states,
       },
     );
   }
@@ -1822,6 +1824,7 @@ class VerisureOwaAlarmChip extends HTMLElement {
       {
         onMoreInfo:    () => this._openDialog(),
         startPinEntry: (svcAction) => VerisureOwaAlarmBadge.prototype._startBadgePinEntry.call(this, svcAction),
+        cardStates:    this._config.states,
       },
     );
   }
