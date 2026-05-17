@@ -1118,14 +1118,22 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const current       = this._config[configKey] || defaults;
     const currentAction = current.action || defaults.action;
 
-    const stateObj  = this._hass?.states[this._config.entity];
-    const features  = stateObj?.attributes?.supported_features || 0;
-    const supported = ARM_ACTIONS.filter(a => features & a.feature);
-    const armOptions = supported.length > 0 ? supported : ARM_ACTIONS;
+    const stateObj     = this._hass?.states[this._config.entity];
+    const features     = stateObj?.attributes?.supported_features || 0;
+    const supported    = ARM_ACTIONS.filter(a => features & a.feature);
+    const configStates = this._config.states;
+    const filtered     = Array.isArray(configStates)
+      ? supported.filter(a => configStates.includes(a.key))
+      : supported;
+    // Two-stage fallback: prefer the user-filtered subset, then drop to all
+    // supported, then drop to the full list — so the dropdown is never empty.
+    const armOptions = filtered.length > 0
+      ? filtered
+      : (supported.length > 0 ? supported : ARM_ACTIONS);
 
     // Mutable state (avoids re-reading form.data which may lag)
     let actionValue   = currentAction;
-    let armStateValue = current.arm_state || _defaultArmState(this._hass, this._config.entity);
+    let armStateValue = current.arm_state || _defaultArmState(this._hass, this._config.entity, this._config.states);
 
     const section = document.createElement("div");
     section.className = "gesture-section";
@@ -1419,7 +1427,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       const tapDefaults  = isBadge ? { action: "more-info" } : { action: "none" };
       const holdDefaults = {
         action: "arm_or_disarm",
-        arm_state: _defaultArmState(this._hass, this._config.entity),
+        arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states),
       };
       const dblDefaults  = { action: "none" };
 
