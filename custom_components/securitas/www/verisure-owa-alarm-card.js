@@ -1113,6 +1113,81 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     }
   }
 
+  _buildArmModesSection(lang) {
+    const section = document.createElement("div");
+    section.className = "arm-modes-section";
+
+    const title = document.createElement("div");
+    title.className = "section-title";
+    title.textContent = _t(lang, "editor_arm_modes");
+    section.appendChild(title);
+
+    const hint = document.createElement("div");
+    hint.className = "section-hint";
+    hint.textContent = _t(lang, "editor_arm_modes_hint");
+    section.appendChild(hint);
+
+    const stateObj   = this._hass?.states[this._config.entity];
+    const features   = stateObj?.attributes?.supported_features || 0;
+    const supported  = ARM_ACTIONS.filter(a => features & a.feature);
+
+    if (supported.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "arm-modes-empty";
+      empty.textContent = _t(lang, "editor_arm_modes_empty");
+      section.appendChild(empty);
+      return section;
+    }
+
+    // Initial checked set:
+    //  - `_config.states` undefined → all supported boxes checked.
+    //  - `_config.states` defined   → only listed modes checked.
+    const configStates = this._config.states;
+    const supportedKeys = supported.map(a => a.key);
+
+    const list = document.createElement("div");
+    list.className = "arm-modes-list";
+
+    supported.forEach(action => {
+      const label   = document.createElement("label");
+      const cb      = document.createElement("input");
+      cb.type       = "checkbox";
+      cb.dataset.armKey = action.key;
+      cb.checked    = configStates === undefined || configStates.includes(action.key);
+
+      const text = document.createElement("span");
+      text.textContent = _t(lang, action.labelKey);
+
+      label.appendChild(cb);
+      label.appendChild(text);
+      list.appendChild(label);
+    });
+    section.appendChild(list);
+
+    // Change handler: recompute the checked subset, then persist.
+    list.addEventListener("change", () => {
+      const checked = Array.from(list.querySelectorAll("input[type='checkbox']"))
+        .filter(cb => cb.checked)
+        .map(cb => cb.dataset.armKey);
+
+      // If every supported mode is checked, delete the key so the config
+      // stays minimal and naturally tracks future expansions of
+      // supported_features.
+      const allChecked = checked.length === supportedKeys.length
+        && supportedKeys.every(k => checked.includes(k));
+
+      if (allChecked) {
+        const { states: _, ...rest } = this._config;
+        this._config = rest;
+      } else {
+        this._config = { ...this._config, states: checked };
+      }
+      this._fireChanged();
+    });
+
+    return section;
+  }
+
   _buildGestureSection(gesture, title, defaults) {
     const configKey     = `${gesture}_action`;
     const current       = this._config[configKey] || defaults;
@@ -1321,10 +1396,41 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
           display: flex;
           flex-direction: column;
         }
+        .arm-modes-section {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .arm-modes-section .section-title {
+          font-weight: 500;
+          color: var(--primary-text-color);
+        }
+        .arm-modes-list {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          margin-top: 4px;
+        }
+        .arm-modes-list label {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          padding: 4px 0;
+        }
+        .arm-modes-list input[type="checkbox"] {
+          margin: 0;
+        }
+        .arm-modes-empty {
+          font-style: italic;
+          color: var(--secondary-text-color);
+          padding: 4px 0;
+        }
       </style>
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
+        <div id="arm-modes-slot"></div>
         <div id="colors-slot"></div>
         <div id="gesture-slot"></div>
       </div>`;
@@ -1387,6 +1493,12 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       this._fireChanged();
     });
     this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
+
+    // ── Arm modes section ────────────────────────────────────────────────────
+    const armModesSlot = this.shadowRoot.getElementById("arm-modes-slot");
+    if (armModesSlot) {
+      armModesSlot.appendChild(this._buildArmModesSection(lang));
+    }
 
     // Color pickers
     this.shadowRoot.querySelectorAll("input[type='color'][data-state]").forEach(input => {
