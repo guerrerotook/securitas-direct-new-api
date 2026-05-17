@@ -248,7 +248,7 @@ function _defaultArmState(hass, entityId, configStates) {
  * @param {object}        hass       - Home Assistant hass object
  * @param {string}        entityId   - Alarm entity id
  * @param {HTMLElement}   srcEl      - Element to dispatch events from
- * @param {object}        callbacks  - { startPinEntry(action), onMoreInfo() }
+ * @param {object}        callbacks  - { startPinEntry(action), onMoreInfo(), cardStates? }
  * @returns {Function}               - Cleanup function (removes listeners)
  */
 function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
@@ -333,7 +333,7 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
  * @param {object}      hass       - Home Assistant hass object
  * @param {string}      entityId   - Alarm entity id
  * @param {HTMLElement} srcEl      - Element to dispatch events from (for more-info)
- * @param {object}      callbacks  - { startPinEntry(serviceAction), onMoreInfo() }
+ * @param {object}      callbacks  - { startPinEntry(serviceAction), onMoreInfo(), cardStates? }
  */
 function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
   if (!action || action.action === "none") return;
@@ -389,7 +389,7 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
         }
       } else if (state === "disarmed") {
         // Arm
-        const armKey = action.arm_state || _defaultArmState(hass, entityId);
+        const armKey = action.arm_state || _defaultArmState(hass, entityId, callbacks.cardStates);
         const armDef = ARM_ACTIONS.find(a => a.key === armKey);
         if (!armDef) return;
         const svcAction = { service: armDef.service, labelKey: armDef.labelKey };
