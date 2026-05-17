@@ -13,6 +13,7 @@
     "lint:fix": "eslint . --fix && prettier --write 'package.json' 'vitest.config.js' 'eslint.config.js' '.prettierrc.json' 'tests-js/**/*.js'"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@vitest/coverage-v8": "^2.1.0",
     "eslint": "^9.0.0",
     "eslint-plugin-vitest": "^0.5.4",
