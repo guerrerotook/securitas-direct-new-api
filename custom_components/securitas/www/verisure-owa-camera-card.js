@@ -117,7 +117,7 @@ const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars)
 const _FULL_IMAGE_ENTITY_ID_RE = /^camera\..*_full_image(_\d+)?$/;
 const _OUR_PLATFORMS = new Set(["securitas", "verisure_owa"]);
 
-function _findFullImageEntityIds(hass) {
+export function findFullImageEntityIds(hass) {
   const ids = [];
   for (const [eid, entry] of Object.entries(hass?.entities || {})) {
     if (!_OUR_PLATFORMS.has(entry?.platform)) continue;
@@ -164,7 +164,7 @@ class VerisureOwaCameraCardEditor extends HTMLElement {
 
   _buildEntitySchema() {
     if (this._fullImageIdsRef !== this._hass?.entities) {
-      this._fullImageIdsCache = _findFullImageEntityIds(this._hass);
+      this._fullImageIdsCache = findFullImageEntityIds(this._hass);
       this._fullImageIdsRef = this._hass?.entities;
     }
     const entitySelector = { domain: "camera" };
@@ -477,7 +477,7 @@ class VerisureOwaCameraCard extends HTMLElement {
   }
 
   static getStubConfig(hass) {
-    const fullImageIds = new Set(_findFullImageEntityIds(hass));
+    const fullImageIds = new Set(findFullImageEntityIds(hass));
     const entity = Object.keys(hass?.states || {}).find(
       (e) => e.startsWith("camera.") && !fullImageIds.has(e),
     );
