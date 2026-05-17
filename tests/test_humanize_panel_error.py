@@ -5,6 +5,7 @@ something a user can read in a notification."""
 from __future__ import annotations
 
 from custom_components.securitas.verisure_owa_api.client._alarm import (
+    PANEL_REJECTION_TEMPLATE,
     humanize_panel_error_msg,
 )
 
@@ -121,6 +122,45 @@ class TestStructuredErrorFormStillWorks:
         )
         # The structured form's curated label wins; the error dict is ignored.
         assert out == "Open zone (Pl / Home / Cocina / Puertajardi)"
+
+
+class TestPanelRejectionBareCode:
+    """Bare ``alarm-manager.<code>`` strings outside the ``err*`` family
+    (e.g. ``usm8``, ``usm9``) signal that the panel rejected the requested
+    action — typically because the user's alarm state mappings ask for a
+    mode the panel isn't configured to support (e.g. day-mode arm with no
+    sensors assigned to that mode, disarm-with-annex on a panel without an
+    annex circuit). The fix is almost always to reconfigure the alarm
+    state mappings, so the surfaced message points the user there rather
+    than guessing at the specific code's meaning.
+    """
+
+    def test_usm9_arm_failure(self) -> None:
+        """Real case: day-mode arm rejected because no sensors are
+        assigned to that mode in the panel configuration."""
+        msg = "alarm-manager.usm9"
+        assert humanize_panel_error_msg(msg) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+
+    def test_usm8_disarm_failure(self) -> None:
+        """Real case: disarm-with-annex rejected on a panel that doesn't
+        support the requested combination."""
+        msg = "alarm-manager.usm8"
+        assert humanize_panel_error_msg(msg) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+
+    def test_unknown_bare_code_gets_same_treatment(self) -> None:
+        """Any bare ``alarm-manager.<single-token>`` that isn't an err* or
+        error_* shape gets the panel-rejection message — we don't try to
+        decode each code individually."""
+        msg = "alarm-manager.something_new"
+        assert humanize_panel_error_msg(msg) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
+
+    def test_error_dict_does_not_break_bare_code_handling(self) -> None:
+        """A bare non-err code should not pick up the err* error.type
+        fallback path even when an error dict is passed in."""
+        msg = "alarm-manager.usm9"
+        assert humanize_panel_error_msg(
+            msg, error={"code": msg, "type": "BLOCKING"}
+        ) == PANEL_REJECTION_TEMPLATE.format(msg=msg)
 
 
 class TestPassThroughForNonPanelMessages:
