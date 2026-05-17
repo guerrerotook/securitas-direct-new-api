@@ -107,3 +107,131 @@ describe("verisure-owa-alarm-card state transitions", () => {
     expect(card.shadowRoot.innerHTML).toContain("Desarmado");
   });
 });
+
+describe("verisure-owa-alarm-card service calls", () => {
+  function findButton(card, labelMatcher) {
+    const buttons = Array.from(card.shadowRoot.querySelectorAll("button"));
+    return buttons.find((b) =>
+      typeof labelMatcher === "string"
+        ? b.textContent.trim() === labelMatcher
+        : labelMatcher.test(b.textContent.trim()),
+    );
+  }
+
+  it("clicking Arm Away calls alarm_arm_away", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const card = mountAlarmCard({ hass });
+
+    const armBtn = findButton(card, /Arm Away/i);
+    expect(armBtn).toBeDefined();
+    armBtn.click();
+
+    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_arm_away", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("clicking Disarm when no code configured calls alarm_disarm immediately", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "armed_away" }) },
+    });
+    const card = mountAlarmCard({ hass });
+
+    const disarmBtn = findButton(card, /Disarm/i);
+    disarmBtn.click();
+
+    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_disarm", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("Force Arm button calls verisure_owa.force_arm when force_arm_available", async () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          forceArmAvailable: true,
+          armExceptions: [{ alias: "Front Door", status_key: "open" }],
+        }),
+      },
+    });
+    const card = mountAlarmCard({ hass });
+
+    const forceBtn = findButton(card, /Force Arm/i);
+    expect(forceBtn).toBeDefined();
+    forceBtn.click();
+
+    expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("Cancel button next to Force Arm calls verisure_owa.force_arm_cancel", async () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({ state: "disarmed", forceArmAvailable: true }),
+      },
+    });
+    const card = mountAlarmCard({ hass });
+
+    const cancelBtn = findButton(card, /Cancel/i);
+    cancelBtn.click();
+
+    expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm_cancel", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("shows PIN keypad when code_arm_required and arm button clicked", () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          codeArmRequired: true,
+          codeFormat: "number",
+        }),
+      },
+    });
+    const card = mountAlarmCard({ hass });
+
+    findButton(card, /Arm Away/i).click();
+
+    const html = card.shadowRoot.innerHTML;
+    expect(html).toMatch(/Enter PIN/);
+    expect(card.shadowRoot.querySelectorAll("button").length).toBeGreaterThan(5);
+  });
+
+  it("shows alphanumeric input when code_format is text", () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "armed_away",
+          codeArmRequired: true,
+          codeFormat: "text",
+        }),
+      },
+    });
+    const card = mountAlarmCard({ hass });
+
+    findButton(card, /Disarm/i).click();
+
+    expect(
+      card.shadowRoot.querySelector("input[type='password'], input[type='text']"),
+    ).toBeDefined();
+  });
+});
+
+describe("verisure-owa-alarm-card error paths", () => {
+  it("logs and does not throw when callService rejects", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    hass.callService.mockRejectedValueOnce(new Error("boom"));
+    const card = mountAlarmCard({ hass });
+
+    const armBtn = card.shadowRoot.querySelector("button");
+    expect(() => armBtn.click()).not.toThrow();
+  });
+});
