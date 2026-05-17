@@ -18,7 +18,7 @@ import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
 
 // ── Translations ──────────────────────────────────────────────────────────────
 
-const TRANSLATIONS = {
+export const TRANSLATIONS = {
   en: {
     editor_entity: "Entity",
     editor_name: "Name",

@@ -22,7 +22,7 @@ import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
 
 // ── Translations ─────────────────────────────────────────────────────────────
 
-const TRANSLATIONS = {
+export const TRANSLATIONS = {
   en: {
     category: {
       armed: "Armed",

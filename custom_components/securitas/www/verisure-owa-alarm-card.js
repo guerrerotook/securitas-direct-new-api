@@ -33,7 +33,7 @@ const FEATURE = {
 };
 
 // ── Translations ─────────────────────────────────────────────────────────────
-const TRANSLATIONS = {
+export const TRANSLATIONS = {
   en: {
     disarmed: "Disarmed", armed_away: "Armed Away", armed_home: "Armed Home",
     armed_night: "Armed Night", armed_vacation: "Armed Vacation",
