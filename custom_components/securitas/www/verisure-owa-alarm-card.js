@@ -442,7 +442,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|states:${this._config?.states === undefined ? "*" : (this._config.states || []).join(",")}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -505,8 +505,15 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Unavailable / unknown — show state but no action buttons
     const isUnavailable = state === "unavailable" || state === "unknown";
 
-    // Determine which arm buttons to show
-    const availableArmActions = ARM_ACTIONS.filter(a => features & a.feature);
+    // Determine which arm buttons to show. `_config.states`, when defined,
+    // is a hide-only filter applied AFTER `supported_features` — the card
+    // never shows buttons for modes the entity does not advertise (and
+    // sub-panel runtime rejection still shrinks `supported_features`
+    // before we get here).
+    const configuredStates    = this._config.states;
+    const availableArmActions = ARM_ACTIONS
+      .filter(a => features & a.feature)
+      .filter(a => configuredStates === undefined || configuredStates.includes(a.key));
     const isArmed   = !INACTIVE_STATES.has(state);
     // Show Disarm during arming/pending too — alarm is already committed
     const canDisarm = isArmed || state === "arming" || state === "pending" || state === "triggered";
