@@ -487,6 +487,9 @@ class VerisureOwaCameraCard extends HTMLElement {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
+/* v8 ignore start -- defensive duplicate-registration guards;
+   the "already defined" branches can't be hit in single-process tests. */
+
 // Canonical (post-v5) tags. After Phase H this is the name HACS will show in the picker.
 if (!customElements.get("verisure-owa-camera-card")) {
   customElements.define("verisure-owa-camera-card", VerisureOwaCameraCard);
@@ -520,3 +523,4 @@ if (!window.customCards.find(c => c.type === "verisure-owa-camera-card")) {
     preview: false,
   });
 }
+/* v8 ignore stop */

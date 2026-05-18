@@ -1072,6 +1072,8 @@ class VerisureOwaActivityLogCardEditor extends HTMLElement {
 
 // ── Registration ──────────────────────────────────────────────────────────────
 
+/* v8 ignore start -- defensive duplicate-registration guards;
+   the "already defined" branches can't be hit in single-process tests. */
 if (!customElements.get("verisure-owa-activity-log-card"))
   customElements.define("verisure-owa-activity-log-card", VerisureOwaActivityLogCard);
 if (!customElements.get("verisure-owa-activity-log-card-editor"))
@@ -1088,3 +1090,4 @@ if (!window.customCards.find((c) => c.type === "verisure-owa-activity-log-card")
       "https://github.com/guerrerotook/securitas-direct-new-api",
   });
 }
+/* v8 ignore stop */

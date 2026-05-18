@@ -2071,6 +2071,9 @@ class VerisureOwaAlarmChip extends HTMLElement {
   getCardSize() { return 1; }
 }
 
+/* v8 ignore start -- defensive duplicate-registration guards;
+   the "already defined" branches can't be hit in single-process tests. */
+
 // Canonical (post-v5) tags. After Phase H this is the name HACS will show in the picker.
 if (!customElements.get("verisure-owa-alarm-card")) {
   customElements.define("verisure-owa-alarm-card", VerisureOwaAlarmCard);
@@ -2142,3 +2145,4 @@ if (!window.customBadges.find(b => b.type === "verisure-owa-alarm-badge")) {
     preview:     false,
   });
 }
+/* v8 ignore stop */
