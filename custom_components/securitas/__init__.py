@@ -754,7 +754,7 @@ def register_service_aliases(hass: HomeAssistant) -> None:
         async_set_service_schema(hass, ALIAS_DOMAIN, service_name, schema)
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001  # pylint: disable=unused-argument
+async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  # noqa: ARG001  # pylint: disable=unused-argument
     """Integration-wide setup, called once regardless of config entries.
 
     Surfaces a Repairs issue if an orphaned ``custom_components/verisure_owa/``
