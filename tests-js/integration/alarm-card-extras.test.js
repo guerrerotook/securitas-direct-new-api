@@ -557,7 +557,7 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(badge.getCardSize()).toBe(1);
     const ctor = customElements.get("verisure-owa-alarm-badge");
     const editor = ctor.getConfigElement();
-    expect(editor.tagName.toLowerCase()).toBe("securitas-alarm-card-editor");
+    expect(editor.tagName.toLowerCase()).toBe("verisure-owa-alarm-card-editor");
     const hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity() },
     });
