@@ -1118,13 +1118,21 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
+    const prev = this._config;
     this._config = { ...config };
-    if (this._internalWriteInFlight) {
+    // Structural changes (different entity / card type) always re-render —
+    // the Arm modes checkboxes and gesture dropdowns are derived from the
+    // entity's `supported_features`, so an in-editor entity switch must
+    // refresh them even though it routes through _fireChanged.
+    const structural = prev?.entity !== config.entity || prev?.type !== config.type;
+    if (this._internalWriteInFlight && !structural) {
       this._internalWriteInFlight = false;
       return;
     }
-    // External call (YAML edit, parent reset, or initial mount). _render
-    // no-ops until `hass` arrives, so a pre-hass mount is safe.
+    this._internalWriteInFlight = false;
+    // External call (YAML edit, parent reset, initial mount) or internal
+    // structural change. _render no-ops until `hass` arrives, so a pre-hass
+    // mount is safe.
     this._render();
   }
 
