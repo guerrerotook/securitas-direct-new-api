@@ -858,6 +858,42 @@ describe("verisure-owa-alarm-card lifecycle and statics", () => {
     expect(card._gestureCleanup).toBeNull();
   });
 
+  it("reconnecting the card after detach re-attaches gesture listeners on next hass update", () => {
+    // PR #475 (b77986f): when the dashboard tears the card off the DOM and
+    // re-mounts it, gesture listeners must come back. disconnectedCallback
+    // wipes _lastKey so the next `set hass` after re-mount sees a changed
+    // key and runs _render() — which calls attachGesture again.
+    vi.useFakeTimers();
+    try {
+      const hass = makeHass({
+        states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+      });
+      const card = mountAlarmCard({
+        config: { hold_action: { action: "more-info" } },
+        hass,
+      });
+      // Detach (e.g. dashboard tab switch / editor open).
+      document.body.removeChild(card);
+
+      expect(card._gestureCleanup).toBeNull();
+      // Re-attach and push fresh hass — the card must re-render gestures.
+      document.body.appendChild(card);
+      card.hass = hass;
+      let captured = false;
+      card.addEventListener("hass-more-info", () => {
+        captured = true;
+      });
+      const iconWrap = card.shadowRoot.querySelector(".icon-wrap");
+      iconWrap.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+      );
+      vi.advanceTimersByTime(600);
+      expect(captured).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("re-rendering during PIN entry returns to normal UI when entity arms", () => {
     const card = mountAlarmCard({
       hass: makeHass({
@@ -886,5 +922,137 @@ describe("verisure-owa-alarm-card lifecycle and statics", () => {
     });
 
     expect(card._uiState).toBe("normal");
+  });
+});
+
+describe("verisure-owa-alarm-card config.states arm-button filter", () => {
+  // PR #475 (4085f1c): when the user adds `states: [...]` to their card
+  // config, only those arm buttons render. The filter is intersected with
+  // `supported_features` — the card never offers a button the entity hasn't
+  // advertised, even if the user lists it.
+
+  function armButtonKeys(card) {
+    return Array.from(card.shadowRoot.querySelectorAll(".btn-arm[data-action]")).map(
+      (b) => b.dataset.action,
+    );
+  }
+
+  it("renders only the listed arm modes when config.states is set", () => {
+    const card = mountAlarmCard({
+      config: { states: ["arm_away", "arm_night"] },
+      hass: makeHass({
+        states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+      }),
+    });
+    expect(armButtonKeys(card)).toEqual(["arm_away", "arm_night"]);
+  });
+
+  it("renders all supported modes when config.states is omitted (default behavior)", () => {
+    const card = mountAlarmCard({
+      hass: makeHass({
+        states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+      }),
+    });
+    // All 5 features are supported by the default fixture entity.
+    expect(armButtonKeys(card)).toEqual([
+      "arm_away",
+      "arm_home",
+      "arm_night",
+      "arm_vacation",
+      "arm_custom_bypass",
+    ]);
+  });
+
+  it("renders no arm buttons when config.states intersects empty with supported_features", () => {
+    // Entity only supports ARM_AWAY (feature 2); user listed only arm_night.
+    const card = mountAlarmCard({
+      config: { states: ["arm_night"] },
+      hass: makeHass({
+        states: {
+          [ENTITY]: makeAlarmEntity({ state: "disarmed", supportedFeatures: 2 }),
+        },
+      }),
+    });
+    expect(armButtonKeys(card)).toEqual([]);
+  });
+
+  it("renders no arm buttons when config.states is the empty array", () => {
+    const card = mountAlarmCard({
+      config: { states: [] },
+      hass: makeHass({
+        states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+      }),
+    });
+    expect(armButtonKeys(card)).toEqual([]);
+  });
+
+  it("updates the visible buttons when a fresh setConfig narrows the states list", () => {
+    // setConfig resets _lastKey so the next state push triggers a fresh
+    // render with the new states filter.
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const card = mountAlarmCard({ hass });
+    expect(armButtonKeys(card).length).toBe(5);
+    card.setConfig({
+      type: "custom:verisure-owa-alarm-card",
+      entity: ENTITY,
+      states: ["arm_home"],
+    });
+    expect(armButtonKeys(card)).toEqual(["arm_home"]);
+  });
+});
+
+describe("verisure-owa-alarm-card arm_or_disarm gesture respects config.states", () => {
+  // PR #475 (6be6983): when the user hides arm_away via states: [...], the
+  // hold gesture's arm_or_disarm fallback default must come from the
+  // visible subset — not the global ARM_ACTIONS[0] (arm_away). Otherwise
+  // the hold gesture calls a service for a button the user can't see.
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("hold gesture with arm_or_disarm and states=['arm_night'] calls alarm_arm_night", () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const card = mountAlarmCard({
+      config: {
+        states: ["arm_night"],
+        hold_action: { action: "arm_or_disarm" },
+      },
+      hass,
+    });
+    const iconWrap = card.shadowRoot.querySelector(".icon-wrap");
+    iconWrap.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    vi.advanceTimersByTime(501);
+    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_arm_night", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("explicit arm_state in the gesture wins over the states-derived default", () => {
+    // The user's explicit arm_state must be honored even if it isn't in the
+    // states filter — that's the same UX as setting it in the editor.
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const card = mountAlarmCard({
+      config: {
+        states: ["arm_night"],
+        hold_action: { action: "arm_or_disarm", arm_state: "arm_home" },
+      },
+      hass,
+    });
+    const iconWrap = card.shadowRoot.querySelector(".icon-wrap");
+    iconWrap.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    vi.advanceTimersByTime(501);
+    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_arm_home", {
+      entity_id: ENTITY,
+    });
   });
 });
