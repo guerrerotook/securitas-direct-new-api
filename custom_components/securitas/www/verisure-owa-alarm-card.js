@@ -1183,6 +1183,9 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
         this._config = { ...this._config, states: checked };
       }
       this._fireChanged();
+      // Refresh the gesture sections so their `arm_state` dropdowns reflect
+      // the new subset immediately instead of waiting for an editor reopen.
+      this._populateGestureSlot();
     });
 
     return section;
@@ -1533,20 +1536,30 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     });
 
     // ── Gesture action sections ──────────────────────────────────────────────
-    const gestureSlot = this.shadowRoot.getElementById("gesture-slot");
-    if (gestureSlot) {
-      const isBadge = this._config.type === "custom:securitas-alarm-badge";
-      const tapDefaults  = isBadge ? { action: "more-info" } : { action: "none" };
-      const holdDefaults = {
-        action: "arm_or_disarm",
-        arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states),
-      };
-      const dblDefaults  = { action: "none" };
+    this._populateGestureSlot();
+  }
 
-      gestureSlot.appendChild(this._buildGestureSection("tap",        "Tap action",        tapDefaults));
-      gestureSlot.appendChild(this._buildGestureSection("hold",       "Hold action",       holdDefaults));
-      gestureSlot.appendChild(this._buildGestureSection("double_tap", "Double-tap action", dblDefaults));
-    }
+  // Build (or rebuild) the three gesture sections into the gesture-slot.
+  // Extracted so the arm-modes checkbox handler can refresh the dropdowns
+  // live when the user toggles which arm states are available — otherwise
+  // each gesture's `arm_state` dropdown shows a stale options list until
+  // the editor is closed and reopened.
+  _populateGestureSlot() {
+    const gestureSlot = this.shadowRoot.getElementById("gesture-slot");
+    if (!gestureSlot) return;
+    gestureSlot.innerHTML = "";
+
+    const isBadge = this._config.type === "custom:securitas-alarm-badge";
+    const tapDefaults  = isBadge ? { action: "more-info" } : { action: "none" };
+    const holdDefaults = {
+      action: "arm_or_disarm",
+      arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states),
+    };
+    const dblDefaults  = { action: "none" };
+
+    gestureSlot.appendChild(this._buildGestureSection("tap",        "Tap action",        tapDefaults));
+    gestureSlot.appendChild(this._buildGestureSection("hold",       "Hold action",       holdDefaults));
+    gestureSlot.appendChild(this._buildGestureSection("double_tap", "Double-tap action", dblDefaults));
   }
 
 
