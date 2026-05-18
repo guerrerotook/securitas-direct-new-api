@@ -223,29 +223,34 @@ const ARM_ACTIONS = [
   { key: "arm_custom_bypass", labelKey: "arm_custom",   feature: FEATURE.ARM_CUSTOM_BYPASS,service: "alarm_arm_custom_bypass" },
 ];
 
+const GESTURE_KEYS = ["tap_action", "hold_action", "double_tap_action"];
+
 // ── Gesture helpers ───────────────────────────────────────────────────────────
 
 /**
- * Returns the first arm state key supported by the entity (and present in
- * `configStates`, if provided), or the first supported key as a fallback,
- * or "arm_away" if nothing is supported.
+ * Returns `{ supported, filtered }` for an entity's arm capabilities.
+ *  - `supported`: ARM_ACTIONS the entity advertises via `supported_features`.
+ *  - `filtered`:  `supported` further intersected with `configStates` when
+ *                 that array is provided; otherwise equal to `supported`.
  *
- * @param {object} hass         - Home Assistant hass object
- * @param {string} entityId     - Alarm entity id
- * @param {string[]} [configStates] - Optional user-configured `states` list
- *                                    (the card's `_config.states`). When
- *                                    present, the result is constrained to
- *                                    keys also in this list; if the
- *                                    intersection is empty, falls back to the
- *                                    first supported key so gestures still
- *                                    produce a valid call.
+ * Used everywhere we need to honor both the entity's capabilities and the
+ * user's optional `states` hide list.
  */
-function _defaultArmState(hass, entityId, configStates) {
-  const features = hass.states[entityId]?.attributes?.supported_features || 0;
+function _filteredArmActions(features, configStates) {
   const supported = ARM_ACTIONS.filter(a => features & a.feature);
   const filtered = Array.isArray(configStates)
     ? supported.filter(a => configStates.includes(a.key))
     : supported;
+  return { supported, filtered };
+}
+
+/**
+ * First arm state key the entity supports (and is in `configStates`, if
+ * given), with fallbacks so callers always get a usable key.
+ */
+function _defaultArmState(hass, entityId, configStates) {
+  const features = hass.states[entityId]?.attributes?.supported_features || 0;
+  const { supported, filtered } = _filteredArmActions(features, configStates);
   const pool = filtered.length > 0 ? filtered : supported;
   return pool.length > 0 ? pool[0].key : "arm_away";
 }
@@ -263,15 +268,19 @@ function _defaultArmState(hass, entityId, configStates) {
  *  - Single tap  : click event executes tap_action (unless suppressed by
  *                  long-press).
  *
- * @param {HTMLElement}   el         - Element to attach listeners to
- * @param {object}        config     - Card/badge config (tap_action etc.)
- * @param {object}        hass       - Home Assistant hass object
- * @param {string}        entityId   - Alarm entity id
- * @param {HTMLElement}   srcEl      - Element to dispatch events from
- * @param {object}        callbacks  - { startPinEntry(action), onMoreInfo(), cardStates? }
- * @returns {Function}               - Cleanup function (removes listeners)
+ * @param {HTMLElement}   el          - Element to attach listeners to
+ * @param {object}        config      - Card/badge config (tap_action etc.)
+ * @param {object}        hass        - Home Assistant hass object
+ * @param {string}        entityId    - Alarm entity id
+ * @param {HTMLElement}   srcEl       - Element to dispatch events from
+ * @param {object}        callbacks   - { startPinEntry(action), onMoreInfo() }
+ * @param {string[]}      [cardStates] - Card's `_config.states` (optional);
+ *                                       passed to executeAction so its
+ *                                       arm_or_disarm fallback honors the
+ *                                       user's filtered subset.
+ * @returns {Function}                - Cleanup function (removes listeners)
  */
-function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
+function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}, cardStates) {
   let holdTimer = null;
   let holdFired = false;
   let downX = 0, downY = 0;
@@ -296,7 +305,7 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
     holdTimer = setTimeout(() => {
       holdTimer = null;
       holdFired = true;
-      executeAction(holdAction, hass, entityId, srcEl, callbacks);
+      executeAction(holdAction, hass, entityId, srcEl, callbacks, cardStates);
     }, HOLD_MS);
   }
 
@@ -314,11 +323,11 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
     if (tapWindow) {
       clearTimeout(tapWindow);
       tapWindow = null;
-      executeAction(doubleTapAction, hass, entityId, srcEl, callbacks);
+      executeAction(doubleTapAction, hass, entityId, srcEl, callbacks, cardStates);
     } else {
       tapWindow = setTimeout(() => {
         tapWindow = null;
-        executeAction(tapAction, hass, entityId, srcEl, callbacks);
+        executeAction(tapAction, hass, entityId, srcEl, callbacks, cardStates);
       }, DOUBLE_MS);
     }
   }
@@ -349,13 +358,17 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}) {
 /**
  * Executes a HA-style action config object.
  *
- * @param {object}      action     - { action, navigation_path, perform_action, data, arm_state }
- * @param {object}      hass       - Home Assistant hass object
- * @param {string}      entityId   - Alarm entity id
- * @param {HTMLElement} srcEl      - Element to dispatch events from (for more-info)
- * @param {object}      callbacks  - { startPinEntry(serviceAction), onMoreInfo(), cardStates? }
+ * @param {object}      action      - { action, navigation_path, perform_action, data, arm_state }
+ * @param {object}      hass        - Home Assistant hass object
+ * @param {string}      entityId    - Alarm entity id
+ * @param {HTMLElement} srcEl       - Element to dispatch events from (for more-info)
+ * @param {object}      callbacks   - { startPinEntry(serviceAction), onMoreInfo() }
+ * @param {string[]}    [cardStates] - Card's `_config.states` (optional); when
+ *                                     `arm_or_disarm` has no explicit
+ *                                     `arm_state`, the fallback default is
+ *                                     drawn from this filtered subset.
  */
-function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
+function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates) {
   if (!action || action.action === "none") return;
 
   switch (action.action) {
@@ -409,7 +422,7 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}) {
         }
       } else if (state === "disarmed") {
         // Arm
-        const armKey = action.arm_state || _defaultArmState(hass, entityId, callbacks.cardStates);
+        const armKey = action.arm_state || _defaultArmState(hass, entityId, cardStates);
         const armDef = ARM_ACTIONS.find(a => a.key === armKey);
         if (!armDef) return;
         const svcAction = { service: armDef.service, labelKey: armDef.labelKey };
@@ -458,6 +471,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
     this._lastKey = null; // force re-render so color changes apply immediately
+    // Memoize the `states` fingerprint so the per-tick `set hass` doesn't
+    // re-allocate it for every unrelated entity update.
+    this._statesFP = config.states === undefined
+      ? "*"
+      : (config.states || []).join(",");
     if (this._hass) this._render();
   }
 
@@ -471,7 +489,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|states:${this._config?.states === undefined ? "*" : (this._config.states || []).join(",")}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|states:${this._statesFP || "*"}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -534,15 +552,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Unavailable / unknown — show state but no action buttons
     const isUnavailable = state === "unavailable" || state === "unknown";
 
-    // Determine which arm buttons to show. `_config.states`, when defined,
-    // is a hide-only filter applied AFTER `supported_features` — the card
-    // never shows buttons for modes the entity does not advertise (and
-    // sub-panel runtime rejection still shrinks `supported_features`
-    // before we get here).
-    const configuredStates    = this._config.states;
-    const availableArmActions = ARM_ACTIONS
-      .filter(a => features & a.feature)
-      .filter(a => configuredStates === undefined || configuredStates.includes(a.key));
+    // `_config.states` is a hide-only filter applied on top of
+    // `supported_features` (which sub-panel runtime rejection has already
+    // shrunk by the time we get here) — never shows buttons the entity
+    // doesn't advertise.
+    const { filtered: availableArmActions } = _filteredArmActions(features, this._config.states);
     const isArmed   = !INACTIVE_STATES.has(state);
     // Show Disarm during arming/pending too — alarm is already committed
     const canDisarm = isArmed || state === "arming" || state === "pending" || state === "triggered";
@@ -623,8 +637,8 @@ class VerisureOwaAlarmCard extends HTMLElement {
             composed: true,
           })),
           startPinEntry: (svcAction) => this._startPinEntry(svcAction),
-          cardStates: this._config.states,
         },
+        this._config.states,
       );
     }
 
@@ -1099,10 +1113,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._config = {};
-    // Set by _fireChanged so the immediate setConfig round-trip from the
-    // parent doesn't trigger a full re-render (which would destroy focus
-    // on every keystroke). Cleared in a microtask so it never persists
-    // long enough to swallow a subsequent real external change.
+    // Suppresses the immediate parent round-trip on our own writes.
     this._internalWriteInFlight = false;
   }
 
@@ -1112,9 +1123,8 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       this._internalWriteInFlight = false;
       return;
     }
-    // External setConfig — YAML edit, parent reset, or initial mount.
-    // Always re-render so the displayed state matches the new config.
-    // _render no-ops until `hass` arrives, so a pre-hass mount is safe.
+    // External call (YAML edit, parent reset, or initial mount). _render
+    // no-ops until `hass` arrives, so a pre-hass mount is safe.
     this._render();
   }
 
@@ -1135,7 +1145,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const section = document.createElement("div");
     section.className = "arm-modes-section";
 
-    const title = document.createElement("div");
+    const title = document.createElement("p");
     title.className = "section-title";
     title.textContent = _t(lang, "editor_arm_modes");
     section.appendChild(title);
@@ -1145,9 +1155,8 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     hint.textContent = _t(lang, "editor_arm_modes_hint");
     section.appendChild(hint);
 
-    const stateObj   = this._hass?.states[this._config.entity];
-    const features   = stateObj?.attributes?.supported_features || 0;
-    const supported  = ARM_ACTIONS.filter(a => features & a.feature);
+    const features = this._hass?.states[this._config.entity]?.attributes?.supported_features || 0;
+    const { supported } = _filteredArmActions(features);
 
     if (supported.length === 0) {
       const empty = document.createElement("div");
@@ -1157,9 +1166,6 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       return section;
     }
 
-    // Initial checked set:
-    //  - `_config.states` undefined → all supported boxes checked.
-    //  - `_config.states` defined   → only listed modes checked.
     const configStates = this._config.states;
     const supportedKeys = supported.map(a => a.key);
 
@@ -1182,54 +1188,42 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     });
     section.appendChild(list);
 
-    // Change handler: recompute the checked subset, then persist.
     list.addEventListener("change", () => {
       const checked = Array.from(list.querySelectorAll("input[type='checkbox']"))
         .filter(cb => cb.checked)
         .map(cb => cb.dataset.armKey);
 
-      // If every supported mode is checked, delete the key so the config
-      // stays minimal and naturally tracks future expansions of
-      // supported_features.
+      // When every supported mode is checked, drop the `states` key so the
+      // YAML stays minimal and naturally tracks future supported_features
+      // expansions.
       const allChecked = checked.length === supportedKeys.length
         && supportedKeys.every(k => checked.includes(k));
 
-      let nextConfig;
-      if (allChecked) {
-        const { states: _, ...rest } = this._config;
-        nextConfig = rest;
-      } else {
-        nextConfig = { ...this._config, states: checked };
-      }
+      const nextConfig = allChecked
+        ? (() => { const { states: _, ...rest } = this._config; return rest; })()
+        : { ...this._config, states: checked };
 
-      // Scrub any gesture's `arm_state` that's no longer in the user's
-      // chosen subset — otherwise the dropdown ends up showing a raw
-      // value that doesn't match any of its options. Only kicks in when
-      // `states` is an explicit non-empty subset: an empty list falls
-      // back to "all supported" for the dropdown anyway, so the saved
-      // arm_state stays valid.
+      // Scrub any gesture whose `arm_state` is no longer in the user's
+      // explicit non-empty subset — otherwise its dropdown would render a
+      // value missing from its options. An empty list falls back to "all
+      // supported" for the dropdown anyway, so saved arm_state stays valid.
       const nextStates = nextConfig.states;
       if (Array.isArray(nextStates) && nextStates.length > 0) {
         const newDefault = _defaultArmState(this._hass, this._config.entity, nextStates);
-        for (const gestureKey of ["tap_action", "hold_action", "double_tap_action"]) {
+        for (const gestureKey of GESTURE_KEYS) {
           const gestureAction = nextConfig[gestureKey];
           if (
             gestureAction?.action === "arm_or_disarm"
             && gestureAction.arm_state
             && !nextStates.includes(gestureAction.arm_state)
           ) {
-            nextConfig = {
-              ...nextConfig,
-              [gestureKey]: { ...gestureAction, arm_state: newDefault },
-            };
+            nextConfig[gestureKey] = { ...gestureAction, arm_state: newDefault };
           }
         }
       }
 
       this._config = nextConfig;
       this._fireChanged();
-      // Refresh the gesture sections so their `arm_state` dropdowns reflect
-      // the new subset immediately instead of waiting for an editor reopen.
       this._populateGestureSlot();
     });
 
@@ -1242,30 +1236,25 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const current       = this._config[configKey] || defaults;
     const currentAction = current.action || defaults.action;
 
-    const stateObj     = this._hass?.states[this._config.entity];
-    const features     = stateObj?.attributes?.supported_features || 0;
-    const supported    = ARM_ACTIONS.filter(a => features & a.feature);
+    const features     = this._hass?.states[this._config.entity]?.attributes?.supported_features || 0;
     const configStates = this._config.states;
-    const filtered     = Array.isArray(configStates)
-      ? supported.filter(a => configStates.includes(a.key))
-      : supported;
-    // `userHiddenAll` = the user explicitly unchecked every supported mode
-    // in the Arm modes section. In that case the dropdown has no honest
-    // options to show — render a helper hint instead. Otherwise apply the
-    // two-stage fallback (filtered → supported → ARM_ACTIONS) so the
-    // dropdown is never empty for non-user reasons (e.g. entity not loaded).
+    const { supported, filtered } = _filteredArmActions(features, configStates);
+    // When the user has explicitly hidden every supported mode the dropdown
+    // has no honest options — render a helper hint instead. Otherwise fall
+    // back through filtered → supported → ARM_ACTIONS so the dropdown is
+    // never empty for non-user reasons (e.g. entity not loaded).
     const userHiddenAll = Array.isArray(configStates) && filtered.length === 0;
-    const armOptions = userHiddenAll
-      ? []
-      : (filtered.length > 0
-          ? filtered
-          : (supported.length > 0 ? supported : ARM_ACTIONS));
+    let armOptions = [];
+    if (!userHiddenAll) {
+      armOptions = filtered.length > 0   ? filtered
+                 : supported.length > 0  ? supported
+                 :                         ARM_ACTIONS;
+    }
 
-    // Mutable state (avoids re-reading form.data which may lag)
     let actionValue   = currentAction;
     let armStateValue = userHiddenAll
       ? undefined
-      : (current.arm_state || _defaultArmState(this._hass, this._config.entity, this._config.states));
+      : (current.arm_state || _defaultArmState(this._hass, this._config.entity, configStates));
 
     const section = document.createElement("div");
     section.className = "gesture-section";
@@ -1651,10 +1640,6 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       bubbles: true,
       composed: true,
     }));
-    // Clear the flag after any synchronous round-trip from the parent so
-    // the next external setConfig is treated correctly. If the parent did
-    // re-call setConfig synchronously, it already cleared the flag — this
-    // microtask is a defensive no-op in that case.
     queueMicrotask(() => { this._internalWriteInFlight = false; });
   }
 }
@@ -1675,13 +1660,8 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
     if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
-    // Force the next `set hass` call to re-render (and re-attach gestures
-    // freed above). Without this, the cached `_lastKey` short-circuits
-    // re-render on reconnection and the badge becomes inert — both tap
-    // (open dialog) and hold (arm_or_disarm) stop firing. See the matching
-    // note in VerisureOwaAlarmCard.disconnectedCallback.
+    // Reset for re-render on reconnection — see VerisureOwaAlarmCard.disconnectedCallback.
     this._lastKey = null;
-    // Always zero PIN state on disconnect, even without an active overlay.
     this._pinState = null;
     this._pin = "";
   }
@@ -1689,7 +1669,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
-    this._lastKey = null;  // reset so config changes always trigger a re-render
+    this._lastKey = null;
   }
 
   set hass(hass) {
@@ -1760,8 +1740,8 @@ class VerisureOwaAlarmBadge extends HTMLElement {
       {
         onMoreInfo:    () => this._openDialog(),
         startPinEntry: (svcAction) => this._startBadgePinEntry(svcAction),
-        cardStates:    this._config.states,
       },
+      this._config.states,
     );
   }
 
@@ -1969,11 +1949,8 @@ class VerisureOwaAlarmChip extends HTMLElement {
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
     if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
-    // Force the next `set hass` call to re-render (and re-attach gestures
-    // freed above). See the matching note in
-    // VerisureOwaAlarmCard.disconnectedCallback — same lifecycle pitfall.
+    // Reset for re-render on reconnection — see VerisureOwaAlarmCard.disconnectedCallback.
     this._lastKey = null;
-    // Always zero PIN state on disconnect, even without an active overlay.
     this._pinState = null;
     this._pin = "";
   }
@@ -2070,8 +2047,8 @@ class VerisureOwaAlarmChip extends HTMLElement {
       {
         onMoreInfo:    () => this._openDialog(),
         startPinEntry: (svcAction) => VerisureOwaAlarmBadge.prototype._startBadgePinEntry.call(this, svcAction),
-        cardStates:    this._config.states,
       },
+      this._config.states,
     );
   }
 
