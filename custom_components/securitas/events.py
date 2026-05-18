@@ -42,7 +42,7 @@ FORCE_ARM_EXPIRED_EVENT_TYPE = "verisure_owa_force_arm_expired"
 ARMING_EXCEPTION_DISMISSED_EVENT_TYPE = "verisure_owa_arming_exception_dismissed"
 
 
-def fire_event(hass: HomeAssistant, suffix: str, payload: dict) -> None:
+def fire_event(hass: HomeAssistant, suffix: str, payload: dict[str, object]) -> None:
     """Fire ``verisure_owa_<suffix>`` and ``securitas_<suffix>`` in the same tick.
 
     Both events carry identical payloads. Subscribers that match either

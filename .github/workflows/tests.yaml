@@ -61,12 +61,13 @@ jobs:
         run: pyright custom_components/
 
   test:
-    name: Tests (${{ matrix.ha-channel }})
+    name: Tests (${{ matrix.ha-channel }}, ${{ matrix.suite }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         ha-channel: [dev, stable, minimum]
+        suite: [unit, integration]
     steps:
       - uses: actions/checkout@v4
 
@@ -100,10 +101,56 @@ jobs:
           python -m pip install --pre pytest-homeassistant-custom-component
           pip install -r requirements_test.txt
 
-      - name: Run tests with coverage
+      - name: Run ${{ matrix.suite }} tests with coverage
+        env:
+          # parallel=true in pyproject.toml suffixes the data file per process;
+          # COVERAGE_FILE pins the base so artifacts upload cleanly.
+          COVERAGE_FILE: .coverage.${{ matrix.ha-channel }}.${{ matrix.suite }}
         run: |
+          if [ "${{ matrix.suite }}" = "unit" ]; then
+            MARKER="not integration"
+          else
+            MARKER="integration"
+          fi
           python -m pytest tests/ -v --tb=short \
-            --cov=custom_components/verisure_owa \
-            --cov=custom_components/securitas \
-            --cov-report=term-missing \
-            --cov-fail-under=90
+            -m "$MARKER" \
+            --cov --cov-report=term-missing --no-cov-on-fail
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.ha-channel }}-${{ matrix.suite }}
+          path: .coverage.${{ matrix.ha-channel }}.${{ matrix.suite }}*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage-gate:
+    name: Coverage gate (90%)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install coverage
+
+      # Gate on the stable channel only — code is identical across channels,
+      # so running the gate 3x would just multiply CI minutes for no signal.
+      - name: Download unit coverage (stable)
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-stable-unit
+
+      - name: Download integration coverage (stable)
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-stable-integration
+
+      - name: Combine and report
+        run: |
+          coverage combine
+          coverage report --fail-under=90

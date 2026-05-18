@@ -1,6 +1,8 @@
 """Shared fixtures for the Verisure OWA HA integration tests."""
 
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
@@ -46,6 +48,42 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
+
+
+# ── integration-marker auto-application ───────────────────────────────────────
+#
+# Tests that import `homeassistant` or `tests.mock_graphql`, or request the
+# `mock_server` fixture, are integration tests. Rather than relying on developers
+# to remember `pytestmark = pytest.mark.integration` on every such file, we
+# auto-apply the marker at collection time. See tests/test_markers.py for the
+# meta-test that pins the expected file set.
+
+_INTEGRATION_IMPORT_RE = re.compile(
+    r"^\s*(?:from|import)\s+(?:homeassistant|tests\.mock_graphql|\.mock_graphql)",
+    re.MULTILINE,
+)
+
+
+def _file_is_integration(path: Path) -> bool:
+    try:
+        source = path.read_text()
+    except OSError:
+        return False
+    return bool(_INTEGRATION_IMPORT_RE.search(source))
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Auto-apply the `integration` marker to tests touching external surfaces."""
+    file_cache: dict[Path, bool] = {}
+    for item in items:
+        path = Path(str(item.fspath))
+        if path not in file_cache:
+            file_cache[path] = _file_is_integration(path)
+        uses_mock_server = "mock_server" in getattr(item, "fixturenames", ())
+        if file_cache[path] or uses_mock_server:
+            item.add_marker(pytest.mark.integration)
 
 
 # ── JWT helpers ──────────────────────────────────────────────────────────────

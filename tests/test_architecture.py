@@ -14,8 +14,8 @@ import ast
 import re
 from pathlib import Path
 
-CLIENT_PACKAGE = Path("custom_components/verisure_owa/verisure_owa_api")
-INTEGRATION_PACKAGE = Path("custom_components/verisure_owa")
+CLIENT_PACKAGE = Path("custom_components/securitas/verisure_owa_api")
+INTEGRATION_PACKAGE = Path("custom_components/securitas")
 
 # Pydantic validators legitimately use bare dict/Any in signatures
 _VALIDATOR_DECORATORS = frozenset({"field_validator", "model_validator", "validator"})
@@ -267,4 +267,33 @@ class TestIntegrationAnyUsageBaseline:
             f"Standalone `Any` count ({count}) exceeds integration baseline "
             f"({self._BASELINE}). If you intentionally added `Any`, "
             f"update _BASELINE. Otherwise, use a more specific type."
+        )
+
+
+# ── Path sanity checks ──────────────────────────────────────────────────────
+#
+# The architecture tests above all rely on `_client_files()` and
+# `_integration_files()` returning a non-empty list. If the path constants
+# drift (e.g. after a rename) these would silently return [] and every
+# architecture assertion would trivially pass. These tests catch that.
+
+
+class TestPackagePathsResolve:
+    """Pin that the package path constants point to real, non-empty directories."""
+
+    def test_client_package_is_non_empty(self):
+        files = _client_files()
+        assert files, (
+            f"_client_files() is empty — CLIENT_PACKAGE ({CLIENT_PACKAGE}) "
+            f"likely points to a renamed/removed directory. Architecture "
+            f"checks would silently pass without scanning anything."
+        )
+
+    def test_integration_package_is_non_empty(self):
+        files = _integration_files()
+        assert files, (
+            f"_integration_files() is empty — INTEGRATION_PACKAGE "
+            f"({INTEGRATION_PACKAGE}) likely points to a renamed/removed "
+            f"directory. Architecture checks would silently pass without "
+            f"scanning anything."
         )
