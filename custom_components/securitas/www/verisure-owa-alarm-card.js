@@ -438,6 +438,15 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
+    // Force the next `set hass` call (which fires on reconnection) to
+    // re-run `_render`. Without this, the cached `_lastKey` matches the
+    // incoming state and the short-circuit skips re-render — leaving the
+    // card without gesture listeners (cleaned up above) until something
+    // else triggers a render. Symptom: hold-on-icon stops working after
+    // any dashboard re-mount (tab switch, editor open/close, etc.) even
+    // though the arm/disarm buttons keep working (their click listeners
+    // live on the surviving DOM nodes).
+    this._lastKey = null;
     // Zero in-flight PIN entry so it doesn't linger in memory if the card is
     // detached mid-entry (e.g. dashboard tab switch).
     this._pin = "";
@@ -1666,6 +1675,12 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
     if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
+    // Force the next `set hass` call to re-render (and re-attach gestures
+    // freed above). Without this, the cached `_lastKey` short-circuits
+    // re-render on reconnection and the badge becomes inert — both tap
+    // (open dialog) and hold (arm_or_disarm) stop firing. See the matching
+    // note in VerisureOwaAlarmCard.disconnectedCallback.
+    this._lastKey = null;
     // Always zero PIN state on disconnect, even without an active overlay.
     this._pinState = null;
     this._pin = "";
@@ -1674,6 +1689,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
+    this._lastKey = null;  // reset so config changes always trigger a re-render
   }
 
   set hass(hass) {
@@ -1953,6 +1969,10 @@ class VerisureOwaAlarmChip extends HTMLElement {
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
     if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
+    // Force the next `set hass` call to re-render (and re-attach gestures
+    // freed above). See the matching note in
+    // VerisureOwaAlarmCard.disconnectedCallback — same lifecycle pitfall.
+    this._lastKey = null;
     // Always zero PIN state on disconnect, even without an active overlay.
     this._pinState = null;
     this._pin = "";
