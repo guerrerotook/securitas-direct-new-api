@@ -2115,8 +2115,16 @@ def _make_entry_with_locks(
     registered_locks: list[dict],
     enabled_circuits: set[str] | None = None,
     entry_options: dict | None = None,
+    lock_discovery_event=None,
+    has_lock_coordinator: bool = False,
 ):
-    """Create MockConfigEntry and inject registered_locks + circuit options into hass.data."""
+    """Create MockConfigEntry and inject registered_locks + circuit options into hass.data.
+
+    Optional ``lock_discovery_event`` (asyncio.Event) is stored under
+    ``lock_discovery_complete`` so the options flow can await it. Optional
+    ``has_lock_coordinator`` mirrors what __init__.async_setup_entry would
+    place there when the installation has a lock service.
+    """
     from custom_components.securitas.const import (
         CONF_ENABLE_ANNEX_PANEL,
         CONF_ENABLE_INTERIOR_PANEL,
@@ -2136,9 +2144,12 @@ def _make_entry_with_locks(
         options=options,
     )
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "registered_locks": registered_locks,
-    }
+    entry_data: dict = {"registered_locks": registered_locks}
+    if lock_discovery_event is not None:
+        entry_data["lock_discovery_complete"] = lock_discovery_event
+    if has_lock_coordinator:
+        entry_data["lock_coordinator"] = MagicMock()
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = entry_data
     return entry
 
 
@@ -2351,6 +2362,145 @@ async def test_lock_automations_skipped_when_no_locks_discovered(hass):
     )
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+async def test_lock_automations_does_not_wait_when_no_event_present(hass):
+    """No event in entry_data => skip immediately, no hang.
+
+    Covers installations with no lock service (no lock_coordinator created,
+    so no lock_discovery_complete event is registered).
+    """
+    import asyncio as _asyncio
+
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[],
+        enabled_circuits={"interior"},
+    )
+    flow_id = await _advance_to_mappings(hass, entry)
+
+    # If the options flow naively awaits a missing event, this would hang
+    # past the wait_for window. Bound it tightly to fail fast.
+    async with _asyncio.timeout(2.0):
+        result = await hass.config_entries.options.async_configure(
+            flow_id,
+            user_input={
+                CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+                CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+                CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+            },
+        )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+async def test_lock_automations_waits_for_discovery_event(hass):
+    """Empty registered_locks + pending event => wait, then render once signalled.
+
+    Simulates the user opening options before background discovery completes.
+    A helper task signals the event and populates registered_locks while the
+    flow is awaiting the mappings -> lock_automations transition.
+    """
+    import asyncio as _asyncio
+
+    event = _asyncio.Event()
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[],
+        enabled_circuits={"interior"},
+        lock_discovery_event=event,
+        has_lock_coordinator=True,
+    )
+    flow_id = await _advance_to_mappings(hass, entry)
+
+    async def _populate_and_signal():
+        # Yield once so the flow task starts awaiting the event first.
+        await _asyncio.sleep(0)
+        hass.data[DOMAIN][entry.entry_id]["registered_locks"] = [
+            {"device_id": "01", "alias": "Front Door"}
+        ]
+        event.set()
+
+    populate_task = _asyncio.create_task(_populate_and_signal())
+
+    try:
+        result = await hass.config_entries.options.async_configure(
+            flow_id,
+            user_input={
+                CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+                CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+                CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+            },
+        )
+    finally:
+        await populate_task
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "lock_automations"
+    assert "lock__01" in _section_keys(result["data_schema"])
+
+
+async def test_lock_automations_times_out_when_event_never_signalled(hass):
+    """Event never set + empty registered_locks => fall through after timeout.
+
+    Discovery may legitimately fail; we must not hang the options flow.
+    Patches the wait timeout to a small value so the test stays fast.
+    """
+    import asyncio as _asyncio
+
+    event = _asyncio.Event()  # never set
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[],
+        enabled_circuits={"interior"},
+        lock_discovery_event=event,
+        has_lock_coordinator=True,
+    )
+    flow_id = await _advance_to_mappings(hass, entry)
+
+    with patch(
+        "custom_components.securitas.config_flow.LOCK_DISCOVERY_WAIT_TIMEOUT",
+        0.1,
+    ):
+        result = await hass.config_entries.options.async_configure(
+            flow_id,
+            user_input={
+                CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+                CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+                CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+            },
+        )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+
+
+async def test_lock_automations_no_wait_when_event_already_set(hass):
+    """Event already set + populated registered_locks => render immediately."""
+    import asyncio as _asyncio
+
+    event = _asyncio.Event()
+    event.set()
+    entry = _make_entry_with_locks(
+        hass,
+        registered_locks=[{"device_id": "01", "alias": "Front Door"}],
+        enabled_circuits={"interior"},
+        lock_discovery_event=event,
+        has_lock_coordinator=True,
+    )
+    flow_id = await _advance_to_mappings(hass, entry)
+
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+        },
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "lock_automations"
+    assert "lock__01" in _section_keys(result["data_schema"])
 
 
 # ===========================================================================

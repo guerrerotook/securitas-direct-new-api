@@ -964,7 +964,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
         # Store per-entry data
-        hass.data[DOMAIN][entry.entry_id] = {
+        entry_data: dict[str, Any] = {
             "hub": client,
             "devices": devices,
             "alarm_coordinator": alarm_coord,
@@ -974,6 +974,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "activity_listener_unsub": activity_listener_unsub,
             "config_entry": entry,
         }
+        # Signalled by _async_discover_devices once lock discovery has either
+        # populated registered_locks or definitively failed. The options-flow
+        # Lock Automation step awaits this so it doesn't render before
+        # discovery knows the actual device_ids. Only created when a lock
+        # coordinator exists — installations without a lock service skip the
+        # step unconditionally and never look at the event.
+        if lock_coord is not None:
+            entry_data["lock_discovery_complete"] = asyncio.Event()
+        hass.data[DOMAIN][entry.entry_id] = entry_data
 
         # Schedule non-blocking first refresh for each coordinator
         for coord in filter(
