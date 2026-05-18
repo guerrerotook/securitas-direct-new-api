@@ -1090,19 +1090,23 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._config = {};
+    // Set by _fireChanged so the immediate setConfig round-trip from the
+    // parent doesn't trigger a full re-render (which would destroy focus
+    // on every keystroke). Cleared in a microtask so it never persists
+    // long enough to swallow a subsequent real external change.
+    this._internalWriteInFlight = false;
   }
 
   setConfig(config) {
-    const prev = this._config;
     this._config = { ...config };
-    // Only rebuild the DOM when something structural changes. Text-field edits
-    // update existing DOM nodes directly, so a full re-render isn't needed and
-    // would destroy the focused element on every keystroke.
-    const needsRender = !prev
-      || prev.entity !== config.entity
-      || prev.type   !== config.type
-      || !this.shadowRoot.querySelector(".editor");
-    if (needsRender) this._render();
+    if (this._internalWriteInFlight) {
+      this._internalWriteInFlight = false;
+      return;
+    }
+    // External setConfig — YAML edit, parent reset, or initial mount.
+    // Always re-render so the displayed state matches the new config.
+    // _render no-ops until `hass` arrives, so a pre-hass mount is safe.
+    this._render();
   }
 
   set hass(hass) {
@@ -1632,11 +1636,17 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
 
 
   _fireChanged() {
+    this._internalWriteInFlight = true;
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: this._config },
       bubbles: true,
       composed: true,
     }));
+    // Clear the flag after any synchronous round-trip from the parent so
+    // the next external setConfig is treated correctly. If the parent did
+    // re-call setConfig synchronously, it already cleared the flag — this
+    // microtask is a defensive no-op in that case.
+    queueMicrotask(() => { this._internalWriteInFlight = false; });
   }
 }
 
