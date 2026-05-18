@@ -106,24 +106,27 @@ describe("activity-log-card tick timer (connectedCallback)", () => {
         states: { [ENTITY]: makeActivityLogEntity({ events: [] }) },
       }),
     });
+    // The tick callback sets `_lastRenderedState = null` before re-rendering;
+    // if disconnectedCallback failed to clear the interval, advancing 60s
+    // after removal would still trip it and we'd see the side effect.
+    expect(card._tickTimer).not.toBeNull();
     card.remove();
-    // No assertion needed — the disconnectedCallback path is what we want
-    // covered; if it doesn't clear the timer, leaked timers would surface
-    // as cross-test interference.
+    expect(card._tickTimer).toBeNull();
+    const renderSpy = vi.spyOn(card, "_render");
     vi.advanceTimersByTime(60_000);
-    expect(true).toBe(true);
+    expect(renderSpy).not.toHaveBeenCalled();
   });
 });
 
 describe("activity-log-card defaults / fallbacks", () => {
-  it("getCardSize defaults to 11 cells when no limit configured", () => {
+  it("getCardSize caps at 8 when no limit configured (default limit is 10 → 1+10 capped to 8)", () => {
     const card = mountActivityCard({
       hass: makeHass({ states: { [ENTITY]: makeActivityLogEntity({ events: [] }) } }),
     });
     expect(card.getCardSize()).toBe(8);
   });
 
-  it("getCardSize uses configured limit (capped at 8)", () => {
+  it("getCardSize returns 1+limit when below the cap", () => {
     const card = mountActivityCard({
       config: { limit: 3 },
       hass: makeHass({ states: { [ENTITY]: makeActivityLogEntity({ events: [] }) } }),
