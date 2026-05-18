@@ -34,11 +34,16 @@ EXPECTED_INTEGRATION_FILES = frozenset(
     }
 )
 
-INTEGRATION_MARKERS = ("from homeassistant", "import homeassistant", "mock_graphql")
+INTEGRATION_MARKERS = (
+    "from homeassistant",
+    "import homeassistant",
+    "mock_graphql",
+    "mock_server",
+)
 
 
 def _has_integration_imports(path: Path) -> bool:
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     return any(marker in source for marker in INTEGRATION_MARKERS)
 
 
@@ -51,13 +56,13 @@ def test_expected_integration_files_have_integration_imports() -> None:
     ]
     assert not missing_imports, (
         f"Files listed in EXPECTED_INTEGRATION_FILES no longer import "
-        f"homeassistant or mock_graphql — remove them from the expected set: "
-        f"{missing_imports}"
+        f"homeassistant or mock_graphql, nor request the mock_server fixture — "
+        f"remove them from the expected set: {missing_imports}"
     )
 
 
 def test_no_unlisted_test_file_has_integration_imports() -> None:
-    """Every test_*.py file with HA or mock_graphql imports is in the expected set."""
+    """Every test_*.py file with HA, mock_graphql, or mock_server is in the expected set."""
     unlisted_with_imports: list[str] = []
     for path in sorted(TESTS_DIR.glob("test_*.py")):
         if path.name in EXPECTED_INTEGRATION_FILES or path.name == "test_markers.py":
@@ -65,7 +70,8 @@ def test_no_unlisted_test_file_has_integration_imports() -> None:
         if _has_integration_imports(path):
             unlisted_with_imports.append(path.name)
     assert not unlisted_with_imports, (
-        f"These files import homeassistant or mock_graphql but are not in "
-        f"EXPECTED_INTEGRATION_FILES. Add them to the set so the integration "
-        f"marker stays in sync: {unlisted_with_imports}"
+        f"These files import homeassistant or mock_graphql, or request the "
+        f"mock_server fixture, but are not in EXPECTED_INTEGRATION_FILES. Add "
+        f"them to the set so the integration marker stays in sync: "
+        f"{unlisted_with_imports}"
     )

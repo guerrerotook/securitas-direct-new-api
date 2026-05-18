@@ -475,7 +475,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // re-allocate it for every unrelated entity update.
     this._statesFP = config.states === undefined
       ? "*"
-      : (config.states || []).join(",");
+      : (Array.isArray(config.states) ? config.states : []).join(",");
     if (this._hass) this._render();
   }
 
@@ -1185,7 +1185,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       const cb      = document.createElement("input");
       cb.type       = "checkbox";
       cb.dataset.armKey = action.key;
-      cb.checked    = configStates === undefined || configStates.includes(action.key);
+      cb.checked    = !Array.isArray(configStates) || configStates.includes(action.key);
 
       const text = document.createElement("span");
       text.textContent = _t(lang, action.labelKey);
