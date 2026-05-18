@@ -1176,12 +1176,39 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       const allChecked = checked.length === supportedKeys.length
         && supportedKeys.every(k => checked.includes(k));
 
+      let nextConfig;
       if (allChecked) {
         const { states: _, ...rest } = this._config;
-        this._config = rest;
+        nextConfig = rest;
       } else {
-        this._config = { ...this._config, states: checked };
+        nextConfig = { ...this._config, states: checked };
       }
+
+      // Scrub any gesture's `arm_state` that's no longer in the user's
+      // chosen subset — otherwise the dropdown ends up showing a raw
+      // value that doesn't match any of its options. Only kicks in when
+      // `states` is an explicit non-empty subset: an empty list falls
+      // back to "all supported" for the dropdown anyway, so the saved
+      // arm_state stays valid.
+      const nextStates = nextConfig.states;
+      if (Array.isArray(nextStates) && nextStates.length > 0) {
+        const newDefault = _defaultArmState(this._hass, this._config.entity, nextStates);
+        for (const gestureKey of ["tap_action", "hold_action", "double_tap_action"]) {
+          const gestureAction = nextConfig[gestureKey];
+          if (
+            gestureAction?.action === "arm_or_disarm"
+            && gestureAction.arm_state
+            && !nextStates.includes(gestureAction.arm_state)
+          ) {
+            nextConfig = {
+              ...nextConfig,
+              [gestureKey]: { ...gestureAction, arm_state: newDefault },
+            };
+          }
+        }
+      }
+
+      this._config = nextConfig;
       this._fireChanged();
       // Refresh the gesture sections so their `arm_state` dropdowns reflect
       // the new subset immediately instead of waiting for an editor reopen.
