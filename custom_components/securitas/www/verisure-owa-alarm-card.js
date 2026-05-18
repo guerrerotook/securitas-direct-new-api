@@ -1600,12 +1600,29 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     if (!gestureSlot) return;
     gestureSlot.innerHTML = "";
 
-    const isBadge = this._config.type === "custom:securitas-alarm-badge";
-    const tapDefaults  = isBadge ? { action: "more-info" } : { action: "none" };
-    const holdDefaults = {
-      action: "arm_or_disarm",
-      arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states),
-    };
+    // Detect the card variant from the configured type. Match the tag-name
+    // suffix so every alias (securitas-*, verisure-owa-*, mushroom-*)
+    // resolves correctly — `_config.type === "custom:securitas-alarm-badge"`
+    // alone misses the canonical verisure-owa-* names and the mushroom chip.
+    const type = this._config.type || "";
+    const isBadge = /-alarm-badge$/.test(type);
+    const isChip  = /-alarm-chip$/.test(type);
+
+    // Editor defaults MUST mirror the variant's runtime fallbacks (see the
+    // `gestureConfig` blocks in VerisureOwaAlarmCard / *AlarmBadge /
+    // *AlarmChip). Otherwise the editor displays an action that the runtime
+    // wouldn't actually invoke — e.g. the Card runtime defaults to
+    // `{ action: "none" }` for hold, so showing "Arm or disarm" here is a
+    // lie and the user's saved card silently does nothing on long-press.
+    const tapDefaults = (isBadge || isChip)
+      ? { action: "more-info" }
+      : { action: "none" };
+    const holdDefaults = isBadge
+      ? {
+          action: "arm_or_disarm",
+          arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states),
+        }
+      : { action: "none" };
     const dblDefaults  = { action: "none" };
 
     gestureSlot.appendChild(this._buildGestureSection("tap",        "Tap action",        tapDefaults));
