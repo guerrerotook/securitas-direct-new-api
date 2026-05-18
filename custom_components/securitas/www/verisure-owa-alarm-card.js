@@ -55,6 +55,7 @@ const TRANSLATIONS = {
     editor_arm_modes: "Arm modes",
     editor_arm_modes_hint: "Uncheck modes to hide their buttons. Modes not supported by the entity are not shown.",
     editor_arm_modes_empty: "This entity reports no supported arm modes.",
+    editor_arm_state_no_modes: "Enable at least one arm mode above to set this action.",
     card_name: "Verisure OWA Alarm Card",
     card_description: "Alarm card for Verisure: dynamic arm modes, PIN support, force-arm for open sensors.",
   },
@@ -79,6 +80,7 @@ const TRANSLATIONS = {
     editor_arm_modes: "Modos de armado",
     editor_arm_modes_hint: "Desmarque los modos para ocultar sus botones. Los modos no admitidos por la entidad no se muestran.",
     editor_arm_modes_empty: "Esta entidad no admite ningún modo de armado.",
+    editor_arm_state_no_modes: "Habilite al menos un modo de armado arriba para configurar esta acción.",
     card_name: "Tarjeta de Alarma Verisure",
     card_description: "Tarjeta de alarma para Verisure: modos de armado, PIN y armado forzado.",
   },
@@ -103,6 +105,7 @@ const TRANSLATIONS = {
     editor_arm_modes: "Modes d’armement",
     editor_arm_modes_hint: "D\u00e9cochez les modes pour masquer leurs boutons. Les modes non pris en charge par l’entit\u00e9 ne sont pas affich\u00e9s.",
     editor_arm_modes_empty: "Cette entit\u00e9 ne prend en charge aucun mode d\u2019armement.",
+    editor_arm_state_no_modes: "Activez au moins un mode d\u2019armement ci-dessus pour configurer cette action.",
     card_name: "Carte d\u2019alarme Verisure",
     card_description: "Carte d\u2019alarme Verisure\u00a0: modes d\u2019armement, PIN et armement forc\u00e9.",
   },
@@ -127,6 +130,7 @@ const TRANSLATIONS = {
     editor_arm_modes: "Modalità di armamento",
     editor_arm_modes_hint: "Deseleziona le modalità per nasconderne i pulsanti. Le modalità non supportate dall\u2019entità non vengono mostrate.",
     editor_arm_modes_empty: "Questa entità non supporta alcuna modalità di armamento.",
+    editor_arm_state_no_modes: "Abilita almeno una modalità di armamento sopra per configurare questa azione.",
     card_name: "Scheda Allarme Verisure",
     card_description: "Scheda allarme Verisure: modalit\u00e0 di armamento, PIN e armamento forzato.",
   },
@@ -151,6 +155,7 @@ const TRANSLATIONS = {
     editor_arm_modes: "Modos de armar",
     editor_arm_modes_hint: "Desmarque os modos para ocultar os seus bot\u00f5es. Os modos n\u00e3o suportados pela entidade n\u00e3o s\u00e3o mostrados.",
     editor_arm_modes_empty: "Esta entidade n\u00e3o suporta nenhum modo de armar.",
+    editor_arm_state_no_modes: "Ative pelo menos um modo de armar acima para configurar esta a\u00e7\u00e3o.",
     card_name: "Cart\u00e3o de Alarme Verisure",
     card_description: "Cart\u00e3o de alarme Verisure: modos de armar, PIN e armamento for\u00e7ado.",
   },
@@ -1219,6 +1224,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
   }
 
   _buildGestureSection(gesture, title, defaults) {
+    const lang          = this._hass?.language || "en";
     const configKey     = `${gesture}_action`;
     const current       = this._config[configKey] || defaults;
     const currentAction = current.action || defaults.action;
@@ -1230,15 +1236,23 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const filtered     = Array.isArray(configStates)
       ? supported.filter(a => configStates.includes(a.key))
       : supported;
-    // Two-stage fallback: prefer the user-filtered subset, then drop to all
-    // supported, then drop to the full list — so the dropdown is never empty.
-    const armOptions = filtered.length > 0
-      ? filtered
-      : (supported.length > 0 ? supported : ARM_ACTIONS);
+    // `userHiddenAll` = the user explicitly unchecked every supported mode
+    // in the Arm modes section. In that case the dropdown has no honest
+    // options to show — render a helper hint instead. Otherwise apply the
+    // two-stage fallback (filtered → supported → ARM_ACTIONS) so the
+    // dropdown is never empty for non-user reasons (e.g. entity not loaded).
+    const userHiddenAll = Array.isArray(configStates) && filtered.length === 0;
+    const armOptions = userHiddenAll
+      ? []
+      : (filtered.length > 0
+          ? filtered
+          : (supported.length > 0 ? supported : ARM_ACTIONS));
 
     // Mutable state (avoids re-reading form.data which may lag)
     let actionValue   = currentAction;
-    let armStateValue = current.arm_state || _defaultArmState(this._hass, this._config.entity, this._config.states);
+    let armStateValue = userHiddenAll
+      ? undefined
+      : (current.arm_state || _defaultArmState(this._hass, this._config.entity, this._config.states));
 
     const section = document.createElement("div");
     section.className = "gesture-section";
@@ -1299,23 +1313,31 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const armFields = document.createElement("div");
     armFields.className = "conditional-fields";
     armFields.style.display = currentAction === "arm_or_disarm" ? "" : "none";
-    const armForm = document.createElement("ha-form");
-    armForm.hass   = this._hass;
-    armForm.data   = { arm_state: armStateValue };
-    armForm.schema = [{
-      name: "arm_state",
-      selector: {
-        select: {
-          mode: "dropdown",
-          options: armOptions.map(a => ({
-            value: a.key,
-            label: a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          })),
+    let armForm = null;
+    if (userHiddenAll) {
+      const hint = document.createElement("div");
+      hint.className = "arm-modes-empty";
+      hint.textContent = _t(lang, "editor_arm_state_no_modes");
+      armFields.appendChild(hint);
+    } else {
+      armForm = document.createElement("ha-form");
+      armForm.hass   = this._hass;
+      armForm.data   = { arm_state: armStateValue };
+      armForm.schema = [{
+        name: "arm_state",
+        selector: {
+          select: {
+            mode: "dropdown",
+            options: armOptions.map(a => ({
+              value: a.key,
+              label: a.key.replace("arm_", "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+            })),
+          },
         },
-      },
-    }];
-    armForm.computeLabel = () => "Arm state";
-    armFields.appendChild(armForm);
+      }];
+      armForm.computeLabel = () => "Arm state";
+      armFields.appendChild(armForm);
+    }
     section.appendChild(armFields);
 
     // Show/hide conditional fields
@@ -1338,7 +1360,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
         const raw = perfDataInput.value.trim();
         if (raw) { try { cfg.data = JSON.parse(raw); } catch (_) {} }
       }
-      if (actionValue === "arm_or_disarm") cfg.arm_state = armStateValue;
+      if (actionValue === "arm_or_disarm" && armStateValue) cfg.arm_state = armStateValue;
       this._config = { ...this._config, [configKey]: cfg };
       this._fireChanged();
     };
@@ -1352,14 +1374,16 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
         writeConfig();
       }
     });
-    armForm.addEventListener("value-changed", (e) => {
-      const v = e.detail?.value?.arm_state;
-      if (v !== undefined) {
-        armStateValue = v;
-        armForm.data = { arm_state: armStateValue };
-        writeConfig();
-      }
-    });
+    if (armForm) {
+      armForm.addEventListener("value-changed", (e) => {
+        const v = e.detail?.value?.arm_state;
+        if (v !== undefined) {
+          armStateValue = v;
+          armForm.data = { arm_state: armStateValue };
+          writeConfig();
+        }
+      });
+    }
     navForm.addEventListener("value-changed", (e) => {
       navForm.data = e.detail.value;
       writeConfig();
