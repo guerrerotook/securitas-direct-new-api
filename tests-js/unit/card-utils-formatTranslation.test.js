@@ -53,4 +53,10 @@ describe("formatTranslation", () => {
     expect(formatTranslation(null, T, "hello")).toBe("Hello");
     expect(formatTranslation(undefined, T, "hello")).toBe("Hello");
   });
+
+  it("treats translations without an `en` table as empty English fallback", () => {
+    const noEn = { fr: { greet: "Salut" } };
+    expect(formatTranslation("fr", noEn, "greet")).toBe("Salut");
+    expect(formatTranslation("fr", noEn, "missing")).toBe("missing");
+  });
 });
