@@ -813,7 +813,7 @@ describe("verisure-owa-alarm-card lifecycle and statics", () => {
   it("getConfigElement returns the matching editor element", () => {
     const ctor = customElements.get("verisure-owa-alarm-card");
     const el = ctor.getConfigElement();
-    expect(el.tagName.toLowerCase()).toBe("securitas-alarm-card-editor");
+    expect(el.tagName.toLowerCase()).toBe("verisure-owa-alarm-card-editor");
   });
 
   it("getStubConfig picks the first alarm_control_panel entity", () => {

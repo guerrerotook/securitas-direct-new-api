@@ -432,7 +432,7 @@ describe("verisure-owa-camera-card static helpers", () => {
   it("getConfigElement returns the matching editor element", () => {
     const ctor = customElements.get("verisure-owa-camera-card");
     const el = ctor.getConfigElement();
-    expect(el.tagName.toLowerCase()).toBe("securitas-camera-card-editor");
+    expect(el.tagName.toLowerCase()).toBe("verisure-owa-camera-card-editor");
   });
 
   it("getStubConfig picks the first non-full-image camera entity", () => {

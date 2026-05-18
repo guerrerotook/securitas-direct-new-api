@@ -1097,7 +1097,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
   }
 
   static getConfigElement() {
-    return document.createElement("securitas-alarm-card-editor");
+    return document.createElement("verisure-owa-alarm-card-editor");
   }
 
   static getStubConfig(hass) {
@@ -1932,7 +1932,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   getCardSize() { return 1; }
 
   static getConfigElement() {
-    return document.createElement("securitas-alarm-card-editor");
+    return document.createElement("verisure-owa-alarm-card-editor");
   }
 
   static getStubConfig(hass) {

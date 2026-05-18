@@ -473,7 +473,7 @@ class VerisureOwaCameraCard extends HTMLElement {
   getCardSize() { return 3; }
 
   static getConfigElement() {
-    return document.createElement("securitas-camera-card-editor");
+    return document.createElement("verisure-owa-camera-card-editor");
   }
 
   static getStubConfig(hass) {
