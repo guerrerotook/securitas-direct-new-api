@@ -6,9 +6,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test": "TZ=UTC vitest run",
+    "test:watch": "TZ=UTC vitest",
+    "test:coverage": "TZ=UTC vitest run --coverage",
     "lint": "eslint . && prettier --check 'package.json' 'vitest.config.js' 'eslint.config.js' '.prettierrc.json' 'tests-js/**/*.js'",
     "lint:fix": "eslint . --fix && prettier --write 'package.json' 'vitest.config.js' 'eslint.config.js' '.prettierrc.json' 'tests-js/**/*.js'"
   },

@@ -11,8 +11,9 @@ export default defineConfig({
       reporter: ["text", "html", "lcov"],
       include: ["custom_components/securitas/www/**/*.js"],
       exclude: [
-        "custom_components/securitas/www/securitas-alarm-card.js",
-        "custom_components/securitas/www/securitas-camera-card.js",
+        // Legacy securitas-* shim files re-export the canonical verisure-owa-* cards.
+        // Globbed so future shims are excluded by convention.
+        "custom_components/securitas/www/securitas-*.js",
       ],
       thresholds: {
         lines: 90,
