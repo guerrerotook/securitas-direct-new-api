@@ -145,3 +145,8 @@ tests/fixtures/*.har
 
 # Local pyright config (user-specific venv path)
 pyrightconfig.json
+
+# JS test infrastructure
+node_modules/
+coverage/
+.vitest-cache/

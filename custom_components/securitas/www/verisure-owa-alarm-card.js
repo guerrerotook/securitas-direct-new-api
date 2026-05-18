@@ -24,7 +24,7 @@
 import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
-const FEATURE = {
+export const FEATURE = {
   ARM_HOME: 1,
   ARM_AWAY: 2,
   ARM_NIGHT: 4,
@@ -33,7 +33,7 @@ const FEATURE = {
 };
 
 // ── Translations ─────────────────────────────────────────────────────────────
-const TRANSLATIONS = {
+export const TRANSLATIONS = {
   en: {
     disarmed: "Disarmed", armed_away: "Armed Away", armed_home: "Armed Home",
     armed_night: "Armed Night", armed_vacation: "Armed Vacation",
@@ -215,7 +215,7 @@ const STATE_LABEL_KEYS = {
 const INACTIVE_STATES = new Set(["disarmed", "arming", "pending", "triggered", "unavailable", "unknown"]);
 
 // ── Arm action definitions ────────────────────────────────────────────────────
-const ARM_ACTIONS = [
+export const ARM_ACTIONS = [
   { key: "arm_away",          labelKey: "arm_away",    feature: FEATURE.ARM_AWAY,         service: "alarm_arm_away" },
   { key: "arm_home",          labelKey: "arm_home",    feature: FEATURE.ARM_HOME,         service: "alarm_arm_home" },
   { key: "arm_night",         labelKey: "arm_night",    feature: FEATURE.ARM_NIGHT,        service: "alarm_arm_night" },
@@ -248,7 +248,7 @@ function _filteredArmActions(features, configStates) {
  * First arm state key the entity supports (and is in `configStates`, if
  * given), with fallbacks so callers always get a usable key.
  */
-function _defaultArmState(hass, entityId, configStates) {
+export function defaultArmState(hass, entityId, configStates) {
   const features = hass.states[entityId]?.attributes?.supported_features || 0;
   const { supported, filtered } = _filteredArmActions(features, configStates);
   const pool = filtered.length > 0 ? filtered : supported;
@@ -422,7 +422,7 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
         }
       } else if (state === "disarmed") {
         // Arm
-        const armKey = action.arm_state || _defaultArmState(hass, entityId, cardStates);
+        const armKey = action.arm_state || defaultArmState(hass, entityId, cardStates);
         const armDef = ARM_ACTIONS.find(a => a.key === armKey);
         if (!armDef) return;
         const svcAction = { service: armDef.service, labelKey: armDef.labelKey };
@@ -1217,7 +1217,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       // supported" for the dropdown anyway, so saved arm_state stays valid.
       const nextStates = nextConfig.states;
       if (Array.isArray(nextStates) && nextStates.length > 0) {
-        const newDefault = _defaultArmState(this._hass, this._config.entity, nextStates);
+        const newDefault = defaultArmState(this._hass, this._config.entity, nextStates);
         for (const gestureKey of GESTURE_KEYS) {
           const gestureAction = nextConfig[gestureKey];
           if (
@@ -1262,7 +1262,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     let actionValue   = currentAction;
     let armStateValue = userHiddenAll
       ? undefined
-      : (current.arm_state || _defaultArmState(this._hass, this._config.entity, configStates));
+      : (current.arm_state || defaultArmState(this._hass, this._config.entity, configStates));
 
     const section = document.createElement("div");
     section.className = "gesture-section";
@@ -1630,7 +1630,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     const holdDefaults = isBadge
       ? {
           action: "arm_or_disarm",
-          arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states),
+          arm_state: defaultArmState(this._hass, this._config.entity, this._config.states),
         }
       : { action: "none" };
     const dblDefaults  = { action: "none" };
@@ -1735,7 +1735,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     const badgeEl = this.shadowRoot.getElementById("badge");
     const gestureConfig = {
       tap_action:        this._config.tap_action        || { action: "more-info" },
-      hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: _defaultArmState(this._hass, this._config.entity, this._config.states) },
+      hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: defaultArmState(this._hass, this._config.entity, this._config.states) },
       double_tap_action: this._config.double_tap_action || { action: "none" },
     };
 

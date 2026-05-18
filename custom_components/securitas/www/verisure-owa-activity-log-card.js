@@ -22,7 +22,7 @@ import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js";
 
 // ── Translations ─────────────────────────────────────────────────────────────
 
-const TRANSLATIONS = {
+export const TRANSLATIONS = {
   en: {
     category: {
       armed: "Armed",
@@ -305,7 +305,7 @@ const CATEGORY_COLORS = {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-function _hassLang(hass) {
+export function hassLang(hass) {
   return hass?.locale?.language || hass?.language || "en";
 }
 
@@ -324,7 +324,7 @@ function _rtf(lang) {
  * Treats the panel-local "YYYY-MM-DD HH:MM:SS" string as the user's local
  * timezone — correct in the common case where HA runs near the panel.
  */
-function _relativeTime(timeStr, lang) {
+export function relativeTime(timeStr, lang) {
   if (!timeStr || timeStr.length < 16) return "";
   // "2026-05-05 15:00:00" → "2026-05-05T15:00:00" → local Date
   const date = new Date(timeStr.replace(" ", "T"));
@@ -341,7 +341,7 @@ function _relativeTime(timeStr, lang) {
 }
 
 /** Format an event's actor as "by Luci" or "(Cucina)" or "" */
-function _formatActor(event, lang) {
+export function formatActor(event, lang) {
   if (event.verisure_user) return `${_t(lang, "by")} ${escHtml(event.verisure_user)}`;
   if (event.device_name) return `(${escHtml(event.device_name)})`;
   return "";
@@ -350,7 +350,7 @@ function _formatActor(event, lang) {
 // Fields shown in the expanded details block, in display order.
 // Skipped: __typename (internal), category (already shown), the redundant
 // signal_type (always equal to type in observed data).
-const DETAIL_FIELDS = [
+export const DETAIL_FIELDS = [
   "time",
   "alias",
   "type",
@@ -371,7 +371,7 @@ const DETAIL_FIELDS = [
 ];
 
 /** Render `exceptions[]` as a small list — "Pfincameret — Low battery" */
-function _renderExceptions(exceptions, lang) {
+export function renderExceptions(exceptions, lang) {
   if (!Array.isArray(exceptions) || exceptions.length === 0) return "";
   const items = exceptions.map((exc) => {
     const aliasText = exc.alias ? escHtml(exc.alias) : "";
@@ -382,14 +382,14 @@ function _renderExceptions(exceptions, lang) {
   return `<ul class="exceptions">${items.join("")}</ul>`;
 }
 
-function _renderRows(event, lang) {
+export function renderRows(event, lang) {
   const rows = [];
   for (const key of DETAIL_FIELDS) {
     const val = event[key];
     if (val == null || val === "" || val === 0) continue;
     let display;
     if (key === "exceptions") {
-      display = _renderExceptions(val, lang);
+      display = renderExceptions(val, lang);
     } else if (Array.isArray(val) || (typeof val === "object" && val !== null)) {
       display = `<pre>${escHtml(JSON.stringify(val, null, 2))}</pre>`;
     } else {
@@ -550,7 +550,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
 
   _render() {
     if (!this._config || !this._hass) return;
-    const lang = _hassLang(this._hass);
+    const lang = hassLang(this._hass);
     const entityId = this._config.entity;
     const stateObj = this._hass.states[entityId];
     this._lastRenderedState = stateObj;
@@ -705,8 +705,8 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     const icon = CATEGORY_ICONS[cat] || CATEGORY_ICONS.unknown;
     const color = CATEGORY_COLORS[cat] || CATEGORY_COLORS.unknown;
     const label = _t(lang, `category.${cat}`);
-    const actor = _formatActor(event, lang);
-    const rel = _relativeTime(event.time, lang);
+    const actor = formatActor(event, lang);
+    const rel = relativeTime(event.time, lang);
     const id = String(event.id_signal || "");
     const isExpanded = this._expanded.has(id);
     const isInjected = event.injected === true;
@@ -737,11 +737,11 @@ class VerisureOwaActivityLogCard extends HTMLElement {
       event.category === "unknown"
         ? `<div class="unknown-prompt">${escHtml(_t(lang, "unknown_event_prompt"))}</div>`
         : "";
-    return `${imageBlock}${prompt}<table class="details">${_renderRows(event, lang)}</table>`;
+    return `${imageBlock}${prompt}<table class="details">${renderRows(event, lang)}</table>`;
   }
 
   _renderImageBlock(event) {
-    const lang = _hassLang(this._hass);
+    const lang = hassLang(this._hass);
     const id = String(event.id_signal || "");
     // Synthetic ids (prefix `ha-`) can't resolve to a server-side image.
     if (id.startsWith("ha-")) return "";
@@ -769,7 +769,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     // after.  Without this, expanding a row that triggers a render
     // (e.g. lazy image fetch) jumps the user back to the top.
     const prevScroll = this.shadowRoot.querySelector(".scroll")?.scrollTop || 0;
-    const lang = _hassLang(this._hass);
+    const lang = hassLang(this._hass);
     const titleHtml = this._config.title
       ? `<div class="card-header">${escHtml(this._config.title)}</div>`
       : "";
@@ -1019,7 +1019,7 @@ class VerisureOwaActivityLogCardEditor extends HTMLElement {
     const entityForm = this.shadowRoot.getElementById("entity-form");
     entityForm.hass = this._hass;
     entityForm.data = this._formData();
-    const lang = _hassLang(this._hass);
+    const lang = hassLang(this._hass);
     const categoryOptions = Object.keys(CATEGORY_ICONS).map((c) => ({
       value: c,
       label: _t(lang, `category.${c}`),

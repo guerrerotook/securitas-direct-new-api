@@ -582,3 +582,18 @@ For protocol-level bugs — wrong alarm state, lock or camera misbehaving — a 
 
 The same technique is used to [capture payloads for new operations](./docs/new_operations.md) if you'd like to help add support.
 
+## Frontend tests
+
+The Lovelace cards under `custom_components/securitas/www/` are covered by a Vitest suite with a 90% coverage gate enforced in CI.
+
+```bash
+npm ci
+npm run lint          # ESLint + Prettier check
+npm test              # one-shot
+npm run test:watch    # watch mode
+npm run test:coverage # writes ./coverage/index.html
+```
+
+- Tests live in `tests-js/`.
+- The runtime cards have no Node dependencies — `node_modules/` is a dev-only concern and is gitignored.
+
