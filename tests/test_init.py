@@ -1859,6 +1859,135 @@ class TestDiscoverCameras:
 
 
 # ===========================================================================
+# _async_discover_devices tests — ordering + completion signalling
+# ===========================================================================
+
+
+class TestAsyncDiscoverDevices:
+    """Tests for _async_discover_devices() ordering and event signalling."""
+
+    @pytest.mark.asyncio
+    async def test_locks_discovered_before_cameras(self):
+        """Locks must submit to the queue before cameras (options-flow latency).
+
+        Locks gate the Lock Automation options step; cameras don't. Order the
+        sequential awaits so a user opening options waits only on lock work.
+        """
+        import asyncio
+
+        from custom_components.securitas import _async_discover_devices
+        from custom_components.securitas.const import DOMAIN
+
+        hass = MagicMock()
+        hass.data = {DOMAIN: {}}
+
+        call_order: list[str] = []
+
+        async def fake_discover_cameras(*_args, **_kwargs):
+            call_order.append("cameras")
+
+        async def fake_discover_locks(*_args, **_kwargs):
+            call_order.append("locks")
+
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        hass.data[DOMAIN][entry.entry_id] = {
+            "hub": MagicMock(),
+            "devices": [VerisureDevice(make_installation())],
+            "lock_discovery_complete": asyncio.Event(),
+        }
+
+        with (
+            patch(
+                "custom_components.securitas.discovery._discover_cameras",
+                new=fake_discover_cameras,
+            ),
+            patch(
+                "custom_components.securitas.discovery._discover_locks",
+                new=fake_discover_locks,
+            ),
+        ):
+            await _async_discover_devices(hass, entry)
+
+        assert call_order == ["locks", "cameras"], (
+            f"Expected locks before cameras, got {call_order}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_lock_discovery_event_is_set_on_completion(self):
+        """The lock_discovery_complete event must be set once discovery returns."""
+        import asyncio
+
+        from custom_components.securitas import _async_discover_devices
+        from custom_components.securitas.const import DOMAIN
+
+        hass = MagicMock()
+        hass.data = {DOMAIN: {}}
+        event = asyncio.Event()
+        entry = MagicMock()
+        entry.entry_id = "entry-2"
+        hass.data[DOMAIN][entry.entry_id] = {
+            "hub": MagicMock(),
+            "devices": [VerisureDevice(make_installation())],
+            "lock_discovery_complete": event,
+        }
+
+        with (
+            patch(
+                "custom_components.securitas.discovery._discover_cameras",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.securitas.discovery._discover_locks",
+                new=AsyncMock(),
+            ),
+        ):
+            await _async_discover_devices(hass, entry)
+
+        assert event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_lock_discovery_event_is_set_even_when_discovery_raises(self):
+        """The event must be set even if _discover_locks raises — never hang options."""
+        import asyncio
+
+        from custom_components.securitas import _async_discover_devices
+        from custom_components.securitas.const import DOMAIN
+
+        hass = MagicMock()
+        hass.data = {DOMAIN: {}}
+        event = asyncio.Event()
+        entry = MagicMock()
+        entry.entry_id = "entry-3"
+        hass.data[DOMAIN][entry.entry_id] = {
+            "hub": MagicMock(),
+            "devices": [VerisureDevice(make_installation())],
+            "lock_discovery_complete": event,
+        }
+
+        async def boom(*_args, **_kwargs):
+            raise RuntimeError("discovery exploded")
+
+        with (
+            patch(
+                "custom_components.securitas.discovery._discover_cameras",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.securitas.discovery._discover_locks",
+                new=boom,
+            ),
+        ):
+            # Whether or not the function re-raises, the event must be set.
+            try:
+                await _async_discover_devices(hass, entry)
+            except RuntimeError:
+                pass
+
+        assert event.is_set()
+
+
+# ===========================================================================
 # Phase F3: Static-URL alias
 # ===========================================================================
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -81,6 +82,13 @@ from .verisure_owa_api.capabilities import detect_annex, detect_peri
 VERSION = 4
 
 _LOGGER = logging.getLogger(__name__)
+
+# Max seconds the Lock Automation options step waits for background lock
+# discovery to finish before falling through. Sized to cover the worst case
+# we've observed in production logs (~12s for an SDVFAST panel that needs
+# the Danalock GraphQL fallback), with a small safety margin. Module-level
+# so tests can monkeypatch it down.
+LOCK_DISCOVERY_WAIT_TIMEOUT: float = 15.0
 
 # Services that should not appear in the Notify-service dropdown.
 # - `notify` / `send_message`: aliases of the legacy generic notify service;
@@ -1106,7 +1114,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         unlock_disarms: [...]}}) is unchanged — the handler converts between
         per-circuit booleans (UI) and circuit-name lists (storage).
         """
-        registered_locks = self._get_registered_locks()
+        registered_locks = await self._get_registered_locks()
         if not registered_locks:
             return self.async_create_entry(title="", data=self._general_data)
 
@@ -1168,11 +1176,40 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
             description_placeholders=placeholders,
         )
 
-    def _get_registered_locks(self) -> list[dict[str, str]]:
-        """Return [{device_id, alias}] for each lock registered for this entry."""
+    async def _get_registered_locks(self) -> list[dict[str, str]]:
+        """Return [{device_id, alias}] for each lock registered for this entry.
+
+        If the in-memory list is empty but the entry has a pending
+        ``lock_discovery_complete`` event (i.e. the installation has a lock
+        service and background discovery is still running), wait up to
+        ``LOCK_DISCOVERY_WAIT_TIMEOUT`` seconds for discovery to finish, then
+        re-read the list. Without this wait, opening options immediately
+        after adding an installation silently skips the Lock Automation step
+        even though a lock exists.
+        """
         domain_entry = self.hass.data.get(DOMAIN, {}).get(
             self.config_entry.entry_id, {}
         )
+        registered = list(domain_entry.get("registered_locks", []))
+        if registered:
+            return registered
+
+        event = domain_entry.get("lock_discovery_complete")
+        if event is None or event.is_set():
+            return registered
+
+        try:
+            async with asyncio.timeout(LOCK_DISCOVERY_WAIT_TIMEOUT):
+                await event.wait()
+        except TimeoutError:
+            _LOGGER.warning(
+                "Lock discovery did not complete within %.1fs for entry %s; "
+                "skipping Lock Automation step",
+                LOCK_DISCOVERY_WAIT_TIMEOUT,
+                self.config_entry.entry_id,
+            )
+            return list(domain_entry.get("registered_locks", []))
+
         return list(domain_entry.get("registered_locks", []))
 
     def _get_enabled_circuits(self) -> set[str]:

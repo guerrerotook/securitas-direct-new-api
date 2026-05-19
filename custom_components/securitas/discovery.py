@@ -197,7 +197,9 @@ async def _discover_locks(
         return
 
     try:
-        lock_modes: list[SmartLockMode] = await hub.get_lock_modes(installation)
+        lock_modes: list[SmartLockMode] = await hub.get_lock_modes(
+            installation, priority=hub.api_queue.FOREGROUND
+        )
     except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
         _LOGGER.warning("Failed to get lock modes for %s", installation.number)
         lock_modes = []
@@ -245,6 +247,11 @@ async def _discover_locks(
                 }
             )
         lock_add(locks, False)
+        _LOGGER.info(
+            "Lock discovery for %s registered %d lock(s)",
+            installation.number,
+            len(locks),
+        )
 
         # Schedule deferred config retry for locks without config.
         for lk in locks:
@@ -253,15 +260,29 @@ async def _discover_locks(
 
 
 async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Discover cameras and locks in the background after setup."""
+    """Discover cameras and locks in the background after setup.
+
+    Locks run before cameras so a user opening the Lock Automation options
+    step doesn't wait on the camera-device query in between. The shared
+    ApiQueue still serializes all calls, so this is purely a reorder, not a
+    parallelization — request rate is unchanged.
+    """
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if entry_data is None:
         return
 
     client: VerisureHub = entry_data["hub"]
     devices: list[VerisureDevice] = entry_data["devices"]
+    lock_event = entry_data.get("lock_discovery_complete")
 
-    for device in devices:
-        installation = device.installation
-        await _discover_cameras(hass, client, installation, entry_data, entry)
-        await _discover_locks(hass, client, installation, entry_data, entry)
+    try:
+        for device in devices:
+            installation = device.installation
+            await _discover_locks(hass, client, installation, entry_data, entry)
+            await _discover_cameras(hass, client, installation, entry_data, entry)
+    finally:
+        # Always signal completion so the options-flow await unblocks even
+        # when discovery raised mid-way. Only set when the entry actually
+        # has a lock service — otherwise the event was never created.
+        if lock_event is not None:
+            lock_event.set()
