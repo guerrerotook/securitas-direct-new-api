@@ -54,6 +54,12 @@
                 "title": "Opzioni per {installation_name}",
                 "description": "Configura le opzioni dell'allarme.",
                 "sections": {
+                    "activity": {
+                        "name": "Registro attività ed eventi",
+                        "data": {
+                            "enable_activity_polling": "Interroga il registro attività una volta al minuto in background (per le automazioni basate su eventi)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avanzato",
                         "data": {
@@ -102,6 +108,12 @@
         "step": {
             "init": {
                 "sections": {
+                    "activity": {
+                        "name": "Registro attività ed eventi",
+                        "data": {
+                            "enable_activity_polling": "Interroga il registro attività una volta al minuto in background (per le automazioni basate su eventi)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avanzato",
                         "data": {

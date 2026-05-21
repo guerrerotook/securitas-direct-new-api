@@ -54,6 +54,12 @@
                 "title": "Opciones para {installation_name}",
                 "description": "Configurar opciones de alarma.",
                 "sections": {
+                    "activity": {
+                        "name": "Registro de actividad y eventos",
+                        "data": {
+                            "enable_activity_polling": "Sondear el registro de actividad una vez por minuto en segundo plano (para automatizaciones por eventos)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avanzado",
                         "data": {
@@ -102,6 +108,12 @@
         "step": {
             "init": {
                 "sections": {
+                    "activity": {
+                        "name": "Registro de actividad y eventos",
+                        "data": {
+                            "enable_activity_polling": "Sondear el registro de actividad una vez por minuto en segundo plano (para automatizaciones por eventos)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avanzado",
                         "data": {

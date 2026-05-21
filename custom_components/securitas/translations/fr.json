@@ -54,6 +54,12 @@
                 "title": "Options pour {installation_name}",
                 "description": "Configurer les options de l'alarme.",
                 "sections": {
+                    "activity": {
+                        "name": "Journal d'activité et événements",
+                        "data": {
+                            "enable_activity_polling": "Interroger le journal d'activité une fois par minute en arrière-plan (pour les automatisations par événements)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avancé",
                         "data": {
@@ -102,6 +108,12 @@
         "step": {
             "init": {
                 "sections": {
+                    "activity": {
+                        "name": "Journal d'activité et événements",
+                        "data": {
+                            "enable_activity_polling": "Interroger le journal d'activité une fois par minute en arrière-plan (pour les automatisations par événements)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avancé",
                         "data": {

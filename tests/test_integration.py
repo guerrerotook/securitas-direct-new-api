@@ -62,15 +62,18 @@ _SETUP_ENTRIES: list[tuple[HomeAssistant, MockConfigEntry]] = []
 
 
 async def _setup(
-    hass: HomeAssistant, server: MockGraphQLServer
+    hass: HomeAssistant, server: MockGraphQLServer, **overrides
 ) -> tuple[MockConfigEntry, bool]:
     """Create an entry and run full async_setup_entry with the mock server.
+
+    Extra keyword args are forwarded to ``make_config_entry_data`` so callers
+    can toggle entry-data fields (e.g. ``enable_activity_polling=True``).
 
     The entry is tracked for teardown by ``_unload_setup_entries`` (autouse
     fixture) so the activity coordinator's periodic-refresh timer doesn't
     leak between tests.
     """
-    entry = _make_entry(hass)
+    entry = _make_entry(hass, **overrides)
     mock_http = server.make_http_client()
     with patch(
         "custom_components.securitas.async_get_clientsession",
@@ -265,6 +268,44 @@ async def test_multiple_installations_stored(
     assert result is True
     devices = hass.data[DOMAIN][entry.entry_id]["devices"]
     assert len(devices) == 2
+
+
+# ── Activity-log background polling (opt-in) ────────────────────────────────────
+
+
+async def test_activity_polling_disabled_by_default(
+    hass: HomeAssistant, mock_server: MockGraphQLServer
+):
+    """Without the opt-in, the activity coordinator runs on-demand only.
+
+    The coordinator and its bus-event listener are still created (so the card
+    can drive refreshes and automations fire while viewing), but
+    update_interval is None — no per-minute background polling.
+    """
+    queue_standard_setup(mock_server)
+    entry, _ = await _setup(hass, mock_server)
+
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    activity_coord = entry_data["activity_coordinator"]
+    assert activity_coord is not None
+    assert activity_coord.update_interval is None
+    assert entry_data["activity_listener_unsub"] is not None
+
+
+async def test_activity_polling_enabled_sets_interval(
+    hass: HomeAssistant, mock_server: MockGraphQLServer
+):
+    """With the opt-in, the activity coordinator polls every 60 seconds."""
+    from datetime import timedelta
+
+    queue_standard_setup(mock_server)
+    entry, _ = await _setup(hass, mock_server, enable_activity_polling=True)
+
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    activity_coord = entry_data["activity_coordinator"]
+    assert activity_coord is not None
+    assert activity_coord.update_interval == timedelta(seconds=60)
+    assert entry_data["activity_listener_unsub"] is not None
 
 
 # ── Header & request verification ────────────────────────────────────────────

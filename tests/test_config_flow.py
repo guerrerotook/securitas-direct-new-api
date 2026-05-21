@@ -774,6 +774,62 @@ async def test_options_init_reads_from_options_first(hass):
     assert result["step_id"] == "init"
 
 
+async def test_options_init_form_includes_activity_polling_toggle(hass):
+    """The init form exposes the activity-log background-polling toggle."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert "activity" in _section_keys(result["data_schema"])
+    assert "enable_activity_polling" in _section_inner_keys(
+        result["data_schema"], "activity"
+    )
+
+
+async def test_options_enabling_activity_polling_persists(hass):
+    """Enabling the toggle writes enable_activity_polling=True to options."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    user_input = _fill_optional_sections(
+        result,
+        {
+            "pin": {CONF_CODE: "1234", CONF_CODE_ARM_REQUIRED: False},
+            "notifications": {},
+            "activity": {"enable_activity_polling": True},
+            CONF_ADVANCED: {
+                CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
+                CONF_DELAY_CHECK_OPERATION: float(DEFAULT_DELAY_CHECK_OPERATION),
+            },
+        },
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+    assert result["step_id"] == "mappings"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["enable_activity_polling"] is True
+
+
 # ===================================================================
 # TestSubpanelsNote
 # ===================================================================

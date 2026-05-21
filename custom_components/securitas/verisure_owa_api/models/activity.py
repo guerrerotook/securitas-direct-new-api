@@ -173,6 +173,12 @@ class ActivityEvent(_NullSafeBase):
     # arm/disarm injected at the moment HA issued the command).  Polled
     # entries from the panel default to False.
     injected: bool = False
+    # When set, this polled (panel) entry is a probable duplicate of the
+    # injected HA event whose ``id_signal`` this holds — i.e. the panel's own
+    # echo of an action HA issued, matched by category + timestamp proximity.
+    # The card nests it inside the HA event's detail and the bus listener does
+    # not re-fire it, so an HA-issued action triggers automations only once.
+    duplicate_of: str | None = None
     # Semantic grouping — explicit on HA-injected events, derived from `type`
     # for polled events via the model validator below.  Keep `category` rather
     # than `type` as the canonical filter for automations: the `type` field

@@ -65,17 +65,11 @@ DismissalReason = Literal["user_arm", "user_disarm", "integration_reload"]
 # carries no user_id (automation/script-driven actions).
 _HA_USER = "Home Assistant"
 
-# How a polled HA-issued action surfaces in the panel timeline: the
-# integration sends Android-like headers (so source="Android") and no
-# Verisure user is attributed.  Paired with HA_INJECTABLE_CATEGORIES, this
-# is what the activity coordinator uses to detect (and drop) the panel's
-# echo of an action HA already injected locally.
-HA_ECHO_SOURCE = "Android"
-
 # Categories the integration emits synthetic events for via
 # ``inject_ha_event``.  Kept here, next to the inject call site, so adding
-# a new injectable category in one place is enough — the coordinator
-# imports this set to suppress the redundant polled echo.
+# a new injectable category in one place is enough — the coordinator imports
+# this set to pair the panel's echo of an HA action (by category + timestamp)
+# with the injected event and flag it ``duplicate_of``.
 HA_INJECTABLE_CATEGORIES: frozenset[ActivityCategory] = frozenset(
     {
         ActivityCategory.ARMED,

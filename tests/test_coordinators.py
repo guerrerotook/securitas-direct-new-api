@@ -34,6 +34,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     WAFBlockedError,
 )
 from custom_components.securitas.verisure_owa_api.models import (
+    ActivityCategory,
     ActivityEvent,
     AirQuality,
     CameraDevice,
@@ -968,10 +969,13 @@ class TestActivityCoordinator:
         assert result.new_events == []
 
     @pytest.mark.asyncio
-    async def test_polled_ha_echo_dropped_for_injectable_categories(self):
-        """Polled HA-issued echoes (Android + null user) of categories we
-        inject for are dropped — those rows are redundant with the
-        synthetic injected entries.  Mobile/web/system rows survive.
+    async def test_polled_echoes_no_longer_dropped_without_injected_match(self):
+        """Polled entries are never dropped now — dedup is mark-not-remove and
+        only fires when a matching injected event exists.
+
+        With no injected events to pair against, every polled entry (including
+        the old Android + null-user echoes that the previous filter dropped)
+        survives and stays un-flagged.
         """
         hass = _make_hass()
         client = _make_client()
@@ -998,13 +1002,9 @@ class TestActivityCoordinator:
         result = await coord._async_update_data()
 
         ids = [e.id_signal for e in result.events]
-        # ha_armed and ha_disarmed are dropped (HA already injected them);
-        # everything else survives.
-        assert "999" not in ids
-        assert "998" not in ids
-        assert "997" in ids
-        assert "996" in ids
-        assert "995" in ids
+        # Nothing is dropped, and with no injected events nothing is flagged.
+        assert {"999", "998", "997", "996", "995"} <= set(ids)
+        assert all(e.duplicate_of is None for e in result.events)
 
     @pytest.mark.asyncio
     async def test_polled_ha_echo_passes_through_for_unknown_categories(self):
@@ -1107,6 +1107,187 @@ class TestActivityCoordinator:
         result = await coord._async_update_data()
 
         assert result.new_events == [new_event]
+
+    @pytest.mark.asyncio
+    async def test_new_remote_events_suppressed_when_background_polling_off(self):
+        """With background polling disabled (update_interval=None), a refresh
+        must not flag remote events as new.
+
+        On-demand refreshes are card-driven, so opening the card after a long
+        gap would otherwise fire a burst of stale verisure_owa_activity bus
+        events for every remote entry since the last refresh. The events still
+        appear in the timeline; they just don't fire on the bus. HA-injected
+        events fire live via inject_event, independent of this path.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        first_batch = [_make_event("999"), _make_event("998")]
+        new_event = _make_event("1000", alias="Disarmed", type=720, signal_type=720)
+        second_batch = [new_event, *first_batch]
+        client.get_activity.side_effect = [first_batch, second_batch]
+
+        coord = ActivityCoordinator(
+            hass, client, queue, installation, update_interval=None
+        )
+        await coord._async_update_data()  # baseline
+        result = await coord._async_update_data()
+
+        # The new remote event is shown in the timeline...
+        assert any(e.id_signal == "1000" for e in result.events)
+        # ...but is NOT fired on the bus.
+        assert result.new_events == []
+
+    @pytest.mark.asyncio
+    async def test_polled_echo_paired_with_injected_is_marked_duplicate(self):
+        """A polled echo of an HA action (same category, within the match
+        window) is tagged duplicate_of the injected event — kept in the
+        timeline but not fired on the bus. Pairing is by category + time, so
+        it works even when the echo carries a named verisure_user (the
+        Verisure account the integration logs in as)."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+
+        injected = _make_event(
+            "ha-x",
+            category=ActivityCategory.DISARMED,
+            time="2026-05-21 17:06:00",
+            injected=True,
+            source="Home Assistant",
+            verisure_user="clinton",
+        )
+        coord.inject_event(injected)
+
+        echo = _make_event(
+            "859",
+            category=ActivityCategory.DISARMED,
+            time="2026-05-21 17:05:58",
+            source="Android",
+            verisure_user="Home Assistant",
+        )
+        client.get_activity.return_value = [echo]
+        result = await coord._async_update_data()
+
+        paired = next(e for e in result.events if e.id_signal == "859")
+        assert paired.duplicate_of == "ha-x"
+        # Both rows are kept in the timeline.
+        assert any(e.id_signal == "ha-x" for e in result.events)
+        # The echo does NOT fire on the bus.
+        assert all(e.id_signal != "859" for e in result.new_events)
+
+    @pytest.mark.asyncio
+    async def test_polled_echo_outside_window_not_marked(self):
+        """An echo more than the match window from the injected event is left
+        alone — treated as a genuine separate event."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+
+        coord.inject_event(
+            _make_event(
+                "ha-x",
+                category=ActivityCategory.DISARMED,
+                time="2026-05-21 17:06:00",
+                injected=True,
+            )
+        )
+
+        # 20s earlier — outside the 15s window.
+        echo = _make_event(
+            "859", category=ActivityCategory.DISARMED, time="2026-05-21 17:05:40"
+        )
+        client.get_activity.return_value = [echo]
+        result = await coord._async_update_data()
+
+        paired = next(e for e in result.events if e.id_signal == "859")
+        assert paired.duplicate_of is None
+        assert any(e.id_signal == "859" for e in result.new_events)
+
+    @pytest.mark.asyncio
+    async def test_polled_event_different_category_not_marked(self):
+        """An echo of a different category isn't paired even when close in time."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+
+        coord.inject_event(
+            _make_event(
+                "ha-x",
+                category=ActivityCategory.DISARMED,
+                time="2026-05-21 17:06:00",
+                injected=True,
+            )
+        )
+
+        echo = _make_event(
+            "859", category=ActivityCategory.ARMED, time="2026-05-21 17:05:58"
+        )
+        client.get_activity.return_value = [echo]
+        result = await coord._async_update_data()
+
+        paired = next(e for e in result.events if e.id_signal == "859")
+        assert paired.duplicate_of is None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_pairing_is_one_to_one(self):
+        """Two HA actions and their two echoes pair up by category — each echo
+        matched to its own injected event, not cross-paired."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = self._make_coordinator(hass, client, queue, installation)
+        await coord._async_update_data()  # baseline
+
+        coord.inject_event(
+            _make_event(
+                "ha-armed",
+                category=ActivityCategory.ARMED,
+                time="2026-05-21 17:05:10",
+                injected=True,
+            )
+        )
+        coord.inject_event(
+            _make_event(
+                "ha-disarmed",
+                category=ActivityCategory.DISARMED,
+                time="2026-05-21 17:06:00",
+                injected=True,
+            )
+        )
+
+        armed_echo = _make_event(
+            "801", category=ActivityCategory.ARMED, time="2026-05-21 17:05:07"
+        )
+        disarmed_echo = _make_event(
+            "859", category=ActivityCategory.DISARMED, time="2026-05-21 17:05:58"
+        )
+        client.get_activity.return_value = [disarmed_echo, armed_echo]
+        result = await coord._async_update_data()
+
+        by_id = {e.id_signal: e for e in result.events}
+        assert by_id["801"].duplicate_of == "ha-armed"
+        assert by_id["859"].duplicate_of == "ha-disarmed"
 
     @pytest.mark.asyncio
     async def test_third_refresh_uses_only_previous_poll_for_dedup(self):
@@ -1477,6 +1658,30 @@ class TestActivityCoordinator:
         # inject_event calls async_set_updated_data internally so coord.data
         # IS populated even when tests bypass async_refresh.
         assert injected in coord.data.events
+        assert injected in coord.data.new_events
+
+    @pytest.mark.asyncio
+    async def test_inject_event_fires_even_when_background_polling_off(self):
+        """HA-injected events fire live regardless of the polling setting.
+
+        Suppressing remote bus events when polling is off must not also mute
+        HA-originated events — those still flow through inject_event, which is
+        independent of the polled-refresh path.
+        """
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_activity.return_value = []
+        coord = ActivityCoordinator(
+            hass, client, queue, installation, update_interval=None
+        )
+        await coord._async_update_data()  # establish baseline
+
+        injected = _make_event("ha-abc", alias="Armed", verisure_user="Clinton")
+        coord.inject_event(injected)
+
         assert injected in coord.data.new_events
 
     @pytest.mark.asyncio

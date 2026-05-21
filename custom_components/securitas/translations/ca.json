@@ -54,6 +54,12 @@
                 "title": "Opcions per a {installation_name}",
                 "description": "Configura les opcions de l'alarma.",
                 "sections": {
+                    "activity": {
+                        "name": "Registre d'activitat i esdeveniments",
+                        "data": {
+                            "enable_activity_polling": "Consulta el registre d'activitat un cop per minut en segon pla (per a automatitzacions per esdeveniments)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avançat",
                         "data": {
@@ -102,6 +108,12 @@
         "step": {
             "init": {
                 "sections": {
+                    "activity": {
+                        "name": "Registre d'activitat i esdeveniments",
+                        "data": {
+                            "enable_activity_polling": "Consulta el registre d'activitat un cop per minut en segon pla (per a automatitzacions per esdeveniments)"
+                        }
+                    },
                     "advanced": {
                         "name": "Avançat",
                         "data": {

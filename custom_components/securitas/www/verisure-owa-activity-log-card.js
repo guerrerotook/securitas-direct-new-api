@@ -52,6 +52,7 @@ export const TRANSLATIONS = {
     not_an_activity_log: "Entity is not an activity log: {entity}",
     details: "Details",
     from_home_assistant: "Issued by Home Assistant",
+    verisure_record: "Verisure record",
     refresh: "Refresh",
     unknown_event_prompt: "Please screenshot this event and create an issue at https://github.com/guerrerotook/securitas-direct-new-api/issues so that we can document this unknown event type.",
     image_loading: "Loading image…",
@@ -86,6 +87,7 @@ export const TRANSLATIONS = {
     not_an_activity_log: "La entidad no es un registro de actividad: {entity}",
     details: "Detalles",
     from_home_assistant: "Emitido por Home Assistant",
+    verisure_record: "Registro de Verisure",
     refresh: "Actualizar",
     unknown_event_prompt: "Captura una imagen de este evento y abre una incidencia en https://github.com/guerrerotook/securitas-direct-new-api/issues para que podamos documentar este tipo de evento desconocido.",
     image_loading: "Cargando imagen…",
@@ -120,6 +122,7 @@ export const TRANSLATIONS = {
     not_an_activity_log: "L'entità non è un registro attività: {entity}",
     details: "Dettagli",
     from_home_assistant: "Emesso da Home Assistant",
+    verisure_record: "Record di Verisure",
     refresh: "Aggiorna",
     unknown_event_prompt: "Fai uno screenshot di questo evento e apri una segnalazione su https://github.com/guerrerotook/securitas-direct-new-api/issues così possiamo documentare questo tipo di evento sconosciuto.",
     image_loading: "Caricamento immagine…",
@@ -154,6 +157,7 @@ export const TRANSLATIONS = {
     not_an_activity_log: "L'entité n'est pas un journal d'activité : {entity}",
     details: "Détails",
     from_home_assistant: "Émis par Home Assistant",
+    verisure_record: "Enregistrement Verisure",
     refresh: "Actualiser",
     unknown_event_prompt: "Prenez une capture d'écran de cet événement et créez un ticket sur https://github.com/guerrerotook/securitas-direct-new-api/issues afin que nous puissions documenter ce type d'événement inconnu.",
     image_loading: "Chargement de l'image…",
@@ -191,6 +195,7 @@ export const TRANSLATIONS = {
     refresh: "Atualizar",
     unknown_event_prompt: "Capture uma imagem deste evento e crie um problema em https://github.com/guerrerotook/securitas-direct-new-api/issues para podermos documentar este tipo de evento desconhecido.",
     image_loading: "A carregar imagem…",
+    verisure_record: "Registo Verisure",
     image_unavailable: "Imagem não disponível",
   },
   "pt-BR": {
@@ -225,6 +230,7 @@ export const TRANSLATIONS = {
     refresh: "Atualizar",
     unknown_event_prompt: "Faça uma captura de tela deste evento e crie uma issue em https://github.com/guerrerotook/securitas-direct-new-api/issues para podermos documentar este tipo de evento desconhecido.",
     image_loading: "Carregando imagem…",
+    verisure_record: "Registro Verisure",
     image_unavailable: "Imagem indisponível",
   },
   ca: {
@@ -256,6 +262,7 @@ export const TRANSLATIONS = {
     not_an_activity_log: "L'entitat no és un registre d'activitat: {entity}",
     details: "Detalls",
     from_home_assistant: "Emès per Home Assistant",
+    verisure_record: "Registre de Verisure",
     refresh: "Actualitza",
     unknown_event_prompt: "Feu una captura de pantalla d'aquest esdeveniment i obriu una incidència a https://github.com/guerrerotook/securitas-direct-new-api/issues perquè puguem documentar aquest tipus d'esdeveniment desconegut.",
     image_loading: "Carregant imatge…",
@@ -423,6 +430,9 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     this._imageCache = new Map();
     // Latest events list, kept so click handlers can resolve the event by id.
     this._latestEvents = [];
+    // parent id_signal → [echo events], built each render to nest panel
+    // echoes of HA actions inside their injected event's detail.
+    this._duplicatesByParent = new Map();
   }
 
   setConfig(config) {
@@ -512,13 +522,19 @@ class VerisureOwaActivityLogCard extends HTMLElement {
   }
 
   connectedCallback() {
-    // Re-render every minute so relative times ("3 minutes ago") stay current.
+    // Pull fresh data as soon as the card is shown — when background polling
+    // is off the coordinator only refreshes on demand, so a freshly-opened
+    // dashboard would otherwise show stale data until the first tick.
+    // _handleRefresh shows the spinner while the fetch is in flight.
+    this._handleRefresh();
+    // Every minute while mounted: pull again (so the log keeps updating while
+    // viewed) and re-render so relative times ("3 minutes ago") stay current.
+    // disconnectedCallback clears this, so refreshes stop when the card leaves
+    // the screen — no per-minute API calls when nobody's looking.
     if (!this._tickTimer) {
-      this._tickTimer = setInterval(() => {
-        // Force a render even if state didn't change — clock advanced.
-        this._lastRenderedState = null;
-        this._render();
-      }, 60_000);
+      // _handleRefresh pulls fresh data and re-renders (so relative times
+      // also advance). It's a no-op while a refresh is already in flight.
+      this._tickTimer = setInterval(() => this._handleRefresh(), 60_000);
     }
   }
 
@@ -527,6 +543,11 @@ class VerisureOwaActivityLogCard extends HTMLElement {
       clearInterval(this._tickTimer);
       this._tickTimer = null;
     }
+    // Cancel any in-flight refresh's fallback timer (and spinner) so a removed
+    // card does no further work — connectedCallback/the tick start a refresh,
+    // each of which arms an 8s fallback timeout that would otherwise survive
+    // removal and fire a stray re-render.
+    this._clearRefreshing();
   }
 
   getCardSize() {
@@ -564,8 +585,22 @@ class VerisureOwaActivityLogCard extends HTMLElement {
       return;
     }
 
+    // Echoes of HA actions (duplicate_of set) are folded into their parent
+    // injected event's detail, not shown as their own row.
+    const duplicatesByParent = new Map();
+    for (const ev of events) {
+      const parent = ev.duplicate_of;
+      if (!parent) continue;
+      const arr = duplicatesByParent.get(parent) || [];
+      arr.push(ev);
+      duplicatesByParent.set(parent, arr);
+    }
+    this._duplicatesByParent = duplicatesByParent;
+
     const hidden = new Set(this._config.hide_categories || []);
-    const visible = events.filter((ev) => !hidden.has(ev.category || "unknown"));
+    const visible = events.filter(
+      (ev) => !ev.duplicate_of && !hidden.has(ev.category || "unknown"),
+    );
     const limited = visible.slice(0, this._config.limit);
     this._latestEvents = limited;
 
@@ -713,6 +748,7 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     const injectedBadge = isInjected
       ? `<ha-icon class="injected-badge" icon="mdi:home-assistant" title="${escHtml(_t(lang, "from_home_assistant"))}"></ha-icon>`
       : "";
+    const duplicates = this._duplicatesByParent?.get(id) || [];
     const detailsId = `details-${escHtml(id)}`;
     return `
       <div class="event${isExpanded ? " expanded" : ""}${isInjected ? " injected" : ""}" data-id="${escHtml(id)}" role="button" tabindex="0" aria-expanded="${isExpanded}" aria-controls="${detailsId}">
@@ -726,18 +762,30 @@ class VerisureOwaActivityLogCard extends HTMLElement {
         <div class="time" title="${escHtml(event.time || "")}">${escHtml(rel)}</div>
       </div>
       <div class="details-row ${isExpanded ? "expanded" : ""}" id="${detailsId}" data-id="${escHtml(id)}">
-        ${this._renderDetails(event, lang)}
+        ${this._renderDetails(event, lang, duplicates)}
       </div>
     `;
   }
 
-  _renderDetails(event, lang) {
+  _renderDetails(event, lang, duplicates = []) {
     const imageBlock = event.img === 1 ? this._renderImageBlock(event) : "";
     const prompt =
       event.category === "unknown"
         ? `<div class="unknown-prompt">${escHtml(_t(lang, "unknown_event_prompt"))}</div>`
         : "";
-    return `${imageBlock}${prompt}<table class="details">${renderRows(event, lang)}</table>`;
+    // The matched panel echo(es) of this HA action — kept out of the main
+    // list, surfaced here because the panel's `type`/native alias is richer
+    // than our generic injected row.
+    const dupBlocks = duplicates
+      .map(
+        (d) => `
+        <div class="duplicate-record">
+          <div class="duplicate-record-header">${escHtml(_t(lang, "verisure_record"))}</div>
+          <table class="details">${renderRows(d, lang)}</table>
+        </div>`,
+      )
+      .join("");
+    return `${imageBlock}${prompt}<table class="details">${renderRows(event, lang)}</table>${dupBlocks}`;
   }
 
   _renderImageBlock(event) {

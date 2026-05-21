@@ -76,6 +76,12 @@
                             "enable_interior_panel": "Enable Interior-only control panel"
                         }
                     },
+                    "activity": {
+                        "name": "Activity Log and Events",
+                        "data": {
+                            "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations)"
+                        }
+                    },
                     "advanced": {
                         "name": "Advanced",
                         "data": {
@@ -122,6 +128,12 @@
                             "enable_perimeter_panel": "Enable Perimeter-only control panel",
                             "enable_annex_panel": "Enable Annex-only control panel",
                             "enable_interior_panel": "Enable Interior-only control panel"
+                        }
+                    },
+                    "activity": {
+                        "name": "Activity Log and Events",
+                        "data": {
+                            "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations)"
                         }
                     },
                     "advanced": {
