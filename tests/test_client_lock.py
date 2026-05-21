@@ -438,6 +438,43 @@ class TestGetLockConfig:
                 "known fast-path failure must not log a traceback"
             )
 
+    async def test_smartlock_non_500_error_logs_traceback(
+        self, client, transport, caplog
+    ):
+        """A VerisureOwaError with a non-500 status still logs a full traceback.
+
+        Only HTTP 500 is the expected Danalock fast-path signal; other statuses
+        (auth, WAF, rate-limit, connection) are real faults worth a traceback.
+        """
+        from custom_components.securitas.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+
+        call_count = 0
+
+        async def _side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise VerisureOwaError("Too Many Requests", http_status=429)
+            if call_count == 2:
+                return danalock_submit_response("ref-dana-006")
+            return danalock_status_response(res="OK", device_number="1")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        with caplog.at_level("DEBUG"):
+            await client.get_lock_config(inst)
+
+        fallback_records = [
+            r for r in caplog.records if "trying Danalock" in r.getMessage()
+        ]
+        assert fallback_records, "expected a fallback log message"
+        assert any(r.exc_info is not None for r in fallback_records), (
+            "non-500 Verisure errors should log a traceback"
+        )
+
     async def test_smartlock_unexpected_error_logs_traceback(
         self, client, transport, caplog
     ):
