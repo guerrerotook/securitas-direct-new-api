@@ -20,6 +20,7 @@ from ..models import (
     SmartLockMode,
     SmartLockModeStatus,
 )
+from ..exceptions import VerisureOwaError
 from ..responses import (
     ChangeLockModeEnvelope,
     DanalockConfigEnvelope,
@@ -107,9 +108,20 @@ class _LockMixin(_ClientBase):
             config = envelope.data.xSGetSmartlockConfig
             if config.res == "OK":
                 return config
+        except VerisureOwaError as err:
+            # Danalock-protocol locks return HTTP 500 to xSGetSmartlockConfig;
+            # this is the expected signal to fall back, not a fault — so log it
+            # concisely without a traceback to keep the logs quiet.
+            _LOGGER.debug(
+                "Smartlock config unavailable for %s device %s (%s), trying Danalock",
+                installation.number,
+                device_id,
+                err,
+            )
         except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             _LOGGER.debug(
-                "Smartlock config fetch failed for %s device %s, trying Danalock",
+                "Smartlock config fetch failed unexpectedly for %s device %s, "
+                "trying Danalock",
                 installation.number,
                 device_id,
                 exc_info=True,

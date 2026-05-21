@@ -404,6 +404,69 @@ class TestGetLockConfig:
         assert isinstance(result, SmartLock)
         assert result.device_id == "2"
 
+    async def test_smartlock_expected_error_logs_without_traceback(
+        self, client, transport, caplog
+    ):
+        """Known VerisureOwaError on the fast path logs concisely, no traceback."""
+        from custom_components.securitas.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+
+        call_count = 0
+
+        async def _side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise VerisureOwaError("Internal Server Error", http_status=500)
+            if call_count == 2:
+                return danalock_submit_response("ref-dana-004")
+            return danalock_status_response(res="OK", device_number="1")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        with caplog.at_level("DEBUG"):
+            await client.get_lock_config(inst)
+
+        fallback_records = [
+            r for r in caplog.records if "trying Danalock" in r.getMessage()
+        ]
+        assert fallback_records, "expected a fallback log message"
+        for record in fallback_records:
+            assert record.exc_info is None, (
+                "known fast-path failure must not log a traceback"
+            )
+
+    async def test_smartlock_unexpected_error_logs_traceback(
+        self, client, transport, caplog
+    ):
+        """An unexpected exception on the fast path still logs a full traceback."""
+        call_count = 0
+
+        async def _side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("boom")
+            if call_count == 2:
+                return danalock_submit_response("ref-dana-005")
+            return danalock_status_response(res="OK", device_number="1")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        with caplog.at_level("DEBUG"):
+            await client.get_lock_config(inst)
+
+        fallback_records = [
+            r for r in caplog.records if "trying Danalock" in r.getMessage()
+        ]
+        assert fallback_records, "expected a fallback log message"
+        assert any(r.exc_info is not None for r in fallback_records), (
+            "unexpected fast-path failure should log a traceback"
+        )
+
     async def test_custom_device_id(self, client, transport):
         """Passes custom device_id to query variables."""
         transport.execute.return_value = smartlock_config_response(res="OK")
