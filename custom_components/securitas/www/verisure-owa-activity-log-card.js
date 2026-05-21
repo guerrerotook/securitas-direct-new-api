@@ -521,20 +521,36 @@ class VerisureOwaActivityLogCard extends HTMLElement {
     }
   }
 
+  _backgroundPolling() {
+    // The integration is polling the timeline itself (enable_activity_polling
+    // on) — exposed as a sensor attribute. When true the card must not add its
+    // own fetches; coordinator updates already keep it fresh.
+    const stateObj = this._hass?.states?.[this._config?.entity];
+    return stateObj?.attributes?.background_polling === true;
+  }
+
   connectedCallback() {
-    // Pull fresh data as soon as the card is shown — when background polling
-    // is off the coordinator only refreshes on demand, so a freshly-opened
-    // dashboard would otherwise show stale data until the first tick.
-    // _handleRefresh shows the spinner while the fetch is in flight.
-    this._handleRefresh();
-    // Every minute while mounted: pull again (so the log keeps updating while
-    // viewed) and re-render so relative times ("3 minutes ago") stay current.
-    // disconnectedCallback clears this, so refreshes stop when the card leaves
-    // the screen — no per-minute API calls when nobody's looking.
+    // When background polling is off the coordinator only refreshes on demand,
+    // so pull immediately when shown — otherwise a freshly-opened dashboard
+    // would show stale data. (_handleRefresh shows the spinner while in
+    // flight.) When polling is on, the coordinator already has fresh data.
+    if (!this._backgroundPolling()) {
+      this._handleRefresh();
+    }
+    // Every minute while mounted, keep relative times current. When polling is
+    // off, also pull fresh data (the card is the only thing driving refreshes).
+    // disconnectedCallback clears this, so on-demand fetches stop when the card
+    // leaves the screen — no per-minute API calls when nobody's looking.
     if (!this._tickTimer) {
-      // _handleRefresh pulls fresh data and re-renders (so relative times
-      // also advance). It's a no-op while a refresh is already in flight.
-      this._tickTimer = setInterval(() => this._handleRefresh(), 60_000);
+      this._tickTimer = setInterval(() => {
+        if (this._backgroundPolling()) {
+          this._lastRenderedState = null;
+          this._render();
+        } else {
+          // _handleRefresh re-renders too; no-op while a refresh is in flight.
+          this._handleRefresh();
+        }
+      }, 60_000);
     }
   }
 

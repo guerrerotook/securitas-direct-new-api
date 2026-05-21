@@ -308,6 +308,47 @@ async def test_activity_polling_enabled_sets_interval(
     assert entry_data["activity_listener_unsub"] is not None
 
 
+async def _setup_and_settle(hass, mock_server, **overrides) -> None:
+    """Run setup with device discovery patched out, then flush background tasks."""
+    entry = _make_entry(hass, **overrides)
+    mock_http = mock_server.make_http_client()
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+        ) as mock_fwd,
+        patch("custom_components.securitas._async_discover_devices"),
+    ):
+        mock_fwd.return_value = True
+        await async_setup_entry(hass, entry)
+        await hass.async_block_till_done()
+    _SETUP_ENTRIES.append((hass, entry))
+
+
+async def test_no_activity_fetch_at_startup_when_polling_off(
+    hass: HomeAssistant, mock_server: MockGraphQLServer
+):
+    """With background polling off, the activity timeline isn't fetched at
+    startup — it's on-demand only, so an idle install makes zero activity
+    API calls until a card asks for one."""
+    queue_standard_setup(mock_server)
+    await _setup_and_settle(hass, mock_server)
+    assert mock_server.call_count("ActV2Timeline") == 0
+
+
+async def test_activity_fetched_at_startup_when_polling_on(
+    hass: HomeAssistant, mock_server: MockGraphQLServer
+):
+    """With background polling on, the activity timeline is fetched at startup
+    like the other coordinators."""
+    queue_standard_setup(mock_server)
+    await _setup_and_settle(hass, mock_server, enable_activity_polling=True)
+    assert mock_server.call_count("ActV2Timeline") >= 1
+
+
 # ── Header & request verification ────────────────────────────────────────────
 
 

@@ -361,7 +361,7 @@ The integration surfaces this history in three places:
 
 By default the integration **does not poll the activity log on a timer** — fetching it every minute is wasted effort for the many setups that never look at it. Instead it refreshes **on demand**:
 
-- The **activity log card** pulls the latest entries whenever it's on screen — once when you open the dashboard, then once a minute while it stays visible. Close the dashboard and the polling stops.
+- The **activity log card** pulls the latest entries whenever it's on screen — once when you open the dashboard, then once a minute while it stays visible. Close the dashboard and the polling stops. (When background polling is on, the card skips its own fetches and just displays what the integration is already polling.)
 - The **refresh button** (top-right of the card) and the **`verisure_owa.refresh_activity_log`** service fetch immediately.
 
 A consequence of on-demand refresh concerns the **`verisure_owa_activity` event bus**. To avoid replaying a burst of stale events the next time you open a dashboard, **remote events do not fire on the bus while background polling is off** — the on-demand refresh updates the sensor and card silently. The one exception is events **you trigger from Home Assistant** (arm, disarm, request image): those are injected and fire on the bus *as they happen*, regardless of the polling setting.

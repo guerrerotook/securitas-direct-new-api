@@ -748,6 +748,38 @@ describe("verisure-owa-activity-log-card on-demand refresh", () => {
     expect(card._refreshing).toBe(true);
     expect(card.shadowRoot.getElementById("refresh-btn").classList.contains("spinning")).toBe(true);
   });
+
+  it("does not auto-refresh on connect when background polling is on", async () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeActivityLogEntity({ events: [], backgroundPolling: true }),
+      },
+    });
+    mountActivityCard({ hass });
+    await Promise.resolve();
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("does not foreground-poll on the tick when background polling is on", () => {
+    vi.useFakeTimers();
+    try {
+      const hass = makeHass({
+        states: {
+          [ENTITY]: makeActivityLogEntity({ events: [], backgroundPolling: true }),
+        },
+      });
+      const card = mountActivityCard({ hass });
+      hass.callService.mockClear();
+      const renderSpy = vi.spyOn(card, "_render");
+      vi.advanceTimersByTime(60_000);
+      // The coordinator is already polling — the card must not add its own
+      // fetch, but it still re-renders so relative times stay current.
+      expect(hass.callService).not.toHaveBeenCalled();
+      expect(renderSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("verisure-owa-activity-log-card duplicate echoes", () => {

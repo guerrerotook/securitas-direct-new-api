@@ -1001,10 +1001,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_data["lock_discovery_complete"] = asyncio.Event()
         hass.data[DOMAIN][entry.entry_id] = entry_data
 
-        # Schedule non-blocking first refresh for each coordinator
+        # Schedule non-blocking first refresh for each coordinator. Skip the
+        # activity coordinator when background polling is off — it's on-demand
+        # only (the card triggers the first fetch when viewed), so an idle
+        # install makes no activity API calls.
         for coord in filter(
             None, [alarm_coord, sentinel_coord, lock_coord, activity_coord]
         ):
+            if (
+                activity_coord is not None
+                and coord is activity_coord
+                and activity_coord.update_interval is None
+            ):
+                continue
             entry.async_create_background_task(
                 hass,
                 coord.async_refresh(),
