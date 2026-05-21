@@ -146,7 +146,7 @@
             },
             "lock_automations": {
                 "title": "Automatisation des serrures",
-                "description": "Configurez le comportement automatique de verrouillage et de désarmement pour chaque serrure.",
+                "description": "Configurez le comportement automatique de verrouillage et de désarmement pour chaque serrure.\n\n⚠️ Désactivez d'abord le verrouillage automatique dans l'application Verisure : son verrouillage automatique par minuterie entre en conflit avec le verrouillage à l'armement de cette intégration.\n\nRemarque : ceci diffère de l'application Verisure. L'application déverrouille la serrure lorsque l'alarme est désarmée ; cette intégration, au contraire, désarme l'alarme lorsque la serrure est déverrouillée, et uniquement lorsqu'elle est déverrouillée depuis Home Assistant.",
                 "sections": {
                     "lock__01": {
                         "name": "{lock_alias_01}",

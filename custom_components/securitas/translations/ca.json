@@ -146,7 +146,7 @@
             },
             "lock_automations": {
                 "title": "Automatització del pany",
-                "description": "Configureu el comportament automàtic de tancament i desarmament per a cada pany.",
+                "description": "Configureu el comportament automàtic de tancament i desarmament per a cada pany.\n\n⚠️ Desactiveu primer el bloqueig automàtic a l'aplicació de Verisure: el seu bloqueig automàtic per temporitzador entra en conflicte amb el tancament en armar d'aquesta integració.\n\nNota: això difereix de l'aplicació de Verisure. L'aplicació desbloqueja el pany quan es desarma l'alarma; aquesta integració, en canvi, desarma l'alarma quan es desbloqueja el pany, i només quan es desbloqueja des de Home Assistant.",
                 "sections": {
                     "lock__01": {
                         "name": "{lock_alias_01}",

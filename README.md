@@ -297,7 +297,12 @@ Auto-disarm only fires when the unlock comes from inside HA. Unlocking from the 
 > **Disable autolock in the Verisure app before using auto-lock here.** Verisure's own autolock runs on its own timer and will fight this integration's arm-driven locking — leaving you with the door locking and unlocking unexpectedly. Turn it off in the app so this integration is the only thing driving the lock.
 
 > [!NOTE]
-> **This is not the same as Verisure's autolock, and the direction is reversed.** The Verisure app *unlocks the door when you disarm*. This integration does **not** do that — there is no "unlock on disarm". Instead, **Auto-disarm on unlock** goes the other way: unlocking the door (from HA) disarms the alarm. If you want the door to unlock when you disarm, create a Home Assistant automation that triggers on the alarm panel reaching `disarmed` and calls `lock.unlock`.
+> **The autolock configuration in this integration is different from the Verisure app.** The Verisure app **unlocks the lock when the alarm is disarmed**, while this integration instead **disarms the alarm when the lock is unlocked**, and only when the lock is unlocked via Home Assistant.
+>
+> There are three reasons for the difference in behaviour:
+> 1. The main reason to disarm the alarm is because you want to open the door.
+> 2. With the Verisure app instead you might disarm the alarm remotely and have the door open itself when nobody is there to close it.
+> 3. We only react to Home Assistant unlock commands because we need the alarm to be disarmed at the same time, not two minutes later after polling to update the lock status.
 
 When something goes wrong, you get a persistent notification:
 
