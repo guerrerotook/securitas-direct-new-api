@@ -1629,18 +1629,15 @@ class TestVerisureLockVerifyPoll:
         )
 
     async def test_gives_up_after_max_attempts_when_target_never_reached(self):
-        lock = make_lock(initial_status="2", poll_status="1")  # unlock that fails
+        # A lock attempt whose status never flips to the target stays at the
+        # last-read value and exhausts the full verification window.
+        lock = make_lock(initial_status="1", poll_status="1")  # lock that fails
         lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
 
-        await lock.async_unlock()
+        await lock.async_lock()
 
-        # Target ("1") IS reached on the first poll here, so verify the inverse:
-        # a lock attempt whose status never flips stays at the last-read value.
-        lock2 = make_lock(initial_status="1", poll_status="1")  # lock that fails
-        lock2._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
-        await lock2.async_lock()
-        assert lock2._state == "1"
-        assert lock2._client.get_lock_modes.await_count == lock2._verify_attempts
+        assert lock._state == "1"
+        assert lock._client.get_lock_modes.await_count == lock._verify_attempts
 
 
 # ===========================================================================
