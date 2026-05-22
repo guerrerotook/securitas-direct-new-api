@@ -55,6 +55,22 @@ def _armed_circuits(state: AlarmState) -> set[str]:
     return armed
 
 
+def _ts_is_newer(read_ts: str, base_ts: str) -> bool:
+    """Return True if ``read_ts`` is strictly newer than ``base_ts``.
+
+    Lock ``statusTimestamp`` values are millisecond-epoch strings.  A reading
+    of the target state only counts as a *real* actuation if its timestamp has
+    advanced past the pre-command baseline — otherwise it may be a stale,
+    not-yet-propagated read of the old state.  When either value is missing or
+    non-numeric we can't compare, so we fall back to trusting the value match
+    (return True) rather than blocking confirmation.
+    """
+    try:
+        return int(read_ts) > int(base_ts)
+    except (TypeError, ValueError):
+        return True
+
+
 # Service request name that identifies a smart-lock capability
 DOORLOCK_SERVICE = "DOORLOCK"
 
@@ -64,6 +80,28 @@ LOCK_STATUS_UNLOCKED = "1"
 LOCK_STATUS_LOCKED = "2"
 LOCK_STATUS_UNLOCKING = "3"
 LOCK_STATUS_LOCKING = "4"
+
+# Verification poll: the Verisure backend acks a lock/unlock command BEFORE the
+# device physically actuates (and its status is eventually-consistent), so a
+# single immediate read-back races ahead of reality.  We re-read the status up
+# to LOCK_VERIFY_ATTEMPTS times, LOCK_VERIFY_DELAY seconds apart, confirming
+# success the moment we see the target state with a *fresh* statusTimestamp
+# (newer than the pre-command baseline).  A stale target reading does not
+# confirm, which closes the "armed + silently unlocked" hole.
+#
+# The fresh-timestamp gate makes *success* fast (early-return), but it does NOT
+# let us shorten the window: a still-completing lock and a genuinely-failed one
+# both read as pre-command UNLOCKED (the door simply hasn't moved yet) and are
+# indistinguishable except by waiting out the physical actuation.  So the
+# ceiling must still cover the worst case.  Upstream PR #413 measured ~6s to
+# start + ~4.5s to complete (~10.5s typical) and validated a 15s wait; 7
+# attempts × 3s spans ~18s, comfortably past that, so we never declare failure
+# before the lock has had time to act.  (This wait was lost when
+# change_lock_mode moved to the generic submit-and-poll scaffold, which returns
+# on the ~2s command ack.)  Tune from the statusTimestamp values in the verify
+# debug logs.
+LOCK_VERIFY_ATTEMPTS = 7
+LOCK_VERIFY_DELAY = 3.0
 
 
 async def async_setup_entry(
@@ -140,6 +178,10 @@ class VerisureLock(  # type: ignore[override]
 
         self._operation_in_progress: bool = False
         self._config_retry_unsubs: list[Callable[[], None]] = []
+
+        # Verification-poll tuning (overridable in tests).
+        self._verify_attempts: int = LOCK_VERIFY_ATTEMPTS
+        self._verify_delay: float = LOCK_VERIFY_DELAY
 
         # Auto-lock state — populated when added to hass.
         self._entry_id: str | None = None  # set externally before async_added_to_hass
@@ -238,11 +280,29 @@ class VerisureLock(  # type: ignore[override]
         triggers = newly_armed.intersection(self._lock_on_arm_circuits)
         if not triggers:
             return
-        # Idempotency: skip if already locked / locking / mid-operation.
-        if self._operation_in_progress:
+        # Skip only when a lock operation is genuinely in flight — never just
+        # because the cached state reads LOCKED.  That cache is
+        # eventually-consistent and can be stale (e.g. the user physically
+        # unlocked moments before arming and the backend hasn't propagated it):
+        # trusting it would silently leave the door unlocked while armed.
+        # A redundant lock command on an already-locked door is harmless.
+        if self._operation_in_progress or self._state == LOCK_STATUS_LOCKING:
+            _LOGGER.debug(
+                "Auto-lock-on-arm skipped for %s device %s: operation already "
+                "in progress (state=%s)",
+                self._installation.number,
+                self._device_id,
+                self._state,
+            )
             return
-        if self._state in (LOCK_STATUS_LOCKED, LOCK_STATUS_LOCKING):
-            return
+        _LOGGER.debug(
+            "Auto-lock-on-arm triggered for %s device %s: circuits %s armed "
+            "(cached lock state=%s)",
+            self._installation.number,
+            self._device_id,
+            sorted(triggers),
+            self._state,
+        )
         # Schedule the lock as a background task — listeners must not
         # block the coordinator-update path.
         if self.hass is not None:
@@ -278,7 +338,12 @@ class VerisureLock(  # type: ignore[override]
             optimistic_state=LOCK_STATUS_LOCKED,
             operation="Auto-lock",
         )
-        if self._state != LOCK_STATUS_LOCKED:
+        # Bias to a false-negative: only warn when the settled state is
+        # *definitively* unlocked.  An UNKNOWN/unreadable status falls back to
+        # the optimistic LOCKED in _change_lock_mode and must not cry wolf —
+        # most "failures" were just the verification racing ahead of a lock
+        # that actuated a few seconds later.
+        if self._state == LOCK_STATUS_UNLOCKED:
             await self._fire_autolock_notification(
                 title="Auto-lock failed",
                 message=(
@@ -380,6 +445,11 @@ class VerisureLock(  # type: ignore[override]
         command (which waits for the lock to physically act), then fetches
         the actual lock status from the API.
         """
+        # Snapshot the last-known timestamp BEFORE the command so the
+        # verification poll can tell a real, fresh actuation apart from a
+        # stale read of the pre-command state.
+        pre_mode = self._current_mode
+        pre_ts = pre_mode.status_timestamp if pre_mode is not None else ""
         self._operation_in_progress = True
         self._force_state(transitional_state)
         try:
@@ -399,13 +469,13 @@ class VerisureLock(  # type: ignore[override]
                 )
                 return
 
-            # Fetch the real status from the API now that the lock has had
-            # time to act.  Catch broadly: aiohttp can raise TimeoutError,
-            # ClientError etc. in addition to VerisureOwaError.
-            try:
-                real_state = await self._get_lock_state(priority=ApiQueue.FOREGROUND)
-            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-                real_state = LOCK_STATUS_UNKNOWN
+            # Verify by polling the real status until it reaches the target
+            # with a fresh timestamp.  The backend acks before the device
+            # physically actuates, so a single immediate read races ahead of
+            # the lock.
+            real_state = await self._poll_lock_until(
+                optimistic_state, operation, pre_ts
+            )
 
             if real_state != LOCK_STATUS_UNKNOWN:
                 self._state = real_state
@@ -416,15 +486,81 @@ class VerisureLock(  # type: ignore[override]
             self._operation_in_progress = False
             await self.coordinator.async_request_refresh()
 
-    async def _get_lock_state(self, *, priority: int | None = None) -> str:
-        """Return the current lock status from the API."""
+    async def _poll_lock_until(self, target: str, operation: str, pre_ts: str) -> str:
+        """Re-read lock status until it reaches ``target`` *freshly* or runs out.
+
+        A reading confirms only when ``lock_status == target`` AND its
+        ``statusTimestamp`` is newer than ``pre_ts`` (the pre-command
+        baseline) — a stale target reading does not confirm.  Returns the last
+        status read (``LOCK_STATUS_UNKNOWN`` if never readable); when the window
+        is exhausted with the value sitting at ``target`` but no fresh
+        timestamp (a likely no-op on an already-settled lock), that target value
+        is returned as a quiet success.  Logs every attempt with its
+        ``statusTimestamp`` so the window can be tuned from logs.
+        """
+        last_status = LOCK_STATUS_UNKNOWN
+        for attempt in range(1, self._verify_attempts + 1):
+            try:
+                mode = await self._read_lock_mode(priority=ApiQueue.FOREGROUND)
+            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+                mode = None
+
+            if mode is not None:
+                last_status = mode.lock_status
+                fresh = _ts_is_newer(mode.status_timestamp, pre_ts)
+                _LOGGER.debug(
+                    "%s verify %d/%d for %s device %s: lockStatus=%s "
+                    "statusTimestamp=%s (pre=%s fresh=%s target=%s)",
+                    operation,
+                    attempt,
+                    self._verify_attempts,
+                    self._installation.number,
+                    self._device_id,
+                    mode.lock_status,
+                    mode.status_timestamp,
+                    pre_ts,
+                    fresh,
+                    target,
+                )
+                if last_status == target and fresh:
+                    return last_status
+            else:
+                _LOGGER.debug(
+                    "%s verify %d/%d for %s device %s: no status returned (target=%s)",
+                    operation,
+                    attempt,
+                    self._verify_attempts,
+                    self._installation.number,
+                    self._device_id,
+                    target,
+                )
+
+            if attempt < self._verify_attempts:
+                await asyncio.sleep(self._verify_delay)
+
+        _LOGGER.debug(
+            "%s verify window exhausted for %s device %s after %d attempts; "
+            "last lockStatus=%s (target=%s)",
+            operation,
+            self._installation.number,
+            self._device_id,
+            self._verify_attempts,
+            last_status,
+            target,
+        )
+        return last_status
+
+    async def _read_lock_mode(
+        self, *, priority: int | None = None
+    ) -> SmartLockMode | None:
+        """Return this device's SmartLockMode from the API, or None."""
         lock_modes: list[SmartLockMode] = await self._client.get_lock_modes(
             self._installation, priority=priority
         )
         for mode in lock_modes:
             if mode.device_id == self._device_id:
-                return mode.lock_status
-        return LOCK_STATUS_UNKNOWN
+                return mode
+        return None
 
     async def async_lock(self, **kwargs: Any) -> None:
         await self._change_lock_mode(

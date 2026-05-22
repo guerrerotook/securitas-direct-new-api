@@ -146,7 +146,7 @@
             },
             "lock_automations": {
                 "title": "Automazione delle serrature",
-                "description": "Configura il comportamento automatico di blocco e disattivazione per ciascuna serratura.",
+                "description": "Configura il comportamento automatico di blocco e disattivazione per ciascuna serratura.\n\n⚠️ Disattiva prima il blocco automatico nell'app Verisure: il suo blocco automatico a tempo va in conflitto con il blocco all'attivazione di questa integrazione.\n\nNota: questo è diverso dall'app Verisure. L'app sblocca la serratura quando l'allarme viene disattivato; questa integrazione invece disattiva l'allarme quando la serratura viene sbloccata, e solo quando viene sbloccata da Home Assistant.",
                 "sections": {
                     "lock__01": {
                         "name": "{lock_alias_01}",

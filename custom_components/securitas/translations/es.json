@@ -146,7 +146,7 @@
             },
             "lock_automations": {
                 "title": "Automatización de cerraduras",
-                "description": "Configure el comportamiento automático de bloqueo y desarmado para cada cerradura.",
+                "description": "Configure el comportamiento automático de bloqueo y desarmado para cada cerradura.\n\n⚠️ Desactive primero el autobloqueo en la app de Verisure: su autobloqueo por temporizador entra en conflicto con el bloqueo al armar de esta integración.\n\nNota: esto difiere de la app de Verisure. La app desbloquea la cerradura cuando se desarma la alarma; esta integración, en cambio, desarma la alarma cuando se desbloquea la cerradura, y solo cuando se desbloquea desde Home Assistant.",
                 "sections": {
                     "lock__01": {
                         "name": "{lock_alias_01}",

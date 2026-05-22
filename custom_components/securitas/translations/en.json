@@ -146,7 +146,7 @@
             },
             "lock_automations": {
                 "title": "Lock automation",
-                "description": "Configure each lock's automatic locking and panel-disarming behaviour.",
+                "description": "Configure each lock's automatic locking and panel-disarming behaviour.\n\n⚠️ Disable autolock in the Verisure app first — its timer-based autolock will fight this integration's arm-driven locking.\n\nNote: this differs from the Verisure app. The app unlocks the lock when the alarm is disarmed; this integration instead disarms the alarm when the lock is unlocked, and only when the lock is unlocked via Home Assistant.",
                 "sections": {
                     "lock__01": {
                         "name": "{lock_alias_01}",
