@@ -275,13 +275,21 @@ class ActivityLogSensor(  # type: ignore[override]
         cache_key = id(data) if data is not None else None
         if cache_key == self._attrs_cache_key:
             return self._attrs_cache
+        # Lets the activity-log card skip its own per-minute refresh when the
+        # integration is already polling in the background (avoids doubled
+        # fetches), and drive on-demand refreshes when it isn't.
+        background_polling = self.coordinator.update_interval is not None
         if data is None or not data.events:
-            attrs: dict[str, Any] = {"events": []}
+            attrs: dict[str, Any] = {
+                "events": [],
+                "background_polling": background_polling,
+            }
         else:
             events = data.events[:_ACTIVITY_LOG_LIMIT]
             attrs = {
                 "latest": events[0].model_dump(),
                 "events": [ev.model_dump() for ev in events],
+                "background_polling": background_polling,
             }
         self._attrs_cache_key = cache_key
         self._attrs_cache = attrs

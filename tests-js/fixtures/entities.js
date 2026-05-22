@@ -43,12 +43,17 @@ export function makeCameraEntity({
   };
 }
 
-export function makeActivityLogEntity({ events = [], friendlyName = "Test Activity Log" } = {}) {
+export function makeActivityLogEntity({
+  events = [],
+  friendlyName = "Test Activity Log",
+  backgroundPolling = false,
+} = {}) {
   return {
     state: String(events.length),
     attributes: {
       friendly_name: friendlyName,
       events,
+      background_polling: backgroundPolling,
     },
   };
 }

@@ -251,6 +251,7 @@ def make_config_entry_data(
     map_vacation: str | None = None,
     notify_group: str = "",
     force_arm_notifications: bool = True,
+    enable_activity_polling: bool | None = None,
 ) -> dict:
     """Build config entry data dict with sensible defaults.
 
@@ -285,6 +286,11 @@ def make_config_entry_data(
         **_mapping(CONF_MAP_VACATION, map_vacation),
         CONF_NOTIFY_GROUP: notify_group,
         CONF_FORCE_ARM_NOTIFICATIONS: force_arm_notifications,
+        **(
+            {}
+            if enable_activity_polling is None
+            else {"enable_activity_polling": enable_activity_polling}
+        ),
     }
 
 

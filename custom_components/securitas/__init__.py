@@ -65,9 +65,11 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
     CONF_REFRESH_TOKEN,
     CONF_UNSUPPORTED_COMMANDS,
+    DEFAULT_ENABLE_ACTIVITY_POLLING,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
@@ -83,6 +85,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
 
 # CameraCoordinator re-exported for backwards compatibility
 from .coordinators import (  # noqa: F401
+    _DEFAULT_ACTIVITY_INTERVAL,
     ActivityCoordinator,
     AlarmCoordinator,
     CameraCoordinator,
@@ -219,6 +222,7 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
 )
 
@@ -301,6 +305,9 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_NOTIFY_GROUP] = _opt(CONF_NOTIFY_GROUP, "")
     config[CONF_FORCE_ARM_NOTIFICATIONS] = _opt(
         CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
+    )
+    config[CONF_ENABLE_ACTIVITY_POLLING] = _opt(
+        CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING
     )
     config = add_device_information(config)
 
@@ -893,12 +900,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 config_entry=entry,
             )
 
+            # Background polling is opt-in. When off (default) the coordinator
+            # runs on-demand only (update_interval=None) — the activity-log
+            # card drives refreshes while it's on screen. When on, it polls
+            # every _DEFAULT_ACTIVITY_INTERVAL so verisure_owa_activity event
+            # automations keep firing even with no card open.
             activity_coord = ActivityCoordinator(
                 hass,
                 client.client,
                 client.api_queue,
                 first_installation,
                 config_entry=entry,
+                update_interval=(
+                    _DEFAULT_ACTIVITY_INTERVAL
+                    if config[CONF_ENABLE_ACTIVITY_POLLING]
+                    else None
+                ),
             )
 
             # Discover sentinel and lock services from cached service list.
@@ -984,10 +1001,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_data["lock_discovery_complete"] = asyncio.Event()
         hass.data[DOMAIN][entry.entry_id] = entry_data
 
-        # Schedule non-blocking first refresh for each coordinator
+        # Schedule non-blocking first refresh for each coordinator. Skip the
+        # activity coordinator when background polling is off — it's on-demand
+        # only (the card triggers the first fetch when viewed), so an idle
+        # install makes no activity API calls.
         for coord in filter(
             None, [alarm_coord, sentinel_coord, lock_coord, activity_coord]
         ):
+            if (
+                activity_coord is not None
+                and coord is activity_coord
+                and activity_coord.update_interval is None
+            ):
+                continue
             entry.async_create_background_task(
                 hass,
                 coord.async_refresh(),

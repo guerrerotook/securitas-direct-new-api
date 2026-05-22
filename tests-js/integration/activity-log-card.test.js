@@ -679,3 +679,150 @@ describe("verisure-owa-activity-log-card-editor change events", () => {
     expect(entityForm.computeLabel({ name: "unknown" })).toBe("unknown");
   });
 });
+
+describe("verisure-owa-activity-log-card on-demand refresh", () => {
+  // With background polling off (the default), the integration's coordinator
+  // does not poll on a timer — the card itself pulls fresh data via the
+  // refresh_activity_log service while it's on screen, and stops when removed.
+
+  it("calls refresh_activity_log on connect (immediate pull when viewed)", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeActivityLogEntity({ events: [] }) },
+    });
+    mountActivityCard({ hass });
+    await Promise.resolve();
+    expect(hass.callService).toHaveBeenCalledWith(
+      "verisure_owa",
+      "refresh_activity_log",
+      expect.objectContaining({ entity_id: ENTITY }),
+    );
+  });
+
+  it("calls refresh_activity_log on each 60s tick while mounted", () => {
+    vi.useFakeTimers();
+    try {
+      const hass = makeHass({
+        states: { [ENTITY]: makeActivityLogEntity({ events: [] }) },
+      });
+      mountActivityCard({ hass });
+      hass.callService.mockClear(); // ignore the connect-time pull
+      vi.advanceTimersByTime(60_000);
+      expect(hass.callService).toHaveBeenCalledWith(
+        "verisure_owa",
+        "refresh_activity_log",
+        expect.objectContaining({ entity_id: ENTITY }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops calling refresh_activity_log after the card is removed", () => {
+    vi.useFakeTimers();
+    try {
+      const hass = makeHass({
+        states: { [ENTITY]: makeActivityLogEntity({ events: [] }) },
+      });
+      const card = mountActivityCard({ hass });
+      card.remove();
+      hass.callService.mockClear();
+      vi.advanceTimersByTime(180_000);
+      expect(hass.callService).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auto-refresh on connect spins the refresh button while in flight", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeActivityLogEntity({ events: [] }) },
+      callService: vi.fn(() => new Promise(() => {})), // never resolves → stays in flight
+    });
+    const card = mountActivityCard({ hass });
+    await Promise.resolve();
+    expect(hass.callService).toHaveBeenCalledWith(
+      "verisure_owa",
+      "refresh_activity_log",
+      expect.objectContaining({ entity_id: ENTITY }),
+    );
+    expect(card._refreshing).toBe(true);
+    expect(card.shadowRoot.getElementById("refresh-btn").classList.contains("spinning")).toBe(true);
+  });
+
+  it("does not auto-refresh on connect when background polling is on", async () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeActivityLogEntity({ events: [], backgroundPolling: true }),
+      },
+    });
+    mountActivityCard({ hass });
+    await Promise.resolve();
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("does not foreground-poll on the tick when background polling is on", () => {
+    vi.useFakeTimers();
+    try {
+      const hass = makeHass({
+        states: {
+          [ENTITY]: makeActivityLogEntity({ events: [], backgroundPolling: true }),
+        },
+      });
+      const card = mountActivityCard({ hass });
+      hass.callService.mockClear();
+      const renderSpy = vi.spyOn(card, "_render");
+      vi.advanceTimersByTime(60_000);
+      // The coordinator is already polling — the card must not add its own
+      // fetch, but it still re-renders so relative times stay current.
+      expect(hass.callService).not.toHaveBeenCalled();
+      expect(renderSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("verisure-owa-activity-log-card duplicate echoes", () => {
+  const HA_EVENT = {
+    id_signal: "ha-x",
+    category: "disarmed",
+    alias: "Disarmed",
+    injected: true,
+    verisure_user: "clinton",
+    time: "2026-05-21 17:06:00",
+  };
+  const ECHO = {
+    id_signal: "859",
+    category: "disarmed",
+    alias: "Disattivazione Perimetrale + Principale",
+    type: 822,
+    source: "Android",
+    verisure_user: "Home Assistant",
+    time: "2026-05-21 17:05:58",
+    duplicate_of: "ha-x",
+  };
+
+  it("does not render a duplicate echo as its own top-level row", () => {
+    const card = mountActivityCard({
+      hass: makeHass({
+        states: { [ENTITY]: makeActivityLogEntity({ events: [HA_EVENT, ECHO] }) },
+      }),
+    });
+    const ids = [...card.shadowRoot.querySelectorAll(".event")].map((r) => r.dataset.id);
+    expect(ids).toContain("ha-x");
+    expect(ids).not.toContain("859");
+  });
+
+  it("nests the matched echo's detail inside the HA event", () => {
+    const card = mountActivityCard({
+      hass: makeHass({
+        states: { [ENTITY]: makeActivityLogEntity({ events: [HA_EVENT, ECHO] }) },
+      }),
+    });
+    const details = card.shadowRoot.querySelector('.details-row[data-id="ha-x"]');
+    expect(details).not.toBeNull();
+    // The echo's richer panel description/type appear in the HA event's detail.
+    expect(details.innerHTML).toContain("Disattivazione Perimetrale + Principale");
+    expect(details.innerHTML).toContain("822");
+  });
+});

@@ -57,10 +57,12 @@ from .const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
+    CONF_ENABLE_ACTIVITY_POLLING,
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_LOCK_AUTOMATIONS,
+    DEFAULT_ENABLE_ACTIVITY_POLLING,
     CONF_REFRESH_TOKEN,
     LOCK_CIRCUITS,
 )
@@ -110,7 +112,14 @@ PANEL_OPTION_KEYS = (
 SECTION_PIN = "pin"
 SECTION_NOTIFICATIONS = "notifications"
 SECTION_SUBPANELS = "subpanels"
-_ALL_SECTIONS = (SECTION_PIN, SECTION_NOTIFICATIONS, SECTION_SUBPANELS, CONF_ADVANCED)
+SECTION_ACTIVITY = "activity"
+_ALL_SECTIONS = (
+    SECTION_PIN,
+    SECTION_NOTIFICATIONS,
+    SECTION_SUBPANELS,
+    SECTION_ACTIVITY,
+    CONF_ADVANCED,
+)
 
 
 # Localized notes appended to the mappings step's description when
@@ -343,6 +352,20 @@ def _build_settings_schema(
         {"collapsed": False},
     )
 
+    activity_section = section(
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ENABLE_ACTIVITY_POLLING,
+                    default=defaults.get(
+                        CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING
+                    ),
+                ): bool,
+            }
+        ),
+        {"collapsed": False},
+    )
+
     advanced_section = section(
         vol.Schema(
             {
@@ -371,6 +394,7 @@ def _build_settings_schema(
             vol.Schema(extra_fields),
             {"collapsed": False},
         )
+    schema_dict[vol.Optional(SECTION_ACTIVITY)] = activity_section
     schema_dict[vol.Optional(CONF_ADVANCED)] = advanced_section
     return vol.Schema(schema_dict)
 
@@ -1024,6 +1048,9 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 CONF_DELAY_CHECK_OPERATION: self._get(
                     CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+                ),
+                CONF_ENABLE_ACTIVITY_POLLING: self._get(
+                    CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING
                 ),
             },
             notify_options,

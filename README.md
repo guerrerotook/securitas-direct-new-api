@@ -357,6 +357,17 @@ The integration surfaces this history in three places:
 - **A sensor** — `sensor.<alias>_activity_log` exposes the most recent event as state, with the last 30 entries in its `events` attribute for templates and custom cards.
 - **The event bus** — each new entry fires a `verisure_owa_activity` event you can trigger automations on.
 
+### How often it refreshes
+
+By default the integration **does not poll the activity log on a timer** — fetching it every minute is wasted effort for the many setups that never look at it. Instead it refreshes **on demand**:
+
+- The **activity log card** pulls the latest entries whenever it's on screen — once when you open the dashboard, then once a minute while it stays visible. Close the dashboard and the polling stops. (When background polling is on, the card skips its own fetches and just displays what the integration is already polling.)
+- The **refresh button** (top-right of the card) and the **`verisure_owa.refresh_activity_log`** service fetch immediately.
+
+A consequence of on-demand refresh concerns the **`verisure_owa_activity` event bus**. To avoid replaying a burst of stale events the next time you open a dashboard, **remote events do not fire on the bus while background polling is off** — the on-demand refresh updates the sensor and card silently. The one exception is events **you trigger from Home Assistant** (arm, disarm, request image): those are injected and fire on the bus *as they happen*, regardless of the polling setting.
+
+So with polling off, `verisure_owa_activity` automations fire for HA-originated actions but **not** for events that originate elsewhere (someone arming at the physical panel, an intrusion, a power cut). If you want event automations to fire for *all* activity, turn on continuous polling: **Settings → Integrations → Verisure OWA → Configure**, then under **Activity Log and Events** enable **"Poll the activity log once per minute in the background"**. With it enabled the integration polls every 60 seconds whether or not a card is open, and every new entry fires on the bus.
+
 Each entry carries a **category** — a stable label for the type of event. The full list:
 
 `armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `alarm`, `alarm_resolved`, `tampering`, `sabotage`, `image_request`, `power_cut`, `power_restored`, `status_check`, `communication_failed`, `communication_restored`, `unknown`.
@@ -402,11 +413,11 @@ action:
       message: "Alarm disarmed by {{ trigger.event.data.verisure_user or 'someone at the panel' }}"
 ```
 
-#### Home Assistant actions and the `injected` flag
+#### Home Assistant actions, panel echoes, and the `injected` flag
 
-When you arm, disarm, or request an image **from Home Assistant** (the card, an automation, the alarm panel entity, a service call), the integration writes an enriched event into the log immediately — tagged with the actual HA user, any arming exceptions, and the captured image where applicable. These entries show a small Home Assistant badge in the card and have `injected: true`.
+When you arm, disarm, or request an image **from Home Assistant** (the card, an automation, the alarm panel entity, a service call), the integration writes an enriched event into the log immediately — tagged with the actual HA user, any arming exceptions, and the captured image where applicable. These entries show a small Home Assistant badge in the card, have `injected: true`, and fire on the `verisure_owa_activity` bus straight away.
 
-The matching event polled back from the panel ~60 seconds later is suppressed: it doesn't appear in the log and it doesn't fire on the event bus, so your automations only run once per action.
+The panel records that same action too and returns it on the next refresh, usually attributed to the Verisure account the integration signs in as. The integration pairs this **echo** to the HA event by category and timestamp (within a few seconds, so it works even hours later and regardless of how the panel names the user) and tags it `duplicate_of: "<injected id>"`. The echo is **kept** — its entry carries the panel's native-language description and precise `type`, which the generic injected row lacks — but the card folds it into the HA event's detail (unfold the row to see the "Verisure record") instead of showing a second row, and it does **not** fire on the event bus. So an HA-issued action enriches the log once and triggers automations once.
 
 If you specifically want to react **only** to actions taken outside Home Assistant (at the panel, in the Verisure app, etc.), exclude the injected entries with a template condition:
 
@@ -456,7 +467,7 @@ You can test which actions are available for your alarm in **Settings → Develo
 |---|---|---|
 | `verisure_owa.refresh_alarm` | `alarm_control_panel.*` | Authoritative status round-trip with the panel (not a lightweight read). Same as the alarm card's refresh button. |
 | `verisure_owa.capture_image` | `camera.*` (thumbnail) | Request a fresh image capture. Waits up to 30 s for a strictly newer frame before completing. Injects an `image_request` activity event. |
-| `verisure_owa.refresh_activity_log` | `sensor.*_activity_log` | Foreground-refresh the activity timeline (instead of waiting for the 60 s polling cycle). Same as the activity log card's refresh button. |
+| `verisure_owa.refresh_activity_log` | `sensor.*_activity_log` | Foreground-refresh the activity timeline on demand. Same as the activity log card's refresh button. (Background polling is off by default — see [Activity Log → How often it refreshes](#how-often-it-refreshes).) |
 | `verisure_owa.fetch_activity_image` | `sensor.*_activity_log` | On-demand historical image fetch for an activity event. Returns base64-encoded bytes + `mime_type` (response service). Takes required `id_signal` + `signal_type` fields. |
 | `verisure_owa.force_arm` | `alarm_control_panel.*` | Force-arm overriding non-blocking exceptions from a previous failed arm. See [Force Arming](#force-arming-advanced). |
 | `verisure_owa.force_arm_cancel` | `alarm_control_panel.*` | Cancel a pending force-arm context and dismiss the arming-exception notification. |

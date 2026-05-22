@@ -59,6 +59,13 @@ CONF_INSTALLATION = "installation"
 CONF_ENABLE_INTERIOR_PANEL = "enable_interior_panel"
 CONF_ENABLE_PERIMETER_PANEL = "enable_perimeter_panel"
 CONF_ENABLE_ANNEX_PANEL = "enable_annex_panel"
+# Opt-in to continuous background polling of the activity timeline. When off
+# (the default) the ActivityCoordinator runs on-demand only — the activity-log
+# card drives refreshes while it's on screen, so the integration makes no
+# per-minute API calls when nobody's viewing it. When on, the coordinator polls
+# every _DEFAULT_ACTIVITY_INTERVAL, which also keeps verisure_owa_activity event
+# automations firing even with no card open.
+CONF_ENABLE_ACTIVITY_POLLING = "enable_activity_polling"
 # Persisted list of API command strings (e.g. "ARMNIGHT1") the panel has
 # already rejected at runtime. Hydrated into the CommandResolver on setup
 # so a sub-panel mode disabled by a 400 response stays disabled across
@@ -68,6 +75,7 @@ CONF_UNSUPPORTED_COMMANDS = "unsupported_commands"
 
 DEFAULT_SCAN_INTERVAL = 120
 DEFAULT_CODE_ARM_REQUIRED = False
+DEFAULT_ENABLE_ACTIVITY_POLLING = False
 DEFAULT_FORCE_ARM_NOTIFICATIONS = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
 DEFAULT_CODE = ""

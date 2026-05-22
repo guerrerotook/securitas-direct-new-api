@@ -1,5 +1,6 @@
 """Tests for sensor and lock platform entities."""
 
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.securitas.verisure_owa_api.models import (
@@ -517,6 +518,26 @@ class TestActivityLogSensor:
         coordinator = _make_activity_coordinator(data=None)
         sensor = ActivityLogSensor(coordinator, make_installation())
         assert sensor.native_value is None
+
+    def test_background_polling_attribute_reflects_update_interval(self):
+        """The card reads this flag to decide whether to drive its own refreshes."""
+        off = _make_activity_coordinator(data=ActivityData(events=[], new_events=[]))
+        off.update_interval = None
+        assert (
+            ActivityLogSensor(off, make_installation()).extra_state_attributes[
+                "background_polling"
+            ]
+            is False
+        )
+
+        on = _make_activity_coordinator(data=ActivityData(events=[], new_events=[]))
+        on.update_interval = timedelta(seconds=60)
+        assert (
+            ActivityLogSensor(on, make_installation()).extra_state_attributes[
+                "background_polling"
+            ]
+            is True
+        )
 
     def test_state_is_none_when_no_events(self):
         coordinator = _make_activity_coordinator(

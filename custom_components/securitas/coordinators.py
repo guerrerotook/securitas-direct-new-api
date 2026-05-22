@@ -25,7 +25,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api_queue import ApiQueue
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
 from .verisure_owa_api.client import VerisureOwaClient
-from .events import HA_ECHO_SOURCE, HA_INJECTABLE_CATEGORIES
+from .events import HA_INJECTABLE_CATEGORIES
 from .verisure_owa_api.command_resolver import (
     PROTO_TO_ALARM_STATE,
     AlarmState,
@@ -55,8 +55,25 @@ _DEFAULT_SENTINEL_INTERVAL = timedelta(minutes=30)
 _DEFAULT_CAMERA_INTERVAL = timedelta(minutes=30)
 _DEFAULT_ACTIVITY_INTERVAL = timedelta(seconds=60)
 _ACTIVITY_TIMELINE_WINDOW = 30
+# How close (in time) a polled entry must be to an injected HA event of the
+# same category to be treated as the panel's echo of that HA action. Observed
+# skew between HA's clock and the panel's is a few seconds; 15s absorbs that
+# while making an accidental match with a genuine separate same-category
+# action by another user very unlikely. Matching on the action timestamps
+# (not the fetch time) means a refresh hours later still pairs correctly.
+_HA_ECHO_MATCH_WINDOW = timedelta(seconds=15)
 _ACTIVITY_STORE_VERSION = 1
 _ACTIVITY_STORE_KEY_PREFIX = "verisure_owa_activity_log"
+
+
+def _parse_panel_time(value: str | None) -> datetime | None:
+    """Parse the panel's ``YYYY-MM-DD HH:MM:SS`` timestamp (naive), or None."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
 
 
 # ── Data models ──────────────────────────────────────────────────────────────
@@ -488,17 +505,11 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         thumbnail: ThumbnailResponse, max_age_hours: int = 1
     ) -> bool:
         """Check if a thumbnail is recent enough to have a full image available."""
-        if not thumbnail.timestamp:
+        parsed = _parse_panel_time(thumbnail.timestamp)
+        if parsed is None:
             return False
-        try:
-            # Timestamp format: "2026-04-09 13:08:16"
-            thumb_time = datetime.strptime(
-                thumbnail.timestamp, "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=timezone.utc)
-            age = datetime.now(tz=timezone.utc) - thumb_time
-            return age < timedelta(hours=max_age_hours)
-        except (ValueError, TypeError):
-            return False
+        age = datetime.now(tz=timezone.utc) - parsed.replace(tzinfo=timezone.utc)
+        return age < timedelta(hours=max_age_hours)
 
     async def _fetch_full_image(
         self,
@@ -624,13 +635,17 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
         installation: Installation,
         *,
         config_entry: ConfigEntry | None = None,
+        update_interval: timedelta | None = _DEFAULT_ACTIVITY_INTERVAL,
     ) -> None:
+        # update_interval=None disables background polling — the coordinator
+        # then only refreshes on demand (e.g. the activity-log card calling
+        # the refresh_activity_log service while it's on screen).
         super().__init__(
             hass,
             _LOGGER,
             config_entry=config_entry,
             name="verisure_owa_activity",
-            update_interval=_DEFAULT_ACTIVITY_INTERVAL,
+            update_interval=update_interval,
         )
         self._client = client
         self._queue = queue
@@ -702,25 +717,76 @@ class ActivityCoordinator(DataUpdateCoordinator[ActivityData]):
             self._client, self._fetch, "Activity"
         )
 
-        polled = [
-            ev
-            for ev in events
-            if not (
-                ev.source == HA_ECHO_SOURCE
-                and ev.verisure_user is None
-                and ev.category in HA_INJECTABLE_CATEGORIES
-            )
-        ]
+        # Tag each polled entry that is the panel's echo of an HA-issued action
+        # with duplicate_of=<injected id>. We keep the echo (its panel `type`
+        # and native-language alias are richer than our generic injected row)
+        # but the card nests it and the bus skips it, so an HA action triggers
+        # automations only once. Pairing is by category + timestamp proximity,
+        # which works regardless of how the panel attributes the echo's user.
+        polled = list(events)
+        self._mark_ha_echoes(self._injected, polled)
         merged = self._merge(self._injected, polled)
 
         current_ids = {ev.id_signal for ev in merged}
-        if self._previous_ids is None:
+        # update_interval is None ⇒ background polling off: every refresh is
+        # on-demand (card-driven), so remote entries must never fire on the bus
+        # — otherwise opening the card after a gap would replay a burst of stale
+        # verisure_owa_activity events. The first poll also baselines silently.
+        # HA-injected events still fire live via inject_event regardless. The
+        # watermark advances either way so dedup stays correct.
+        if self._previous_ids is None or self.update_interval is None:
             new_events: list[ActivityEvent] = []
         else:
-            new_events = [ev for ev in merged if ev.id_signal not in self._previous_ids]
+            # Probable duplicates of HA actions never fire — the injected event
+            # already fired live via inject_event.
+            new_events = [
+                ev
+                for ev in merged
+                if ev.id_signal not in self._previous_ids and ev.duplicate_of is None
+            ]
         self._previous_ids = current_ids
 
         return ActivityData(events=merged, new_events=new_events)
+
+    @staticmethod
+    def _mark_ha_echoes(
+        injected: list[ActivityEvent], polled: list[ActivityEvent]
+    ) -> None:
+        """Tag polled echoes of HA actions in place via ``duplicate_of``.
+
+        Pairs each injected HA event to at most one polled entry of the same
+        category whose timestamp is within ``_HA_ECHO_MATCH_WINDOW`` (greedy,
+        nearest-in-time first), so two HA actions and their two echoes don't
+        cross-match. Only injectable categories are considered.
+        """
+        injected_times = [
+            (inj, _parse_panel_time(inj.time))
+            for inj in injected
+            if inj.category in HA_INJECTABLE_CATEGORIES
+        ]
+        # Parse each polled timestamp once, not once per injected event.
+        polled_times = [(cand, _parse_panel_time(cand.time)) for cand in polled]
+        claimed: set[int] = set()  # ids() of polled entries already matched
+        for inj, inj_time in injected_times:
+            if inj_time is None:
+                continue
+            best: ActivityEvent | None = None
+            best_delta: timedelta | None = None
+            for cand, cand_time in polled_times:
+                if (
+                    cand_time is None
+                    or id(cand) in claimed
+                    or cand.category != inj.category
+                ):
+                    continue
+                delta = abs(cand_time - inj_time)
+                if delta <= _HA_ECHO_MATCH_WINDOW and (
+                    best_delta is None or delta < best_delta
+                ):
+                    best, best_delta = cand, delta
+            if best is not None:
+                best.duplicate_of = inj.id_signal
+                claimed.add(id(best))
 
     @staticmethod
     def _merge(
