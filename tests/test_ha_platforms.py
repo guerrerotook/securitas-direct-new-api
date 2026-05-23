@@ -1675,8 +1675,24 @@ class TestVerisureLockVerifyPoll:
         assert lock._client.get_lock_modes.await_count == 4
 
     async def test_single_poll_when_target_immediate(self):
-        lock = make_lock(poll_status="2")
+        # Baseline at ts=100, verify at ts=200 → first verify is fresh and
+        # matches target → loop exits after one verify read.
+        lock = make_lock()
         lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],
+                [
+                    SmartLockMode(
+                        lock_status="2", device_id="01", status_timestamp="200"
+                    )
+                ],
+            ]
+        )
 
         await lock.async_lock()
 
@@ -2014,6 +2030,91 @@ class TestVerisureLockTimestampConfirmation:
         assert lock._client.get_lock_modes.await_count == 1 + lock._verify_attempts
         # Quiet success: state ends at target, no error path taken.
         assert lock._state == "2"
+
+    async def test_empty_status_timestamp_keeps_polling_not_short_circuit(self):
+        """A response with empty/missing statusTimestamp must not be treated as fresh.
+
+        Under v5.0.5's "any fresh read is authoritative" semantics, a fallback that
+        treats unparseable timestamps as fresh would short-circuit the verify loop
+        on the very first read — returning whatever pre-command status the backend
+        echoed back even though the device hasn't actuated yet. The verify loop
+        should instead keep polling until either a real (newer) timestamp lands
+        or the window exhausts (in which case the quiet-success-on-target branch
+        covers a no-op command).
+        """
+        lock = make_lock(initial_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        # Baseline read returns a normal ts. Verify reads all come back with an
+        # EMPTY statusTimestamp — the field is just missing from the backend
+        # response and SmartLockMode defaults it to "". The lock_status on those
+        # reads is still pre-command ("1" unlocked), so a short-circuit here
+        # would falsely report failure for a lock command that's actually
+        # in-flight.
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                # Baseline
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],
+                # Verify reads (all empty ts, pre-command state)
+                *[
+                    [
+                        SmartLockMode(
+                            lock_status="1", device_id="01", status_timestamp=""
+                        )
+                    ]
+                    for _ in range(lock._verify_attempts)
+                ],
+            ]
+        )
+
+        await lock.async_lock()
+
+        # Every verify attempt must run — empty ts is not authoritative.
+        assert lock._client.get_lock_modes.await_count == 1 + lock._verify_attempts
+
+
+class TestTsIsNewer:
+    """Unit tests for the verify-loop's freshness comparator."""
+
+    def test_strictly_newer_returns_true(self):
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("200", "100") is True
+
+    def test_equal_returns_false(self):
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("100", "100") is False
+
+    def test_older_returns_false(self):
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("100", "200") is False
+
+    def test_empty_read_ts_returns_false(self):
+        """Missing read timestamp → can't compare → treat as stale."""
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("", "100") is False
+
+    def test_empty_base_ts_returns_false(self):
+        """Missing baseline → can't compare → treat as stale."""
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("200", "") is False
+
+    def test_both_empty_returns_false(self):
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("", "") is False
+
+    def test_non_numeric_returns_false(self):
+        from custom_components.securitas.lock import _ts_is_newer
+
+        assert _ts_is_newer("abc", "100") is False
 
 
 # ===========================================================================

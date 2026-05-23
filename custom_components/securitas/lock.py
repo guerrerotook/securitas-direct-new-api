@@ -62,13 +62,18 @@ def _ts_is_newer(read_ts: str, base_ts: str) -> bool:
     of the target state only counts as a *real* actuation if its timestamp has
     advanced past the pre-command baseline — otherwise it may be a stale,
     not-yet-propagated read of the old state.  When either value is missing or
-    non-numeric we can't compare, so we fall back to trusting the value match
-    (return True) rather than blocking confirmation.
+    non-numeric we can't compare, so we return False (treat as stale).  Under
+    the "any fresh read is authoritative" verify semantics, a True fallback
+    would short-circuit the verify loop on the very first read whenever the
+    backend omitted ``statusTimestamp`` — handing back whatever pre-command
+    state it echoed before the device had actuated.  Returning False keeps the
+    loop polling; the quiet-success-on-target branch in ``_poll_lock_until`` is
+    the safety net for genuine no-op commands that never re-stamp.
     """
     try:
         return int(read_ts) > int(base_ts)
     except (TypeError, ValueError):
-        return True
+        return False
 
 
 # Service request name that identifies a smart-lock capability
