@@ -445,10 +445,16 @@ class VerisureLock(  # type: ignore[override]
         command (which waits for the lock to physically act), then fetches
         the actual lock status from the API.
         """
-        # Snapshot the last-known timestamp BEFORE the command so the
-        # verification poll can tell a real, fresh actuation apart from a
-        # stale read of the pre-command state.
-        pre_mode = self._current_mode
+        # Read a FRESH baseline timestamp from the API (not coordinator data,
+        # which can be minutes stale or even older than the actual current
+        # backend timestamp if the lock was physically moved since the last
+        # coordinator update).  The verify poll needs a baseline taken at the
+        # moment of the command to reliably distinguish a real actuation from
+        # a stale read of any prior state.
+        try:
+            pre_mode = await self._read_lock_mode(priority=ApiQueue.FOREGROUND)
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            pre_mode = None
         pre_ts = pre_mode.status_timestamp if pre_mode is not None else ""
         self._operation_in_progress = True
         self._force_state(transitional_state)
