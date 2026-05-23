@@ -1554,7 +1554,7 @@ class TestVerisureLockAutoLockFailure:
         ]
         assert len(notification_calls) == 1
         payload = notification_calls[0].args[2]
-        assert payload["notification_id"].startswith("verisure_owa_autolock_")
+        assert payload["notification_id"].startswith("verisure_owa_lock_")
         assert "Auto-lock failed" in payload["title"]
 
     async def test_no_notification_on_successful_auto_lock(self):
