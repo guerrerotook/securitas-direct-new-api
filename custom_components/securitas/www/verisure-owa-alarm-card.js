@@ -335,7 +335,13 @@ function attachGesture(el, config, hass, entityId, srcEl, callbacks = {}, cardSt
   function onPointerCancel() { cancelHold(); }
 
   function onClick(e) {
-    if (holdFired) { holdFired = false; e.stopImmediatePropagation(); }
+    // Our gesture handler owns the click on this element. Always swallow
+    // the native click so it cannot bubble to a parent's tap_action handler
+    // (e.g. an HA tile-card wrapper or dashboard view default) — otherwise
+    // a single tap would fire both our action AND the parent's, opening
+    // duplicate dialogs.
+    if (holdFired) holdFired = false;
+    e.stopImmediatePropagation();
   }
 
   el.addEventListener("pointerdown",   onPointerDown);
@@ -1900,9 +1906,18 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     overlay.appendChild(content);
     document.body.appendChild(overlay);
 
-    // Create the full alarm card inside the dialog
+    // Create the full alarm card inside the dialog.
+    //
+    // Strip the badge/chip's gesture config before passing it down. The same
+    // tap_action key means different things in different contexts: on a badge
+    // or chip, `more-info` is wired to open THIS popup; on the alarm-card,
+    // `more-info` dispatches `hass-more-info` and opens HA's standard dialog.
+    // Forwarding the badge's gestures verbatim would make a tap on the icon
+    // inside the popup open HA's dialog on top of our popup.
+    const innerConfig = { ...this._config };
+    for (const k of GESTURE_KEYS) delete innerConfig[k];
     this._dialogCard = document.createElement("securitas-alarm-card");
-    this._dialogCard.setConfig(this._config);
+    this._dialogCard.setConfig(innerConfig);
     this._dialogCard.hass = this._hass;
     content.appendChild(this._dialogCard);
 

@@ -147,6 +147,100 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(dialogCard).not.toBeNull();
   });
 
+  it("clicking the alarm-card icon inside the popup must NOT open HA's more-info dialog (default-tap config)", () => {
+    // User bug report: when our badge's popup is open and the user clicks the
+    // big shield icon in the embedded alarm-card, HA's standard more-info
+    // dialog appears. The embedded card's tap_action default is `none`, so
+    // tapping the icon should be a no-op. Listen on document for hass-more-info
+    // (the event HA's <home-assistant> root would catch to open the dialog).
+    const badge = mountBadge();
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    vi.advanceTimersByTime(301);
+
+    const popupCard = document.body.querySelector("securitas-alarm-card");
+    expect(popupCard).not.toBeNull();
+
+    const moreInfoCalls = vi.fn();
+    document.addEventListener("hass-more-info", moreInfoCalls);
+
+    const iconWrap = popupCard.shadowRoot.querySelector(".icon-wrap");
+    iconWrap.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    iconWrap.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    iconWrap.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    vi.advanceTimersByTime(301);
+
+    document.removeEventListener("hass-more-info", moreInfoCalls);
+    expect(moreInfoCalls).not.toHaveBeenCalled();
+  });
+
+  it("clicking the alarm-card icon inside the popup must NOT open HA's dialog when badge tap_action is more-info", () => {
+    // The badge's editor defaults tap_action to `more-info` (which means
+    // "open our popup" in badge context). That same config is passed
+    // wholesale to the popup's inner alarm-card via setConfig(this._config) —
+    // but in the alarm-card context, `more-info` means "open HA's dialog".
+    // So a user who configures their badge with the default tap action
+    // and then clicks the icon inside the popup gets HA's dialog. Bug.
+    const badge = mountBadge({ config: { tap_action: { action: "more-info" } } });
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    vi.advanceTimersByTime(301);
+
+    const popupCard = document.body.querySelector("securitas-alarm-card");
+    expect(popupCard).not.toBeNull();
+
+    const moreInfoCalls = vi.fn();
+    document.addEventListener("hass-more-info", moreInfoCalls);
+
+    const iconWrap = popupCard.shadowRoot.querySelector(".icon-wrap");
+    iconWrap.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    iconWrap.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    iconWrap.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    vi.advanceTimersByTime(301);
+
+    document.removeEventListener("hass-more-info", moreInfoCalls);
+    expect(moreInfoCalls).not.toHaveBeenCalled();
+  });
+
+  it("a tap on the badge stops the native click event from bubbling to parents", () => {
+    // When the badge sits inside a parent (e.g. an HA tile-card wrapper or a
+    // dashboard view that has its own tap_action default of `more-info`), the
+    // browser's native click event must NOT bubble past the badge — otherwise
+    // the user sees BOTH our custom popup AND the standard HA more-info dialog.
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    parent.appendChild(badge);
+    const parentClicks = vi.fn();
+    parent.addEventListener("click", parentClicks);
+
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    // Native click event follows pointerup in a real browser; jsdom doesn't
+    // synthesise it, so dispatch one explicitly.
+    badgeEl.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    vi.advanceTimersByTime(301);
+
+    expect(parentClicks).not.toHaveBeenCalled();
+  });
+
   it("closing the dialog via the close button removes the overlay", () => {
     const badge = mountBadge();
     const badgeEl = badge.shadowRoot.getElementById("badge");
@@ -587,6 +681,69 @@ describe("verisure-owa-alarm-chip dialog wiring", () => {
     chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     vi.advanceTimersByTime(301);
     expect(document.body.querySelector("securitas-alarm-card")).not.toBeNull();
+  });
+
+  it("clicking the alarm-card icon inside the chip's popup must NOT open HA's dialog", () => {
+    // Same bug as the badge: the chip's tap_action (default `more-info`) is
+    // passed wholesale to the embedded alarm-card via _openDialog. In the
+    // alarm-card context, `more-info` dispatches `hass-more-info` and opens
+    // HA's standard dialog on top of our popup. The chip delegates to the
+    // badge's _openDialog so the same gesture-stripping fix protects it.
+    const chip = document.createElement("verisure-owa-alarm-chip");
+    chip.setConfig({ entity: ENTITY, tap_action: { action: "more-info" } });
+    chip.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    document.body.appendChild(chip);
+    const chipEl = chip.shadowRoot.getElementById("chip");
+    chipEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    vi.advanceTimersByTime(301);
+
+    const popupCard = document.body.querySelector("securitas-alarm-card");
+    expect(popupCard).not.toBeNull();
+
+    const moreInfoCalls = vi.fn();
+    document.addEventListener("hass-more-info", moreInfoCalls);
+
+    const iconWrap = popupCard.shadowRoot.querySelector(".icon-wrap");
+    iconWrap.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    iconWrap.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    iconWrap.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    vi.advanceTimersByTime(301);
+
+    document.removeEventListener("hass-more-info", moreInfoCalls);
+    expect(moreInfoCalls).not.toHaveBeenCalled();
+  });
+
+  it("a tap on the chip stops the native click event from bubbling to parents", () => {
+    // Same concern as the badge: when the chip is placed inside a wrapper
+    // (mushroom chips card, generic container with its own tap handler, etc.),
+    // the native click must not escape and trigger the parent's tap_action.
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const chip = document.createElement("verisure-owa-alarm-chip");
+    chip.setConfig({ entity: ENTITY });
+    chip.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    parent.appendChild(chip);
+    const parentClicks = vi.fn();
+    parent.addEventListener("click", parentClicks);
+
+    const chipEl = chip.shadowRoot.getElementById("chip");
+    chipEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    chipEl.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    vi.advanceTimersByTime(301);
+
+    expect(parentClicks).not.toHaveBeenCalled();
   });
 
   it("setting hass before setConfig is a no-op (renders only after config arrives)", () => {
