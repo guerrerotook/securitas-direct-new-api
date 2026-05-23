@@ -9,55 +9,17 @@ A Home Assistant integration for **Verisure** (formerly Securitas Direct in some
 
 > **Upgrading from a previous version?** See [CHANGES.md](./CHANGES.md) for what's new and the breaking changes in this release.
 
-## Features
+## What's included
 
-### Alarm control
+Full alarm control: the mappings between HA's five buttons (Home/Away/Night/Vacation/Custom) and your Verisure modes are yours to set. Optional local PIN. If your install has multiple circuits, you can opt into a dedicated sub-panel for each (Interior, Perimeter, Annex).
 
-- **Main panel** — arm, disarm, and monitor your alarm from HA, one per installation.
-- **Configurable mappings** — choose which Verisure mode each HA button (Home, Away, Night, Vacation, Custom) activates.
-- **Per-circuit sub-panels** — optional Interior-only, Perimeter-only, and Annex-only panels alongside the main one, for installations with the corresponding sensors.
-- **Force arming (panel-dependent)** — when arming is blocked by an open sensor, you can force-arm from a mobile notification, the custom alarm card, an automation, or the `verisure_owa.force_arm` service. Whether force-arming is offered at all is decided by your panel firmware: some installations (Spain has been observed) always refuse, in which case you'll get a "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
-- **Refresh** — request an immediate alarm status check via the bundled alarm card's refresh button (or `verisure_owa.refresh_alarm` from an automation).
+Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. A connectivity diagnostic for the panel itself.
 
-### Lovelace cards
+Bundled Lovelace cards: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, camera card, activity-log card.
 
-Custom cards bundled with the integration:
+The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
 
-- **Alarm card** — dynamic arm buttons (only the modes you've mapped), PIN keypad, and force-arm UI.
-- **Alarm badge** — compact dashboard badge with a state-specific shield icon; tap opens the alarm card, hold/double-tap can arm or disarm directly.
-- **Mushroom chip** — pill-shaped chip for use inside a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom), with the same state-specific icon and color as the badge.
-- **Camera card** — latest thumbnail with a capture button, timestamp overlay, and click-to-open full-resolution image.
-- **Activity log card** — viewer for the activity log with a refresh button and click-through to entry details (including images for image-request entries).
-
-### Smart locks
-
-- **Lock, unlock, open** — multiple locks per installation. If your lock supports latch hold-back, an **Open** action is also available.
-- **Auto-lock on arm** — pick which circuits should lock the door when they arm.
-- **Auto-disarm before unlock** — pick which circuits should be disarmed when the lock is unlocked from HA. The disarm and the unlock dispatch in parallel.
-- **Failure notifications** — persistent notifications when an auto-lock, auto-disarm, or post-disarm unlock fails.
-
-### Cameras
-
-- **Live thumbnails + full-resolution images** — one thumbnail entity and one full-resolution entity per camera.
-- **On-demand capture** — a Capture button triggers a fresh image; a `capturing` attribute is exposed for automations.
-
-### Sensors
-
-- **Sentinel** — temperature, humidity, and air quality (numeric and categorical) for each Sentinel device.
-- **WiFi connectivity** — diagnostic binary sensor showing the panel's connection status.
-- **Activity log sensor** — the most recent Verisure event as state, with the last 30 entries available as an attribute.
-
-### Activity log
-
-- **Verisure event history in HA** — arm/disarm, the Verisure user who did it, intrusions, image requests, power cuts, and more — surfaced via: an activity log card, the activity log sensor, and a `verisure_owa_activity` event you can trigger automations on.
-- **HA action enrichment** — actions taken from within Home Assistant are tagged with the actual HA user and replace the events coming from Verisure so that automations only fire once.
-
-### Multi-installation & authentication
-
-- **Multiple installations per account** — each installation gets its own entities; the API session is shared.
-- **Two-factor authentication** — handled automatically via SMS during setup if your account needs it.
-- **No password on disk** — your password is used once to mint a long-lived refresh token, then discarded. If the token is revoked or expires, HA shows a reauth dialog.
-- **Local PIN protection** — optional PIN for arming and/or disarming from HA, separate from your Verisure account.
+Multiple installations per account work out of the box. 2FA is handled at setup. Your password isn't stored on disk — it gets used once to mint a refresh token, then discarded.
 
 ## Supported Countries
 
@@ -93,20 +55,11 @@ Go to **Settings → Integrations → Add Integration** and search for **Verisur
 
 ![Setup](./docs/images/setup.png)
 
-The wizard takes you through:
-
-1. **Login** — your country (auto-detected from your HA locale), username, and password. If your account requires 2FA you'll be asked to pick a phone number and enter the SMS code.
-2. **Installation** — if your account has more than one, pick which to configure. Repeat the flow to add others. Perimeter and annex sensors are detected automatically.
-3. **Options** — PIN code, force-arm notifications, optional sub-panel toggles, and a collapsed Advanced section.
-4. **Mappings** — map each HA alarm button (Home, Away, Night, Vacation, Custom) to a Verisure mode.
-
-Locks and cameras are discovered in the background after setup. The **Lock automation** screen for auto-lock and auto-disarm appears under **Configure** once locks are registered.
+The wizard handles login (with SMS 2FA if your account uses it), picks an installation if your account has more than one, walks through PIN / notifications / sub-panel options, and lets you map each HA alarm button to a Verisure mode. Repeat the flow once per installation if you have several. Locks and cameras are discovered in the background — the **Lock automation** screen appears under **Configure** once they're registered.
 
 ### Naming: `securitas` vs `verisure_owa`
 
-For historical reasons, this integration's Home Assistant domain is `securitas`, but every service call, event, asset URL, and Lovelace card type is also registered under the `verisure_owa` name. **Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write today** — both work identically. The `verisure_owa` form is the one that will survive the eventual domain rename (see [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) for the planned split into a separate HACS repository). Old automations using the `securitas` form will keep working until that migration ships, with no deprecation warnings in the meantime.
-
-The Lovelace card picker only offers the `custom:verisure-owa-alarm-card` / `-camera-card` / `-activity-log-card` forms; dashboards with the older `custom:securitas-alarm-card` / `-camera-card` types continue to render via aliased custom-element registrations.
+The integration's HA domain is `securitas` for historical reasons, but every service, event, and card name is also registered under `verisure_owa.*` / `verisure_owa_*` — use that form when you write new automations. Old `securitas.*` automations keep working. See [`docs/FUTURE_MIGRATION_PLAN.md`](docs/FUTURE_MIGRATION_PLAN.md) for why this is unresolved.
 
 ## Options
 
@@ -125,6 +78,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
 | | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
 | | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
+| **Activity Log and Events** | Poll the activity log once per minute in the background | No | Off by default: the log refreshes on demand from the card, and remote events (someone arming at the panel, an intrusion, a power cut) don't fire on the `verisure_owa_activity` bus. Turn it on if you want every event to fire — see [How often it refreshes](#how-often-it-refreshes). |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 
@@ -154,13 +108,11 @@ Verisure supports several alarm modes, but Home Assistant's alarm panel only has
 | Partial Night + Perimeter + Annex | Nighttime interior + external sensors + annex            |
 | Total + Perimeter + Annex         | All interior + external sensors + annex                  |
 
-The available modes depend on which circuits are detected on your installation: standard installations see only the four interior modes; perimeter installations add the four perimeter combinations; annex installations add the four annex combinations; installations with both add the four perimeter+annex combinations on top.
+You only see the modes your installation actually supports. A standard install gets the four interior modes; perimeter installations get the four perimeter combinations on top, annex installations the four annex combinations, and an install with both gets all sixteen. Leave a mapping blank to hide that HA button.
 
-To hide a button from the alarm panel, leave its mapping field blank.
+The mapping works both ways: when Verisure reports "Total + Perimeter" and you've mapped that to **Away**, the panel shows Armed Away. Switching between modes (Armed Home → Armed Away + Perimeter → Disarmed, etc.) is sorted out for you.
 
-> **Note:** Your country may only support a single Partial mode, rather than a Partial Day and a Partial Night. In this case, use just Partial Day.
-
-The mapping is bidirectional: when Verisure reports "Total + Perimeter" and you've mapped that to **Away**, the panel shows Armed Away. Switching between modes (Armed Home → Armed Away + Perimeter → Disarmed, etc.) is worked out for you.
+> **Note:** Your country may only support a single Partial mode, rather than Partial Day and Partial Night. If so, use Partial Day.
 
 ### Defaults
 
@@ -228,7 +180,7 @@ chips:
 
 ### Gesture Actions
 
-The **alarm card**, **badge**, and **chip** all support configurable tap, hold, and double-tap actions. For the **card** and **badge**, these can be set in the visual editor under the **Tap action**, **Hold action**, and **Double-tap action** sections. For the **chip**, these actions are configured in YAML (see [below](#chip-gesture-actions)).
+All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card and badge expose them in the visual editor; the chip is YAML-only.
 
 ![Gesture Actions](./docs/images/card-gestures.png)
 
@@ -238,7 +190,7 @@ The **alarm card**, **badge**, and **chip** all support configurable tap, hold, 
 | Hold       | Arm / Disarm  | _(none)_        | _(none)_     |
 | Double-tap | _(none)_      | _(none)_        | _(none)_     |
 
-Each action can be set to one of the following:
+Each action can be:
 
 | Option   | Description                                                                                         |
 | -------- | --------------------------------------------------------------------------------------------------- |
@@ -247,9 +199,9 @@ Each action can be set to one of the following:
 | Arm      | Arm the alarm to a chosen state (Home, Away, Night, Custom, or Vacation). Only fires when disarmed. |
 | Disarm   | Disarm the alarm. Only fires when armed.                                                            |
 
-Example: set **Hold** to **Disarm** on the badge to disarm with a long press, without opening the card popup.
+Example: set **Hold** to **Disarm** on the badge to disarm with a long press without opening the card popup.
 
-The card and badge have a visual editor for gesture actions. The chip only supports YAML configuration:
+#### Chip YAML
 
 ```yaml
 type: custom:mushroom-chips-card
@@ -264,8 +216,6 @@ chips:
       action: navigate
       navigation_path: /lovelace/security
 ```
-
-Available actions:
 
 | Action           | YAML value                                                           |
 | ---------------- | -------------------------------------------------------------------- |
@@ -297,12 +247,7 @@ Auto-disarm only fires when the unlock comes from inside HA. Unlocking from the 
 > **Disable autolock in the Verisure app before using auto-lock here.** Verisure's own autolock runs on its own timer and will fight this integration's arm-driven locking — leaving you with the door locking and unlocking unexpectedly. Turn it off in the app so this integration is the only thing driving the lock.
 
 > [!NOTE]
-> **The autolock configuration in this integration is different from the Verisure app.** The Verisure app **unlocks the lock when the alarm is disarmed**, while this integration instead **disarms the alarm when the lock is unlocked**, and only when the lock is unlocked via Home Assistant.
->
-> There are three reasons for the difference in behaviour:
-> 1. The main reason to disarm the alarm is because you want to open the door.
-> 2. With the Verisure app instead you might disarm the alarm remotely and have the door open itself when nobody is there to close it.
-> 3. We only react to Home Assistant unlock commands because we need the alarm to be disarmed at the same time, not two minutes later after polling to update the lock status.
+> **The direction is reversed from the Verisure app.** The app unlocks when you disarm; this integration disarms when you unlock from HA. The usual reason to disarm is that you're about to open the door, so triggering off the unlock makes more sense than the other way around — and we only react to HA-initiated unlocks so the disarm and unlock stay in lockstep instead of drifting apart while we wait for a status poll.
 
 When something goes wrong, you get a persistent notification:
 
@@ -318,8 +263,6 @@ Each Verisure camera produces two entities — `camera.<name>` for the thumbnail
 
 Captures can take up to 30 seconds to appear, depending on how busy the API is — the integration waits for a frame strictly newer than the one being displayed before completing.
 
-A **Capture** button entity (`button.<name>_capture`) is also exposed for backwards compatibility with v5.0.1 dashboards and automations. It still works but is deprecated; pressing it logs a one-line deprecation warning. New automations should call `verisure_owa.capture_image` directly.
-
 ### Custom Camera Card
 
 There's a custom camera card (`verisure-owa-camera-card`) tailored to the Verisure camera entities.
@@ -332,18 +275,13 @@ It shows the latest thumbnail image with:
 - **Timestamp overlay** — displays when the image was taken, with a relative time and an absolute tooltip
 - **Click to open** — clicking the image opens the HA more-info dialog. If a full-resolution image is available (auto-discovered from the same device), it opens the full-resolution entity; otherwise the thumbnail entity.
 
-To add it to your dashboard, click **Add Card → Search for "Verisure OWA Camera Card"** and pick your camera entity from the dropdown.
+To add it to your dashboard, click **Add Card → Search for "Verisure OWA Camera Card"** and pick your camera entity from the dropdown. Only two options: `entity` (the thumbnail camera, required) and `name` (display name, optional — defaults to the device name).
 
 ```yaml
 type: custom:verisure-owa-camera-card
-entity: camera.sala              # thumbnail entity (required)
-name: Sala                       # optional — overrides the entity friendly name
+entity: camera.sala
+name: Sala
 ```
-
-| Option | Required | Description |
-|---|---|---|
-| `entity` | Yes | The thumbnail camera entity (`camera.<name>`) |
-| `name` | No | Display name shown on the card. Defaults to the HA device name. |
 
 ## Activity Log
 
@@ -359,14 +297,14 @@ The integration surfaces this history in three places:
 
 ### How often it refreshes
 
-By default the integration **does not poll the activity log on a timer** — fetching it every minute is wasted effort for the many setups that never look at it. Instead it refreshes **on demand**:
+By default the integration **doesn't poll the activity log on a timer** — fetching it every minute is wasted effort for setups that never look at it. Refreshes happen on demand instead:
 
-- The **activity log card** pulls the latest entries whenever it's on screen — once when you open the dashboard, then once a minute while it stays visible. Close the dashboard and the polling stops. (When background polling is on, the card skips its own fetches and just displays what the integration is already polling.)
+- The **card** pulls the latest entries while it's on screen — once on open, then once a minute. Close the dashboard and the polling stops.
 - The **refresh button** (top-right of the card) and the **`verisure_owa.refresh_activity_log`** service fetch immediately.
 
-A consequence of on-demand refresh concerns the **`verisure_owa_activity` event bus**. To avoid replaying a burst of stale events the next time you open a dashboard, **remote events do not fire on the bus while background polling is off** — the on-demand refresh updates the sensor and card silently. The one exception is events **you trigger from Home Assistant** (arm, disarm, request image): those are injected and fire on the bus *as they happen*, regardless of the polling setting.
+There's a side effect on the **`verisure_owa_activity` event bus**: with on-demand refresh, remote events don't fire on the bus (otherwise you'd get a burst of stale events the next time you open a dashboard — the sensor and card update silently instead). The exception is actions **you take from HA** — those fire as they happen, regardless of the polling setting. So with polling off, automations catch HA-originated activity but miss events from elsewhere (someone arming at the physical panel, an intrusion, a power cut).
 
-So with polling off, `verisure_owa_activity` automations fire for HA-originated actions but **not** for events that originate elsewhere (someone arming at the physical panel, an intrusion, a power cut). If you want event automations to fire for *all* activity, turn on continuous polling: **Settings → Integrations → Verisure OWA → Configure**, then under **Activity Log and Events** enable **"Poll the activity log once per minute in the background"**. With it enabled the integration polls every 60 seconds whether or not a card is open, and every new entry fires on the bus.
+If you want every event to fire on the bus, turn on continuous polling under **Settings → Integrations → Verisure OWA → Configure → Activity Log and Events**.
 
 Each entry carries a **category** — a stable label for the type of event. The full list:
 
@@ -436,30 +374,15 @@ Two things to keep an eye out for and [open an issue](https://github.com/guerrer
 
 ## Automations & Scripts
 
-You can arm, disarm, and control the alarm from automations and scripts using the standard Home Assistant alarm actions:
+Arm and disarm using the standard `alarm_control_panel.alarm_arm_*` actions (`alarm_arm_home`, `alarm_arm_away`, `alarm_arm_night`, `alarm_arm_vacation`, `alarm_arm_custom_bypass`) and `alarm_control_panel.alarm_disarm`. Only the modes you've mapped in the [Alarm State Mappings](#alarm-state-mappings) will work — calling `alarm_arm_home` on a panel where Home is blank fails with an error. Pass `code: "12345"` if you have a PIN configured.
 
 ```yaml
 action: alarm_control_panel.alarm_arm_away
 target:
   entity_id: alarm_control_panel.my_alarm
 data:
-  code: "12345" # only needed if you have a PIN configured
+  code: "12345"
 ```
-
-Replace `alarm_arm_away` with the action for the mode you want:
-
-| Action                                        | Mode     |
-| --------------------------------------------- | -------- |
-| `alarm_control_panel.alarm_arm_away`          | Away     |
-| `alarm_control_panel.alarm_arm_home`          | Home     |
-| `alarm_control_panel.alarm_arm_night`         | Night    |
-| `alarm_control_panel.alarm_arm_vacation`      | Vacation |
-| `alarm_control_panel.alarm_arm_custom_bypass` | Custom   |
-| `alarm_control_panel.alarm_disarm`            | Disarm   |
-
-> **Important:** Only actions for modes you have mapped in the [Alarm State Mappings](#alarm-state-mappings) will work. If you try to arm with an unmapped mode (e.g. calling `alarm_arm_home` when Home is left blank), the action will fail with an error. Check your mappings in **Settings → Integrations → Verisure OWA → Configure → Submit** (second page).
-
-You can test which actions are available for your alarm in **Settings → Developer Tools → Actions** — type "arm alarm" to see the list.
 
 ### Integration services
 
@@ -472,21 +395,19 @@ You can test which actions are available for your alarm in **Settings → Develo
 | `verisure_owa.force_arm` | `alarm_control_panel.*` | Force-arm overriding non-blocking exceptions from a previous failed arm. See [Force Arming](#force-arming-advanced). |
 | `verisure_owa.force_arm_cancel` | `alarm_control_panel.*` | Cancel a pending force-arm context and dismiss the arming-exception notification. |
 
-The `force_arm` and `force_arm_cancel` services are also registered under `securitas.*` as equal-weight aliases (kept indefinitely for backwards compatibility with v4-era automations). All other services exist only under `verisure_owa.*`.
-
-The `VerisureRefreshButton` (one per installation) and `VerisureCaptureButton` (one per camera) entities still exist and continue to dispatch the same logic on press, but are deprecated; pressing one logs a one-line deprecation warning. New automations should call the equivalent service directly.
+`force_arm` and `force_arm_cancel` also work as `securitas.*` aliases (kept indefinitely for v4-era automations). All other services are `verisure_owa.*` only. The pre-v5.0.2 `button.*_capture` and per-installation refresh button still work but are deprecated — call the services above instead.
 
 ## Force Arming (advanced)
 
-Most users won't need anything from this section. When arming is blocked by an open sensor, the [custom alarm card](#custom-alarm-card) shows a warning with a **Force Arm** button, and — if **Built-in force-arm notifications** is enabled in the integration options — a mobile notification with **Force Arm** / **Cancel** action buttons does the same from your phone. That covers the common "window left open" case with no automation work.
-
-The rest of this section is for users who want something more advanced: writing their own automations against the `verisure_owa_arming_exception` event (e.g. auto-force-arm only on `armed_away`, custom notification text, multi-step logic), or calling the `verisure_owa.force_arm` service directly.
+Most users won't need anything below — the alarm card and built-in mobile notifications already handle the "window left open" case. This section is for people writing their own automations against the `verisure_owa_arming_exception` event, or calling `verisure_owa.force_arm` directly.
 
 ### What happens when arming is blocked
 
-The arm command reverts, the entity gains `force_arm_available` and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always — regardless of the notifications toggle). The card shows a warning with **Force Arm** / **Cancel** buttons. If built-in notifications are enabled, you also get a persistent notification and (when a notify service is configured) a mobile notification with the same buttons.
+The arm command reverts, the entity gains `force_arm_available` and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The card shows a warning with **Force Arm** / **Cancel** buttons. If built-in notifications are enabled, you also get a persistent notification and — when a notify service is configured — a mobile notification with the same buttons.
 
-You then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm — from the card, the mobile notification, the `verisure_owa.force_arm` service targeting your alarm panel entity, or your own automation. After 180 seconds the force-arm context expires and you have to retry from scratch.
+You then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
+
+Some panels refuse force-arming altogether (Spain has been observed). In that case you'll get an "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
 
 ### The `verisure_owa_arming_exception` event
 
@@ -571,7 +492,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 - **Alarm shows wrong state after using the Verisure app** — Periodic polling reads the last known status from the Verisure server, which may take a moment to reflect changes made via the app. Press the **Refresh** button to force an immediate panel check.
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
-- **2FA issues** — If 2FA fails, remove and re-add the integration. You will be prompted for a new SMS code. If the error persists, try creating a new user via the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using the new credentials in Home Assistant.
+- **2FA issues** — If 2FA fails, remove and re-add the integration; you'll be prompted for a new SMS code. If that doesn't work, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.
 
 ## Reporting Issues
 
@@ -604,18 +525,4 @@ For protocol-level bugs — wrong alarm state, lock or camera misbehaving — a 
 
 The same technique is used to [capture payloads for new operations](./docs/new_operations.md) if you'd like to help add support.
 
-## Frontend tests
-
-The Lovelace cards under `custom_components/securitas/www/` are covered by a Vitest suite with a 90% coverage gate enforced in CI.
-
-```bash
-npm ci
-npm run lint          # ESLint + Prettier check
-npm test              # one-shot
-npm run test:watch    # watch mode
-npm run test:coverage # writes ./coverage/index.html
-```
-
-- Tests live in `tests-js/`.
-- The runtime cards have no Node dependencies — `node_modules/` is a dev-only concern and is gitignored.
 

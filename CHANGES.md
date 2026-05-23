@@ -2,6 +2,83 @@
 
 The most recent release is at the top; append new entries above the previous one with each release.
 
+## v5.0.5
+
+### Bug fixes
+
+- **Auto-lock verify silently polled a stale cache (regression from v5.0.4).** The verify mechanism added in v5.0.4 read through `hub.get_lock_modes()`, which had a 60s TTL cache. The first verify read repopulated the cache with stale pre-command data; the remaining six reads all hit that cache and the verify saw no movement, so it gave up and fired false "Auto-lock failed" notifications even when the lock actuated correctly. The cache had only two callers (startup discovery, which always missed; and the verify loop, which the cache broke) — the lock coordinator already bypassed it. Removed: `hub.get_lock_modes` is now a thin pass-through to the queued client call.
+
+- **Verify baseline could be stale when sourced from coordinator data.** The pre-command `statusTimestamp` baseline was read from `self._current_mode` (eventually-consistent coordinator data). If the user physically moved the lock between coordinator updates, the baseline was older than the actual current backend timestamp, and the first verify read looked "fresh" while still reflecting pre-command physical state — a false confirmation. The baseline is now captured via a foreground `_read_lock_mode` API call at command time. The transitional UI state (LOCKING/UNLOCKING) is still forced *first* so the spinner is instant; the baseline read happens after, under `_operation_in_progress` so concurrent coordinator updates can't clobber the transitional state.
+
+- **Verify loop wasted up to 18s on definite failures.** A fresh-but-wrong-state read (e.g. lock blocked, device snapped back) used to keep polling until window exhaust before the failure notification could fire. Any read with a `statusTimestamp` newer than the pre-command baseline is now authoritative — success or failure returns immediately. The defensive quiet-success-on-exhaust branch stays (covers devices that don't re-stamp `statusTimestamp` on a no-op command).
+
+- **Tapping the icon inside an alarm badge/chip popup opened HA's standard more-info dialog over the popup.** Two distinct causes. (1) The badge/chip's `tap_action` (whose editor default is `more-info`, meaning "open our popup") was passed through to the `securitas-alarm-card` embedded inside the popup; in that card's context the same key dispatches `hass-more-info`, which `<home-assistant>` catches and opens the standard dialog. Gesture config keys (`tap_action`, `hold_action`, `double_tap_action`) are now stripped before the embedded card is configured. (2) On a normal tap, the gesture handler's capture-phase click only stopped propagation when a long-press fired; the native click bubbled to wrapping containers with their own `tap_action: more-info` (e.g. a parent tile-card) and opened a second parallel dialog. Native clicks are now always swallowed since our gesture handler owns interaction on the element.
+
+## v5.0.4
+
+### New: opt-in background polling for the activity log
+
+The activity log no longer polls every minute by default — most installs never look at it, and the per-minute API traffic was wasted.
+
+Background polling is now controlled by an **Activity Log and Events** options toggle (`enable_activity_polling`, **default off**), in both the initial config flow and the options flow.
+
+- When **off**: the `ActivityCoordinator` is created with `update_interval=None` (no timer). The activity-log Lovelace card pulls fresh data via the existing `refresh_activity_log` service — once on connect and once a minute while it's on screen (spinner shown) — and stops when the card is removed. Zero API calls when nobody's viewing. Remote (panel-originated) events are **not** raised on the `verisure_owa_activity` bus while polling is off, so opening a dashboard after a gap can't replay a burst of stale events. HA-injected events still fire live.
+- When **on**: continuous 60s polling, as before — turn this on if you want event automations to fire for actions taken outside HA.
+
+No config migration: a missing `enable_activity_polling` reads as the default (off) for existing installs.
+
+### New: HA-action echoes are de-duplicated
+
+When you arm/disarm/request-an-image from HA, the panel later returns its own echo of that action. The previous null-user heuristic stopped matching once Verisure attributed the echo to the integration's signed-in user. Now the echo is paired to the injected event by **category + timestamp (±15s)** — robust to clock skew and to however the panel attributes the user — and tagged `duplicate_of`. The echo is **kept** (its native-language description and precise `type` are richer than the generic injected row) but the card folds it into the HA event's detail (unfold to see the **Verisure record**) and the echo never fires on the bus. So an HA action enriches the log once and triggers automations once.
+
+### Bug fixes
+
+- **Auto-lock-on-arm fired false "Auto-lock failed" notifications.** The Verisure backend acks a lock command before the device physically actuates (~6s to start, ~4.5s to complete per PR #413), so the single immediate read-back raced ahead of the lock and saw it still unlocked. The ~15s actuation wait that PR #413 added (`hub.py: _LOCK_CMD_MIN_WAIT`) was lost when `change_lock_mode` moved to the generic submit-and-poll scaffold, which returns on the ~2s command ack. Two changes on the entity side:
+  - Auto-lock-on-arm no longer skips when the cached state reads LOCKED. That cache is eventually-consistent and can be stale (user physically unlocked moments before arming) — trusting it would leave the door silently unlocked while armed. We now skip only when a lock operation is genuinely in flight; a redundant lock on an already-locked door is harmless.
+  - The single read-back is replaced by `_poll_lock_until()`, which re-reads up to `LOCK_VERIFY_ATTEMPTS` times (`LOCK_VERIFY_DELAY` apart) and confirms success on `lockStatus == target` **with a `statusTimestamp` newer than the pre-command baseline**. A stale target read does not confirm, closing the "armed + silently unlocked" hole. The failure notification fires only when the settled state is definitively unlocked; UNKNOWN falls back to optimistic (no false alarm). (See v5.0.5 for the follow-up cache-bypass and fresh-baseline fixes.)
+
+- **Danalock-protocol locks logged a full traceback on every detection.** Such locks return HTTP 500 to the `xSGetSmartlockConfig` fast-path query — the *expected* signal to fall back to Danalock detection. The fallback was logged with `exc_info=True`, dumping a traceback every time. The known HTTP 500 case is now logged as a single concise DEBUG line; any other status (auth, WAF, rate-limit, connection failures) still logs the full traceback so real faults aren't hidden.
+
+### Docs
+
+- README + options-flow description (in all locales: en/es/fr/it/pt/pt-BR/ca) tell users to **disable autolock in the Verisure app** — the app's timer-based autolock fights this integration's arm-driven locking — and clarify that the **direction differs from the Verisure app**: there is no unlock-on-disarm here; "Disarm before unlocking" is the *inverse* (unlocking from HA disarms). README points at an HA automation for unlock-on-disarm.
+- `docs/architecture.md` refreshed for the verify-poll scheme and the no-skip-on-stale-LOCKED change.
+
+## v5.0.3
+
+### New: configurable arm-state buttons in the alarm card
+
+The Verisure OWA alarm card supports an optional `states: [...]` config key to filter which arm-state buttons are shown, mirroring HA's stock `alarm-modes` tile feature.
+
+- `states` omitted → today's behavior (all `supported_features` buttons).
+- `states: []` → no arm buttons; gesture editor's `arm_state` dropdown shows a helper hint instead of options.
+- `states: [arm_away, arm_home]` → only those buttons appear (subject to `supported_features`).
+- The user's filter is intersected with what the panel actually supports, and sub-panel runtime rejection still shrinks `supported_features` *before* the filter runs.
+- Editor gets a new **Arm modes** checkbox section. The gesture `arm_state` dropdown is filtered live by the same subset; stale `arm_state` values on existing gestures are scrubbed when the underlying mode is hidden. Badge and Chip inherit the behaviour through their embedded card.
+
+### Bug fixes
+
+- **Lock Automation options page silently skipped when the user opened it before background lock discovery finished.** Reported on #447. The options flow now waits up to 15s on a per-entry `lock_discovery_complete` asyncio.Event before deciding the installation has no locks, so users see the lock page on first visit even on slow API responses. Discovery additionally runs locks before cameras to get the event set sooner, and the `get_lock_modes` discovery call is bumped to FOREGROUND priority. The event is set in a `finally` so the await unblocks even when discovery raises mid-way.
+
+- **Lovelace editor took an extra hop opening any of the cards.** The alarm card (Card and Badge variants) and the camera card returned the legacy `securitas-*-card-editor` tag from `getConfigElement()`, even though the canonical `verisure-owa-*-card-editor` is the real class (the legacy tag is a shim alias). Switched all three to the canonical tag — the legacy alias still resolves.
+
+- **Card editor regressions surfaced while testing the new `states` config.**
+  - Per-variant gesture defaults: editor's `holdDefaults` was always `arm_or_disarm` regardless of variant, but only the Badge runtime defaults to that — Card and Chip were silently doing nothing on long-press despite the editor showing "Arm Away". Variant detection only matched `custom:securitas-alarm-badge` exactly, missing the canonical `verisure-owa-*` names and the `mushroom-*` chip alias. Editor defaults now mirror per-variant runtime fallbacks.
+  - YAML-mode edits silently no-op'd the UI: the editor's `setConfig` only re-rendered on entity/type changes (intentional, to preserve focus during in-editor keystrokes). An `_internalWriteInFlight` flag now suppresses focus-destroying round-trips for in-editor writes, while every *external* `setConfig` always re-renders.
+  - All three variants' `disconnectedCallback` freed gesture listeners but never reset `_lastKey`, so the `set hass` short-circuit prevented re-render on reconnection — Card hold and Badge/Chip tap+hold went dead after any dashboard re-mount (tab switch, editor open/close, conditional/stack re-render).
+
+- **Panel-rejection codes surfaced as raw integers in the activity feed.** Bare codes like `48` ("Already armed in this mode") were shown verbatim instead of the humanized string. Now resolved through the same translation path as the rest of the panel-event codes.
+
+- **Alarm panel entity_id healer overwrote user renames.** The healer that re-attaches a panel after a config-entry reload now respects user renames in the entity registry — it matches via the panel's stable `unique_id` rather than recomputing the entity_id.
+
+- **Browser cached older versions of the bundled Lovelace cards across releases.** Card URLs now embed the integration version (`?v=5.0.3` etc.), so every release busts the browser cache without users having to hard-reload.
+
+### Internal
+
+- **JS test infrastructure for the bundled Lovelace cards.** Vitest + happy-dom + ESLint + Prettier; 286 tests; 90% coverage gate on statements / branches / functions / lines, enforced in CI. The activity-log, camera, and alarm cards each got pure-helper extraction, unit tests for helpers, integration tests for render/state/interaction paths, editor integration tests, legacy-shim re-export tests, and gesture-handler edge-case tests.
+- **Vitest bumped 2 → 4** (and happy-dom 15 → 20). Vitest 4's v8 coverage uses AST-aware remapping (more accurate branch counts), which dropped the same source from 90.67% → ~85% branches under v2. Targeted edge-case tests cover the genuinely new branches; the defensive duplicate-registration guards at the bottom of each card file are wrapped in `/* v8 ignore */` since their "already defined" branch can't be exercised in a single-process test run. Net coverage stays above the 90% gate.
+- **Unit and integration tests split into separate CI jobs** per HA channel, with a combined 90% coverage gate on the stable channel. `pytest.mark.integration` is auto-applied to any test file that imports `homeassistant` or `tests.mock_graphql`, or requests the `mock_server` fixture. Coverage configuration moved into `pyproject.toml` so local and CI runs share the same exclusions and branch-coverage settings.
+
 ## v5.0.2
 
 ### New: refresh & capture as entity services
@@ -46,13 +123,13 @@ Activity-log type code `3121` ("Estado de las comunicaciones" on Spanish firmwar
 
 ### HACS bug fix
 
-- **HACS upgrade from any prior version now works.** v5.0.1 introduced a second `custom_components/verisure_owa/` directory alongside the legacy `custom_components/securitas/` shim. HACS only ever manages one directory per repository ([hacs/integration#385](https://github.com/hacs/integration/issues/385)) — HACS users only got the shim, the new directory was never deployed, and Home Assistant refused to load the `securitas` integration because its declared dependency `verisure_owa` was missing. v5.0.2 collapses everything back into a single `custom_components/securitas/` directory and stays on the `securitas` domain. The full domain rename is deferred until it can ship via a separate HACS repository; see [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md).
+- **HACS upgrade from any prior version now works.** v5.0.1 introduced a second `custom_components/verisure_owa/` directory alongside the legacy `custom_components/securitas/` shim. HACS only ever manages one directory per repository ([hacs/integration#385](https://github.com/hacs/integration/issues/385)) — HACS users only got the shim, the new directory was never deployed, and Home Assistant refused to load the `securitas` integration because its declared dependency `verisure_owa` was missing. v5.0.2 collapses everything back into a single `custom_components/securitas/` directory and stays on the `securitas` domain. The full domain rename is deferred until it can ship via a separate HACS repository; see [`docs/FUTURE_MIGRATION_PLAN.md`](docs/FUTURE_MIGRATION_PLAN.md).
 
 ### Service and event naming
 
 Every service is now registered under BOTH `securitas.<X>` AND `verisure_owa.<X>`, and every event the integration fires is emitted under BOTH `securitas_<X>` AND `verisure_owa_<X>`. Both forms are functionally identical and equal-weight in HA's eyes — no deprecation, no warnings, no scheduled removal.
 
-**Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write going forward.** When the deferred domain rename completes (see `docs/MIGRATION_PLAN.md`), the `securitas.*` form will move to a separate compatibility integration; automations using the `verisure_owa` form will keep working unchanged. The Lovelace card picker only offers the `custom:verisure-owa-*` forms; old dashboards using `custom:securitas-*` types continue to render via aliased custom-element registrations.
+**Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write going forward.** When the deferred domain rename completes (see `docs/FUTURE_MIGRATION_PLAN.md`), the `securitas.*` form will move to a separate compatibility integration; automations using the `verisure_owa` form will keep working unchanged. The Lovelace card picker only offers the `custom:verisure-owa-*` forms; old dashboards using `custom:securitas-*` types continue to render via aliased custom-element registrations.
 
 The `services.yaml` descriptions and the README explicitly recommend the verisure_owa form. The `verisure_owa.*` services also get a programmatic UI schema via `async_set_service_schema` so they appear in the Developer Tools service picker with full field validation, identical to the securitas form.
 

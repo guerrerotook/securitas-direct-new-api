@@ -150,3 +150,5 @@ pyrightconfig.json
 node_modules/
 coverage/
 .vitest-cache/
+.ha-changes-state.json
+HA_CHANGES_REPORT.md

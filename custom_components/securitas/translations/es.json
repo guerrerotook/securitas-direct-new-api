@@ -211,7 +211,13 @@
     "services": {
         "force_arm": {
             "name": "Forzar armado",
-            "description": "Obsoleto — usa `verisure_owa.force_arm` en su lugar.\n\nForzar el armado de la alarma, ignorando excepciones no bloqueantes (p. ej. ventanas abiertas) de un intento de armado fallido anterior."
+            "description": "Obsoleto — usa `verisure_owa.force_arm` en su lugar.\n\nForzar el armado de la alarma, ignorando excepciones no bloqueantes (p. ej. ventanas abiertas) de un intento de armado fallido anterior.",
+            "fields": {
+                "code": {
+                    "name": "Código PIN",
+                    "description": "Opcional. Si se proporciona, se valida con el PIN configurado antes de completar el armado forzado. La mayoría de las llamadas no lo necesitan — el intento de armado anterior que produjo el contexto de armado forzado ya validó el PIN."
+                }
+            }
         },
         "force_arm_cancel": {
             "name": "Cancelar armado forzado",

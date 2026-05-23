@@ -211,7 +211,13 @@
     "services": {
         "force_arm": {
             "name": "Forzare attivazione",
-            "description": "Deprecato — usa `verisure_owa.force_arm` al suo posto.\n\nForzare l'attivazione dell'allarme, ignorando le eccezioni non bloccanti (es. finestre aperte) da un precedente tentativo di attivazione fallito."
+            "description": "Deprecato — usa `verisure_owa.force_arm` al suo posto.\n\nForzare l'attivazione dell'allarme, ignorando le eccezioni non bloccanti (es. finestre aperte) da un precedente tentativo di attivazione fallito.",
+            "fields": {
+                "code": {
+                    "name": "Codice PIN",
+                    "description": "Opzionale. Se fornito, viene convalidato con il PIN configurato prima di completare l'attivazione forzata. La maggior parte dei chiamanti non ne ha bisogno — il precedente tentativo di attivazione che ha generato il contesto di attivazione forzata ha già convalidato il PIN."
+                }
+            }
         },
         "force_arm_cancel": {
             "name": "Annullare attivazione forzata",
