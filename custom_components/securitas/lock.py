@@ -493,16 +493,17 @@ class VerisureLock(  # type: ignore[override]
             await self.coordinator.async_request_refresh()
 
     async def _poll_lock_until(self, target: str, operation: str, pre_ts: str) -> str:
-        """Re-read lock status until it reaches ``target`` *freshly* or runs out.
+        """Re-read lock status until a fresh reading lands or the window runs out.
 
-        A reading confirms only when ``lock_status == target`` AND its
-        ``statusTimestamp`` is newer than ``pre_ts`` (the pre-command
-        baseline) — a stale target reading does not confirm.  Returns the last
-        status read (``LOCK_STATUS_UNKNOWN`` if never readable); when the window
-        is exhausted with the value sitting at ``target`` but no fresh
-        timestamp (a likely no-op on an already-settled lock), that target value
-        is returned as a quiet success.  Logs every attempt with its
-        ``statusTimestamp`` so the window can be tuned from logs.
+        Any read with a ``statusTimestamp`` newer than ``pre_ts`` is treated as
+        authoritative: the device has reported its true post-command state, so we
+        return immediately whether or not it matches ``target``.  Stale reads
+        (``statusTimestamp <= pre_ts``) keep polling — they may be pre-command
+        state propagating slowly.  When the window exhausts on stale reads but
+        the value is sitting at ``target`` (a likely no-op on an already-settled
+        lock that didn't re-stamp), that target value is returned as a quiet
+        success.  Otherwise the last stale status is returned.  Logs every
+        attempt with its ``statusTimestamp`` so the window can be tuned from logs.
         """
         last_status = LOCK_STATUS_UNKNOWN
         for attempt in range(1, self._verify_attempts + 1):
@@ -528,7 +529,11 @@ class VerisureLock(  # type: ignore[override]
                     fresh,
                     target,
                 )
-                if last_status == target and fresh:
+                if fresh:
+                    # Any fresh read is authoritative — the device has spoken.  Either it
+                    # matches the target (success, fast happy-path) or it doesn't (real
+                    # failure with a real-state response, e.g. lock blocked).  Either way,
+                    # no point polling further; return the confirmed status.
                     return last_status
             else:
                 _LOGGER.debug(

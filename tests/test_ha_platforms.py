@@ -1554,17 +1554,33 @@ class TestVerisureLockAutoLockFailure:
 
     async def test_no_notification_when_lock_actuates_after_delay(self):
         # Reproduces the real log: the device acks the command but actuates a
-        # few seconds later. The first read-back still shows UNLOCKED; a later
-        # read shows LOCKED. The verification poll must catch the LOCKED state
-        # and NOT fire a false "Auto-lock failed" notification.
+        # few seconds later. Early reads are stale (same ts as baseline); the
+        # real actuation produces a fresh timestamp. The poll must catch the
+        # LOCKED state and NOT fire a false "Auto-lock failed" notification.
         lock = make_lock(initial_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._client.get_lock_modes = AsyncMock(
             side_effect=[
-                [SmartLockMode(lock_status="1", device_id="01")],  # baseline read
-                [SmartLockMode(lock_status="1", device_id="01")],  # too early
-                [SmartLockMode(lock_status="1", device_id="01")],  # still early
-                [SmartLockMode(lock_status="2", device_id="01")],  # actuated
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # baseline
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # stale, too early
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # stale, still early
+                [
+                    SmartLockMode(
+                        lock_status="2", device_id="01", status_timestamp="200"
+                    )
+                ],  # fresh: actuated
             ]
         )
         lock.hass.services.async_call = AsyncMock()
@@ -1623,21 +1639,39 @@ class TestVerisureLockVerifyPoll:
     """The post-command read-back re-polls until the lock reaches the target."""
 
     async def test_polls_until_target_reached_then_stops(self):
+        # Timestamps are required: stale reads (same ts as baseline) keep
+        # polling; a fresh read with the target state confirms and stops.
         lock = make_lock(initial_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
         lock._client.get_lock_modes = AsyncMock(
             side_effect=[
-                [SmartLockMode(lock_status="1", device_id="01")],  # baseline read
-                [SmartLockMode(lock_status="1", device_id="01")],
-                [SmartLockMode(lock_status="1", device_id="01")],
-                [SmartLockMode(lock_status="2", device_id="01")],
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # baseline
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # stale, keep polling
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # stale, keep polling
+                [
+                    SmartLockMode(
+                        lock_status="2", device_id="01", status_timestamp="200"
+                    )
+                ],  # fresh target, stop
             ]
         )
 
         await lock.async_lock()
 
         assert lock._state == "2"
-        # Stops as soon as the target appears — 1 baseline + 3 verify reads.
+        # Stops as soon as a fresh read lands — 1 baseline + 3 verify reads.
         assert lock._client.get_lock_modes.await_count == 4
 
     async def test_single_poll_when_target_immediate(self):
@@ -1654,15 +1688,21 @@ class TestVerisureLockVerifyPoll:
         )
 
     async def test_gives_up_after_max_attempts_when_target_never_reached(self):
-        # A lock attempt whose status never flips to the target stays at the
-        # last-read value and exhausts the full verification window.
-        lock = make_lock(initial_status="1", poll_status="1")  # lock that fails
+        # A lock attempt whose status never flips: all reads return the same
+        # stale timestamp so no read is ever "fresh" — the window exhausts.
+        lock = make_lock(initial_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        # All reads return ts="100" — identical to baseline, never fresh.
+        lock._client.get_lock_modes = AsyncMock(
+            return_value=[
+                SmartLockMode(lock_status="1", device_id="01", status_timestamp="100")
+            ]
+        )
 
         await lock.async_lock()
 
         assert lock._state == "1"
-        # 1 baseline read + _verify_attempts verify reads.
+        # 1 baseline read + _verify_attempts verify reads (never fresh → exhausts).
         assert lock._client.get_lock_modes.await_count == lock._verify_attempts + 1
 
 
@@ -1672,11 +1712,14 @@ class TestVerisureLockVerifyPoll:
 
 
 class TestVerisureLockTimestampConfirmation:
-    """A target reading only confirms when its statusTimestamp is fresh.
+    """A fresh read (any status) is authoritative; stale reads keep polling.
 
-    The pre-command timestamp is read from coordinator data; a read of the
-    target state whose timestamp has NOT advanced past it is treated as a
-    stale/no-op reading, not a confirmed actuation.
+    The pre-command timestamp is captured by a live API read at the moment
+    the command is sent (see Task 2).  Each subsequent read whose
+    ``statusTimestamp`` advances past that baseline is treated as
+    authoritative — success or failure — and ends the poll loop.  Reads
+    whose timestamp has not advanced are pre-command propagation and
+    keep polling until the window exhausts.
     """
 
     @staticmethod
@@ -1804,15 +1847,18 @@ class TestVerisureLockTimestampConfirmation:
         assert "Auto-lock failed" in notification_calls[0].args[2]["title"]
 
     async def test_no_false_failure_when_lock_actuates_late(self):
-        # Door physically open but cache stale-locked (ts=100). On arm we lock.
-        # The backend first propagates the true PRE-command unlocked state
-        # (ts=200, newer than pre_ts but still pre-command), for the whole early
-        # window — then our lock finally actuates (ts=300) near the worst-case
-        # actuation time.  The window must outlast that: confirm LOCKED and fire
-        # NO notification.  A window shorter than the physical actuation time
-        # would expire on the pre-command unlocked reading and cry wolf.
+        # Note: a prior version of this test covered "stale coordinator baseline
+        # + pre-command-fresh read" — that scenario became impossible once
+        # _change_lock_mode started reading a live baseline (Task 2), so any
+        # ts > pre_ts is guaranteed post-command.  The remaining concern this
+        # test still locks in is that LATE actuation (slow backend propagation)
+        # does not produce a false-failure notification.
+        # Lock actuates after a delay: baseline captures pre-command ts=100.
+        # Early verify reads return the same ts=100 (stale — backend hasn't
+        # propagated the actuation yet) so polling continues.  Eventually the
+        # backend stamps ts=200 confirming LOCKED.  Must confirm success and
+        # fire NO "Auto-lock failed" notification.
         lock = make_lock(initial_status="2")
-        self._seed_pre_ts(lock, "2", "100")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
 
         def mode(status, ts):
@@ -1821,9 +1867,9 @@ class TestVerisureLockTimestampConfirmation:
             ]
 
         # Baseline read: pre-command state (locked, ts=100).
-        # Then: unlocked (pre-command) for five reads, then the real lock.
+        # Stale reads while waiting for actuation, then fresh LOCKED confirmation.
         lock._client.get_lock_modes = AsyncMock(
-            side_effect=[mode("2", "100")] + [mode("1", "200")] * 5 + [mode("2", "300")]
+            side_effect=[mode("2", "100")] + [mode("2", "100")] * 3 + [mode("2", "200")]
         )
         lock.hass.services.async_call = AsyncMock()
 
@@ -1894,6 +1940,80 @@ class TestVerisureLockTimestampConfirmation:
         # verify read and use only TWO calls (no baseline, one verify).
         assert lock._client.get_lock_modes.await_count == 3
         assert lock._state == "1"
+
+    async def test_fresh_wrong_state_returns_early_for_fast_failure(self):
+        """A fresh read to a non-target state confirms FAILURE — no further polling.
+
+        When the device reports a fresh status that doesn't match the requested
+        target (e.g. lock blocked, device snapped back to unlocked), we have
+        definitive evidence of failure. There's no point polling further.
+        """
+        lock = make_lock(initial_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                # Baseline: ts=100, pre-command unlocked.
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],
+                # Verify 1: stale (same ts as baseline) — keep polling.
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],
+                # Verify 2: FRESH but status=1 (unlocked) when we wanted target=2.
+                # Device snapped back — confirmed failure. Should early-return.
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="200"
+                    )
+                ],
+                # If the test sees these, we're still polling — bug.
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="300"
+                    )
+                ],
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="400"
+                    )
+                ],
+            ]
+        )
+
+        await lock.async_lock()
+
+        # 1 baseline + 2 verify reads (stale, then fresh-wrong-state) = 3 total.
+        assert lock._client.get_lock_modes.await_count == 3
+        assert lock._state == "1"  # The confirmed wrong state.
+
+    async def test_quiet_success_when_exhaust_with_status_at_target(self):
+        """No-op on already-target lock: stale reads at target → quiet success.
+
+        Some Verisure devices may not re-stamp ``statusTimestamp`` on a no-op
+        command (locking an already-locked door).  Every read shows the
+        pre-command status equal to target but with the pre-command timestamp,
+        so every read is stale.  The window exhausts — but because the final
+        state IS the target, we treat it as a quiet success (state = target,
+        no notification).
+        """
+        lock = make_lock(initial_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+        # Baseline plus every verify attempt: status="2" (already locked), ts="100".
+        # Same ts means never fresh → polling exhausts.
+        mode = SmartLockMode(lock_status="2", device_id="01", status_timestamp="100")
+        lock._client.get_lock_modes = AsyncMock(return_value=[mode])
+
+        await lock.async_lock()
+
+        # All baseline + verify attempts hit the API.
+        assert lock._client.get_lock_modes.await_count == 1 + lock._verify_attempts
+        # Quiet success: state ends at target, no error path taken.
+        assert lock._state == "2"
 
 
 # ===========================================================================
