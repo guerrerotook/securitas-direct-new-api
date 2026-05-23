@@ -55,7 +55,7 @@ Go to **Settings → Integrations → Add Integration** and search for **Verisur
 
 ![Setup](./docs/images/setup.png)
 
-The wizard handles login (with SMS 2FA if your account uses it), picks an installation if your account has more than one, walks through PIN / notifications / sub-panel options, and lets you map each HA alarm button to a Verisure mode. Repeat the flow once per installation if you have several. Locks and cameras are discovered in the background — the **Lock automation** screen appears under **Configure** once they're registered.
+The wizard handles login (with SMS 2FA if your account uses it), picks an installation if your account has more than one, walks through the Settings page (PIN, force-arm notifications, sub-panels, activity-log polling), and lets you map each HA alarm button to a Verisure mode. Repeat the flow once per installation if you have several. Locks and cameras are discovered in the background — the **Lock automation** screen appears under **Configure** once they're registered.
 
 ### Naming: `securitas` vs `verisure_owa`
 
