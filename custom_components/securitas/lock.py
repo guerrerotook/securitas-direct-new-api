@@ -98,8 +98,11 @@ LOCK_STATUS_LOCKING = "4"
 # attempts × 3s spans ~18s, comfortably past that, so we never declare failure
 # before the lock has had time to act.  (This wait was lost when
 # change_lock_mode moved to the generic submit-and-poll scaffold, which returns
-# on the ~2s command ack.)  Tune from the statusTimestamp values in the verify
-# debug logs.
+# on the ~2s command ack.)  Until the cache removal in this branch, this
+# verify silently polled a 60s TTL cache that absorbed 6 of 7 reads
+# instead of hitting the backend — once that was removed, the verify
+# actually polls the API on every attempt.  Tune from the statusTimestamp
+# values in the verify debug logs.
 LOCK_VERIFY_ATTEMPTS = 7
 LOCK_VERIFY_DELAY = 3.0
 
