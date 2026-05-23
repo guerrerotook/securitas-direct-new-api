@@ -3,7 +3,6 @@
 import asyncio
 import base64
 import logging
-import time
 from functools import partial
 from typing import Any
 
@@ -22,7 +21,6 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .api_queue import ApiQueue
 from .const import (
-    API_CACHE_TTL,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
@@ -182,10 +180,6 @@ class VerisureHub:
         self._api_queue = ApiQueue(
             interval=domain_config[CONF_DELAY_CHECK_OPERATION],
         )
-        self._lock_modes: dict[
-            str, list[SmartLockMode]
-        ] = {}  # installation.number -> SmartLockMode list
-        self._lock_modes_time: dict[str, float] = {}  # last fetch time per installation
         self.camera_images: dict[str, bytes] = {}
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
@@ -524,15 +518,9 @@ class VerisureHub:
     async def get_lock_modes(
         self, installation: Installation, *, priority: int | None = None
     ) -> list[SmartLockMode]:
-        """Get lock modes with caching, submitted via queue."""
+        """Get lock modes from the API via the queue."""
         if priority is None:
             priority = ApiQueue.BACKGROUND
-
-        _CACHE_TTL = API_CACHE_TTL
-        now = time.monotonic()
-        cached_time = self._lock_modes_time.get(installation.number, 0)
-        if now - cached_time < _CACHE_TTL and installation.number in self._lock_modes:
-            return self._lock_modes[installation.number]
 
         try:
             modes: list[SmartLockMode] = await self._api_queue.submit(
@@ -548,8 +536,6 @@ class VerisureHub:
             )
             modes = []
 
-        self._lock_modes[installation.number] = modes
-        self._lock_modes_time[installation.number] = time.monotonic()
         return modes
 
     async def arm_alarm(
@@ -594,8 +580,7 @@ class VerisureHub:
     ) -> None:
         """Send lock/unlock command and wait for completion.
 
-        The client handles all polling internally.  After the client returns,
-        the lock modes cache is invalidated so the caller fetches fresh state.
+        The client handles all polling internally.
         """
         await self._api_queue.submit(
             self.client.change_lock_mode,
@@ -604,8 +589,6 @@ class VerisureHub:
             device_id,
             priority=ApiQueue.FOREGROUND,
         )
-        # Invalidate the cache so the caller fetches fresh state.
-        self._lock_modes_time.pop(installation.number, None)
 
     async def get_lock_config(
         self,
