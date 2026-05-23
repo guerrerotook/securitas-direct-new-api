@@ -496,6 +496,9 @@ class VerisureLock(  # type: ignore[override]
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            # Nudge the coordinator so other lock entities on the same
+            # installation pick up the new state; this entity's own state
+            # was already settled by _poll_lock_until above.
             await self.coordinator.async_request_refresh()
 
     async def _poll_lock_until(self, target: str, operation: str, pre_ts: str) -> str:
