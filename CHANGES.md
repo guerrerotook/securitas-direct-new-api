@@ -2,6 +2,12 @@
 
 The most recent release is at the top; append new entries above the previous one with each release.
 
+## Unreleased
+
+### Behaviour changes
+
+- **Manual lock / unlock / open now surface failure to the caller.** Previously, `lock.lock` / `lock.unlock` / `lock.open` service calls from the HA UI, scripts, or automations swallowed both API-level errors (e.g. the backend's `alarm-manager.error_no_response_to_request`) and verify-confirmed wrong-state outcomes (the verify loop confirmed the door stayed at the wrong state) — the script saw success and the user got no feedback. Both layers now fire a persistent notification ("Lock failed" / "Unlock failed", including the underlying reason for diagnosis) and raise `HomeAssistantError` so scripts and automations see the actual failure. The bias-to-false-negative is preserved: if every verify read returned an unreadable status (UNKNOWN), we still fall back to the optimistic target state without firing. Auto-lock-on-arm continues to use its existing post-state check (it must not raise — it's a background task — and must not fire on a no-op redundant lock against an already-locked door).
+
 ## v5.0.5
 
 ### Bug fixes
