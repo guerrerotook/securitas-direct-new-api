@@ -441,23 +441,26 @@ class VerisureLock(  # type: ignore[override]
     ) -> None:
         """Send lock command, then poll for real status.
 
-        Sets a transitional state (e.g. LOCKING) immediately, sends the
-        command (which waits for the lock to physically act), then fetches
-        the actual lock status from the API.
+        Sets a transitional state (e.g. LOCKING) immediately, reads a fresh
+        pre-command baseline timestamp, sends the command (which waits for
+        the backend's ~2s acknowledgement), then polls until a real, fresh
+        status reading lands or the verify window exhausts.
         """
+        self._operation_in_progress = True
+        self._force_state(transitional_state)
         # Read a FRESH baseline timestamp from the API (not coordinator data,
         # which can be minutes stale or even older than the actual current
         # backend timestamp if the lock was physically moved since the last
         # coordinator update).  The verify poll needs a baseline taken at the
         # moment of the command to reliably distinguish a real actuation from
-        # a stale read of any prior state.
+        # a stale read of any prior state.  Done AFTER setting
+        # _operation_in_progress so a concurrent coordinator update can't
+        # clobber the transitional state during this read.
         try:
             pre_mode = await self._read_lock_mode(priority=ApiQueue.FOREGROUND)
         except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             pre_mode = None
         pre_ts = pre_mode.status_timestamp if pre_mode is not None else ""
-        self._operation_in_progress = True
-        self._force_state(transitional_state)
         try:
             try:
                 await self._client.change_lock_mode(
