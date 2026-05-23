@@ -87,6 +87,24 @@ LOCK_STATUS_LOCKED = "2"
 LOCK_STATUS_UNLOCKING = "3"
 LOCK_STATUS_LOCKING = "4"
 
+# Human-readable names for the API codes above.  Used in user-facing
+# error messages (persistent notifications, raised HomeAssistantError);
+# the raw numeric codes are an internal protocol detail and should not
+# leak into anything an end user reads.
+_LOCK_STATUS_NAMES: dict[str, str] = {
+    LOCK_STATUS_UNKNOWN: "unknown",
+    LOCK_STATUS_UNLOCKED: "unlocked",
+    LOCK_STATUS_LOCKED: "locked",
+    LOCK_STATUS_UNLOCKING: "unlocking",
+    LOCK_STATUS_LOCKING: "locking",
+}
+
+
+def _lock_status_name(status: str) -> str:
+    """Return a human-readable name for a Verisure lockStatus code."""
+    return _LOCK_STATUS_NAMES.get(status, f"unknown ({status!r})")
+
+
 # Verification poll: the Verisure backend acks a lock/unlock command BEFORE the
 # device physically actuates (and its status is eventually-consistent), so a
 # single immediate read-back races ahead of reality.  We re-read the status up
@@ -528,8 +546,9 @@ class VerisureLock(  # type: ignore[override]
             # success per the bias-to-false-negative contract.
             if real_state not in (LOCK_STATUS_UNKNOWN, optimistic_state):
                 return (
-                    f"door reports lockStatus={real_state} after "
-                    f"{operation.lower()} command (expected {optimistic_state})"
+                    f"door reports {_lock_status_name(real_state)} after "
+                    f"{operation.lower()} command (expected "
+                    f"{_lock_status_name(optimistic_state)})"
                 )
             return None
         finally:

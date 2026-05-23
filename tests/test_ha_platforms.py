@@ -1802,6 +1802,47 @@ class TestVerisureLockManualFailureNotification:
         assert len(calls) == 1
         assert "Unlock failed" in calls[0].args[2]["title"]
 
+    async def test_failure_message_uses_readable_state_names_not_raw_codes(self):
+        """The notification + raised exception are read by a non-technical user.
+
+        The verify-confirmed-wrong-state failure path must not leak the
+        backend's numeric ``lockStatus`` codes (``"1"``, ``"2"``) into the
+        user-facing message — that's an internal protocol detail.  Render
+        them as human-readable state names instead.
+        """
+        lock = make_lock(initial_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # baseline
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="200"
+                    )
+                ],  # fresh, still unlocked → confirmed failure
+            ]
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await lock.async_lock()
+
+        # Message goes into both the raised exception AND the persistent
+        # notification — neither must contain the raw API codes.
+        raised = str(exc_info.value)
+        notif_message = _persistent_notification_calls(lock)[0].args[2]["message"]
+        for text in (raised, notif_message):
+            assert "unlocked" in text.lower()
+            assert "locked" in text.lower()
+            # The raw codes are protocol noise — must not surface.
+            assert "lockStatus=1" not in text
+            assert "lockStatus=2" not in text
+            assert "(expected 2)" not in text
+
     # --- Bias-to-false-negative (UNKNOWN → optimistic) --------------------
 
     async def test_async_lock_no_raise_when_window_exhausts_with_unknown(self):
