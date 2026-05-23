@@ -211,7 +211,13 @@
     "services": {
         "force_arm": {
             "name": "Forcer l'armement",
-            "description": "Déprécié — utilisez `verisure_owa.force_arm` à la place.\n\nForcer l'armement de l'alarme en ignorant les exceptions non bloquantes (ex. fenêtres ouvertes) d'une tentative d'armement précédente échouée."
+            "description": "Déprécié — utilisez `verisure_owa.force_arm` à la place.\n\nForcer l'armement de l'alarme en ignorant les exceptions non bloquantes (ex. fenêtres ouvertes) d'une tentative d'armement précédente échouée.",
+            "fields": {
+                "code": {
+                    "name": "Code PIN",
+                    "description": "Facultatif. S'il est fourni, il est validé par rapport au code PIN configuré avant de finaliser l'armement forcé. La plupart des appelants n'en ont pas besoin — la tentative d'armement précédente qui a produit le contexte d'armement forcé a déjà validé le code PIN."
+                }
+            }
         },
         "force_arm_cancel": {
             "name": "Annuler l'armement forcé",

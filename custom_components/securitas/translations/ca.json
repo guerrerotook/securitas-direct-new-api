@@ -211,7 +211,13 @@
     "services": {
         "force_arm": {
             "name": "Força l'armat",
-            "description": "Obsolet — utilitza `verisure_owa.force_arm` en lloc d'aquest.\n\nForça l'armat de l'alarma, ignorant les excepcions no bloquejants (p. ex. finestres obertes) d'un intent d'armat fallit anterior."
+            "description": "Obsolet — utilitza `verisure_owa.force_arm` en lloc d'aquest.\n\nForça l'armat de l'alarma, ignorant les excepcions no bloquejants (p. ex. finestres obertes) d'un intent d'armat fallit anterior.",
+            "fields": {
+                "code": {
+                    "name": "Codi PIN",
+                    "description": "Opcional. Si es proporciona, es valida amb el PIN configurat abans de completar l'armat forçat. La majoria de les crides no el necessiten — l'intent d'armat anterior que va produir el context d'armat forçat ja va validar el PIN."
+                }
+            }
         },
         "force_arm_cancel": {
             "name": "Cancel·la l'armat forçat",
