@@ -62,13 +62,18 @@ def _ts_is_newer(read_ts: str, base_ts: str) -> bool:
     of the target state only counts as a *real* actuation if its timestamp has
     advanced past the pre-command baseline — otherwise it may be a stale,
     not-yet-propagated read of the old state.  When either value is missing or
-    non-numeric we can't compare, so we fall back to trusting the value match
-    (return True) rather than blocking confirmation.
+    non-numeric we can't compare, so we return False (treat as stale).  Under
+    the "any fresh read is authoritative" verify semantics, a True fallback
+    would short-circuit the verify loop on the very first read whenever the
+    backend omitted ``statusTimestamp`` — handing back whatever pre-command
+    state it echoed before the device had actuated.  Returning False keeps the
+    loop polling; the quiet-success-on-target branch in ``_poll_lock_until`` is
+    the safety net for genuine no-op commands that never re-stamp.
     """
     try:
         return int(read_ts) > int(base_ts)
     except (TypeError, ValueError):
-        return True
+        return False
 
 
 # Service request name that identifies a smart-lock capability
@@ -98,8 +103,11 @@ LOCK_STATUS_LOCKING = "4"
 # attempts × 3s spans ~18s, comfortably past that, so we never declare failure
 # before the lock has had time to act.  (This wait was lost when
 # change_lock_mode moved to the generic submit-and-poll scaffold, which returns
-# on the ~2s command ack.)  Tune from the statusTimestamp values in the verify
-# debug logs.
+# on the ~2s command ack.)  Until the cache removal in this branch, this
+# verify silently polled a 60s TTL cache that absorbed 6 of 7 reads
+# instead of hitting the backend — once that was removed, the verify
+# actually polls the API on every attempt.  Tune from the statusTimestamp
+# values in the verify debug logs.
 LOCK_VERIFY_ATTEMPTS = 7
 LOCK_VERIFY_DELAY = 3.0
 
@@ -441,17 +449,26 @@ class VerisureLock(  # type: ignore[override]
     ) -> None:
         """Send lock command, then poll for real status.
 
-        Sets a transitional state (e.g. LOCKING) immediately, sends the
-        command (which waits for the lock to physically act), then fetches
-        the actual lock status from the API.
+        Sets a transitional state (e.g. LOCKING) immediately, reads a fresh
+        pre-command baseline timestamp, sends the command (which waits for
+        the backend's ~2s acknowledgement), then polls until a real, fresh
+        status reading lands or the verify window exhausts.
         """
-        # Snapshot the last-known timestamp BEFORE the command so the
-        # verification poll can tell a real, fresh actuation apart from a
-        # stale read of the pre-command state.
-        pre_mode = self._current_mode
-        pre_ts = pre_mode.status_timestamp if pre_mode is not None else ""
         self._operation_in_progress = True
         self._force_state(transitional_state)
+        # Read a FRESH baseline timestamp from the API (not coordinator data,
+        # which can be minutes stale or even older than the actual current
+        # backend timestamp if the lock was physically moved since the last
+        # coordinator update).  The verify poll needs a baseline taken at the
+        # moment of the command to reliably distinguish a real actuation from
+        # a stale read of any prior state.  Done AFTER setting
+        # _operation_in_progress so a concurrent coordinator update can't
+        # clobber the transitional state during this read.
+        try:
+            pre_mode = await self._read_lock_mode(priority=ApiQueue.FOREGROUND)
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            pre_mode = None
+        pre_ts = pre_mode.status_timestamp if pre_mode is not None else ""
         try:
             try:
                 await self._client.change_lock_mode(
@@ -484,19 +501,23 @@ class VerisureLock(  # type: ignore[override]
             self.async_write_ha_state()
         finally:
             self._operation_in_progress = False
+            # Nudge the coordinator so other lock entities on the same
+            # installation pick up the new state; this entity's own state
+            # was already settled by _poll_lock_until above.
             await self.coordinator.async_request_refresh()
 
     async def _poll_lock_until(self, target: str, operation: str, pre_ts: str) -> str:
-        """Re-read lock status until it reaches ``target`` *freshly* or runs out.
+        """Re-read lock status until a fresh reading lands or the window runs out.
 
-        A reading confirms only when ``lock_status == target`` AND its
-        ``statusTimestamp`` is newer than ``pre_ts`` (the pre-command
-        baseline) — a stale target reading does not confirm.  Returns the last
-        status read (``LOCK_STATUS_UNKNOWN`` if never readable); when the window
-        is exhausted with the value sitting at ``target`` but no fresh
-        timestamp (a likely no-op on an already-settled lock), that target value
-        is returned as a quiet success.  Logs every attempt with its
-        ``statusTimestamp`` so the window can be tuned from logs.
+        Any read with a ``statusTimestamp`` newer than ``pre_ts`` is treated as
+        authoritative: the device has reported its true post-command state, so we
+        return immediately whether or not it matches ``target``.  Stale reads
+        (``statusTimestamp <= pre_ts``) keep polling — they may be pre-command
+        state propagating slowly.  When the window exhausts on stale reads but
+        the value is sitting at ``target`` (a likely no-op on an already-settled
+        lock that didn't re-stamp), that target value is returned as a quiet
+        success.  Otherwise the last stale status is returned.  Logs every
+        attempt with its ``statusTimestamp`` so the window can be tuned from logs.
         """
         last_status = LOCK_STATUS_UNKNOWN
         for attempt in range(1, self._verify_attempts + 1):
@@ -522,7 +543,11 @@ class VerisureLock(  # type: ignore[override]
                     fresh,
                     target,
                 )
-                if last_status == target and fresh:
+                if fresh:
+                    # Any fresh read is authoritative — the device has spoken.  Either it
+                    # matches the target (success, fast happy-path) or it doesn't (real
+                    # failure with a real-state response, e.g. lock blocked).  Either way,
+                    # no point polling further; return the confirmed status.
                     return last_status
             else:
                 _LOGGER.debug(

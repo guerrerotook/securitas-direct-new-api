@@ -1,7 +1,6 @@
 """Tests for VerisureHub orchestration methods."""
 
 import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +9,6 @@ from homeassistant.const import CONF_PASSWORD
 
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
-    API_CACHE_TTL,
     CONF_REFRESH_TOKEN,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
@@ -228,18 +226,6 @@ class TestChangeLockMode:
             installation, True, "device-1"
         )
 
-    async def test_cache_invalidated_after_change(self):
-        """Lock modes cache is invalidated after a change."""
-        hub = make_hub()
-        installation = make_installation()
-        hub._lock_modes_time[installation.number] = 12345.0
-        hub._lock_modes[installation.number] = ["stale"]
-        hub.client.change_lock_mode = AsyncMock()
-
-        await hub.change_lock_mode(installation, True, "device-1")
-
-        assert installation.number not in hub._lock_modes_time
-
     async def test_error_propagates(self):
         """VerisureOwaError from client propagates to caller."""
         hub = make_hub()
@@ -256,10 +242,10 @@ class TestChangeLockMode:
 
 
 class TestGetLockModes:
-    """Tests for get_lock_modes with TTL cache."""
+    """Tests for get_lock_modes."""
 
-    async def test_cache_miss_calls_api(self):
-        """First call fetches from API and caches the result."""
+    async def test_get_lock_modes_calls_api(self):
+        """get_lock_modes delegates to the client."""
         hub = make_hub()
         installation = make_installation()
         modes = [{"id": "lock-1", "mode": "locked"}]
@@ -269,39 +255,6 @@ class TestGetLockModes:
 
         assert result == modes
         hub.client.get_lock_modes.assert_awaited_once_with(installation)
-        assert hub._lock_modes[installation.number] == modes
-
-    async def test_cache_hit_skips_api(self):
-        """Second call within TTL returns cached value."""
-        hub = make_hub()
-        installation = make_installation()
-        modes = [{"id": "lock-1", "mode": "locked"}]
-        hub.client.get_lock_modes = AsyncMock(return_value=modes)
-
-        await hub.get_lock_modes(installation)
-        hub.client.get_lock_modes.reset_mock()
-
-        result = await hub.get_lock_modes(installation)
-
-        assert result == modes
-        hub.client.get_lock_modes.assert_not_awaited()
-
-    async def test_cache_expired_calls_api_again(self):
-        """After TTL expires, API is called again."""
-        hub = make_hub()
-        installation = make_installation()
-        hub.client.get_lock_modes = AsyncMock(return_value=["old"])
-
-        await hub.get_lock_modes(installation)
-        hub.client.get_lock_modes.reset_mock()
-        hub.client.get_lock_modes.return_value = ["new"]
-
-        hub._lock_modes_time[installation.number] = time.monotonic() - API_CACHE_TTL - 1
-
-        result = await hub.get_lock_modes(installation)
-
-        assert result == ["new"]
-        hub.client.get_lock_modes.assert_awaited_once()
 
     async def test_securitas_error_returns_empty_list(self):
         """VerisureOwaError is caught and returns an empty list."""
@@ -314,8 +267,6 @@ class TestGetLockModes:
         result = await hub.get_lock_modes(installation)
 
         assert result == []
-        # Empty list should still be cached
-        assert hub._lock_modes[installation.number] == []
 
 
 # ── capture_image tests ─────────────────────────────────────────────────────
