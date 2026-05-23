@@ -104,7 +104,7 @@ Locks and cameras are discovered in the background after setup. The **Lock autom
 
 ### Naming: `securitas` vs `verisure_owa`
 
-For historical reasons, this integration's Home Assistant domain is `securitas`, but every service call, event, asset URL, and Lovelace card type is also registered under the `verisure_owa` name. **Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write today** — both work identically. The `verisure_owa` form is the one that will survive the eventual domain rename (see [`docs/MIGRATION_PLAN.md`](docs/MIGRATION_PLAN.md) for the planned split into a separate HACS repository). Old automations using the `securitas` form will keep working until that migration ships, with no deprecation warnings in the meantime.
+For historical reasons, this integration's Home Assistant domain is `securitas`, but every service call, event, asset URL, and Lovelace card type is also registered under the `verisure_owa` name. **Prefer the `verisure_owa.*` / `verisure_owa_*` form in any automation you write today** — both work identically. The `verisure_owa` form is the one that will survive the eventual domain rename (see [`docs/FUTURE_MIGRATION_PLAN.md`](docs/FUTURE_MIGRATION_PLAN.md) for the planned split into a separate HACS repository). Old automations using the `securitas` form will keep working until that migration ships, with no deprecation warnings in the meantime.
 
 The Lovelace card picker only offers the `custom:verisure-owa-alarm-card` / `-camera-card` / `-activity-log-card` forms; dashboards with the older `custom:securitas-alarm-card` / `-camera-card` types continue to render via aliased custom-element registrations.
 
@@ -125,6 +125,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
 | | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
 | | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
+| **Activity Log and Events** | Poll the activity log once per minute in the background | No | When off (default), the activity log refreshes on demand from the activity-log card and remote events do **not** fire on the `verisure_owa_activity` bus — see [Activity Log → How often it refreshes](#how-often-it-refreshes). Turn this on if you want event automations to fire for actions taken outside HA (physical panel arm/disarm, intrusions, power cuts). |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 

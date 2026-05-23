@@ -514,7 +514,7 @@ ALIAS_DOMAIN = "verisure_owa"
 # platform.async_register_entity_service is also exposed under `verisure_owa.<X>`
 # below — both are equal first-class names in HA's eyes. Docs/services.yaml
 # steer users toward the verisure_owa.* form so a future domain rename costs
-# them less (see docs/MIGRATION_PLAN.md).
+# them less (see docs/FUTURE_MIGRATION_PLAN.md).
 _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
     (
         "force_arm",
@@ -731,7 +731,7 @@ def register_service_aliases(hass: HomeAssistant) -> None:
 
     The two are functionally equal in HA's eyes; docs/services.yaml steer
     users toward the ``verisure_owa.*`` form so the deferred completion of
-    the domain rename (see docs/MIGRATION_PLAN.md) is a low-cost change
+    the domain rename (see docs/FUTURE_MIGRATION_PLAN.md) is a low-cost change
     for their automations.
     """
     if hass.services.has_service(ALIAS_DOMAIN, _ALIASED_SERVICES[0][0]):
@@ -834,7 +834,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register verisure_owa.* service aliases alongside the securitas.* primary
     # registrations. Both forms are functionally equal; docs steer users toward
     # the verisure_owa form for forward compatibility with the deferred domain
-    # rename (see docs/MIGRATION_PLAN.md).
+    # rename (see docs/FUTURE_MIGRATION_PLAN.md).
     register_service_aliases(hass)
     # v5+ entity services that only ever existed under verisure_owa.*
     # (refresh_alarm, capture_image, refresh_activity_log, fetch_activity_image).

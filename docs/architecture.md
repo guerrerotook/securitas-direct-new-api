@@ -814,7 +814,7 @@ All four entities subscribe to the same `AlarmCoordinator`; commands from any en
 
 ## Force-arm with sub-panels
 
-The event-driven force-arm architecture generalizes naturally: each panel owns its own force context, fires `verisure_owa_arming_exception` (and the equivalent `securitas_arming_exception` — both are emitted by `events.fire_event`) with its own `entity_id`, and the built-in handler filters by entity_id so notifications mention the specific panel that triggered the exception. Subscribe to whichever name you prefer in your own automations; the `verisure_owa_*` form is recommended for forward compatibility with the deferred domain rename (see `docs/MIGRATION_PLAN.md`).
+The event-driven force-arm architecture generalizes naturally: each panel owns its own force context, fires `verisure_owa_arming_exception` (and the equivalent `securitas_arming_exception` — both are emitted by `events.fire_event`) with its own `entity_id`, and the built-in handler filters by entity_id so notifications mention the specific panel that triggered the exception. Subscribe to whichever name you prefer in your own automations; the `verisure_owa_*` form is recommended for forward compatibility with the deferred domain rename (see `docs/FUTURE_MIGRATION_PLAN.md`).
 
 ## Configuration
 

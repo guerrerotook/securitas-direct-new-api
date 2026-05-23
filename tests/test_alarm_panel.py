@@ -6789,7 +6789,7 @@ async def test_verisure_owa_force_arm_alias_forwards_to_securitas(hass):
     exposes verisure_owa.force_arm as a symmetric alias that forwards
     to it. Both names are equal-weight in HA's eyes; the alias is for
     forward-compat with the deferred domain rename (see
-    docs/MIGRATION_PLAN.md).
+    docs/FUTURE_MIGRATION_PLAN.md).
     """
     from custom_components.securitas import register_service_aliases
 

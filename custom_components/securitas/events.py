@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # ``verisure_owa_<suffix>`` and ``securitas_<suffix>`` via ``fire_event``
 # below. Both forms are functionally identical; docs steer users toward
 # the ``verisure_owa_*`` form for forward compatibility with the deferred
-# domain rename (see docs/MIGRATION_PLAN.md). The constants below name
+# domain rename (see docs/FUTURE_MIGRATION_PLAN.md). The constants below name
 # the verisure_owa form since that's the recommended one.
 ACTIVITY_EVENT_TYPE = "verisure_owa_activity"
 ARMING_EXCEPTION_EVENT_TYPE = "verisure_owa_arming_exception"
@@ -47,7 +47,7 @@ def fire_event(hass: HomeAssistant, suffix: str, payload: dict[str, object]) -> 
 
     Both events carry identical payloads. Subscribers that match either
     name will see the event. New automations should subscribe to the
-    ``verisure_owa_*`` form (see docs/MIGRATION_PLAN.md).
+    ``verisure_owa_*`` form (see docs/FUTURE_MIGRATION_PLAN.md).
     """
     hass.bus.async_fire(f"verisure_owa_{suffix}", payload)
     hass.bus.async_fire(f"securitas_{suffix}", payload)
