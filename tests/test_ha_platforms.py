@@ -1,7 +1,11 @@
 """Tests for sensor and lock platform entities."""
 
+import contextlib
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.securitas.verisure_owa_api.models import (
     ActivityEvent,
@@ -988,8 +992,10 @@ class TestVerisureLockActions:
         lock._client.change_lock_mode = AsyncMock(
             side_effect=VerisureOwaError("API error")
         )
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_lock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
 
         # On error, state is restored from _last_state (initial "2" = locked)
         assert lock._state == "2"
@@ -999,8 +1005,10 @@ class TestVerisureLockActions:
         lock._client.change_lock_mode = AsyncMock(
             side_effect=VerisureOwaError("API error")
         )
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_unlock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_unlock()
 
         # On error, state is restored from _last_state (initial "2" = locked)
         assert lock._state == "2"
@@ -1055,8 +1063,10 @@ class TestVerisureLockActions:
         lock._client.change_lock_mode = AsyncMock(
             side_effect=VerisureOwaError("API error")
         )
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_open()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_open()
 
         assert lock._state == "2"
 
@@ -1087,23 +1097,28 @@ class TestVerisureLockActions:
         assert lock._state == "1"
 
     async def test_async_lock_stale_poll_trusts_api(self):
-        """When API still returns pre-command state, we trust it."""
+        """When API still returns pre-command state, we trust it and report failure."""
         # Lock starts open ("1"), we lock it, but the API still returns "1".
         # After the min wait the API should normally have the new state, but
-        # if it doesn't, we trust what the API says rather than guess.
+        # if it doesn't, we trust what the API says rather than guess — and
+        # surface that as a failure to the service caller (raise + notify).
         lock = make_lock(initial_status="1", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=None)
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_lock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
 
         assert lock._state == "1"
 
     async def test_async_unlock_stale_poll_trusts_api(self):
-        """When API still returns pre-command state, we trust it."""
+        """When API still returns pre-command state, we trust it and report failure."""
         lock = make_lock(initial_status="2", poll_status="2")
         lock._client.change_lock_mode = AsyncMock(return_value=None)
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_unlock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_unlock()
 
         assert lock._state == "2"
 
@@ -1159,8 +1174,10 @@ class TestVerisureLockActions:
         """_operation_in_progress is cleared even when the command fails."""
         lock = make_lock()
         lock._client.change_lock_mode = AsyncMock(side_effect=VerisureOwaError("fail"))
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_lock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
 
         assert lock._operation_in_progress is False
 
@@ -1537,7 +1554,7 @@ class TestVerisureLockAutoLockFailure:
         ]
         assert len(notification_calls) == 1
         payload = notification_calls[0].args[2]
-        assert payload["notification_id"].startswith("verisure_owa_autolock_")
+        assert payload["notification_id"].startswith("verisure_owa_lock_")
         assert "Auto-lock failed" in payload["title"]
 
     async def test_no_notification_on_successful_auto_lock(self):
@@ -1631,6 +1648,249 @@ class TestVerisureLockAutoLockFailure:
 
 
 # ===========================================================================
+# Manual lock/unlock/open failure notification tests
+# ===========================================================================
+
+
+def _persistent_notification_calls(lock):
+    return [
+        c
+        for c in lock.hass.services.async_call.await_args_list
+        if c.args[:2] == ("persistent_notification", "create")
+    ]
+
+
+class TestVerisureLockManualFailureNotification:
+    """async_lock / async_unlock / async_open must surface failure.
+
+    Both via a persistent notification (for UI users) AND by raising
+    HomeAssistantError (for scripts/automations / HA service callers).
+    Auto-lock-on-arm's behaviour is intentionally separate — see
+    TestVerisureLockAutoLockFailure — because its bias-to-false-negative
+    must be preserved.
+    """
+
+    # --- VerisureOwaError (command-status step) ---------------------------
+
+    async def test_async_lock_raises_HomeAssistantError_on_api_error(self):
+        lock = make_lock(initial_status="1", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError, match="network down"):
+            await lock.async_lock()
+
+    async def test_async_lock_fires_notification_on_api_error(self):
+        lock = make_lock(initial_status="1", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with contextlib.suppress(HomeAssistantError):
+            await lock.async_lock()
+
+        calls = _persistent_notification_calls(lock)
+        assert len(calls) == 1
+        payload = calls[0].args[2]
+        assert "Lock failed" in payload["title"]
+        assert "network down" in payload["message"]
+
+    async def test_async_unlock_raises_HomeAssistantError_on_api_error(self):
+        lock = make_lock(initial_status="2", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError, match="network down"):
+            await lock.async_unlock()
+
+    async def test_async_unlock_fires_notification_on_api_error(self):
+        lock = make_lock(initial_status="2", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with contextlib.suppress(HomeAssistantError):
+            await lock.async_unlock()
+
+        calls = _persistent_notification_calls(lock)
+        assert len(calls) == 1
+        assert "Unlock failed" in calls[0].args[2]["title"]
+
+    async def test_async_open_raises_HomeAssistantError_on_api_error(self):
+        lock = make_lock(initial_status="2", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError, match="network down"):
+            await lock.async_open()
+
+    async def test_async_open_fires_notification_on_api_error(self):
+        lock = make_lock(initial_status="2", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(
+            side_effect=VerisureOwaError("network down")
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with contextlib.suppress(HomeAssistantError):
+            await lock.async_open()
+
+        calls = _persistent_notification_calls(lock)
+        assert len(calls) == 1
+        assert "Unlock failed" in calls[0].args[2]["title"]
+
+    # --- Verify-confirmed wrong state (post-command poll) -----------------
+
+    async def test_async_lock_raises_when_verify_confirms_unlocked(self):
+        """Fresh verify read of UNLOCKED after a LOCK command = definite failure."""
+        lock = make_lock(initial_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # baseline
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="200"
+                    )
+                ],  # fresh, wrong state
+            ]
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
+
+        calls = _persistent_notification_calls(lock)
+        assert len(calls) == 1
+        assert "Lock failed" in calls[0].args[2]["title"]
+
+    async def test_async_unlock_raises_when_verify_confirms_locked(self):
+        """Fresh verify read of LOCKED after an UNLOCK command = definite failure."""
+        lock = make_lock(initial_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                [
+                    SmartLockMode(
+                        lock_status="2", device_id="01", status_timestamp="100"
+                    )
+                ],  # baseline
+                [
+                    SmartLockMode(
+                        lock_status="2", device_id="01", status_timestamp="200"
+                    )
+                ],  # fresh, wrong state
+            ]
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError):
+            await lock.async_unlock()
+
+        calls = _persistent_notification_calls(lock)
+        assert len(calls) == 1
+        assert "Unlock failed" in calls[0].args[2]["title"]
+
+    async def test_failure_message_uses_readable_state_names_not_raw_codes(self):
+        """The notification + raised exception are read by a non-technical user.
+
+        The verify-confirmed-wrong-state failure path must not leak the
+        backend's numeric ``lockStatus`` codes (``"1"``, ``"2"``) into the
+        user-facing message — that's an internal protocol detail.  Render
+        them as human-readable state names instead.
+        """
+        lock = make_lock(initial_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._client.get_lock_modes = AsyncMock(
+            side_effect=[
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="100"
+                    )
+                ],  # baseline
+                [
+                    SmartLockMode(
+                        lock_status="1", device_id="01", status_timestamp="200"
+                    )
+                ],  # fresh, still unlocked → confirmed failure
+            ]
+        )
+        lock.hass.services.async_call = AsyncMock()
+
+        with pytest.raises(HomeAssistantError) as exc_info:
+            await lock.async_lock()
+
+        # Message goes into both the raised exception AND the persistent
+        # notification — neither must contain the raw API codes.
+        raised = str(exc_info.value)
+        notif_message = _persistent_notification_calls(lock)[0].args[2]["message"]
+        for text in (raised, notif_message):
+            assert "unlocked" in text.lower()
+            assert "locked" in text.lower()
+            # The raw codes are protocol noise — must not surface.
+            assert "lockStatus=1" not in text
+            assert "lockStatus=2" not in text
+            assert "(expected 2)" not in text
+
+    # --- Bias-to-false-negative (UNKNOWN → optimistic) --------------------
+
+    async def test_async_lock_no_raise_when_window_exhausts_with_unknown(self):
+        """All verify reads return no readable status → optimistic fallback, no raise."""
+        lock = make_lock(initial_status="1")  # poll_status=None → empty list
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock.hass.services.async_call = AsyncMock()
+
+        # Must not raise.
+        await lock.async_lock()
+
+        assert lock._state == "2"  # optimistic LOCKED
+        assert _persistent_notification_calls(lock) == []
+
+    async def test_async_unlock_no_raise_when_window_exhausts_with_unknown(self):
+        lock = make_lock(initial_status="2")  # poll_status=None → empty list
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock.async_unlock()
+
+        assert lock._state == "1"  # optimistic UNLOCKED
+        assert _persistent_notification_calls(lock) == []
+
+    # --- Success path -----------------------------------------------------
+
+    async def test_async_lock_no_raise_no_notification_on_success(self):
+        lock = make_lock(initial_status="1", poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock.async_lock()
+
+        assert lock._state == "2"
+        assert _persistent_notification_calls(lock) == []
+
+    async def test_async_unlock_no_raise_no_notification_on_success(self):
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock.hass.services.async_call = AsyncMock()
+
+        await lock.async_unlock()
+
+        assert lock._state == "1"
+        assert _persistent_notification_calls(lock) == []
+
+
+# ===========================================================================
 # Lock verification poll (poll-until-target) tests
 # ===========================================================================
 
@@ -1706,6 +1966,8 @@ class TestVerisureLockVerifyPoll:
     async def test_gives_up_after_max_attempts_when_target_never_reached(self):
         # A lock attempt whose status never flips: all reads return the same
         # stale timestamp so no read is ever "fresh" — the window exhausts.
+        # The exhausted-stale-wrong-state case is a definitive failure and
+        # raises (caller wanted LOCKED, last read says UNLOCKED).
         lock = make_lock(initial_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
         # All reads return ts="100" — identical to baseline, never fresh.
@@ -1714,8 +1976,10 @@ class TestVerisureLockVerifyPoll:
                 SmartLockMode(lock_status="1", device_id="01", status_timestamp="100")
             ]
         )
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_lock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
 
         assert lock._state == "1"
         # 1 baseline read + _verify_attempts verify reads (never fresh → exhausts).
@@ -2000,8 +2264,10 @@ class TestVerisureLockTimestampConfirmation:
                 ],
             ]
         )
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_lock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
 
         # 1 baseline + 2 verify reads (stale, then fresh-wrong-state) = 3 total.
         assert lock._client.get_lock_modes.await_count == 3
@@ -2069,8 +2335,12 @@ class TestVerisureLockTimestampConfirmation:
                 ],
             ]
         )
+        lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_lock()
+        # Window exhausts with the last read being stale-wrong-state ("1" when
+        # target was "2") — a definitive failure that raises to the caller.
+        with pytest.raises(HomeAssistantError):
+            await lock.async_lock()
 
         # Every verify attempt must run — empty ts is not authoritative.
         assert lock._client.get_lock_modes.await_count == 1 + lock._verify_attempts
@@ -2303,7 +2573,8 @@ class TestVerisureLockUnlockDisarmFailure:
         lock._combined_alarm_panel = panel
         lock.hass.services.async_call = AsyncMock()
 
-        await lock.async_unlock()
+        with pytest.raises(HomeAssistantError):
+            await lock.async_unlock()
 
         # The unlock failed — notification with "Unlock failed" wording.
         notif_calls = [

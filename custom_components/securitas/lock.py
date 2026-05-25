@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components import lock
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -85,6 +86,24 @@ LOCK_STATUS_UNLOCKED = "1"
 LOCK_STATUS_LOCKED = "2"
 LOCK_STATUS_UNLOCKING = "3"
 LOCK_STATUS_LOCKING = "4"
+
+# Human-readable names for the API codes above.  Used in user-facing
+# error messages (persistent notifications, raised HomeAssistantError);
+# the raw numeric codes are an internal protocol detail and should not
+# leak into anything an end user reads.
+_LOCK_STATUS_NAMES: dict[str, str] = {
+    LOCK_STATUS_UNKNOWN: "unknown",
+    LOCK_STATUS_UNLOCKED: "unlocked",
+    LOCK_STATUS_LOCKED: "locked",
+    LOCK_STATUS_UNLOCKING: "unlocking",
+    LOCK_STATUS_LOCKING: "locking",
+}
+
+
+def _lock_status_name(status: str) -> str:
+    """Return a human-readable name for a Verisure lockStatus code."""
+    return _LOCK_STATUS_NAMES.get(status, f"unknown ({status!r})")
+
 
 # Verification poll: the Verisure backend acks a lock/unlock command BEFORE the
 # device physically actuates (and its status is eventually-consistent), so a
@@ -316,18 +335,24 @@ class VerisureLock(  # type: ignore[override]
         if self.hass is not None:
             self.hass.async_create_task(self._auto_lock())
 
-    def _autolock_notification_id(self) -> str:
-        return f"verisure_owa_autolock_{self._installation.number}_{self._device_id}"
+    def _lock_notification_id(self) -> str:
+        return f"verisure_owa_lock_{self._installation.number}_{self._device_id}"
 
-    async def _fire_autolock_notification(self, *, title: str, message: str) -> None:
-        """Create / replace a persistent notification for an autolock event."""
+    async def _fire_lock_notification(self, *, title: str, message: str) -> None:
+        """Create / replace a persistent notification for a lock-related event.
+
+        Single shared notification_id per-lock — auto-lock-on-arm,
+        auto-disarm-on-unlock, manual lock/unlock/open failures all dedupe
+        through the same notification card (the latest event is what the
+        user cares about).
+        """
         if self.hass is None:
             return
         await self.hass.services.async_call(
             "persistent_notification",
             "create",
             {
-                "notification_id": self._autolock_notification_id(),
+                "notification_id": self._lock_notification_id(),
                 "title": title,
                 "message": message,
             },
@@ -337,8 +362,13 @@ class VerisureLock(  # type: ignore[override]
     async def _auto_lock(self) -> None:
         """Perform an auto-lock-on-arm action.
 
-        On failure (VerisureOwaError or post-call state still unlocked),
-        creates a persistent notification.
+        On a definitive failure (post-call state still unlocked), creates a
+        persistent notification.  Never raises — this runs as a background
+        task with no caller waiting on its result.  The post-state check
+        (not the ``_change_lock_mode`` return) preserves the
+        bias-to-false-negative: a redundant lock command that errors on an
+        already-locked door produces a notification-worthy error reason but
+        the door is in the right state, so we stay quiet here.
         """
         await self._change_lock_mode(
             lock_state=True,
@@ -346,13 +376,8 @@ class VerisureLock(  # type: ignore[override]
             optimistic_state=LOCK_STATUS_LOCKED,
             operation="Auto-lock",
         )
-        # Bias to a false-negative: only warn when the settled state is
-        # *definitively* unlocked.  An UNKNOWN/unreadable status falls back to
-        # the optimistic LOCKED in _change_lock_mode and must not cry wolf —
-        # most "failures" were just the verification racing ahead of a lock
-        # that actuated a few seconds later.
         if self._state == LOCK_STATUS_UNLOCKED:
-            await self._fire_autolock_notification(
+            await self._fire_lock_notification(
                 title="Auto-lock failed",
                 message=(
                     f"Could not lock {self._attr_name} when arming. "
@@ -446,13 +471,28 @@ class VerisureLock(  # type: ignore[override]
         transitional_state: str,
         optimistic_state: str,
         operation: str,
-    ) -> None:
+    ) -> str | None:
         """Send lock command, then poll for real status.
 
         Sets a transitional state (e.g. LOCKING) immediately, reads a fresh
         pre-command baseline timestamp, sends the command (which waits for
         the backend's ~2s acknowledgement), then polls until a real, fresh
         status reading lands or the verify window exhausts.
+
+        Returns ``None`` on success — either the verify loop saw the target
+        state, or it exhausted with no readable status (UNKNOWN →
+        bias-to-false-negative optimistic fallback), or it exhausted with
+        the last stale read sitting at the target (quiet-success-on-no-op).
+
+        Returns a short error reason string on definitive failure:
+          * a ``VerisureOwaError`` from the command itself, OR
+          * the verify loop returning a non-target ``lockStatus`` — whether
+            from a fresh authoritative read (e.g. lock blocked, device
+            snapped back) OR from window-exhaust with the last stale read
+            still on the wrong state (device never re-stamped its
+            ``statusTimestamp`` AND the value never reached the target).
+
+        Callers decide how to surface failure (notification, raise, both).
         """
         self._operation_in_progress = True
         self._force_state(transitional_state)
@@ -484,7 +524,7 @@ class VerisureLock(  # type: ignore[override]
                     self._device_id,
                     err.log_detail(),
                 )
-                return
+                return err.message
 
             # Verify by polling the real status until it reaches the target
             # with a fresh timestamp.  The backend acks before the device
@@ -499,6 +539,18 @@ class VerisureLock(  # type: ignore[override]
             else:
                 self._state = optimistic_state
             self.async_write_ha_state()
+
+            # Definite failure: the verify loop got a fresh post-command read
+            # that is neither the target nor UNKNOWN — the device reported a
+            # real, wrong state (e.g. bolt blocked).  UNKNOWN stays a quiet
+            # success per the bias-to-false-negative contract.
+            if real_state not in (LOCK_STATUS_UNKNOWN, optimistic_state):
+                return (
+                    f"door reports {_lock_status_name(real_state)} after "
+                    f"{operation.lower()} command (expected "
+                    f"{_lock_status_name(optimistic_state)})"
+                )
+            return None
         finally:
             self._operation_in_progress = False
             # Nudge the coordinator so other lock entities on the same
@@ -587,13 +639,31 @@ class VerisureLock(  # type: ignore[override]
                 return mode
         return None
 
+    async def _notify_and_raise_on_failure(
+        self, *, action: str, error_reason: str
+    ) -> None:
+        """Surface a service-call failure: persistent notification + raise.
+
+        The notification gives UI users a record after the toast disappears;
+        the raise propagates the failure to scripts/automations via the HA
+        service call.  Title is "{Action} failed" (e.g. "Lock failed",
+        "Unlock failed"); message includes the underlying reason for
+        diagnosis.
+        """
+        title = f"{action} failed"
+        message = f"Could not {action.lower()} {self._attr_name}: {error_reason}"
+        await self._fire_lock_notification(title=title, message=message)
+        raise HomeAssistantError(message)
+
     async def async_lock(self, **kwargs: Any) -> None:
-        await self._change_lock_mode(
+        error = await self._change_lock_mode(
             lock_state=True,
             transitional_state=LOCK_STATUS_LOCKING,
             optimistic_state=LOCK_STATUS_LOCKED,
             operation="Lock",
         )
+        if error is not None:
+            await self._notify_and_raise_on_failure(action="Lock", error_reason=error)
 
     async def _dispatch_unlock_disarm(self) -> bool | None:
         """Disarm configured circuits before unlocking.
@@ -615,7 +685,7 @@ class VerisureLock(  # type: ignore[override]
             return None
         ok = await self._combined_alarm_panel.execute_partial_disarm(targets)
         if not ok:
-            await self._fire_autolock_notification(
+            await self._fire_lock_notification(
                 title="Auto-disarm failed",
                 message=(
                     f"Could not disarm before unlocking {self._attr_name}. "
@@ -627,15 +697,18 @@ class VerisureLock(  # type: ignore[override]
     async def _perform_user_unlock(self, operation: str) -> None:
         """Concurrent disarm + unlock used by both async_unlock and async_open.
 
-        Both branches each handle their own errors internally (disarm fires an
-        "Auto-disarm failed" notification on failure; unlock rolls back the
-        entity state) so neither raises from gather. Running them in parallel
-        halves the user-perceived latency without changing the semantics:
-        the post-call check still fires "Unlock failed" only when the disarm
-        succeeded but the lock state stayed LOCKED.
+        Disarm and unlock are kicked off in parallel for latency.  Each path
+        handles errors independently so neither raises from ``gather``:
+        ``_dispatch_unlock_disarm`` fires "Auto-disarm failed" on its own
+        failure, and ``_change_lock_mode`` rolls entity state back + returns
+        a reason string on its own failure.  After gather completes we
+        inspect both results and surface unlock failure to the HA service
+        caller: fire "Unlock failed" notification AND raise
+        HomeAssistantError so scripts/automations see it.  If the parallel
+        disarm succeeded, the message is enriched to point out the
+        asymmetric outcome ("alarm disarmed but door still locked").
         """
-        pre_state = self._state
-        disarm_result, _ = await asyncio.gather(
+        disarm_result, unlock_error = await asyncio.gather(
             self._dispatch_unlock_disarm(),
             self._change_lock_mode(
                 lock_state=False,
@@ -644,19 +717,21 @@ class VerisureLock(  # type: ignore[override]
                 operation=operation,
             ),
         )
-        if (
-            disarm_result is True
-            and self._state == pre_state
-            and self._state == LOCK_STATUS_LOCKED
-        ):
-            # Disarm succeeded but the unlock itself failed — state reverted.
-            await self._fire_autolock_notification(
-                title="Unlock failed",
-                message=(
-                    f"{self._attr_name}: alarm has been disarmed but the door "
-                    f"is still locked."
-                ),
+        if unlock_error is None:
+            return
+        if disarm_result is True:
+            # Disarm-succeeded-but-unlock-failed: the asymmetric outcome
+            # needs its own wording — the helper's generic "Could not
+            # unlock X: Y" would understate the half-success.
+            message = (
+                f"{self._attr_name}: alarm has been disarmed but the door "
+                f"is still locked ({unlock_error})."
             )
+            await self._fire_lock_notification(title="Unlock failed", message=message)
+            raise HomeAssistantError(message)
+        await self._notify_and_raise_on_failure(
+            action="Unlock", error_reason=unlock_error
+        )
 
     async def async_unlock(self, **kwargs: Any) -> None:
         await self._perform_user_unlock("Unlock")
