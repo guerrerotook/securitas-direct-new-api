@@ -2,6 +2,12 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.1.1
+
+Bugfix release.
+
+**Disarm fallback restored.**  Some panels — observed on Spanish installations in night+perimeter mode — reject the combined `DARM1DARMPERI` disarm command with an HTTP 404 ("Requested data not found") instead of the more usual 400.  Pre-v5 code fell back to plain `DARM1` on any non-busy error, but the v5 resolver/executor only fell back on 400, so on these panels the disarm appeared to silently fail.  The executor now treats 404 the same as 400 — a permanent panel-side rejection of *this* specific command — and falls through to `DARM1`, restoring the v4 behaviour.
+
 ## v5.1.0
 
 This is the first stable v5 release, and the first major update since v4.0.9 in April.
