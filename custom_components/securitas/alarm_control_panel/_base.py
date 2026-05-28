@@ -570,12 +570,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     raise
                 if err.http_status == 409:
                     raise  # Server busy — don't try alternatives
-                if err.http_status == 400:
-                    # 400 BAD_USER_INPUT ("command not valid for panel") is
-                    # the *only* HTTP status the Verisure OWA API uses to
-                    # signal "this command is not in the panel's enum".
-                    # Mark this specific command unsupported, persist, and
-                    # try the next alternative in the step.
+                if err.http_status in (400, 404):
+                    # The Verisure OWA API uses two HTTP statuses for
+                    # "this command is not in the panel's enum":
+                    #   - 400 BAD_USER_INPUT — surfaced when the panel's
+                    #     ArmCodeRequest / DisarmCodeRequest enum doesn't
+                    #     include the requested code at all (the GraphQL
+                    #     server validates the variable up front).
+                    #   - 404 "Requested data not found" — surfaced by the
+                    #     panel itself when it doesn't recognise the
+                    #     compound disarm command (e.g. Spanish panels that
+                    #     don't accept DARM1DARMPERI from night+perimeter).
+                    # Both are permanent panel-side rejections of *this*
+                    # specific command. Mark unsupported, persist, and try
+                    # the next alternative in the step.
                     #
                     # We deliberately do NOT blacklist for other 4xx
                     # (401 auth-blip, 422 validation hiccup, 429 rate-limit,
@@ -586,22 +594,23 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     # the error so the caller sees the transient failure
                     # without polluting unsupported_commands.
                     _LOGGER.info(
-                        "Command %s not supported by panel (status 400),"
+                        "Command %s not supported by panel (status %s),"
                         " trying next alternative: %s",
                         command,
+                        err.http_status,
                         err.log_detail(),
                     )
                     self._resolver.mark_unsupported(command)
                     self._persist_unsupported()
                 else:
                     # Any other 4xx (transient auth, rate-limit, etc.) or
-                    # 5xx server error / panel-level error — not a "command
-                    # not valid" case. Don't blacklist; don't try
-                    # alternatives (they'll likely also fail the same way).
+                    # 5xx server error — not a "command not valid" case.
+                    # Don't blacklist; don't try alternatives (they'll
+                    # likely also fail the same way).
                     raise
                 last_err = err
 
-        if last_err and last_err.http_status == 400:
+        if last_err and last_err.http_status in (400, 404):
             # Sub-panels have no user-editable mapping — point the user at
             # the auto-disabled feature; mappable Main panel still points
             # them at the mappings UI.
