@@ -185,7 +185,7 @@ class TestUnexpectedStateError:
 class TestLogDetail:
     """log_detail() returns brief output for known statuses, verbose otherwise."""
 
-    KNOWN_STATUSES = [400, 403, 409]
+    KNOWN_STATUSES = [400, 403, 404, 409]
     UNKNOWN_STATUSES = [500, 502, 429, None]
 
     @pytest.mark.parametrize("status", KNOWN_STATUSES)

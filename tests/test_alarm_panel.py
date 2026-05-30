@@ -4184,7 +4184,16 @@ class TestDynamicDisarm:
         assert alarm._state == AlarmControlPanelState.DISARMED
 
     async def test_peri_armed_falls_back_to_darm1(self):
-        """When DARM1DARMPERI fails, falls back to DARM1."""
+        """When DARM1DARMPERI fails with 404 (panel rejects from current state),
+        falls back to DARM1.
+
+        Real Spanish panels reject DARM1DARMPERI with a GraphQL ApiError whose
+        inner ``data.status`` is 404 ("Requested data not found error") when the
+        panel is in a state where the combined disarm isn't supported. The
+        executor must treat 404 the same way it treats 400 BAD_USER_INPUT —
+        as a panel-side rejection that should fall through to the next
+        alternative in the step.
+        """
         alarm = make_alarm(has_peri=True)
         alarm._last_proto_code = "A"  # total_peri = peri armed
         alarm._state = AlarmControlPanelState.ARMED_AWAY
@@ -4194,7 +4203,9 @@ class TestDynamicDisarm:
         async def disarm_side_effect(installation, command):
             calls.append(command)
             if command == "DARM1DARMPERI":
-                raise VerisureOwaError("404 not found", http_status=400)
+                raise VerisureOwaError(
+                    "4: Requested data not found error.", http_status=404
+                )
             return OperationStatus(
                 operation_status="OK",
                 message="",
@@ -4210,6 +4221,47 @@ class TestDynamicDisarm:
 
         assert calls == ["DARM1DARMPERI", "DARM1"]
         assert alarm._state == AlarmControlPanelState.DISARMED
+        # 404 is a permanent panel-side rejection, same as 400 — the resolver
+        # should have blacklisted the combined command for the session.
+        assert "DARM1DARMPERI" in alarm._resolver.unsupported
+
+    async def test_peri_armed_falls_back_to_darm1_on_400(self):
+        """When DARM1DARMPERI fails with 400 BAD_USER_INPUT, falls back to DARM1.
+
+        Parallel of ``test_peri_armed_falls_back_to_darm1`` covering the
+        original 400 case (command not in panel's ArmCodeRequest enum) — kept
+        as a separate test so future refactors can't conflate the two status
+        codes and lose coverage of either path.
+        """
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "A"  # total_peri = peri armed
+        alarm._state = AlarmControlPanelState.ARMED_AWAY
+
+        calls = []
+
+        async def disarm_side_effect(installation, command):
+            calls.append(command)
+            if command == "DARM1DARMPERI":
+                raise VerisureOwaError(
+                    'Variable "$request" got invalid value "DARM1DARMPERI"',
+                    http_status=400,
+                )
+            return OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                numinst="123456",
+                protom_response="D",
+                protom_response_date="",
+            )
+
+        alarm.client.disarm_alarm = disarm_side_effect
+
+        await alarm.async_alarm_disarm()
+
+        assert calls == ["DARM1DARMPERI", "DARM1"]
+        assert alarm._state == AlarmControlPanelState.DISARMED
+        assert "DARM1DARMPERI" in alarm._resolver.unsupported
 
     async def test_peri_not_armed_uses_darm1(self):
         """With peri configured but not currently armed, resolver uses DARM1.
@@ -4350,7 +4402,9 @@ class TestDynamicDisarm:
         async def track_disarm(installation, command):
             disarm_calls.append(command)
             if command == "DARM1DARMPERI":
-                raise VerisureOwaError("404 not found", http_status=400)
+                raise VerisureOwaError(
+                    "4: Requested data not found error.", http_status=404
+                )
             return OperationStatus(protom_response="D", operation_status="OK")
 
         alarm.client.disarm_alarm = track_disarm

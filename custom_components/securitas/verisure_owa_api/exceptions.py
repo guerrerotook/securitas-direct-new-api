@@ -9,7 +9,13 @@ class VerisureOwaError(Exception):
     """Base class for all Verisure OWA errors."""
 
     # http_status values that are well-understood and need no extra context.
-    _KNOWN_STATUSES: frozenset[int] = frozenset({400, 403, 409})
+    # 400 = command not in panel's GraphQL enum (BAD_USER_INPUT).
+    # 403 = session expired / WAF block.
+    # 404 = panel-side rejection of a specific command (e.g. compound
+    #       disarm not recognised by panel firmware); the message already
+    #       carries the panel's error code so the body is duplicative.
+    # 409 = server busy (transient).
+    _KNOWN_STATUSES: frozenset[int] = frozenset({400, 403, 404, 409})
 
     def __init__(self, message: str, *, http_status: int | None = None) -> None:
         super().__init__(message)
@@ -25,7 +31,7 @@ class VerisureOwaError(Exception):
     def log_detail(self) -> str:
         """Return a log string: concise for known errors, verbose otherwise.
 
-        Known HTTP statuses (400, 403, 409) return just the message.
+        Known HTTP statuses (400, 403, 404, 409) return just the message.
         Unknown errors append the response body so we can diagnose them.
         """
         if self.http_status in self._KNOWN_STATUSES:
