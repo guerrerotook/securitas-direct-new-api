@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -373,6 +374,85 @@ class TestRefreshToken:
         result = await client.refresh_token()
 
         assert result is False
+
+
+# ── Concurrent renewal tests ─────────────────────────────────────────────────
+
+
+class TestConcurrentRenewal:
+    """Renewal must be serialized: all coordinators share one client (issue #499)."""
+
+    async def test_concurrent_check_auth_triggers_single_refresh(
+        self, client, transport
+    ):
+        """Concurrent token renewals must not race the (rotating) refresh token.
+
+        Every coordinator shares one VerisureOwaClient. When the short-lived
+        auth JWT expires, several coordinator polls call
+        _check_authentication_token at the same instant. Without serialization
+        each fires its own RefreshLogin with the same one-time-use refresh
+        token; the server rotates on the first and rejects the rest, which then
+        fall through to a (passwordless) login and surface a credential error.
+        Only one refresh must actually reach the wire.
+        """
+        new_jwt = make_jwt(exp_minutes=15)
+        call_ops: list[str] = []
+
+        async def slow_execute(content, _headers):
+            call_ops.append(content["operationName"])
+            # Yield so the other gathered coroutines get a chance to interleave
+            # before this refresh completes — reproduces the real race.
+            await asyncio.sleep(0)
+            return refresh_response(hash_token=new_jwt)
+
+        transport.execute.side_effect = slow_execute
+
+        client.authentication_token = FAKE_JWT_EXPIRED
+        client._authentication_token_exp = datetime.now() - timedelta(minutes=5)
+        client.refresh_token_value = "some-refresh-token"
+
+        await asyncio.gather(*[client._check_authentication_token() for _ in range(5)])
+
+        assert call_ops.count("RefreshLogin") == 1
+
+
+# ── Empty-password fallback tests ────────────────────────────────────────────
+
+
+class TestEmptyPasswordFallback:
+    """A rejected refresh must never trigger an empty-password login (issue #499)."""
+
+    async def test_refresh_failure_without_password_does_not_login(self, transport):
+        """When refresh is rejected and no password is stored, never POST a login.
+
+        v5.1.0 drops the password after minting a refresh token. If the refresh
+        is later rejected, falling back to login() would send user + "" — which
+        the API answers with "usuario o contraseña incorrectos" and which counts
+        toward Verisure's 3-strikes account lock. The client must instead raise
+        AuthenticationError so HA triggers a clean reauth.
+        """
+        client = VerisureOwaClient(
+            transport=transport,
+            country="ES",
+            language="es",
+            username="test@example.com",
+            password="",
+            device_id="test-device-id",
+            uuid="test-uuid",
+            id_device_indigitall="test-indigitall",
+            refresh_token="stale-refresh-token",
+        )
+        client.authentication_token = FAKE_JWT_EXPIRED
+        client._authentication_token_exp = datetime.now() - timedelta(minutes=5)
+        transport.execute.return_value = refresh_response(res="ERROR")
+
+        with pytest.raises(AuthenticationError):
+            await client._check_authentication_token()
+
+        ops = [
+            call.args[0]["operationName"] for call in transport.execute.call_args_list
+        ]
+        assert "mkLoginToken" not in ops
 
 
 # ── Typed execute tests ──────────────────────────────────────────────────────

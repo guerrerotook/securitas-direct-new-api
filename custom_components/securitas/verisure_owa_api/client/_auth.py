@@ -28,7 +28,19 @@ class _AuthMixin(_ClientBase):
     """Login, refresh, logout, and 2FA validation."""
 
     async def login(self) -> None:
-        """Login to the Verisure OWA API and set auth tokens."""
+        """Login to the Verisure OWA API and set auth tokens.
+
+        Once a refresh token has been minted the password is scrubbed from
+        storage (v5.1.0). Sending an empty password to the API only earns a
+        credential error and burns an attempt toward Verisure's 3-strikes
+        account lock, so refuse it here and signal reauth instead — this guards
+        every fallback path that reaches login() after a rejected refresh (#499).
+        """
+        if not self.password:
+            raise AuthenticationError(
+                "Cannot login: no password available (refresh token rejected). "
+                "Re-authentication required."
+            )
         content = {
             "operationName": "mkLoginToken",
             "variables": {
