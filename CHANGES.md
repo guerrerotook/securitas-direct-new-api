@@ -2,6 +2,14 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.1.2
+
+A bugfix release for Spain (and any market) hitting repeated re-authentication failures since v5.1.0.
+
+### Fixed
+
+**Session drops every few hours ([#499](https://github.com/guerrerotook/securitas-direct-new-api/issues/499)).**  Since v5.1.0 the password is used once to mint a long-lived refresh token and then dropped from storage.  Two problems combined to break that on Spanish accounts: when the short-lived session token expired, the several entity coordinators that share one connection would all try to refresh at the same instant, racing each other over the single-use refresh token — the first won, the rest were rejected.  A rejected refresh then fell back to a password login, but the password was already gone, so the integration sent an empty one and the server replied "el usuario o la contraseña son incorrectos" — which also counts toward the three-strikes account lock.  Token renewal is now serialized so only one refresh runs at a time, and a refresh failure with no stored password now triggers a clean re-auth prompt instead of an empty-password login.
+
 ## v5.1.1
 
 Bugfix release.
