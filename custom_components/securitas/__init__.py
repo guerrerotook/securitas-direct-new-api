@@ -941,10 +941,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     alarm_coord.has_annex,
                 )
 
-            # Sentinel coordinator — needs a sentinel service and its zone
+            # Sentinel coordinator — needs a sentinel service AND a zone.
+            # An account can subscribe to CONFORT without a Sentinel device
+            # installed (issue #498): the API then returns null attributes and
+            # an empty xSComfort device list, so no zone exists anywhere. With
+            # an empty zone the air-quality query 500s on every poll and the
+            # coordinator fails forever, so skip it unless a zone is present.
             for service in services:
-                if service.request in SENTINEL_SERVICE_NAMES:
-                    zone = service.attributes[0].value if service.attributes else ""
+                if service.request in SENTINEL_SERVICE_NAMES and service.attributes:
+                    zone = service.attributes[0].value
                     sentinel_coord = SentinelCoordinator(
                         hass,
                         client.client,
