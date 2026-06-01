@@ -534,6 +534,38 @@ async def test_services_with_sentinel(
     assert len(sentinel_services) == 1
 
 
+async def test_sentinel_coordinator_created_when_zone_present(
+    hass: HomeAssistant, mock_server: MockGraphQLServer
+):
+    """A CONFORT service with a zone attribute produces a sentinel coordinator."""
+    sentinel = make_sentinel_service(zone="1")
+    queue_standard_setup(mock_server, extra_services=[sentinel])
+    entry, result = await _setup(hass, mock_server)
+    assert result is True
+
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    assert entry_data["sentinel_coordinator"] is not None
+
+
+async def test_sentinel_coordinator_skipped_when_no_zone(
+    hass: HomeAssistant, mock_server: MockGraphQLServer
+):
+    """A CONFORT service with no attributes must not create a sentinel coordinator.
+
+    Regression test for issue #498: an account can subscribe to CONFORT
+    without a Sentinel device installed. The API then returns null
+    attributes and no zone, and the air-quality query 500s on every poll.
+    Without a resolvable zone we skip the coordinator entirely.
+    """
+    sentinel = make_sentinel_service(zone=None)
+    queue_standard_setup(mock_server, extra_services=[sentinel])
+    entry, result = await _setup(hass, mock_server)
+    assert result is True
+
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    assert entry_data["sentinel_coordinator"] is None
+
+
 # ── Arm / Disarm via VerisureOwaClient ───────────────────────────────────────────────
 
 

@@ -679,11 +679,19 @@ def make_doorlock_service() -> dict:
     )
 
 
-def make_sentinel_service(zone: str = "1") -> dict:
-    """Return a CONFORT (sentinel) service dict for use in graphql_services."""
+def make_sentinel_service(zone: str | None = "1") -> dict:
+    """Return a CONFORT (sentinel) service dict for use in graphql_services.
+
+    Passing ``zone=None`` returns a CONFORT service with no attributes —
+    mirroring issue #498, where the account subscribes to CONFORT but has
+    no Sentinel device installed, so the API returns null attributes and no
+    zone.
+    """
     return _make_service_dict(
         id_service=20,
         request="CONFORT",
         description="Sentinel",
-        attributes=[{"name": "zone", "value": zone, "active": True}],
+        attributes=(
+            None if zone is None else [{"name": "zone", "value": zone, "active": True}]
+        ),
     )
