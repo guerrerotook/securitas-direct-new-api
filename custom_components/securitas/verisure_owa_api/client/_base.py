@@ -119,6 +119,12 @@ class _ClientBase:
         self.protom_response: str = ""
         self.authentication_otp_challenge_value: tuple[str, str] | None = None
 
+        # Serializes token renewal. All coordinators share one client, so when
+        # the short-lived auth JWT expires their polls would otherwise fire
+        # concurrent RefreshLogin calls with the same one-time-use refresh
+        # token — the server rotates on the first and rejects the rest. See #499.
+        self._auth_lock = asyncio.Lock()
+
         # Device configuration
         self.device_id: str = device_id
         self.uuid: str = uuid
@@ -412,11 +418,27 @@ class _ClientBase:
         if installation is not None:
             await self._ensure_capabilities(installation)
 
-    async def _check_authentication_token(self) -> None:
-        """Check expiration of the authentication token and get a new one if needed."""
-        if (self.authentication_token is None) or (
+    def _token_needs_renewal(self) -> bool:
+        """True when the auth token is missing or within a minute of expiry."""
+        return (self.authentication_token is None) or (
             datetime.now() + timedelta(minutes=1) > self._authentication_token_exp
-        ):
+        )
+
+    async def _check_authentication_token(self) -> None:
+        """Check expiration of the authentication token and get a new one if needed.
+
+        Renewal is serialized behind ``_auth_lock`` with a double-check inside:
+        when several coordinators hit an expired token at once, the first
+        renews and the rest reuse that result instead of racing concurrent
+        RefreshLogin calls against a one-time-use refresh token (issue #499).
+        """
+        if not self._token_needs_renewal():
+            return
+        async with self._auth_lock:
+            # Re-check under the lock: a coroutine we queued behind may have
+            # already minted a fresh token while we were waiting.
+            if not self._token_needs_renewal():
+                return
             if self.refresh_token_value:
                 _LOGGER.debug("[auth] Auth token expired, refreshing")
                 try:
