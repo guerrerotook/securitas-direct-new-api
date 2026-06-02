@@ -29,6 +29,7 @@ from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    AuthenticationError,
     VerisureOwaError,
     SessionExpiredError,
     WAFBlockedError,
@@ -135,21 +136,40 @@ class TestAlarmCoordinator:
             await coord._async_update_data()
 
     @pytest.mark.asyncio
-    async def test_session_expired_retries_login_then_auth_failed(self):
-        """SessionExpiredError retries login; if login fails, raises ConfigEntryAuthFailed."""
+    async def test_session_expired_genuine_login_failure_raises_auth_failed(self):
+        """A genuine auth failure on relogin raises ConfigEntryAuthFailed (reauth)."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
         client.get_general_status.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = VerisureOwaError("login failed")
+        client.login.side_effect = AuthenticationError("credentials rejected")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):
             await coord._async_update_data()
-
         client.login.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_session_expired_transient_login_failure_raises_update_failed(self):
+        """A transient server error on relogin raises UpdateFailed, NOT reauth,
+        and records the failure on the client for visibility."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_general_status.side_effect = SessionExpiredError("expired")
+        client.login.side_effect = VerisureOwaError(
+            "server crash", http_status=500
+        )  # any non-genuine (transient) error -> retry, not reauth
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+        client.login.assert_awaited_once()
+        client.record_auth_recovery_failure.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_session_expired_retry_succeeds(self):
@@ -422,14 +442,14 @@ class TestLockCoordinator:
 
     @pytest.mark.asyncio
     async def test_session_expired_retries_login_then_auth_failed(self):
-        """SessionExpiredError retries login; login failure raises ConfigEntryAuthFailed."""
+        """SessionExpiredError retries login; genuine auth failure raises ConfigEntryAuthFailed."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
         installation = _make_installation()
 
         client.get_lock_modes.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = VerisureOwaError("login failed")
+        client.login.side_effect = AuthenticationError("credentials rejected")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):
@@ -1360,7 +1380,7 @@ class TestActivityCoordinator:
         installation = _make_installation()
 
         client.get_activity.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = VerisureOwaError("login failed")
+        client.login.side_effect = AuthenticationError("credentials rejected")
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(ConfigEntryAuthFailed):

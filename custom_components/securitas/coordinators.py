@@ -36,6 +36,7 @@ from .verisure_owa_api.exceptions import (
     VerisureOwaError,
     SessionExpiredError,
     WAFBlockedError,
+    is_genuine_auth_failure,
 )
 from .verisure_owa_api.models import (
     ActivityEvent,
@@ -127,14 +128,20 @@ class ActivityData:
 
 
 async def _handle_session_expired(client: VerisureOwaClient) -> None:
-    """Attempt to re-login after a SessionExpiredError.
+    """Re-login after a SessionExpiredError, routing by failure type.
 
-    Raises ConfigEntryAuthFailed if re-login fails.
+    Genuine auth failures (bad credentials, account blocked, 2FA, revoked
+    token) raise ConfigEntryAuthFailed to trigger the HA reauth flow. Transient
+    server-side failures raise UpdateFailed so the coordinator retries on the
+    next interval — we never force a reauth prompt for a backend wobble.
     """
     try:
         await client.login()
     except VerisureOwaError as err:
-        raise ConfigEntryAuthFailed(f"Re-authentication failed: {err}") from err
+        if is_genuine_auth_failure(err):
+            raise ConfigEntryAuthFailed(f"Re-authentication failed: {err}") from err
+        client.record_auth_recovery_failure(err)
+        raise UpdateFailed(f"Transient auth error, will retry: {err}") from err
 
 
 async def _fetch_with_session_recovery[T](
@@ -147,6 +154,10 @@ async def _fetch_with_session_recovery[T](
     On SessionExpiredError, re-login then retry once. WAFBlockedError and any
     remaining VerisureOwaError are wrapped as UpdateFailed messages keyed on
     *label* — the human-readable subject for the failure.
+
+    Re-login (on SessionExpiredError) may itself raise ConfigEntryAuthFailed
+    for a genuine credential failure, or UpdateFailed for a transient relogin
+    error — both propagate uncaught.
     """
     try:
         return await fetcher()
