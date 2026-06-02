@@ -230,6 +230,56 @@ class TestAlarmCoordinator:
 
         assert "WAF blocked" in str(exc_info.value)
 
+    @pytest.mark.asyncio
+    async def test_2026_06_02_outage_signals_do_not_force_reauth(self):
+        """Replay the production outage: a 403 'try again later' on the fetch,
+        then a transient xSRefreshLogin JS-crash on relogin. Must be UpdateFailed
+        (retry), never ConfigEntryAuthFailed."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_general_status.side_effect = SessionExpiredError(
+            "Invalid session. Please, try again later.", http_status=403
+        )
+        js_crash = VerisureOwaError(
+            "Cannot read properties of undefined (reading 'it')"
+        )
+        js_crash.response_body = {
+            "errors": [
+                {"message": "Cannot read properties of undefined (reading 'it')"}
+            ],
+            "data": {"xSRefreshLogin": None},
+        }
+        client.login.side_effect = js_crash
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+        client.record_auth_recovery_failure.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_outage_then_recovery_succeeds(self):
+        """After a transient relogin failure, the next poll recovers cleanly."""
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        status = SStatus(status="0")
+        client.get_general_status.side_effect = [
+            SessionExpiredError("expired"),  # poll 1: triggers recovery
+            status,  # poll 1 retry after successful login
+        ]
+        client.login.return_value = None  # login succeeds this time
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        result = await coord._async_update_data()
+
+        assert result.status is status
+        client.login.assert_awaited_once()
+
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────
 
