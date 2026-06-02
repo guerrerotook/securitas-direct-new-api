@@ -65,6 +65,14 @@ API_CALLBY = "OWA_10"
 API_ID_PREFIX = "OWA_______________"
 ALARM_STATUS_SERVICE_ID = "11"
 
+# Auth-recovery observability. A transient failure on the refresh/login path
+# increments a streak counter; once it reaches the threshold we emit a louder,
+# throttled WARNING so a misclassified dead session stays visible despite HA's
+# UpdateFailed repeat-suppression.
+_AUTH_ESCALATION_THRESHOLD = 3
+_AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
+_ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
+
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
     {
@@ -124,6 +132,13 @@ class _ClientBase:
         # concurrent RefreshLogin calls with the same one-time-use refresh
         # token — the server rotates on the first and rejects the rest. See #499.
         self._auth_lock = asyncio.Lock()
+
+        # Auth-recovery streak: consecutive transient failures on the auth
+        # path (refresh/login). Reset on any successful auth. Shared across all
+        # coordinators because they share one client.
+        self.consecutive_auth_recovery_failures: int = 0
+        self._auth_streak_started: datetime | None = None
+        self._last_auth_escalation: datetime | None = None
 
         # Device configuration
         self.device_id: str = device_id
@@ -456,6 +471,58 @@ class _ClientBase:
             _LOGGER.debug("[auth] Auth token expired, logging in again")
             # pylint: disable=no-member  # provided by _AuthMixin
             await self.login()  # type: ignore[attr-defined]
+
+    def note_auth_success(self) -> None:
+        """Reset the auth-recovery streak after a successful authentication."""
+        if self.consecutive_auth_recovery_failures:
+            _LOGGER.info(
+                "Verisure authentication recovered after %d transient failure(s)",
+                self.consecutive_auth_recovery_failures,
+            )
+        self.consecutive_auth_recovery_failures = 0
+        self._auth_streak_started = None
+        self._last_auth_escalation = None
+
+    def record_auth_recovery_failure(self, err: VerisureOwaError) -> None:
+        """Record a transient auth-recovery failure and log it.
+
+        The first failure in a streak logs a WARNING. Once the streak reaches
+        ``_AUTH_ESCALATION_THRESHOLD`` a louder, throttled WARNING explains that
+        reauth is being deliberately withheld and how to report a wrong call.
+        """
+        now = datetime.now()
+        is_first = self.consecutive_auth_recovery_failures == 0
+        if is_first:
+            self._auth_streak_started = now
+        self.consecutive_auth_recovery_failures += 1
+        count = self.consecutive_auth_recovery_failures
+
+        if is_first:
+            _LOGGER.warning(
+                "Verisure auth recovery failed with a transient server error "
+                "(%s); credentials look valid, will retry next poll. NOT forcing "
+                "reauthentication.",
+                err.log_detail(),
+            )
+        elif count >= _AUTH_ESCALATION_THRESHOLD:
+            last = self._last_auth_escalation
+            if last is None or now - last >= _AUTH_ESCALATION_INTERVAL:
+                self._last_auth_escalation = now
+                # _auth_streak_started is always set on the first failure above,
+                # so it is non-None here; `or now` only narrows the Optional type.
+                started = self._auth_streak_started or now
+                minutes = int((now - started).total_seconds() // 60)
+                _LOGGER.warning(
+                    "Verisure session has failed to recover %d times over %d "
+                    "minutes. The errors look transient/server-side so we are "
+                    "deliberately NOT forcing reauthentication. If your Verisure "
+                    "devices remain unavailable, please report this at %s and "
+                    "include this line. Last response: %s",
+                    count,
+                    minutes,
+                    _ISSUES_URL,
+                    err.log_detail(),
+                )
 
     async def _ensure_capabilities(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""

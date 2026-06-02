@@ -476,3 +476,50 @@ class TestRefreshTokenEdgeCases:
 
         api.refresh_token.assert_awaited_once()
         api.login.assert_awaited_once()
+
+
+# ── Auth-recovery streak counter ─────────────────────────────────────────────
+
+
+class TestAuthRecoveryStreak:
+    def test_starts_at_zero(self, api):
+        assert api.consecutive_auth_recovery_failures == 0
+
+    def test_record_increments_and_warns_first_time(self, api, caplog):
+        with caplog.at_level("WARNING"):
+            api.record_auth_recovery_failure(VerisureOwaError("boom", http_status=500))
+        assert api.consecutive_auth_recovery_failures == 1
+        assert "NOT forcing reauthentication" in caplog.text
+
+    def test_escalates_at_threshold_with_report_url(self, api, caplog):
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                api.record_auth_recovery_failure(
+                    VerisureOwaError("boom", http_status=500)
+                )
+        assert api.consecutive_auth_recovery_failures == 3
+        assert "github.com/guerrerotook/securitas-direct-new-api/issues" in caplog.text
+        assert "3 times" in caplog.text
+
+    def test_escalation_is_throttled(self, api, caplog):
+        with caplog.at_level("WARNING"):
+            for _ in range(10):
+                api.record_auth_recovery_failure(
+                    VerisureOwaError("boom", http_status=500)
+                )
+        escalations = caplog.text.count("deliberately NOT forcing")
+        assert escalations == 1
+
+    def test_note_success_resets_and_logs_recovery(self, api, caplog):
+        for _ in range(3):
+            api.record_auth_recovery_failure(VerisureOwaError("boom", http_status=500))
+        with caplog.at_level("INFO"):
+            api.note_auth_success()
+        assert api.consecutive_auth_recovery_failures == 0
+        assert "recovered after 3 transient" in caplog.text
+
+    def test_note_success_noop_when_no_streak(self, api, caplog):
+        with caplog.at_level("INFO"):
+            api.note_auth_success()
+        assert api.consecutive_auth_recovery_failures == 0
+        assert "recovered after" not in caplog.text
