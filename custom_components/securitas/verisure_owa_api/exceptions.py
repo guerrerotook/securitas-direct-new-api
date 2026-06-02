@@ -132,9 +132,14 @@ class UnexpectedStateError(VerisureOwaError):
 _GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset({"60052", "60067"})
 
 
-def _error_code(err: VerisureOwaError) -> str | None:
-    """Best-effort extraction of the vendor ``err`` code from a response body."""
-    body = err.response_body
+def _error_code_from_body(body: object) -> str | None:
+    """Extract the vendor ``err`` code from a GraphQL response-body dict.
+
+    Walks ``body["errors"][0]["data"]["err"]`` defensively, returning the code
+    as a string (the server sends strings) or ``None`` if absent/malformed.
+    Shared by ``_error_code`` (error-object form) and the auth client's
+    account-blocked check (raw-response form).
+    """
     if not isinstance(body, dict):
         return None
     errors = body.get("errors")
@@ -144,6 +149,11 @@ def _error_code(err: VerisureOwaError) -> str | None:
             code = data.get("err")
             return str(code) if code is not None else None
     return None
+
+
+def _error_code(err: VerisureOwaError) -> str | None:
+    """Best-effort extraction of the vendor ``err`` code from an error object."""
+    return _error_code_from_body(err.response_body)
 
 
 def is_genuine_auth_failure(err: VerisureOwaError) -> bool:

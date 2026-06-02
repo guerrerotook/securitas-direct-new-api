@@ -24,6 +24,7 @@ from ..exceptions import (
     OperationTimeoutError,
     SessionExpiredError,
     VerisureOwaError,
+    _error_code_from_body,
     is_genuine_auth_failure,
 )
 from ..http_transport import HttpTransport
@@ -354,12 +355,7 @@ class _ClientBase:
     @staticmethod
     def _is_account_blocked(result_json: dict[str, Any]) -> bool:
         """Check if a login response indicates the account is blocked (error 60052)."""
-        errors = result_json.get("errors")
-        if isinstance(errors, list) and errors:
-            first = errors[0]
-            if isinstance(first, dict) and isinstance(first.get("data"), dict):
-                return first["data"].get("err") == "60052"
-        return False
+        return _error_code_from_body(result_json) == "60052"
 
     def _extract_otp_data(self, data: Any) -> tuple[str | None, list[OtpPhone]]:
         """Extract OTP hash and phone list from error data."""

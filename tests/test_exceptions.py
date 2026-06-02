@@ -18,6 +18,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     TwoFactorRequiredError,
     UnexpectedStateError,
     WAFBlockedError,
+    _error_code_from_body,
     is_genuine_auth_failure,
 )
 
@@ -273,3 +274,14 @@ class TestIsGenuineAuthFailure:
 
     def test_unknown_error_defaults_to_transient(self):
         assert is_genuine_auth_failure(VerisureOwaError("mystery")) is False
+
+
+# ── _error_code_from_body ─────────────────────────────────────────────────────
+
+
+def test_error_code_from_body_extracts_and_stringifies():
+    assert _error_code_from_body({"errors": [{"data": {"err": "60052"}}]}) == "60052"
+    assert _error_code_from_body({"errors": [{"data": {"err": 60052}}]}) == "60052"
+    assert _error_code_from_body({"errors": []}) is None
+    assert _error_code_from_body("nope") is None
+    assert _error_code_from_body({"errors": [{"message": "x"}]}) is None
