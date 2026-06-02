@@ -229,35 +229,33 @@ class TestPollOperation:
 
 
 class TestCheckAuthenticationTokenErrorHandling:
-    async def test_falls_back_to_login_on_verisure_owa_error(self, api):
-        """Should fall back to login() when refresh raises VerisureOwaError."""
+    async def test_transient_refresh_error_propagates_no_login(self, api):
+        """A transient refresh error (bare VerisureOwaError) propagates instead
+        of falling back to login(), and is recorded for visibility."""
         api.authentication_token = None
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(side_effect=VerisureOwaError("refresh failed"))
         api.login = AsyncMock()
 
-        await api._check_authentication_token()
-        api.login.assert_called_once()
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
 
-    async def test_falls_back_to_login_on_timeout(self, api):
-        """Should fall back to login() when refresh raises asyncio.TimeoutError."""
+        api.login.assert_not_called()
+        assert api.consecutive_auth_recovery_failures == 1
+
+    async def test_timeout_refresh_error_propagates_no_login(self, api):
+        """A raw asyncio.TimeoutError during refresh is wrapped as a
+        VerisureOwaError and propagated (transient), not funneled into login."""
         api.authentication_token = None
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
         api.login = AsyncMock()
 
-        await api._check_authentication_token()
-        api.login.assert_called_once()
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
 
-    async def test_falls_back_to_login_on_timeout_error(self, api):
-        """Should fall back to login() when refresh raises asyncio.TimeoutError."""
-        api.authentication_token = None
-        api.refresh_token_value = "some-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError("timeout"))
-        api.login = AsyncMock()
-
-        await api._check_authentication_token()
-        api.login.assert_called_once()
+        api.login.assert_not_called()
+        assert api.consecutive_auth_recovery_failures == 1
 
     async def test_does_not_catch_unexpected_exceptions(self, api):
         """Should NOT catch unexpected exceptions like ValueError."""
