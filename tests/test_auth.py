@@ -266,6 +266,21 @@ class TestCheckAuthenticationToken:
         api.login.assert_not_called()
         assert api.consecutive_auth_recovery_failures == 1
 
+    async def test_timeout_wrapped_with_descriptive_message(self, api):
+        """A bare asyncio.TimeoutError is wrapped with a non-empty, descriptive
+        message so the propagated error and streak log are actionable."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError) as exc_info:
+            await api._check_authentication_token()
+
+        assert str(exc_info.value)  # non-empty
+        assert "TimeoutError" in str(exc_info.value)
+
     async def test_expired_token_no_refresh_value_calls_login(self, api):
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min

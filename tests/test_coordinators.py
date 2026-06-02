@@ -280,6 +280,25 @@ class TestAlarmCoordinator:
         assert result.status is status
         client.login.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_session_expired_login_timeout_raises_update_failed(self):
+        """A raw asyncio.TimeoutError from relogin is treated as transient
+        (UpdateFailed + recorded), not an uncaught traceback or reauth."""
+        import asyncio as _asyncio
+
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_general_status.side_effect = SessionExpiredError("expired")
+        client.login.side_effect = _asyncio.TimeoutError()
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+        client.record_auth_recovery_failure.assert_called_once()
+
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────
 

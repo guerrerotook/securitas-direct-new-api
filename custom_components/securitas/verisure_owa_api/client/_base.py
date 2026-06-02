@@ -466,7 +466,7 @@ class _ClientBase:
                     owa_err = (
                         err
                         if isinstance(err, VerisureOwaError)
-                        else VerisureOwaError(str(err))
+                        else VerisureOwaError(f"Token refresh failed: {err!r}")
                     )
                     # Genuine token rejection (e.g. err 60067): the refresh
                     # token is dead -> fall through to login() so a missing

@@ -137,11 +137,16 @@ async def _handle_session_expired(client: VerisureOwaClient) -> None:
     """
     try:
         await client.login()
-    except VerisureOwaError as err:
-        if is_genuine_auth_failure(err):
-            raise ConfigEntryAuthFailed(f"Re-authentication failed: {err}") from err
-        client.record_auth_recovery_failure(err)
-        raise UpdateFailed(f"Transient auth error, will retry: {err}") from err
+    except (VerisureOwaError, asyncio.TimeoutError) as err:
+        owa_err = (
+            err
+            if isinstance(err, VerisureOwaError)
+            else VerisureOwaError(f"Login timed out: {err!r}")
+        )
+        if is_genuine_auth_failure(owa_err):
+            raise ConfigEntryAuthFailed(f"Re-authentication failed: {owa_err}") from err
+        client.record_auth_recovery_failure(owa_err)
+        raise UpdateFailed(f"Transient auth error, will retry: {owa_err}") from err
 
 
 async def _fetch_with_session_recovery[T](
