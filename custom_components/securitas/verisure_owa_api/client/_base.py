@@ -24,6 +24,7 @@ from ..exceptions import (
     OperationTimeoutError,
     SessionExpiredError,
     VerisureOwaError,
+    is_genuine_auth_failure,
 )
 from ..http_transport import HttpTransport
 from ..models import Installation, OtpPhone
@@ -465,8 +466,25 @@ class _ClientBase:
                     VerisureOwaError,
                     asyncio.TimeoutError,
                 ) as err:
+                    owa_err = (
+                        err
+                        if isinstance(err, VerisureOwaError)
+                        else VerisureOwaError(str(err))
+                    )
+                    # Genuine token rejection (e.g. err 60067): the refresh
+                    # token is dead -> fall through to login() so a missing
+                    # password surfaces as a clean reauth signal. Transient
+                    # server error (5xx, the xSRefreshLogin crash, a timeout):
+                    # the token is probably fine -> do NOT burn a login attempt;
+                    # record it and propagate so the coordinator retries.
+                    if not is_genuine_auth_failure(owa_err):
+                        self.record_auth_recovery_failure(owa_err)
+                        if isinstance(err, VerisureOwaError):
+                            raise
+                        raise owa_err from err
                     _LOGGER.warning(
-                        "Refresh token error, falling back to login: %s", err
+                        "Refresh token genuinely rejected, falling back to login: %s",
+                        err,
                     )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
             # pylint: disable=no-member  # provided by _AuthMixin

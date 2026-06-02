@@ -1,5 +1,6 @@
 """Tests for VerisureOwaClient authentication flow."""
 
+import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -8,6 +9,7 @@ import pytest
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     AuthenticationError,
+    SessionExpiredError,
     VerisureOwaError,
     TwoFactorRequiredError,
 )
@@ -215,17 +217,54 @@ class TestCheckAuthenticationToken:
         api.refresh_token.assert_awaited_once()
         api.login.assert_awaited_once()
 
-    async def test_expired_token_refresh_exception_falls_back_to_login(self, api):
+    async def test_transient_refresh_exception_propagates_no_login(self, api):
+        """A transient server error during refresh must NOT fall back to login
+        (which would launder it into a 'no password' credential failure).
+        It propagates so the coordinator retries next poll."""
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=VerisureOwaError("boom"))
+        api.refresh_token = AsyncMock(
+            side_effect=VerisureOwaError("boom", http_status=500)
+        )
+        api.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
+
+        api.login.assert_not_called()
+        assert api.consecutive_auth_recovery_failures == 1
+
+    async def test_genuine_refresh_exception_falls_back_to_login(self, api):
+        """A genuine token rejection (err 60067) falls back to login so a dead
+        token surfaces as a clean reauth signal."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        genuine = SessionExpiredError("Invalid Session", http_status=403)
+        genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        api.refresh_token = AsyncMock(side_effect=genuine)
         api.login = AsyncMock()
 
         await api._check_authentication_token()
 
-        api.refresh_token.assert_awaited_once()
         api.login.assert_awaited_once()
+        assert api.consecutive_auth_recovery_failures == 0
+
+    async def test_timeout_refresh_exception_propagates_as_owa_error(self, api):
+        """A raw asyncio.TimeoutError during refresh is wrapped as a
+        VerisureOwaError and propagated (transient), not funneled into login."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
+
+        api.login.assert_not_called()
+        assert api.consecutive_auth_recovery_failures == 1
 
     async def test_expired_token_no_refresh_value_calls_login(self, api):
         api.authentication_token = FAKE_JWT
@@ -464,18 +503,20 @@ class TestValidateDeviceEdgeCases:
 
 
 class TestRefreshTokenEdgeCases:
-    async def test_refresh_token_after_expired_calls_login(self, api):
-        """When refresh fails and token is expired, falls back to login."""
+    async def test_transient_refresh_error_propagates_no_login(self, api):
+        """A bare VerisureOwaError from refresh (no err code) is transient —
+        must propagate instead of falling back to login."""
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min  # expired
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(side_effect=VerisureOwaError("Refresh failed"))
         api.login = AsyncMock()
 
-        await api._check_authentication_token()
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
 
         api.refresh_token.assert_awaited_once()
-        api.login.assert_awaited_once()
+        api.login.assert_not_called()
 
 
 # ── Auth-recovery streak counter ─────────────────────────────────────────────
