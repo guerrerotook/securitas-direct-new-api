@@ -523,3 +523,22 @@ class TestAuthRecoveryStreak:
             api.note_auth_success()
         assert api.consecutive_auth_recovery_failures == 0
         assert "recovered after" not in caplog.text
+
+
+class TestStreakResetOnSuccess:
+    async def test_refresh_success_resets_streak(self, api, mock_execute):
+        api.consecutive_auth_recovery_failures = 4
+        mock_execute.return_value = refresh_response()
+
+        ok = await api.refresh_token()
+
+        assert ok is True
+        assert api.consecutive_auth_recovery_failures == 0
+
+    async def test_login_success_resets_streak(self, api, mock_execute):
+        api.consecutive_auth_recovery_failures = 4
+        mock_execute.return_value = login_response()
+
+        await api.login()
+
+        assert api.consecutive_auth_recovery_failures == 0
