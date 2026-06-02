@@ -2,6 +2,18 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.2.0
+
+Re-authentication is now reserved for genuine credential problems, and transient Verisure backend hiccups no longer drag you to the login screen.
+
+### Fixed
+
+**Spurious re-auth prompts during backend wobbles ([#502](https://github.com/guerrerotook/securitas-direct-new-api/pull/502)).**  A short Verisure-side outage — an "Invalid session, try again later" (HTTP 403), a 500 on the zones endpoint, or even a server-side crash in the token-refresh call — used to surface as a Home Assistant re-authentication request, even though your username and password were perfectly fine.  The integration now classifies failures: only a genuine auth problem (wrong credentials, a blocked account, 2-factor required, or an explicitly revoked token) triggers a re-auth prompt.  Everything else — server errors, timeouts, WAF blocks, transient session drops — is treated as temporary and simply retried on the next poll, so the integration heals itself once Verisure recovers, with no clicking required.  The password is still never stored on disk; the fix does not reintroduce it.
+
+### Added
+
+**Visible, reportable diagnostics when recovery stalls.**  Because ambiguous failures are now retried indefinitely rather than forcing a re-auth, the logs make it obvious when something is genuinely stuck: after several consecutive transient auth-recovery failures the integration logs an escalating warning — stating that re-auth is being deliberately withheld, how long the trouble has lasted, the exact server response, and a link to file an issue — so a misclassified, truly-dead session can be spotted and reported instead of silently retrying forever.
+
 ## v5.1.2
 
 A bugfix release for Spain (and any market) hitting repeated re-authentication failures since v5.1.0.

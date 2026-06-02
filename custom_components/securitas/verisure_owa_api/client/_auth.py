@@ -117,6 +117,8 @@ class _AuthMixin(_ClientBase):
         else:
             self.login_timestamp = int(datetime.now().timestamp() * 1000)
 
+        self.note_auth_success()
+
     async def refresh_token(self) -> bool:
         """Refresh the authentication token. Returns True on success."""
         content = {
@@ -158,6 +160,7 @@ class _AuthMixin(_ClientBase):
         if refresh_data.get("refreshToken"):
             self._update_refresh_token(refresh_data["refreshToken"])
 
+        self.note_auth_success()
         return True
 
     async def logout(self) -> None:

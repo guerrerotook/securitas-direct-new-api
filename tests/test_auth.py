@@ -1,5 +1,6 @@
 """Tests for VerisureOwaClient authentication flow."""
 
+import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -8,6 +9,7 @@ import pytest
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     AuthenticationError,
+    SessionExpiredError,
     VerisureOwaError,
     TwoFactorRequiredError,
 )
@@ -215,17 +217,69 @@ class TestCheckAuthenticationToken:
         api.refresh_token.assert_awaited_once()
         api.login.assert_awaited_once()
 
-    async def test_expired_token_refresh_exception_falls_back_to_login(self, api):
+    async def test_transient_refresh_exception_propagates_no_login(self, api):
+        """A transient server error during refresh must NOT fall back to login
+        (which would launder it into a 'no password' credential failure).
+        It propagates so the coordinator retries next poll."""
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=VerisureOwaError("boom"))
+        api.refresh_token = AsyncMock(
+            side_effect=VerisureOwaError("boom", http_status=500)
+        )
+        api.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
+
+        api.login.assert_not_called()
+        assert api.consecutive_auth_recovery_failures == 1
+
+    async def test_genuine_refresh_exception_falls_back_to_login(self, api):
+        """A genuine token rejection (err 60067) falls back to login so a dead
+        token surfaces as a clean reauth signal."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        genuine = SessionExpiredError("Invalid Session", http_status=403)
+        genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        api.refresh_token = AsyncMock(side_effect=genuine)
         api.login = AsyncMock()
 
         await api._check_authentication_token()
 
-        api.refresh_token.assert_awaited_once()
         api.login.assert_awaited_once()
+        assert api.consecutive_auth_recovery_failures == 0
+
+    async def test_timeout_refresh_exception_propagates_as_owa_error(self, api):
+        """A raw asyncio.TimeoutError during refresh is wrapped as a
+        VerisureOwaError and propagated (transient), not funneled into login."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
+
+        api.login.assert_not_called()
+        assert api.consecutive_auth_recovery_failures == 1
+
+    async def test_timeout_wrapped_with_descriptive_message(self, api):
+        """A bare asyncio.TimeoutError is wrapped with a non-empty, descriptive
+        message so the propagated error and streak log are actionable."""
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError) as exc_info:
+            await api._check_authentication_token()
+
+        assert str(exc_info.value)  # non-empty
+        assert "TimeoutError" in str(exc_info.value)
 
     async def test_expired_token_no_refresh_value_calls_login(self, api):
         api.authentication_token = FAKE_JWT
@@ -464,15 +518,108 @@ class TestValidateDeviceEdgeCases:
 
 
 class TestRefreshTokenEdgeCases:
-    async def test_refresh_token_after_expired_calls_login(self, api):
-        """When refresh fails and token is expired, falls back to login."""
+    async def test_transient_refresh_error_propagates_no_login(self, api):
+        """A bare VerisureOwaError from refresh (no err code) is transient —
+        must propagate instead of falling back to login."""
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min  # expired
         api.refresh_token_value = "some-refresh-token"
         api.refresh_token = AsyncMock(side_effect=VerisureOwaError("Refresh failed"))
         api.login = AsyncMock()
 
-        await api._check_authentication_token()
+        with pytest.raises(VerisureOwaError):
+            await api._check_authentication_token()
 
         api.refresh_token.assert_awaited_once()
-        api.login.assert_awaited_once()
+        api.login.assert_not_called()
+
+
+# ── Auth-recovery streak counter ─────────────────────────────────────────────
+
+
+class TestAuthRecoveryStreak:
+    def test_starts_at_zero(self, api):
+        assert api.consecutive_auth_recovery_failures == 0
+
+    def test_record_increments_and_warns_first_time(self, api, caplog):
+        with caplog.at_level("WARNING"):
+            api.record_auth_recovery_failure(VerisureOwaError("boom", http_status=500))
+        assert api.consecutive_auth_recovery_failures == 1
+        assert "NOT forcing reauthentication" in caplog.text
+
+    def test_escalates_at_threshold_with_report_url(self, api, caplog):
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                api.record_auth_recovery_failure(
+                    VerisureOwaError("boom", http_status=500)
+                )
+        assert api.consecutive_auth_recovery_failures == 3
+        assert "github.com/guerrerotook/securitas-direct-new-api/issues" in caplog.text
+        assert "3 times" in caplog.text
+
+    def test_escalation_is_throttled(self, api, caplog):
+        with caplog.at_level("WARNING"):
+            for _ in range(10):
+                api.record_auth_recovery_failure(
+                    VerisureOwaError("boom", http_status=500)
+                )
+        escalations = caplog.text.count("deliberately NOT forcing")
+        assert escalations == 1
+
+    def test_note_success_resets_and_logs_recovery(self, api, caplog):
+        for _ in range(3):
+            api.record_auth_recovery_failure(VerisureOwaError("boom", http_status=500))
+        with caplog.at_level("INFO"):
+            api.note_auth_success()
+        assert api.consecutive_auth_recovery_failures == 0
+        assert "recovered after 3 transient" in caplog.text
+
+    def test_note_success_noop_when_no_streak(self, api, caplog):
+        with caplog.at_level("INFO"):
+            api.note_auth_success()
+        assert api.consecutive_auth_recovery_failures == 0
+        assert "recovered after" not in caplog.text
+
+    def test_stale_streak_decays_to_fresh(self, api, caplog, monkeypatch):
+        """A new failure long after the previous one starts a fresh streak,
+        not a misleading high count spanning the idle gap."""
+        # Seed a partial streak as if 2 failures happened, last one ~hours ago.
+        api.consecutive_auth_recovery_failures = 2
+        api._auth_streak_started = datetime.now() - timedelta(hours=3)
+        api._last_auth_failure = datetime.now() - timedelta(hours=3)
+
+        with caplog.at_level("WARNING"):
+            api.record_auth_recovery_failure(VerisureOwaError("boom", http_status=500))
+
+        # Treated as a fresh first failure, not count==3 escalation.
+        assert api.consecutive_auth_recovery_failures == 1
+        assert "deliberately NOT forcing" not in caplog.text
+
+    def test_continuous_failures_still_escalate(self, api, caplog):
+        """Back-to-back failures (no idle gap) still accumulate and escalate."""
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                api.record_auth_recovery_failure(
+                    VerisureOwaError("boom", http_status=500)
+                )
+        assert api.consecutive_auth_recovery_failures == 3
+        assert "deliberately NOT forcing" in caplog.text
+
+
+class TestStreakResetOnSuccess:
+    async def test_refresh_success_resets_streak(self, api, mock_execute):
+        api.consecutive_auth_recovery_failures = 4
+        mock_execute.return_value = refresh_response()
+
+        ok = await api.refresh_token()
+
+        assert ok is True
+        assert api.consecutive_auth_recovery_failures == 0
+
+    async def test_login_success_resets_streak(self, api, mock_execute):
+        api.consecutive_auth_recovery_failures = 4
+        mock_execute.return_value = login_response()
+
+        await api.login()
+
+        assert api.consecutive_auth_recovery_failures == 0

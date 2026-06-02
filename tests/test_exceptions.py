@@ -7,6 +7,7 @@ import pytest
 from custom_components.securitas.verisure_owa_api.exceptions import (
     APIConnectionError,
     APIResponseError,
+    AccountBlockedError,
     ArmingExceptionError,
     AuthenticationError,
     ImageCaptureError,
@@ -17,6 +18,8 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     TwoFactorRequiredError,
     UnexpectedStateError,
     WAFBlockedError,
+    _error_code_from_body,
+    is_genuine_auth_failure,
 )
 
 
@@ -215,3 +218,70 @@ class TestLogDetail:
         assert err.log_detail() == "late body"
         err.response_body = {"raw": "data"}
         assert "raw" in err.log_detail()
+
+
+# ── is_genuine_auth_failure ───────────────────────────────────────────────────
+
+
+def _with_err_code(err: VerisureOwaError, code: str) -> VerisureOwaError:
+    err.response_body = {"errors": [{"message": "x", "data": {"err": code}}]}
+    return err
+
+
+class TestIsGenuineAuthFailure:
+    def test_authentication_error_is_genuine(self):
+        assert is_genuine_auth_failure(AuthenticationError("bad creds")) is True
+
+    def test_account_blocked_is_genuine(self):
+        assert is_genuine_auth_failure(AccountBlockedError("blocked")) is True
+
+    def test_two_factor_required_is_genuine(self):
+        assert is_genuine_auth_failure(TwoFactorRequiredError("2fa")) is True
+
+    def test_err_60052_account_blocked_code_is_genuine(self):
+        err = _with_err_code(VerisureOwaError("blocked"), "60052")
+        assert is_genuine_auth_failure(err) is True
+
+    def test_err_60067_invalid_session_code_is_genuine(self):
+        err = _with_err_code(
+            SessionExpiredError("Invalid Session", http_status=403), "60067"
+        )
+        assert is_genuine_auth_failure(err) is True
+
+    def test_bare_403_session_expired_is_transient(self):
+        err = SessionExpiredError(
+            "Invalid session. Please, try again later.", http_status=403
+        )
+        assert is_genuine_auth_failure(err) is False
+
+    def test_500_server_error_is_transient(self):
+        assert (
+            is_genuine_auth_failure(VerisureOwaError("boom", http_status=500)) is False
+        )
+
+    def test_waf_block_is_transient(self):
+        assert is_genuine_auth_failure(WAFBlockedError("blocked")) is False
+
+    def test_js_crash_null_data_is_transient(self):
+        err = VerisureOwaError("Cannot read properties of undefined (reading 'it')")
+        err.response_body = {
+            "errors": [
+                {"message": "Cannot read properties of undefined (reading 'it')"}
+            ],
+            "data": {"xSRefreshLogin": None},
+        }
+        assert is_genuine_auth_failure(err) is False
+
+    def test_unknown_error_defaults_to_transient(self):
+        assert is_genuine_auth_failure(VerisureOwaError("mystery")) is False
+
+
+# ── _error_code_from_body ─────────────────────────────────────────────────────
+
+
+def test_error_code_from_body_extracts_and_stringifies():
+    assert _error_code_from_body({"errors": [{"data": {"err": "60052"}}]}) == "60052"
+    assert _error_code_from_body({"errors": [{"data": {"err": 60052}}]}) == "60052"
+    assert _error_code_from_body({"errors": []}) is None
+    assert _error_code_from_body("nope") is None
+    assert _error_code_from_body({"errors": [{"message": "x"}]}) is None
