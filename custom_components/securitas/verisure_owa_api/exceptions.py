@@ -125,3 +125,38 @@ class UnexpectedStateError(VerisureOwaError):
     def __init__(self, proto_code: str) -> None:
         self.proto_code = proto_code
         super().__init__(f"Unexpected protocol code: {proto_code!r}")
+
+
+# Vendor error codes that genuinely require re-authentication:
+# 60052 = account blocked; 60067 = invalid/expired session on refresh.
+_GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset({"60052", "60067"})
+
+
+def _error_code(err: VerisureOwaError) -> str | None:
+    """Best-effort extraction of the vendor ``err`` code from a response body."""
+    body = err.response_body
+    if not isinstance(body, dict):
+        return None
+    errors = body.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        data = errors[0].get("data")
+        if isinstance(data, dict):
+            code = data.get("err")
+            return str(code) if code is not None else None
+    return None
+
+
+def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
+    """True only for failures that genuinely require re-authentication.
+
+    Genuine (-> reauth): credential rejection, account blocked, 2FA required,
+    or an explicitly invalid/revoked token (err 60052 / 60067).
+
+    Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
+    "try again later" session error, and unrecognised null-data GraphQL errors
+    such as the xSRefreshLogin server crash -- is transient and must NOT trigger
+    a reauth prompt. Unknown failures default to transient (retry forever).
+    """
+    if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
+        return True
+    return _error_code(err) in _GENUINE_AUTH_ERROR_CODES
