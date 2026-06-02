@@ -565,6 +565,31 @@ class TestAuthRecoveryStreak:
         assert api.consecutive_auth_recovery_failures == 0
         assert "recovered after" not in caplog.text
 
+    def test_stale_streak_decays_to_fresh(self, api, caplog, monkeypatch):
+        """A new failure long after the previous one starts a fresh streak,
+        not a misleading high count spanning the idle gap."""
+        # Seed a partial streak as if 2 failures happened, last one ~hours ago.
+        api.consecutive_auth_recovery_failures = 2
+        api._auth_streak_started = datetime.now() - timedelta(hours=3)
+        api._last_auth_failure = datetime.now() - timedelta(hours=3)
+
+        with caplog.at_level("WARNING"):
+            api.record_auth_recovery_failure(VerisureOwaError("boom", http_status=500))
+
+        # Treated as a fresh first failure, not count==3 escalation.
+        assert api.consecutive_auth_recovery_failures == 1
+        assert "deliberately NOT forcing" not in caplog.text
+
+    def test_continuous_failures_still_escalate(self, api, caplog):
+        """Back-to-back failures (no idle gap) still accumulate and escalate."""
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                api.record_auth_recovery_failure(
+                    VerisureOwaError("boom", http_status=500)
+                )
+        assert api.consecutive_auth_recovery_failures == 3
+        assert "deliberately NOT forcing" in caplog.text
+
 
 class TestStreakResetOnSuccess:
     async def test_refresh_success_resets_streak(self, api, mock_execute):

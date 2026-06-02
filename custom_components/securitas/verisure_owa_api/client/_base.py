@@ -141,6 +141,7 @@ class _ClientBase:
         self.consecutive_auth_recovery_failures: int = 0
         self._auth_streak_started: datetime | None = None
         self._last_auth_escalation: datetime | None = None
+        self._last_auth_failure: datetime | None = None
 
         # Device configuration
         self.device_id: str = device_id
@@ -496,6 +497,7 @@ class _ClientBase:
         self.consecutive_auth_recovery_failures = 0
         self._auth_streak_started = None
         self._last_auth_escalation = None
+        self._last_auth_failure = None
 
     def record_auth_recovery_failure(self, err: VerisureOwaError) -> None:
         """Record a transient auth-recovery failure and log it.
@@ -505,6 +507,17 @@ class _ClientBase:
         reauth is being deliberately withheld and how to report a wrong call.
         """
         now = datetime.now()
+        # A streak represents *continuous* failures. If the previous failure was
+        # longer ago than the escalation interval, the problem cleared in between
+        # (e.g. polls succeeded on a still-valid token), so start a fresh streak
+        # rather than reporting a count that spans a long idle gap.
+        last_failure = self._last_auth_failure
+        if last_failure is not None and now - last_failure >= _AUTH_ESCALATION_INTERVAL:
+            self.consecutive_auth_recovery_failures = 0
+            self._auth_streak_started = None
+            self._last_auth_escalation = None
+        self._last_auth_failure = now
+
         is_first = self.consecutive_auth_recovery_failures == 0
         if is_first:
             self._auth_streak_started = now
