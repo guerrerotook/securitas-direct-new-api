@@ -115,7 +115,9 @@ const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars)
 // The (_\d+)? captures HA's auto-disambiguation suffix (_2, _3, ...)
 // when multiple installations produce the same default entity_id.
 const _FULL_IMAGE_ENTITY_ID_RE = /^camera\..*_full_image(_\d+)?$/;
-const _OUR_PLATFORMS = new Set(["securitas", "verisure_owa"]);
+// The integration domain is `securitas` (a rename to `verisure_owa` was
+// considered but reversed before release, so no install ever uses it).
+const _OUR_PLATFORMS = new Set(["securitas"]);
 
 export function findFullImageEntityIds(hass) {
   const ids = [];
@@ -124,6 +126,15 @@ export function findFullImageEntityIds(hass) {
     if (_FULL_IMAGE_ENTITY_ID_RE.test(eid)) ids.push(eid);
   }
   return ids;
+}
+
+// Card-picker suggestion hook: offer this card when the user selects one of our
+// camera entities (excluding the internal `_full_image` snapshot cameras).
+export function cameraEntitySuggestion(hass, entityId) {
+  if (!entityId.startsWith("camera.")) return null;
+  if (!_OUR_PLATFORMS.has(hass?.entities?.[entityId]?.platform)) return null;
+  if (_FULL_IMAGE_ENTITY_ID_RE.test(entityId)) return null;
+  return { config: { type: "custom:verisure-owa-camera-card", entity: entityId } };
 }
 
 class VerisureOwaCameraCardEditor extends HTMLElement {
@@ -521,6 +532,7 @@ if (!window.customCards.find(c => c.type === "verisure-owa-camera-card")) {
     name: TRANSLATIONS.en.card_name,
     description: TRANSLATIONS.en.card_description,
     preview: false,
+    getEntitySuggestion: cameraEntitySuggestion,
   });
 }
 /* v8 ignore stop */

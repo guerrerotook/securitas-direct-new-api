@@ -7,12 +7,12 @@ describe("findFullImageEntityIds", () => {
     expect(findFullImageEntityIds(makeHass())).toEqual([]);
   });
 
-  it("returns matching full-image cameras from our platforms", () => {
+  it("returns matching full-image cameras from our platform", () => {
     const hass = makeHass({
       entities: {
-        "camera.front_door_full_image": { platform: "verisure_owa" },
+        "camera.front_door_full_image": { platform: "securitas" },
         "camera.garden_full_image_2": { platform: "securitas" },
-        "camera.kitchen": { platform: "verisure_owa" },
+        "camera.kitchen": { platform: "securitas" },
         "camera.other_full_image": { platform: "generic" },
       },
     });
@@ -20,6 +20,16 @@ describe("findFullImageEntityIds", () => {
     expect(ids.sort()).toEqual(
       ["camera.front_door_full_image", "camera.garden_full_image_2"].sort(),
     );
+  });
+
+  it("ignores full-image cameras from the never-released verisure_owa domain", () => {
+    // The integration domain was briefly going to be renamed securitas →
+    // verisure_owa, but that was reversed before release, so no install ever
+    // registers entities under the verisure_owa platform.
+    const hass = makeHass({
+      entities: { "camera.front_door_full_image": { platform: "verisure_owa" } },
+    });
+    expect(findFullImageEntityIds(hass)).toEqual([]);
   });
 
   it("ignores entries without a platform field", () => {

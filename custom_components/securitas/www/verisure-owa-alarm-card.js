@@ -255,6 +255,22 @@ export function defaultArmState(hass, entityId, configStates) {
   return pool.length > 0 ? pool[0].key : "arm_away";
 }
 
+// Entity registry platform this integration registers entities under. The
+// domain is `securitas` (a rename to `verisure_owa` was reversed before
+// release, so no install ever uses it).
+const _OUR_PLATFORMS = new Set(["securitas"]);
+
+// Card-picker suggestion hook: when the user selects one of our alarm panels,
+// offer both the full card and the compact chip as variants.
+export function alarmEntitySuggestion(hass, entityId) {
+  if (!entityId.startsWith("alarm_control_panel.")) return null;
+  if (!_OUR_PLATFORMS.has(hass?.entities?.[entityId]?.platform)) return null;
+  return [
+    { config: { type: "custom:verisure-owa-alarm-card", entity: entityId } },
+    { config: { type: "custom:verisure-owa-alarm-chip", entity: entityId } },
+  ];
+}
+
 /**
  * Attaches pointer-based gesture listeners to `el`.
  *
@@ -714,7 +730,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
     // Arm / Disarm / Refresh buttons
     this.shadowRoot.querySelectorAll("[data-action]").forEach(btn => {
-      btn.addEventListener("click", (e) => {
+      btn.addEventListener("click", () => {
         const action = btn.dataset.action;
         this._handleAction(action, stateObj, codeFormat, codeArmRequired, hasCode, isArmed, entity);
       });
@@ -1703,7 +1719,6 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   _renderBadge() {
     if (!this._hass || !this._config) return;
 
-    const lang = this._hass.language || "en";
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) {
       this.shadowRoot.innerHTML = `<ha-icon icon="mdi:shield-alert" style="color:var(--error-color)"></ha-icon>`;
@@ -2141,6 +2156,7 @@ if (!window.customCards.find(c => c.type === "verisure-owa-alarm-card")) {
     name:        TRANSLATIONS.en.card_name,
     description: TRANSLATIONS.en.card_description,
     preview:     false,
+    getEntitySuggestion: alarmEntitySuggestion,
   });
 }
 if (!window.customCards.find(c => c.type === "verisure-owa-alarm-chip")) {

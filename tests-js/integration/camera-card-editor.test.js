@@ -24,10 +24,13 @@ describe("verisure-owa-camera-card-editor", () => {
         "camera.back_yard_full_image_2": makeCameraEntity(),
       },
       entities: {
-        "camera.front_door": { platform: "verisure_owa" },
-        "camera.front_door_full_image": { platform: "verisure_owa" },
+        "camera.front_door": { platform: "securitas" },
+        "camera.front_door_full_image": { platform: "securitas" },
         "camera.back_yard": { platform: "securitas" },
         "camera.back_yard_full_image_2": { platform: "securitas" },
+        // A full-image camera from another integration must NOT be excluded —
+        // only entities on our domain (securitas) count.
+        "camera.neighbour_full_image": { platform: "generic" },
       },
     });
     document.body.appendChild(editor);
@@ -39,7 +42,7 @@ describe("verisure-owa-camera-card-editor", () => {
     const [field] = entityForm.schema;
     expect(field.name).toBe("entity");
     expect(field.selector.entity.domain).toBe("camera");
-    // Both full-image variants (one per supported platform alias) must be excluded.
+    // Both of our full-image variants must be excluded; the foreign one must not.
     expect(field.selector.entity.exclude_entities).toEqual(
       expect.arrayContaining(["camera.front_door_full_image", "camera.back_yard_full_image_2"]),
     );
@@ -54,7 +57,7 @@ describe("verisure-owa-camera-card-editor", () => {
     editor.setConfig({});
     editor.hass = makeHass({
       states: { "camera.front_door": makeCameraEntity() },
-      entities: { "camera.front_door": { platform: "verisure_owa" } },
+      entities: { "camera.front_door": { platform: "securitas" } },
     });
     document.body.appendChild(editor);
 
@@ -72,7 +75,7 @@ describe("verisure-owa-camera-card-editor", () => {
     editor.setConfig({});
     editor.hass = makeHass({
       states: { "camera.front_door": makeCameraEntity() },
-      entities: { "camera.front_door": { platform: "verisure_owa" } },
+      entities: { "camera.front_door": { platform: "securitas" } },
     });
     document.body.appendChild(editor);
 

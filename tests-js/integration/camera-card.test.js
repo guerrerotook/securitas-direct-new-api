@@ -203,8 +203,8 @@ describe("verisure-owa-camera-card click → more-info", () => {
         },
       },
       entities: {
-        [ENTITY]: { device_id: "dev1", platform: "verisure_owa" },
-        [FULL]: { device_id: "dev1", platform: "verisure_owa" },
+        [ENTITY]: { device_id: "dev1", platform: "securitas" },
+        [FULL]: { device_id: "dev1", platform: "securitas" },
       },
     });
     const card = mountCameraCard({ hass });
@@ -219,7 +219,7 @@ describe("verisure-owa-camera-card click → more-info", () => {
   it("uses the device's name_by_user as display name when no config.name", () => {
     const hass = makeHass({
       states: { [ENTITY]: makeCameraEntity() },
-      entities: { [ENTITY]: { device_id: "dev1", platform: "verisure_owa" } },
+      entities: { [ENTITY]: { device_id: "dev1", platform: "securitas" } },
       devices: { dev1: { name: "Camera", name_by_user: "Front Hall" } },
     });
     const card = mountCameraCard({ hass });
@@ -229,7 +229,7 @@ describe("verisure-owa-camera-card click → more-info", () => {
   it("falls back to device.name when name_by_user is unset", () => {
     const hass = makeHass({
       states: { [ENTITY]: makeCameraEntity() },
-      entities: { [ENTITY]: { device_id: "dev1", platform: "verisure_owa" } },
+      entities: { [ENTITY]: { device_id: "dev1", platform: "securitas" } },
       devices: { dev1: { name: "Hallway" } },
     });
     const card = mountCameraCard({ hass });
@@ -303,7 +303,7 @@ describe("verisure-owa-camera-card-editor name field", () => {
     editor.setConfig({ entity: "camera.front_door" });
     editor.hass = makeHass({
       states: { "camera.front_door": makeCameraEntity() },
-      entities: { "camera.front_door": { platform: "verisure_owa" } },
+      entities: { "camera.front_door": { platform: "securitas" } },
     });
     document.body.appendChild(editor);
 
@@ -325,7 +325,7 @@ describe("verisure-owa-camera-card-editor name field", () => {
     editor.setConfig({ entity: "camera.front_door", name: "Old" });
     editor.hass = makeHass({
       states: { "camera.front_door": makeCameraEntity() },
-      entities: { "camera.front_door": { platform: "verisure_owa" } },
+      entities: { "camera.front_door": { platform: "securitas" } },
     });
     document.body.appendChild(editor);
 
@@ -346,7 +346,7 @@ describe("verisure-owa-camera-card-editor name field", () => {
     editor.setConfig({ entity: "camera.front_door" });
     editor.hass = makeHass({
       states: { "camera.front_door": makeCameraEntity() },
-      entities: { "camera.front_door": { platform: "verisure_owa" } },
+      entities: { "camera.front_door": { platform: "securitas" } },
     });
     document.body.appendChild(editor);
 
@@ -382,7 +382,7 @@ describe("verisure-owa-camera-card defensive defaults", () => {
   it("uses config.name when both name and device entry are present", () => {
     const hass = makeHass({
       states: { [ENTITY]: makeCameraEntity() },
-      entities: { [ENTITY]: { device_id: "dev1", platform: "verisure_owa" } },
+      entities: { [ENTITY]: { device_id: "dev1", platform: "securitas" } },
       devices: { dev1: { name: "Device" } },
     });
     const card = mountCameraCard({ config: { name: "Override" }, hass });
@@ -392,7 +392,7 @@ describe("verisure-owa-camera-card defensive defaults", () => {
   it("_findFullEntity returns null when the camera entry has no device_id", () => {
     const hass = makeHass({
       states: { [ENTITY]: makeCameraEntity() },
-      entities: { [ENTITY]: { platform: "verisure_owa" } },
+      entities: { [ENTITY]: { platform: "securitas" } },
     });
     const card = mountCameraCard({ hass });
     // Without a device_id the lookup returns null and the click goes to the thumbnail.
@@ -406,8 +406,8 @@ describe("verisure-owa-camera-card defensive defaults", () => {
 
   it("_entitiesByDeviceId reuses its cache when hass.entities is unchanged", () => {
     const entities = {
-      [ENTITY]: { device_id: "dev1", platform: "verisure_owa" },
-      "camera.test_full_image": { device_id: "dev1", platform: "verisure_owa" },
+      [ENTITY]: { device_id: "dev1", platform: "securitas" },
+      "camera.test_full_image": { device_id: "dev1", platform: "securitas" },
     };
     const hass = makeHass({
       states: { [ENTITY]: makeCameraEntity() },
@@ -444,8 +444,8 @@ describe("verisure-owa-camera-card static helpers", () => {
         "light.kitchen": { state: "on", attributes: {} },
       },
       entities: {
-        "camera.x_full_image": { platform: "verisure_owa" },
-        "camera.front_door": { platform: "verisure_owa" },
+        "camera.x_full_image": { platform: "securitas" },
+        "camera.front_door": { platform: "securitas" },
       },
     });
     const stub = ctor.getStubConfig(hass);

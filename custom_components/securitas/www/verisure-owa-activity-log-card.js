@@ -316,6 +316,23 @@ export function hassLang(hass) {
   return hass?.locale?.language || hass?.language || "en";
 }
 
+// Entity registry platform this integration registers entities under. The
+// domain is `securitas` (a rename to `verisure_owa` was reversed before
+// release, so no install ever uses it).
+const _OUR_PLATFORMS = new Set(["securitas"]);
+
+// Card-picker suggestion hook: offer this card when the user selects one of our
+// activity-log sensors (identified by their `events` attribute array, the same
+// shape the editor detects).
+export function activityLogEntitySuggestion(hass, entityId) {
+  if (!entityId.startsWith("sensor.")) return null;
+  if (!_OUR_PLATFORMS.has(hass?.entities?.[entityId]?.platform)) return null;
+  if (!Array.isArray(hass?.states?.[entityId]?.attributes?.events)) return null;
+  return {
+    config: { type: "custom:verisure-owa-activity-log-card", entity: entityId },
+  };
+}
+
 const _RTF_CACHE = new Map();
 function _rtf(lang) {
   let f = _RTF_CACHE.get(lang);
@@ -1150,6 +1167,7 @@ if (!window.customCards.find((c) => c.type === "verisure-owa-activity-log-card")
     name: "Verisure OWA Activity Log Card",
     description: "Shows recent activity log entries from a Verisure OWA installation.",
     preview: false,
+    getEntitySuggestion: activityLogEntitySuggestion,
     documentationURL:
       "https://github.com/guerrerotook/securitas-direct-new-api",
   });
