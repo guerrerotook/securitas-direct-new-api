@@ -59,7 +59,7 @@ def main() -> int:
     if not strings_file.exists():
         sys.exit(f"check_translations: no strings.json in {component}")
 
-    reference = flatten(json.loads(strings_file.read_text()))
+    reference = flatten(json.loads(strings_file.read_text(encoding="utf-8")))
     trans_dir = component / "translations"
     if not trans_dir.is_dir():
         print("check_translations: no translations/ dir — nothing to check")
@@ -67,7 +67,7 @@ def main() -> int:
 
     had_error = False
     for path in sorted(trans_dir.glob("*.json")):
-        keys = flatten(json.loads(path.read_text()))
+        keys = flatten(json.loads(path.read_text(encoding="utf-8")))
         stale = sorted(keys - reference)
         missing = sorted(reference - keys)
         if stale:

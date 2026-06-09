@@ -29,7 +29,12 @@ DOC_PREFIXES = ("readme", "docs/", "changelog")
 
 def git(*args: str) -> str:
     out = subprocess.run(
-        ["git", *args], cwd=ROOT, capture_output=True, text=True, check=True
+        ["git", *args],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return out.stdout
 
@@ -45,15 +50,20 @@ def component_dir() -> Path | None:
 def services_keys(ref: str, path: str) -> set[str]:
     """Top-level service keys in services.yaml at a given git ref ('' = worktree)."""
     try:
-        text = git("show", f"{ref}:{path}") if ref else (ROOT / path).read_text()
+        text = (
+            git("show", f"{ref}:{path}")
+            if ref
+            else (ROOT / path).read_text(encoding="utf-8")
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return set()
     # services.yaml top-level keys are the service names — read them without a
     # yaml dependency: lines at column 0 that aren't comments and end in ':'.
     keys = set()
     for line in text.splitlines():
-        if line and line[0] not in " #\t" and ":" in line:
-            keys.add(line.split(":", 1)[0].strip())
+        stripped = line.rstrip()
+        if stripped and stripped[0] not in " #\t" and stripped.endswith(":"):
+            keys.add(stripped[:-1].strip())
     return keys
 
 
@@ -68,7 +78,11 @@ def main() -> int:
     status = git("diff", "--name-status", diff_range).splitlines()
     changed = [line.split("\t") for line in status if line.strip()]
 
-    docs_touched = any(parts[-1].lower().startswith(DOC_PREFIXES) for parts in changed)
+    # Check every path field (parts[0] is the A/D/R status) so a rename that
+    # moves a docs file is counted via its old path too, not just the new one.
+    docs_touched = any(
+        p.lower().startswith(DOC_PREFIXES) for parts in changed for p in parts[1:]
+    )
 
     structural: list[str] = []
     edited_py = False

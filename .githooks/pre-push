@@ -30,6 +30,9 @@ default_base() {
   done
   echo "HEAD~1"
 }
+# Single-ref assumption: a push of multiple refs at once (e.g. `git push --all`)
+# feeds several stdin lines and only the last is gated here. That's fine for the
+# normal one-branch-at-a-time flow; CI is the backstop for bulk pushes.
 range=""
 while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue
@@ -41,6 +44,12 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   fi
 done
 [ -n "$range" ] || range="$(default_base)..HEAD"
+
+# The remote SHA in the range may be absent locally (shallow clone, not fetched
+# recently) — fall back to a base we know exists so downstream consumers of the
+# range (e.g. check_docs.py, which has no fallback of its own) don't crash.
+range_base="${range%%..*}"
+git rev-parse --verify --quiet "${range_base}^{commit}" >/dev/null 2>&1 || range="$(default_base)..HEAD"
 
 changed="$(git diff --name-only "$range" 2>/dev/null || git diff --name-only HEAD~1)"
 echo "pre-push: $(printf '%s\n' "$changed" | grep -c . || true) changed file(s) in range $range"
@@ -67,19 +76,19 @@ fi
 # --- Step 2: i18n drift ---
 if [ -n "$i18n_changed$py_changed" ]; then
   step "Translations"
-  if python3 "$ROOT/scripts/check_translations.py"; then pass "Translations"
+  if need python3 && python3 "$ROOT/scripts/check_translations.py"; then pass "Translations"
   else fail "Translations — see above"; fi
 fi
 
 # --- Step 3: docs drift ---
 step "Docs"
-if python3 "$ROOT/scripts/check_docs.py" "$range"; then pass "Docs"
+if need python3 && python3 "$ROOT/scripts/check_docs.py" "$range"; then pass "Docs"
 else fail "Docs — structural change needs a docs update"; fi
 
 # --- Step 4: Python unit tests (slower; only if Python changed) ---
 if [ -n "$py_changed" ]; then
   step "Python unit tests"
-  if need python && (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; python -m pytest tests/ -m "not integration"); then
+  if need python3 && (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; python3 -m pytest tests/ -m "not integration"); then
     pass "Python unit tests"
   else
     fail "Python unit tests"
