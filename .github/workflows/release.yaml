@@ -103,3 +103,32 @@ jobs:
             --title "v$VERSION" \
             --generate-notes \
             $prerelease_flag
+
+      - name: Roll branch forward to the next minor (final releases only)
+        # Skip for pre-releases: only a finished release rolls the version
+        # forward, so unreleased work no longer carries the just-released
+        # version. Pushes directly to the dispatched branch, the same way the
+        # "Commit, tag, push" step above already does.
+        if: ${{ inputs.prerelease != true }}
+        run: |
+          NEXT=$(python3 -c "import os; mj, mn, _ = os.environ['VERSION'].split('-')[0].split('.'); print(f'{mj}.{int(mn)+1}.0')")
+          echo "Final release — rolling $BRANCH forward to development version $NEXT"
+          NEXT="$NEXT" python3 <<'PY'
+          import os, re, sys
+          new_version = os.environ["NEXT"]
+          path = "custom_components/securitas/manifest.json"
+          with open(path) as f:
+              content = f.read()
+          updated, n = re.subn(
+              r'("version"\s*:\s*)"[^"]+"',
+              lambda m: m.group(1) + f'"{new_version}"',
+              content,
+          )
+          if n != 1:
+              sys.exit(f"Expected exactly one version field in {path}, found {n}")
+          with open(path, "w") as f:
+              f.write(updated)
+          PY
+          git add custom_components/securitas/manifest.json
+          git commit -m "chore: bump version to $NEXT for development"
+          git push origin "HEAD:$BRANCH"
