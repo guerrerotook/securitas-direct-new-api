@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Pre-push gate for securitas-direct-new-api (Python integration + a Lovelace
+# card with eslint/prettier/vitest). Strategy: cheap lint first, then drift
+# checks (i18n, docs), then the slower tests — and only for the areas whose
+# files actually changed in this push.
+#
+# Python tests run UNIT-only here (the integration suite + the combined 90%
+# coverage gate stay in CI, which also runs the min/dev HA matrix). Tests run
+# against the HA-stable installed in this environment (the devcontainer).
+#
+# Install once per clone:  bash bin/install-hooks.sh
+# Bypass in an emergency:  git push --no-verify
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+LOG_FILE="/tmp/securitas-pre-push.log"
+failed=0
+exec > >(tee "$LOG_FILE") 2>&1
+
+step() { printf '\n\033[1;34m▶ %s\033[0m\n' "$1"; }
+fail() { printf '\033[1;31m✗ %s\033[0m\n' "$1"; failed=1; }
+pass() { printf '\033[1;32m✓ %s\033[0m\n' "$1"; }
+need() { command -v "$1" >/dev/null 2>&1 || { fail "$1 not found — are you pushing from the devcontainer? (deps expected there)"; return 1; }; }
+
+# --- Compute the precise diff range from the refs git feeds us on stdin ---
+ZERO=0000000000000000000000000000000000000000
+default_base() {
+  for ref in origin/main main origin/HEAD; do
+    git rev-parse --verify --quiet "$ref" >/dev/null 2>&1 && { echo "$ref"; return; }
+  done
+  echo "HEAD~1"
+}
+range=""
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue
+  if [ "$remote_sha" = "$ZERO" ]; then
+    base="$(git merge-base "$(default_base)" "$local_sha" 2>/dev/null || default_base)"
+    range="${base}..${local_sha}"
+  else
+    range="${remote_sha}..${local_sha}"
+  fi
+done
+[ -n "$range" ] || range="$(default_base)..HEAD"
+
+changed="$(git diff --name-only "$range" 2>/dev/null || git diff --name-only HEAD~1)"
+echo "pre-push: $(printf '%s\n' "$changed" | grep -c . || true) changed file(s) in range $range"
+
+py_changed=$(printf '%s\n' "$changed"   | grep -E '^(custom_components/securitas/|tests/).*\.py$' || true)
+fe_changed=$(printf '%s\n' "$changed"   | grep -E '^(custom_components/securitas/www/|tests-js/)' || true)
+i18n_changed=$(printf '%s\n' "$changed" | grep -E '^custom_components/securitas/(strings\.json|translations/)' || true)
+
+# --- Step 1: fast lint/format + types (Python) ---
+if [ -n "$py_changed" ]; then
+  step "Ruff format"
+  if need ruff && ruff format --check .; then pass "Ruff format"
+  else fail "Ruff format — run: ruff format ."; fi
+
+  step "Ruff lint"
+  if need ruff && ruff check .; then pass "Ruff lint"
+  else fail "Ruff lint — run: ruff check --fix ."; fi
+
+  step "Pyright"
+  if need pyright && pyright custom_components/; then pass "Pyright"
+  else fail "Pyright — see above"; fi
+fi
+
+# --- Step 2: i18n drift ---
+if [ -n "$i18n_changed$py_changed" ]; then
+  step "Translations"
+  if python3 "$ROOT/scripts/check_translations.py"; then pass "Translations"
+  else fail "Translations — see above"; fi
+fi
+
+# --- Step 3: docs drift ---
+step "Docs"
+if python3 "$ROOT/scripts/check_docs.py" "$range"; then pass "Docs"
+else fail "Docs — structural change needs a docs update"; fi
+
+# --- Step 4: Python unit tests (slower; only if Python changed) ---
+if [ -n "$py_changed" ]; then
+  step "Python unit tests"
+  if need python && (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; python -m pytest tests/ -m "not integration"); then
+    pass "Python unit tests"
+  else
+    fail "Python unit tests"
+  fi
+fi
+
+# --- Step 5: frontend lint + tests (only if the card changed) ---
+if [ -n "$fe_changed" ]; then
+  step "Frontend lint"
+  if need npm && npm run lint; then pass "Frontend lint"
+  else fail "Frontend lint — run: npm run lint:fix"; fi
+
+  step "Frontend tests"
+  if need npm && npm test; then pass "Frontend tests"
+  else fail "Frontend tests"; fi
+fi
+
+# --- Result ---
+echo ""
+if [ "$failed" -ne 0 ]; then
+  printf '\033[1;31m✗ Pre-push checks failed. Push aborted.\033[0m\n\n\033[1mFailures:\033[0m\n'
+  perl -pe 's/\e\[[0-9;]*m//g' "$LOG_FILE" | grep -E "^✗ " | sed 's/^/  /'
+  printf '\n\033[1mFull log:\033[0m %s\n' "$LOG_FILE"
+  exit 1
+fi
+printf '\033[1;32m✓ All pre-push checks passed.\033[0m\n'
