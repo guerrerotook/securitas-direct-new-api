@@ -310,9 +310,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # arm/disarm refuses cleanly instead of acting on a stale cached state.
         if is_proto_letter(proto_code):
             self._last_proto_code = proto_code
-        # A fresh authoritative status reconciles any provisional
-        # (accepted-but-unconfirmed) arm/disarm. (#508)
-        self._reconcile_provisional()
+            # A fresh authoritative status (a real proto letter) reconciles
+            # any provisional (accepted-but-unconfirmed) arm/disarm — gated on
+            # is_proto_letter so an error/placeholder status doesn't clear it,
+            # mirroring the axis sub-panel override. (#508)
+            self._reconcile_provisional()
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
             self._last_unmapped_logged = None
