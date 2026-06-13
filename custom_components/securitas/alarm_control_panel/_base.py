@@ -310,6 +310,23 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # arm/disarm refuses cleanly instead of acting on a stale cached state.
         if is_proto_letter(proto_code):
             self._last_proto_code = proto_code
+        # A fresh authoritative status reconciles any provisional
+        # (accepted-but-unconfirmed) arm/disarm: clear the flag and dismiss
+        # the unconfirmed notification. (#508)
+        if self._attr_extra_state_attributes.get("state_provisional"):
+            self._set_state_provisional(False)
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="persistent_notification",
+                    service="dismiss",
+                    service_data={
+                        "notification_id": (
+                            f"{DOMAIN}.operation_unconfirmed_"
+                            f"{self.installation.number}"
+                        ),
+                    },
+                )
+            )
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
             self._last_unmapped_logged = None

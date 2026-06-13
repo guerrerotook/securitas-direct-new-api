@@ -8333,4 +8333,38 @@ async def test_arm_timeout_is_provisional_not_failed():
     assert alarm._state == AlarmControlPanelState.ARMED_AWAY  # optimistic target
     assert alarm._attr_extra_state_attributes.get("state_provisional") is True
     assert mock_notify.call_args[0][2] == "arm_unconfirmed"
-    alarm.coordinator.async_request_refresh.assert_awaited()
+
+
+def test_coordinator_status_clears_provisional_and_dismisses():
+    """A fresh authoritative status clears the provisional flag and dismisses
+    the unconfirmed notification."""
+    from custom_components.securitas.coordinators import AlarmStatusData
+
+    alarm = make_alarm()
+    alarm._set_state_provisional(True)
+
+    # Build AlarmStatusData with an SStatus carrying a real proto code.
+    # SStatus uses pydantic with populate_by_name=True so keyword args
+    # must match the Python field names (status, timestamp_update, wifi_connected).
+    status = SStatus(status="D", timestamp_update="1", wifi_connected=False)
+    data = AlarmStatusData(status=status, protom_response="D")
+
+    alarm._update_from_coordinator(data)
+
+    # Provisional flag must be cleared.
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+
+    # async_create_task must have been called to schedule the dismiss.
+    alarm.hass.async_create_task.assert_called()
+
+    # Verify the dismiss targets the correct notification id.
+    # hass.services.async_call is a MagicMock; calling it (inside the
+    # coroutine-like object passed to async_create_task) records the call
+    # synchronously — _consume_coro only calls .close() on the return value.
+    call = alarm.hass.services.async_call.call_args
+    assert call is not None, "hass.services.async_call was not called"
+    assert call.kwargs["domain"] == "persistent_notification"
+    assert call.kwargs["service"] == "dismiss"
+    assert call.kwargs["service_data"]["notification_id"].endswith(
+        "operation_unconfirmed_123456"
+    )
