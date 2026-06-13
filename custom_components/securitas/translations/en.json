@@ -90,7 +90,7 @@
                             "operation_poll_timeout": "Operation poll timeout (seconds)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm before showing the new state as provisional. Raise this on slow backends (e.g. Italy)."
+                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm action. Raise this if you get timeout warnings."
                         }
                     }
                 }
@@ -148,7 +148,7 @@
                             "operation_poll_timeout": "Operation poll timeout (seconds)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm before showing the new state as provisional. Raise this on slow backends (e.g. Italy)."
+                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm action. Raise this if you get timeout warnings."
                         }
                     }
                 }

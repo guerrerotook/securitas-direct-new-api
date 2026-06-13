@@ -68,7 +68,7 @@
                             "operation_poll_timeout": "Délai d'attente de confirmation (secondes)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Durée d'attente de la confirmation d'armement/désarmement par le panneau avant d'afficher le nouvel état comme provisoire. Augmentez-la sur les serveurs lents (p. ex. l'Italie)."
+                            "operation_poll_timeout": "Durée d'attente de la confirmation d'une action d'armement/désarmement par le panneau. Augmentez-la si vous recevez des avertissements de délai dépassé."
                         }
                     },
                     "pin": {
@@ -126,7 +126,7 @@
                             "operation_poll_timeout": "Délai d'attente de confirmation (secondes)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Durée d'attente de la confirmation d'armement/désarmement par le panneau avant d'afficher le nouvel état comme provisoire. Augmentez-la sur les serveurs lents (p. ex. l'Italie)."
+                            "operation_poll_timeout": "Durée d'attente de la confirmation d'une action d'armement/désarmement par le panneau. Augmentez-la si vous recevez des avertissements de délai dépassé."
                         }
                     },
                     "pin": {

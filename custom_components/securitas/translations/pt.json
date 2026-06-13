@@ -68,7 +68,7 @@
                             "operation_poll_timeout": "Tempo limite de confirmação (segundos)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Quanto tempo aguardar a confirmação de armar/desarmar pelo painel antes de mostrar o novo estado como provisório. Aumente em servidores lentos (por exemplo, Itália)."
+                            "operation_poll_timeout": "Quanto tempo aguardar a confirmação de uma ação de armar/desarmar pelo painel. Aumente se receber avisos de tempo limite."
                         }
                     },
                     "pin": {
@@ -126,7 +126,7 @@
                             "operation_poll_timeout": "Tempo limite de confirmação (segundos)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Quanto tempo aguardar a confirmação de armar/desarmar pelo painel antes de mostrar o novo estado como provisório. Aumente em servidores lentos (por exemplo, Itália)."
+                            "operation_poll_timeout": "Quanto tempo aguardar a confirmação de uma ação de armar/desarmar pelo painel. Aumente se receber avisos de tempo limite."
                         }
                     },
                     "pin": {

@@ -68,7 +68,7 @@
                             "operation_poll_timeout": "Timeout di conferma operazione (secondi)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un inserimento/disinserimento prima di mostrare il nuovo stato come provvisorio. Aumentalo su backend lenti (es. Italia)."
+                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un'azione di inserimento/disinserimento. Aumentalo se ricevi avvisi di timeout."
                         }
                     },
                     "pin": {
@@ -126,7 +126,7 @@
                             "operation_poll_timeout": "Timeout di conferma operazione (secondi)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un inserimento/disinserimento prima di mostrare il nuovo stato come provvisorio. Aumentalo su backend lenti (es. Italia)."
+                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un'azione di inserimento/disinserimento. Aumentalo se ricevi avvisi di timeout."
                         }
                     },
                     "pin": {

@@ -81,6 +81,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Activity Log and Events** | Poll the activity log once per minute in the background | No | Off by default: the log refreshes on demand from the card, and remote events (someone arming at the panel, an intrusion, a power cut) don't fire on the `verisure_owa_activity` bus. Turn it on if you want every event to fire — see [How often it refreshes](#how-often-it-refreshes). |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
+| | Operation poll timeout | 120s | How long to wait for the panel to confirm an arm/disarm action before treating it as accepted-but-unconfirmed (range 60–300s). Raise this if arm/disarm operations log `not confirmed within timeout` warnings. |
 
 ## Alarm State Mappings
 
@@ -490,6 +491,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
   - **Increase the API request delay** — The **Delay between API requests** (default: 2 seconds) controls the minimum gap between consecutive API calls. Increasing this to 4–5 seconds reduces request bursts.
   - If you have **multiple installations** on one account, each one polls independently, multiplying the request rate. All API requests to the same country domain are serialized through a shared queue, which helps, but the total volume still increases with each installation.
 - **Alarm shows wrong state after using the Verisure app** — Periodic polling reads the last known status from the Verisure server, which may take a moment to reflect changes made via the app. Press the **Refresh** button to force an immediate panel check.
+- **Arm/disarm logs `not confirmed within timeout`** — On a slow or congested backend the panel can accept an arm/disarm but not confirm it within the poll window. The integration shows the **intended** state provisionally (with a "… not confirmed" notification) and reconciles automatically on the next status read — it no longer reverts to the previous state or reports a hard failure. If this happens often, raise the **Operation poll timeout** under **Configure → Advanced**.
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
 - **2FA issues** — If 2FA fails, remove and re-add the integration; you'll be prompted for a new SMS code. If that doesn't work, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.

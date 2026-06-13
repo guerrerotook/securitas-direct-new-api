@@ -68,7 +68,7 @@
                             "operation_poll_timeout": "Temps d'espera de confirmació (segons)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi un armat/desarmat abans de mostrar el nou estat com a provisional. Augmenta'l en servidors lents (p. ex. Itàlia)."
+                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi una acció d'armat/desarmat. Augmenta'l si reps avisos de temps d'espera esgotat."
                         }
                     },
                     "pin": {
@@ -126,7 +126,7 @@
                             "operation_poll_timeout": "Temps d'espera de confirmació (segons)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi un armat/desarmat abans de mostrar el nou estat com a provisional. Augmenta'l en servidors lents (p. ex. Itàlia)."
+                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi una acció d'armat/desarmat. Augmenta'l si reps avisos de temps d'espera esgotat."
                         }
                     },
                     "pin": {

@@ -68,7 +68,7 @@
                             "operation_poll_timeout": "Tiempo de espera de confirmación (segundos)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme un armado/desarmado antes de mostrar el nuevo estado como provisional. Auméntalo en servidores lentos (p. ej. Italia)."
+                            "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme una acción de armado/desarmado. Auméntalo si recibes avisos de tiempo de espera agotado."
                         }
                     },
                     "pin": {
@@ -126,7 +126,7 @@
                             "operation_poll_timeout": "Tiempo de espera de confirmación (segundos)"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme un armado/desarmado antes de mostrar el nuevo estado como provisional. Auméntalo en servidores lentos (p. ej. Italia)."
+                            "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme una acción de armado/desarmado. Auméntalo si recibes avisos de tiempo de espera agotado."
                         }
                     },
                     "pin": {
