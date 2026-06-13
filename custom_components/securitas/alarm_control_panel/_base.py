@@ -888,6 +888,24 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 alias="Disarmed",
                 context=user_context,
             )
+        except OperationTimeoutError as err:
+            # Command accepted (xSDisarmPanel res: OK) but the confirmation
+            # poll didn't resolve within poll_timeout. The panel is almost
+            # certainly actioning it (issue #508, IT backend). Reflect the
+            # target optimistically (fail-safe) and let the coordinator's
+            # xSStatus read reconcile — do NOT roll back or report a failure.
+            self._set_waf_blocked(False)
+            self._set_state_provisional(True)
+            self.update_status_alarm(self._optimistic_status(target))
+            _LOGGER.warning(
+                "Disarm not confirmed within timeout for %s; state provisional, "
+                "awaiting reconciliation: %s",
+                self.installation.number,
+                err.log_detail(),
+            )
+            self._notify_operation_unconfirmed("disarm_unconfirmed")
+            self.async_write_ha_state()
+            await self.coordinator.async_request_refresh()
         except VerisureOwaError as err:
             self._state = self._last_state
             _LOGGER.error(
