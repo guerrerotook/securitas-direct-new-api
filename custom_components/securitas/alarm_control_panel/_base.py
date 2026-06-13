@@ -321,8 +321,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     service="dismiss",
                     service_data={
                         "notification_id": (
-                            f"{DOMAIN}.operation_unconfirmed_"
-                            f"{self.installation.number}"
+                            f"{DOMAIN}.operation_unconfirmed_{self.installation.number}"
                         ),
                     },
                 )
@@ -827,9 +826,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         code, then disarmed, if the target has no modelled proto letter.
         """
         proto = (
-            ALARM_STATE_TO_PROTO.get(target)
-            or self._last_proto_code
-            or PROTO_DISARMED
+            ALARM_STATE_TO_PROTO.get(target) or self._last_proto_code or PROTO_DISARMED
         )
         return OperationStatus(protom_response=proto)
 

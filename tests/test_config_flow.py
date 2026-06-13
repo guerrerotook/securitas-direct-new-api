@@ -2679,8 +2679,12 @@ async def test_options_init_prefills_saved_operation_poll_timeout(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "init"
 
-    marker = _section_inner_marker(result["data_schema"], CONF_ADVANCED, CONF_OPERATION_POLL_TIMEOUT)
-    assert marker is not None, "operation_poll_timeout field not found in advanced section"
+    marker = _section_inner_marker(
+        result["data_schema"], CONF_ADVANCED, CONF_OPERATION_POLL_TIMEOUT
+    )
+    assert marker is not None, (
+        "operation_poll_timeout field not found in advanced section"
+    )
     assert marker.default() == saved_value, (
         f"Expected pre-filled default {saved_value!r}, got {marker.default()!r}. "
         "CONF_OPERATION_POLL_TIMEOUT is missing from the async_step_init defaults dict."
