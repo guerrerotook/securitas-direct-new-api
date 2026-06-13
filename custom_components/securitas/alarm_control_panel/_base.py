@@ -880,6 +880,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
+        if self._operation_in_progress:
+            _LOGGER.debug(
+                "Disarm ignored for %s: an operation is already in progress",
+                self.installation.number,
+            )
+            return
         await self._dismiss_pending_force_context_on_siblings(
             reason=DISMISSAL_REASON_USER_DISARM,
             new_mode="disarmed",
@@ -953,6 +959,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         bypassed_exceptions: list[dict[str, Any]] | None = None,
     ) -> None:
         """Set the arm state using the command resolver."""
+        if self._operation_in_progress:
+            _LOGGER.debug(
+                "Arm ignored for %s: an operation is already in progress",
+                self.installation.number,
+            )
+            return
         # Capture the calling user's context up-front — HA expires
         # `self._context` ~1 s after async_set_context, and the arm
         # transition + state writes below take longer than that.

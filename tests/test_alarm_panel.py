@@ -8368,3 +8368,32 @@ def test_coordinator_status_clears_provisional_and_dismisses():
     assert call.kwargs["service_data"]["notification_id"].endswith(
         "operation_unconfirmed_123456"
     )
+
+
+async def test_disarm_reentry_guard_ignores_overlapping_call():
+    """A second disarm while one is in progress is ignored (no duplicate DARM)."""
+    from unittest.mock import AsyncMock
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "Q"
+    alarm._operation_in_progress = True  # simulate an in-flight operation
+    alarm.client.disarm_alarm = AsyncMock()
+
+    await alarm.async_alarm_disarm()
+
+    alarm.client.disarm_alarm.assert_not_called()
+
+
+async def test_arm_reentry_guard_ignores_overlapping_call():
+    """A second arm while one is in progress is ignored (no duplicate command)."""
+    from unittest.mock import AsyncMock
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "D"
+    alarm._operation_in_progress = True  # simulate an in-flight operation
+    alarm.client.arm_alarm = AsyncMock()
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    alarm.client.arm_alarm.assert_not_called()
