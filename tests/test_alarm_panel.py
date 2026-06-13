@@ -8261,3 +8261,18 @@ class TestAsyncManualRefresh:
         await alarm.async_manual_refresh()
 
         assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
+
+
+def test_optimistic_status_maps_target_to_proto():
+    alarm = make_alarm()
+    target = alarm._resolve_target_state("disarmed")
+    status = alarm._optimistic_status(target)
+    assert status.protom_response == "D"  # PROTO_DISARMED
+
+
+def test_set_state_provisional_toggles_attribute():
+    alarm = make_alarm()
+    alarm._set_state_provisional(True)
+    assert alarm._attr_extra_state_attributes.get("state_provisional") is True
+    alarm._set_state_provisional(False)
+    assert "state_provisional" not in alarm._attr_extra_state_attributes

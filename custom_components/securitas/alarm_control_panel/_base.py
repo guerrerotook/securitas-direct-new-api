@@ -40,7 +40,9 @@ from ..const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_UNSUPPORTED_COMMANDS,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
 )
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
@@ -71,6 +73,7 @@ from ..verisure_owa_api import (
 from ..verisure_owa_api.exceptions import OperationTimeoutError
 from ..verisure_owa_api.__version__ import __url__ as _PROJECT_URL
 from ..verisure_owa_api.command_resolver import (
+    ALARM_STATE_TO_PROTO,
     AlarmState,
     AnnexMode,
     CommandResolver,
@@ -790,6 +793,43 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._attr_extra_state_attributes["refresh_failed"] = True
         else:
             self._attr_extra_state_attributes.pop("refresh_failed", None)
+
+    def _set_state_provisional(self, provisional: bool) -> None:
+        """Flag the entity state as provisional (accepted-but-unconfirmed)."""
+        if provisional:
+            self._attr_extra_state_attributes["state_provisional"] = True
+        else:
+            self._attr_extra_state_attributes.pop("state_provisional", None)
+
+    def _optimistic_status(self, target: AlarmState) -> OperationStatus:
+        """Build an OperationStatus reflecting the *intended* target state.
+
+        Used when a command was accepted (res: OK) but the confirmation poll
+        timed out: we optimistically show the target (the fail-safe direction)
+        and let the coordinator reconcile. Falls back to the last known proto
+        code, then disarmed, if the target has no modelled proto letter.
+        """
+        proto = (
+            ALARM_STATE_TO_PROTO.get(target)
+            or self._last_proto_code
+            or PROTO_DISARMED
+        )
+        return OperationStatus(protom_response=proto)
+
+    def _notify_operation_unconfirmed(self, translation_key: str) -> None:
+        """Raise the accepted-but-unconfirmed persistent notification."""
+        timeout = self.client.config.get(
+            CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+        )
+        _notify(
+            self.hass,
+            f"operation_unconfirmed_{self.installation.number}",
+            translation_key,
+            {
+                "installation": self.installation.alias,
+                "timeout": str(int(timeout)),
+            },
+        )
 
     def _set_waf_blocked(self, blocked: bool) -> None:
         """Track WAF rate-limit state for the alarm card."""
