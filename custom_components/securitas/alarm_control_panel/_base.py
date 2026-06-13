@@ -43,6 +43,7 @@ from ..const import (
     CONF_OPERATION_POLL_TIMEOUT,
     CONF_UNSUPPORTED_COMMANDS,
     DEFAULT_OPERATION_POLL_TIMEOUT,
+    PROJECT_URL,
 )
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
@@ -71,7 +72,6 @@ from ..verisure_owa_api import (
     is_proto_letter,
 )
 from ..verisure_owa_api.exceptions import OperationTimeoutError
-from ..verisure_owa_api.__version__ import __url__ as _PROJECT_URL
 from ..verisure_owa_api.command_resolver import (
     ALARM_STATE_TO_PROTO,
     AlarmState,
@@ -364,7 +364,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 self.entity_id,
                 self.installation.number,
                 proto_code,
-                _PROJECT_URL,
+                PROJECT_URL,
             )
 
     def _store_operation_status_metadata(self, status: OperationStatus | None) -> bool:
@@ -494,7 +494,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if self._last_proto_code not in PROTO_TO_ALARM_STATE:
             raise VerisureOwaError(
                 f"Alarm is in unknown state '{self._last_proto_code}'. "
-                f"Please open an issue at {_PROJECT_URL}/issues "
+                f"Please open an issue at {PROJECT_URL}/issues "
                 "including this state code."
             )
 

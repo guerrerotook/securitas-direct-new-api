@@ -8,6 +8,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "securitas"
 SIGNAL_CAMERA_STATE = f"{DOMAIN}_camera_state"  # state-only update, no token rotation
+PROJECT_URL = "https://github.com/guerrerotook/securitas-direct-new-api"
 
 
 def _file_hash(path: Path) -> str:
