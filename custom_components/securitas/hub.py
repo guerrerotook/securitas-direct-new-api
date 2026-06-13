@@ -23,8 +23,10 @@ from .api_queue import ApiQueue
 from .const import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_DEVICE_INDIGITALL,
     CONF_REFRESH_TOKEN,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
     DOMAIN,
     SIGNAL_CAMERA_STATE,
 )
@@ -173,6 +175,9 @@ class VerisureHub:
             uuid=domain_config[CONF_UNIQUE_ID],
             id_device_indigitall=domain_config[CONF_DEVICE_INDIGITALL],
             poll_delay=domain_config[CONF_DELAY_CHECK_OPERATION],
+            poll_timeout=domain_config.get(
+                CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+            ),
             log_filter=self.log_filter,
             refresh_token=domain_config.get(CONF_REFRESH_TOKEN),
             on_refresh_token_changed=self._persist_refresh_token,

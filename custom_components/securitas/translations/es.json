@@ -64,7 +64,11 @@
                         "name": "Avanzado",
                         "data": {
                             "scan_interval": "Intervalo de actualización en segundos (0 desactiva las actualizaciones automáticas)",
-                            "delay_check_operation": "Retardo entre solicitudes de API (seg)"
+                            "delay_check_operation": "Retardo entre solicitudes de API (seg)",
+                            "operation_poll_timeout": "Tiempo de espera de confirmación (segundos)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme un armado/desarmado antes de mostrar el nuevo estado como provisional. Auméntalo en servidores lentos (p. ej. Italia)."
                         }
                     },
                     "pin": {
@@ -118,7 +122,11 @@
                         "name": "Avanzado",
                         "data": {
                             "scan_interval": "Intervalo de actualización en segundos (0 desactiva las actualizaciones automáticas)",
-                            "delay_check_operation": "Retardo entre solicitudes de API (seg)"
+                            "delay_check_operation": "Retardo entre solicitudes de API (seg)",
+                            "operation_poll_timeout": "Tiempo de espera de confirmación (segundos)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme un armado/desarmado antes de mostrar el nuevo estado como provisional. Auméntalo en servidores lentos (p. ej. Italia)."
                         }
                     },
                     "pin": {

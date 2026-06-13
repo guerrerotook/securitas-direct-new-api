@@ -31,6 +31,7 @@ from . import (
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
     CONF_INSTALLATION,
@@ -46,6 +47,7 @@ from . import (
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
@@ -380,6 +382,13 @@ def _build_settings_schema(
                         DEFAULT_DELAY_CHECK_OPERATION,
                     ),
                 ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
+                vol.Optional(
+                    CONF_OPERATION_POLL_TIMEOUT,
+                    default=defaults.get(
+                        CONF_OPERATION_POLL_TIMEOUT,
+                        DEFAULT_OPERATION_POLL_TIMEOUT,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
             }
         ),
         {"collapsed": True},
@@ -1048,6 +1057,9 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 ),
                 CONF_DELAY_CHECK_OPERATION: self._get(
                     CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+                ),
+                CONF_OPERATION_POLL_TIMEOUT: self._get(
+                    CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
                 ),
                 CONF_ENABLE_ACTIVITY_POLLING: self._get(
                     CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING

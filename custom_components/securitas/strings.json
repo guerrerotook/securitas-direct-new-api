@@ -86,7 +86,11 @@
                         "name": "Advanced",
                         "data": {
                             "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
-                            "delay_check_operation": "Delay between API requests (sec)"
+                            "delay_check_operation": "Delay between API requests (sec)",
+                            "operation_poll_timeout": "Operation poll timeout (seconds)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm before showing the new state as provisional. Raise this on slow backends (e.g. Italy)."
                         }
                     }
                 }
@@ -140,7 +144,11 @@
                         "name": "Advanced",
                         "data": {
                             "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
-                            "delay_check_operation": "Delay between API requests (sec)"
+                            "delay_check_operation": "Delay between API requests (sec)",
+                            "operation_poll_timeout": "Operation poll timeout (seconds)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm before showing the new state as provisional. Raise this on slow backends (e.g. Italy)."
                         }
                     }
                 }

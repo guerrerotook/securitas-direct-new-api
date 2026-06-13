@@ -64,7 +64,11 @@
                         "name": "Avanzato",
                         "data": {
                             "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
-                            "delay_check_operation": "Ritardo tra le richieste API (sec)"
+                            "delay_check_operation": "Ritardo tra le richieste API (sec)",
+                            "operation_poll_timeout": "Timeout di conferma operazione (secondi)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un inserimento/disinserimento prima di mostrare il nuovo stato come provvisorio. Aumentalo su backend lenti (es. Italia)."
                         }
                     },
                     "pin": {
@@ -118,7 +122,11 @@
                         "name": "Avanzato",
                         "data": {
                             "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
-                            "delay_check_operation": "Ritardo tra le richieste API (sec)"
+                            "delay_check_operation": "Ritardo tra le richieste API (sec)",
+                            "operation_poll_timeout": "Timeout di conferma operazione (secondi)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un inserimento/disinserimento prima di mostrare il nuovo stato come provvisorio. Aumentalo su backend lenti (es. Italia)."
                         }
                     },
                     "pin": {

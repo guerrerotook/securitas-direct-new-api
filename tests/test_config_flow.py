@@ -2618,3 +2618,70 @@ class TestNotifyServiceDropdown:
         assert "notify" not in labels
         assert "send_message" not in labels
         assert "mobile_app_phone" in labels
+
+
+async def test_operation_poll_timeout_round_trips(hass):
+    """The advanced option is stored and surfaced in the runtime config dict."""
+    from custom_components.securitas import _build_config_dict
+    from custom_components.securitas.const import (
+        CONF_OPERATION_POLL_TIMEOUT,
+        DEFAULT_OPERATION_POLL_TIMEOUT,
+    )
+    from tests.conftest import make_config_entry_data
+
+    base_data = make_config_entry_data()
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=base_data,
+        options={CONF_OPERATION_POLL_TIMEOUT: 180.0},
+    )
+    entry.add_to_hass(hass)
+    config, _ = _build_config_dict(entry)
+    assert config[CONF_OPERATION_POLL_TIMEOUT] == 180.0
+
+    entry_default = MockConfigEntry(
+        domain=DOMAIN,
+        data=base_data,
+        options={},
+    )
+    entry_default.add_to_hass(hass)
+    config_default, _ = _build_config_dict(entry_default)
+    assert config_default[CONF_OPERATION_POLL_TIMEOUT] == DEFAULT_OPERATION_POLL_TIMEOUT
+
+
+async def test_options_init_prefills_saved_operation_poll_timeout(hass):
+    """Reopening Options must pre-fill a previously saved operation_poll_timeout.
+
+    Regression for the bug where CONF_OPERATION_POLL_TIMEOUT was missing from
+    the defaults dict passed to _build_settings_schema, causing the form to
+    always show the schema default (120 s) instead of the saved value.
+    """
+    from custom_components.securitas.const import (
+        CONF_OPERATION_POLL_TIMEOUT,
+        DEFAULT_OPERATION_POLL_TIMEOUT,
+    )
+
+    saved_value = 180.0
+    assert saved_value != DEFAULT_OPERATION_POLL_TIMEOUT, (
+        "test value must differ from the schema default to be meaningful"
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={CONF_OPERATION_POLL_TIMEOUT: saved_value},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    marker = _section_inner_marker(result["data_schema"], CONF_ADVANCED, CONF_OPERATION_POLL_TIMEOUT)
+    assert marker is not None, "operation_poll_timeout field not found in advanced section"
+    assert marker.default() == saved_value, (
+        f"Expected pre-filled default {saved_value!r}, got {marker.default()!r}. "
+        "CONF_OPERATION_POLL_TIMEOUT is missing from the async_step_init defaults dict."
+    )
