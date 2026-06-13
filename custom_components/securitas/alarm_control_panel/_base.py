@@ -931,6 +931,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_state(AlarmControlPanelState.DISARMING)
         self._operation_in_progress = True
         self._operation_epoch += 1
+        # Declared before the try so it is always bound in the except handlers
+        # (pyright reportPossiblyUnbound); it is always set before the awaited
+        # transition that can raise OperationTimeoutError.
+        target: AlarmState | None = None
         try:
             target = self._resolve_target_state("disarmed")
             result = await self._execute_transition(target)
@@ -946,6 +950,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 context=user_context,
             )
         except OperationTimeoutError as err:
+            assert target is not None  # set before the transition that raised
             await self._handle_operation_timeout(err, verb="disarm", target=target)
         except VerisureOwaError as err:
             self._state = self._last_state
@@ -997,6 +1002,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if suid:
             force_params["suid"] = suid
 
+        # Declared before the try so it is always bound in the except handlers
+        # (pyright reportPossiblyUnbound); it is always set before the awaited
+        # transition that can raise OperationTimeoutError.
+        target: AlarmState | None = None
         try:
             target = self._resolve_target_state(mode)
             result = await self._execute_transition(target, **force_params)
@@ -1025,6 +1034,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 exceptions=forced_excs,
             )
         except OperationTimeoutError as err:
+            assert target is not None  # set before the transition that raised
             await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
