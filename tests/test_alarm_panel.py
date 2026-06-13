@@ -8393,6 +8393,32 @@ def test_subpanel_coordinator_status_clears_provisional_and_dismisses():
     )
 
 
+async def test_disarm_genuine_failure_rolls_back_and_is_not_provisional():
+    """A non-timeout VerisureOwaError still rolls back + notifies disarm_failed
+    and must NOT set the provisional flag — only timeouts are provisional."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.securitas.verisure_owa_api.exceptions import (
+        VerisureOwaError,
+    )
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "Q"  # armed_night
+    alarm._last_state = AlarmControlPanelState.ARMED_NIGHT
+    alarm._state = AlarmControlPanelState.ARMED_NIGHT
+    alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("boom"))
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as mock_notify:
+        await alarm.async_alarm_disarm()
+
+    # Genuine failure: rolled back to the prior state, NOT provisional.
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+    assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
+    assert mock_notify.call_args[0][2] == "disarm_failed"
+
+
 async def test_disarm_reentry_guard_ignores_overlapping_call():
     """A second disarm while one is in progress is ignored (no duplicate DARM)."""
     from unittest.mock import AsyncMock
