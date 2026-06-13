@@ -2,6 +2,18 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.3.0
+
+Arm and disarm no longer report a false failure — and roll the panel back to a stale, untrustworthy state — when the backend accepts the command but is slow to confirm it.
+
+### Fixed
+
+**Arm/disarm wrongly reported as failed when the backend is slow to confirm ([#508](https://github.com/guerrerotook/securitas-direct-new-api/issues/508)).**  On some backends — notably Italy (SDVECU) — the panel accepts an arm or disarm (the command returns `OK`) but the follow-up confirmation poll can sit on `processing.request` past the timeout.  The integration used to treat that timeout as an outright failure: it rolled the entity back to its previous state, logged an error, and raised an "arm/disarm failed" notification — even though the panel had actually carried out the command.  The result was a Home Assistant alarm state that couldn't be trusted (showing `disarmed` while the panel was armed, or the reverse) plus spurious failure alerts.  A command the backend has accepted but not yet confirmed is now treated as **accepted-but-provisional**: the entity optimistically shows the intended state, flags it as provisional, logs a *warning* rather than an error, and posts a distinct "not confirmed" notification — then reconciles automatically against the next authoritative status read.  Genuine failures still roll back and notify exactly as before.  A re-entry guard also stops a duplicate command being sent while one is already in flight.
+
+### Added
+
+**Configurable operation poll timeout.**  A new **Operation poll timeout** option (Configure → Advanced; default 120 s, range 60–300 s) sets how long to wait for the panel to confirm an arm/disarm before treating it as accepted-but-unconfirmed.  Raise it if you see "not confirmed within timeout" warnings in the log.
+
 ## v5.2.0
 
 Re-authentication is now reserved for genuine credential problems, and transient Verisure backend hiccups no longer drag you to the login screen.
