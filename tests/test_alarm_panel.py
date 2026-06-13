@@ -128,6 +128,19 @@ class TestNotificationTranslationsPersistentMessageTrim:
             )
 
 
+def test_unconfirmed_notification_strings_exist_all_locales():
+    """Every locale defines arm_unconfirmed and disarm_unconfirmed with tokens."""
+    from custom_components.securitas.notification_translations import (
+        NOTIFICATION_TRANSLATIONS,
+    )
+
+    for locale, entries in NOTIFICATION_TRANSLATIONS.items():
+        for key in ("arm_unconfirmed", "disarm_unconfirmed"):
+            assert key in entries, f"{locale} missing {key}"
+            msg = entries[key]["message"]
+            assert "{installation}" in msg and "{timeout}" in msg, f"{locale}/{key}"
+
+
 class TestForceArmExpiredMobileMessageTranslation:
     """force_arm_expired entry must carry a mobile_message string per locale
     for the button-less informational mobile notification on expiry."""
