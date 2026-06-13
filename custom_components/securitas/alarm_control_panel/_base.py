@@ -311,10 +311,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if is_proto_letter(proto_code):
             self._last_proto_code = proto_code
         # A fresh authoritative status reconciles any provisional
-        # (accepted-but-unconfirmed) arm/disarm: clearing the flag also
-        # dismisses the unconfirmed notification. (#508)
-        if self._attr_extra_state_attributes.get("state_provisional"):
-            self._set_state_provisional(False)
+        # (accepted-but-unconfirmed) arm/disarm. (#508)
+        self._reconcile_provisional()
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
             self._last_unmapped_logged = None
@@ -819,6 +817,18 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     },
                 )
             )
+
+    def _reconcile_provisional(self) -> None:
+        """Clear the provisional flag once an authoritative status is applied.
+
+        Shared by the combined panel and the axis sub-panels: the sub-panel
+        ``_update_from_coordinator`` override replaces the base method, so
+        without calling this it would never clear an accepted-but-unconfirmed
+        arm/disarm — leaving the flag set and its notification dangling
+        forever. Clearing the flag also dismisses the notification. (#508)
+        """
+        if self._attr_extra_state_attributes.get("state_provisional"):
+            self._set_state_provisional(False)
 
     def _optimistic_status(self, target: AlarmState) -> OperationStatus:
         """Build an OperationStatus reflecting the *intended* target state.

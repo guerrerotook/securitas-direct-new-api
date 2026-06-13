@@ -222,6 +222,10 @@ class _AxisSubPanelMixin:
         if not is_proto_letter(proto_code):
             return
         self._last_proto_code = proto_code  # type: ignore[attr-defined]
+        # Reconcile any provisional (accepted-but-unconfirmed) arm/disarm.
+        # The base _update_from_coordinator does this, but this override
+        # replaces it — so call it here too or sub-panels never clear. (#508)
+        self._reconcile_provisional()  # type: ignore[attr-defined]
         if proto_code not in PROTO_TO_ALARM_STATE:
             return
         joint = self.coordinator.alarm_state  # type: ignore[attr-defined]

@@ -8370,6 +8370,29 @@ def test_coordinator_status_clears_provisional_and_dismisses():
     )
 
 
+def test_subpanel_coordinator_status_clears_provisional_and_dismisses():
+    """Axis sub-panels override _update_from_coordinator, so they must also
+    reconcile a provisional flag on a fresh authoritative status (#508)."""
+    from custom_components.securitas.coordinators import AlarmStatusData
+
+    alarm = _make_interior_panel()
+    alarm._set_state_provisional(True)
+
+    status = SStatus(status="D", timestamp_update="1", wifi_connected=False)
+    data = AlarmStatusData(status=status, protom_response="D")
+
+    alarm._update_from_coordinator(data)
+
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+    alarm.hass.async_create_task.assert_called()
+    call = alarm.hass.services.async_call.call_args
+    assert call is not None, "hass.services.async_call was not called"
+    assert call.kwargs["service"] == "dismiss"
+    assert call.kwargs["service_data"]["notification_id"].endswith(
+        "operation_unconfirmed_12345"
+    )
+
+
 async def test_disarm_reentry_guard_ignores_overlapping_call():
     """A second disarm while one is in progress is ignored (no duplicate DARM)."""
     from unittest.mock import AsyncMock
