@@ -64,7 +64,11 @@
                         "name": "Avançado",
                         "data": {
                             "scan_interval": "Intervalo de atualização em segundos (0 desativa as atualizações automáticas)",
-                            "delay_check_operation": "Atraso entre solicitações de API (seg)"
+                            "delay_check_operation": "Atraso entre solicitações de API (seg)",
+                            "operation_poll_timeout": "Tempo limite de confirmação (segundos)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Quanto tempo aguardar a confirmação de uma ação de armar/desarmar pelo painel. Aumente se receber avisos de tempo limite."
                         }
                     },
                     "pin": {
@@ -118,7 +122,11 @@
                         "name": "Avançado",
                         "data": {
                             "scan_interval": "Intervalo de atualização em segundos (0 desativa as atualizações automáticas)",
-                            "delay_check_operation": "Atraso entre solicitações de API (seg)"
+                            "delay_check_operation": "Atraso entre solicitações de API (seg)",
+                            "operation_poll_timeout": "Tempo limite de confirmação (segundos)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Quanto tempo aguardar a confirmação de uma ação de armar/desarmar pelo painel. Aumente se receber avisos de tempo limite."
                         }
                     },
                     "pin": {

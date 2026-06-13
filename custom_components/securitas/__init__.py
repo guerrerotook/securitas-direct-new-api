@@ -52,6 +52,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
     CONF_INSTALLATION,
@@ -76,6 +77,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_COUNTRY,
     DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     PLATFORMS,
@@ -224,6 +226,7 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
+    CONF_OPERATION_POLL_TIMEOUT,
 )
 
 
@@ -300,6 +303,9 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_SCAN_INTERVAL] = _opt(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     config[CONF_DELAY_CHECK_OPERATION] = _opt(
         CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
+    )
+    config[CONF_OPERATION_POLL_TIMEOUT] = _opt(
+        CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
     )
     config[CONF_ENTRY_ID] = entry.entry_id
     config[CONF_NOTIFY_GROUP] = _opt(CONF_NOTIFY_GROUP, "")

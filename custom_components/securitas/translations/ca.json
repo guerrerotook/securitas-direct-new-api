@@ -64,7 +64,11 @@
                         "name": "Avançat",
                         "data": {
                             "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
-                            "delay_check_operation": "Retard entre sol·licituds de l'API (s)"
+                            "delay_check_operation": "Retard entre sol·licituds de l'API (s)",
+                            "operation_poll_timeout": "Temps d'espera de confirmació (segons)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi una acció d'armat/desarmat. Augmenta'l si reps avisos de temps d'espera esgotat."
                         }
                     },
                     "pin": {
@@ -118,7 +122,11 @@
                         "name": "Avançat",
                         "data": {
                             "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
-                            "delay_check_operation": "Retard entre sol·licituds de l'API (s)"
+                            "delay_check_operation": "Retard entre sol·licituds de l'API (s)",
+                            "operation_poll_timeout": "Temps d'espera de confirmació (segons)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi una acció d'armat/desarmat. Augmenta'l si reps avisos de temps d'espera esgotat."
                         }
                     },
                     "pin": {

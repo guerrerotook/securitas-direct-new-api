@@ -40,6 +40,26 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure: Disarming failed",
             "message": "{error}",
         },
+        "arm_unconfirmed": {
+            "title": "Verisure: Arm not confirmed",
+            "message": (
+                "The arm command was sent to {installation} and accepted, but "
+                "the panel hasn't confirmed the new state within {timeout}s. The "
+                "state shown is provisional and will update automatically once "
+                "the panel reports in. If this keeps happening, raise the "
+                "**Operation poll timeout** in the integration options."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure: Disarm not confirmed",
+            "message": (
+                "The disarm command was sent to {installation} and accepted, but "
+                "the panel hasn't confirmed the new state within {timeout}s. The "
+                "state shown is provisional and will update automatically once "
+                "the panel reports in. If this keeps happening, raise the "
+                "**Operation poll timeout** in the integration options."
+            ),
+        },
         "rate_limited": {
             "title": "Verisure: Rate limited",
             "message": (
@@ -107,6 +127,26 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
         "disarm_failed": {
             "title": "Verisure: Error al desarmar",
             "message": "{error}",
+        },
+        "arm_unconfirmed": {
+            "title": "Verisure: Armado sin confirmar",
+            "message": (
+                "El comando de armado se envió a {installation} y se aceptó, pero "
+                "el panel no ha confirmado el nuevo estado en {timeout}s. El estado "
+                "mostrado es provisional y se actualizará automáticamente cuando el "
+                "panel responda. Si ocurre con frecuencia, aumenta el **Tiempo de "
+                "espera de confirmación** en las opciones de la integración."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure: Desarmado sin confirmar",
+            "message": (
+                "El comando de desarmado se envió a {installation} y se aceptó, pero "
+                "el panel no ha confirmado el nuevo estado en {timeout}s. El estado "
+                "mostrado es provisional y se actualizará automáticamente cuando el "
+                "panel responda. Si ocurre con frecuencia, aumenta el **Tiempo de "
+                "espera de confirmación** en las opciones de la integración."
+            ),
         },
         "rate_limited": {
             "title": "Verisure: Demasiadas solicitudes",
@@ -177,6 +217,27 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
         "disarm_failed": {
             "title": "Verisure : Échec du désarmement",
             "message": "{error}",
+        },
+        "arm_unconfirmed": {
+            "title": "Verisure : Armement non confirmé",
+            "message": (
+                "La commande d'armement a été envoyée à {installation} et acceptée, "
+                "mais le panneau n'a pas confirmé le nouvel état en {timeout}s. "
+                "L'état affiché est provisoire et se mettra à jour automatiquement "
+                "dès que le panneau répondra. Si cela se reproduit souvent, "
+                "augmentez le **Délai d'attente de confirmation** dans les options."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure : Désarmement non confirmé",
+            "message": (
+                "La commande de désarmement a été envoyée à {installation} et "
+                "acceptée, mais le panneau n'a pas confirmé le nouvel état en "
+                "{timeout}s. L'état affiché est provisoire et se mettra à jour "
+                "automatiquement dès que le panneau répondra. Si cela se reproduit "
+                "souvent, augmentez le **Délai d'attente de confirmation** dans les "
+                "options."
+            ),
         },
         "rate_limited": {
             "title": "Verisure : Trop de requêtes",
@@ -250,6 +311,26 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure: Disattivazione fallita",
             "message": "{error}",
         },
+        "arm_unconfirmed": {
+            "title": "Verisure: inserimento non confermato",
+            "message": (
+                "Il comando di inserimento è stato inviato a {installation} ed "
+                "accettato, ma la centrale non ha confermato il nuovo stato entro "
+                "{timeout}s. Lo stato mostrato è provvisorio e si aggiornerà "
+                "automaticamente quando la centrale risponderà. Se accade spesso, "
+                "aumenta il **Timeout di conferma operazione** nelle opzioni."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure: disinserimento non confermato",
+            "message": (
+                "Il comando di disinserimento è stato inviato a {installation} ed "
+                "accettato, ma la centrale non ha confermato il nuovo stato entro "
+                "{timeout}s. Lo stato mostrato è provvisorio e si aggiornerà "
+                "automaticamente quando la centrale risponderà. Se accade spesso, "
+                "aumenta il **Timeout di conferma operazione** nelle opzioni."
+            ),
+        },
         "rate_limited": {
             "title": "Verisure: Troppe richieste",
             "message": (
@@ -322,6 +403,26 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure: Falha ao desarmar",
             "message": "{error}",
         },
+        "arm_unconfirmed": {
+            "title": "Verisure: Armar não confirmado",
+            "message": (
+                "O comando de armar foi enviado para {installation} e aceito, mas "
+                "o painel não confirmou o novo estado em {timeout}s. O estado "
+                "mostrado é provisório e será atualizado automaticamente quando o "
+                "painel responder. Se isto acontecer com frequência, aumente o "
+                "**Tempo limite de confirmação** nas opções da integração."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure: Desarmar não confirmado",
+            "message": (
+                "O comando de desarmar foi enviado para {installation} e aceito, "
+                "mas o painel não confirmou o novo estado em {timeout}s. O estado "
+                "mostrado é provisório e será atualizado automaticamente quando o "
+                "painel responder. Se isto acontecer com frequência, aumente o "
+                "**Tempo limite de confirmação** nas opções da integração."
+            ),
+        },
         "rate_limited": {
             "title": "Verisure: Demasiados pedidos",
             "message": (
@@ -390,6 +491,26 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
         "disarm_failed": {
             "title": "Verisure: Falha ao desarmar",
             "message": "{error}",
+        },
+        "arm_unconfirmed": {
+            "title": "Verisure: Armar não confirmado",
+            "message": (
+                "O comando de armar foi enviado para {installation} e aceito, mas "
+                "o painel não confirmou o novo estado em {timeout}s. O estado "
+                "mostrado é provisório e será atualizado automaticamente quando o "
+                "painel responder. Se isto acontecer com frequência, aumente o "
+                "**Tempo limite de confirmação** nas opções da integração."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure: Desarmar não confirmado",
+            "message": (
+                "O comando de desarmar foi enviado para {installation} e aceito, "
+                "mas o painel não confirmou o novo estado em {timeout}s. O estado "
+                "mostrado é provisório e será atualizado automaticamente quando o "
+                "painel responder. Se isto acontecer com frequência, aumente o "
+                "**Tempo limite de confirmação** nas opções da integração."
+            ),
         },
         "rate_limited": {
             "title": "Verisure: Limite de requisições",
@@ -460,6 +581,26 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
         "disarm_failed": {
             "title": "Verisure: Error en desarmar",
             "message": "{error}",
+        },
+        "arm_unconfirmed": {
+            "title": "Verisure: Armat sense confirmar",
+            "message": (
+                "L'ordre d'armat s'ha enviat a {installation} i s'ha acceptat, però "
+                "el panell no ha confirmat el nou estat en {timeout}s. L'estat "
+                "mostrat és provisional i s'actualitzarà automàticament quan el "
+                "panell respongui. Si passa sovint, augmenta el **Temps d'espera de "
+                "confirmació** a les opcions de la integració."
+            ),
+        },
+        "disarm_unconfirmed": {
+            "title": "Verisure: Desarmat sense confirmar",
+            "message": (
+                "L'ordre de desarmat s'ha enviat a {installation} i s'ha acceptat, "
+                "però el panell no ha confirmat el nou estat en {timeout}s. L'estat "
+                "mostrat és provisional i s'actualitzarà automàticament quan el "
+                "panell respongui. Si passa sovint, augmenta el **Temps d'espera de "
+                "confirmació** a les opcions de la integració."
+            ),
         },
         "rate_limited": {
             "title": "Verisure: Massa peticions",

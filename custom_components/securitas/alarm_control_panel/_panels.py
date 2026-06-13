@@ -110,6 +110,14 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         try:
             result = await self._execute_transition(target)
         except VerisureOwaError as err:
+            # NOTE (#508 follow-up): an OperationTimeoutError (command accepted
+            # but the confirmation poll didn't resolve) is a VerisureOwaError,
+            # so it is rolled back here — unlike the user-facing arm/disarm
+            # paths, which now treat that as accepted-but-provisional. The
+            # rollback shows the circuits as still-armed (the fail-safe
+            # direction) but reports failure to the lock automation. Applying
+            # provisional semantics to this multi-entity path is a tracked
+            # follow-up, not handled in this change.
             for entity in affected:
                 entity._state = entity._last_state  # noqa: SLF001  # pylint: disable=protected-access
                 entity._operation_in_progress = False  # noqa: SLF001  # pylint: disable=protected-access
@@ -222,6 +230,10 @@ class _AxisSubPanelMixin:
         if not is_proto_letter(proto_code):
             return
         self._last_proto_code = proto_code  # type: ignore[attr-defined]
+        # Reconcile any provisional (accepted-but-unconfirmed) arm/disarm.
+        # The base _update_from_coordinator does this, but this override
+        # replaces it — so call it here too or sub-panels never clear. (#508)
+        self._reconcile_provisional()  # type: ignore[attr-defined]
         if proto_code not in PROTO_TO_ALARM_STATE:
             return
         joint = self.coordinator.alarm_state  # type: ignore[attr-defined]

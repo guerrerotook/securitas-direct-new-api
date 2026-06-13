@@ -40,7 +40,9 @@ from ..const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_UNSUPPORTED_COMMANDS,
+    DEFAULT_OPERATION_POLL_TIMEOUT,
 )
 from ..coordinators import AlarmCoordinator, AlarmStatusData
 from ..entity import VerisureEntity
@@ -71,6 +73,7 @@ from ..verisure_owa_api import (
 from ..verisure_owa_api.exceptions import OperationTimeoutError
 from ..verisure_owa_api.__version__ import __url__ as _PROJECT_URL
 from ..verisure_owa_api.command_resolver import (
+    ALARM_STATE_TO_PROTO,
     AlarmState,
     AnnexMode,
     CommandResolver,
@@ -307,6 +310,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # arm/disarm refuses cleanly instead of acting on a stale cached state.
         if is_proto_letter(proto_code):
             self._last_proto_code = proto_code
+            # A fresh authoritative status (a real proto letter) reconciles
+            # any provisional (accepted-but-unconfirmed) arm/disarm — gated on
+            # is_proto_letter so an error/placeholder status doesn't clear it,
+            # mirroring the axis sub-panel override. (#508)
+            self._reconcile_provisional()
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
             self._last_unmapped_logged = None
@@ -791,6 +799,91 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         else:
             self._attr_extra_state_attributes.pop("refresh_failed", None)
 
+    def _set_state_provisional(self, provisional: bool) -> None:
+        """Flag the entity state as provisional (accepted-but-unconfirmed).
+
+        Clearing the flag also dismisses the unconfirmed notification, so the
+        notification ID lives in one place — mirrors ``_set_waf_blocked``.
+        """
+        if provisional:
+            self._attr_extra_state_attributes["state_provisional"] = True
+        elif self._attr_extra_state_attributes.pop("state_provisional", None):
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="persistent_notification",
+                    service="dismiss",
+                    service_data={
+                        "notification_id": (
+                            f"{DOMAIN}.operation_unconfirmed_{self.installation.number}"
+                        ),
+                    },
+                )
+            )
+
+    def _reconcile_provisional(self) -> None:
+        """Clear the provisional flag once an authoritative status is applied.
+
+        Shared by the combined panel and the axis sub-panels: the sub-panel
+        ``_update_from_coordinator`` override replaces the base method, so
+        without calling this it would never clear an accepted-but-unconfirmed
+        arm/disarm — leaving the flag set and its notification dangling
+        forever. Clearing the flag also dismisses the notification. (#508)
+        """
+        if self._attr_extra_state_attributes.get("state_provisional"):
+            self._set_state_provisional(False)
+
+    def _optimistic_status(self, target: AlarmState) -> OperationStatus:
+        """Build an OperationStatus reflecting the *intended* target state.
+
+        Used when a command was accepted (res: OK) but the confirmation poll
+        timed out: we optimistically show the target (the fail-safe direction)
+        and let the coordinator reconcile. Falls back to the last known proto
+        code, then disarmed, if the target has no modelled proto letter.
+        """
+        proto = (
+            ALARM_STATE_TO_PROTO.get(target) or self._last_proto_code or PROTO_DISARMED
+        )
+        return OperationStatus(protom_response=proto)
+
+    def _notify_operation_unconfirmed(self, translation_key: str) -> None:
+        """Raise the accepted-but-unconfirmed persistent notification."""
+        timeout = self.client.config.get(
+            CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+        )
+        _notify(
+            self.hass,
+            f"operation_unconfirmed_{self.installation.number}",
+            translation_key,
+            {
+                "installation": self.installation.alias,
+                "timeout": str(int(timeout)),
+            },
+        )
+
+    async def _handle_operation_timeout(
+        self, err: OperationTimeoutError, *, verb: str, target: AlarmState
+    ) -> None:
+        """Handle an accepted-but-unconfirmed arm/disarm (poll timed out, #508).
+
+        The command was accepted (``res: OK``) but the confirmation poll didn't
+        resolve within ``poll_timeout``. Reflect the target optimistically
+        (the fail-safe direction) and let the coordinator's ``xSStatus`` read
+        reconcile — never roll back or report a failure.
+        """
+        self._set_waf_blocked(False)
+        self._set_state_provisional(True)
+        self.update_status_alarm(self._optimistic_status(target))
+        _LOGGER.warning(
+            "%s not confirmed within timeout for %s; state provisional, "
+            "awaiting reconciliation: %s",
+            verb.capitalize(),
+            self.installation.number,
+            err.log_detail(),
+        )
+        self._notify_operation_unconfirmed(f"{verb}_unconfirmed")
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
+
     def _set_waf_blocked(self, blocked: bool) -> None:
         """Track WAF rate-limit state for the alarm card."""
         if blocked:
@@ -823,6 +916,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
+        if self._operation_in_progress:
+            _LOGGER.debug(
+                "Disarm ignored for %s: an operation is already in progress",
+                self.installation.number,
+            )
+            return
         await self._dismiss_pending_force_context_on_siblings(
             reason=DISMISSAL_REASON_USER_DISARM,
             new_mode="disarmed",
@@ -834,6 +933,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_state(AlarmControlPanelState.DISARMING)
         self._operation_in_progress = True
         self._operation_epoch += 1
+        # Declared before the try so it is always bound in the except handlers
+        # (pyright reportPossiblyUnbound); it is always set before the awaited
+        # transition that can raise OperationTimeoutError.
+        target: AlarmState | None = None
         try:
             target = self._resolve_target_state("disarmed")
             result = await self._execute_transition(target)
@@ -848,6 +951,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 alias="Disarmed",
                 context=user_context,
             )
+        except OperationTimeoutError as err:
+            assert target is not None  # set before the transition that raised
+            await self._handle_operation_timeout(err, verb="disarm", target=target)
         except VerisureOwaError as err:
             self._state = self._last_state
             _LOGGER.error(
@@ -878,6 +984,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         bypassed_exceptions: list[dict[str, Any]] | None = None,
     ) -> None:
         """Set the arm state using the command resolver."""
+        if self._operation_in_progress:
+            _LOGGER.debug(
+                "Arm ignored for %s: an operation is already in progress",
+                self.installation.number,
+            )
+            return
         # Capture the calling user's context up-front — HA expires
         # `self._context` ~1 s after async_set_context, and the arm
         # transition + state writes below take longer than that.
@@ -892,6 +1004,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if suid:
             force_params["suid"] = suid
 
+        # Declared before the try so it is always bound in the except handlers
+        # (pyright reportPossiblyUnbound); it is always set before the awaited
+        # transition that can raise OperationTimeoutError.
+        target: AlarmState | None = None
         try:
             target = self._resolve_target_state(mode)
             result = await self._execute_transition(target, **force_params)
@@ -919,6 +1035,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 context=user_context,
                 exceptions=forced_excs,
             )
+        except OperationTimeoutError as err:
+            assert target is not None  # set before the transition that raised
+            await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state

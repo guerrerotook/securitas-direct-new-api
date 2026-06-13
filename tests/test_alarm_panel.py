@@ -128,6 +128,19 @@ class TestNotificationTranslationsPersistentMessageTrim:
             )
 
 
+def test_unconfirmed_notification_strings_exist_all_locales():
+    """Every locale defines arm_unconfirmed and disarm_unconfirmed with tokens."""
+    from custom_components.securitas.notification_translations import (
+        NOTIFICATION_TRANSLATIONS,
+    )
+
+    for locale, entries in NOTIFICATION_TRANSLATIONS.items():
+        for key in ("arm_unconfirmed", "disarm_unconfirmed"):
+            assert key in entries, f"{locale} missing {key}"
+            msg = entries[key]["message"]
+            assert "{installation}" in msg and "{timeout}" in msg, f"{locale}/{key}"
+
+
 class TestForceArmExpiredMobileMessageTranslation:
     """force_arm_expired entry must carry a mobile_message string per locale
     for the button-less informational mobile notification on expiry."""
@@ -8248,3 +8261,188 @@ class TestAsyncManualRefresh:
         await alarm.async_manual_refresh()
 
         assert alarm._attr_extra_state_attributes.get("waf_blocked") is True
+
+
+def test_optimistic_status_maps_target_to_proto():
+    alarm = make_alarm()
+    target = alarm._resolve_target_state("disarmed")
+    status = alarm._optimistic_status(target)
+    assert status.protom_response == "D"  # PROTO_DISARMED
+
+
+def test_set_state_provisional_toggles_attribute():
+    alarm = make_alarm()
+    alarm._set_state_provisional(True)
+    assert alarm._attr_extra_state_attributes.get("state_provisional") is True
+    alarm._set_state_provisional(False)
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+
+
+@pytest.mark.asyncio
+async def test_disarm_timeout_is_provisional_not_failed():
+    """OperationTimeoutError after accepted disarm => optimistic disarmed +
+    provisional flag + unconfirmed notification, NOT a rollback/failure."""
+    from unittest.mock import AsyncMock
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+    from custom_components.securitas.verisure_owa_api.exceptions import (
+        OperationTimeoutError,
+    )
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "Q"  # armed_night
+    alarm._last_state = AlarmControlPanelState.ARMED_NIGHT
+    alarm._state = AlarmControlPanelState.ARMED_NIGHT
+    alarm.client.disarm_alarm = AsyncMock(
+        side_effect=OperationTimeoutError("Poll operation timed out after 120.0s")
+    )
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as mock_notify:
+        await alarm.async_alarm_disarm()
+
+    assert alarm._state == AlarmControlPanelState.DISARMED
+    assert alarm._attr_extra_state_attributes.get("state_provisional") is True
+    assert mock_notify.call_args[0][2] == "disarm_unconfirmed"
+    alarm.coordinator.async_request_refresh.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_arm_timeout_is_provisional_not_failed():
+    """OperationTimeoutError after accepted arm => optimistic target state +
+    provisional flag + unconfirmed notification, NOT a rollback/failure."""
+    from unittest.mock import AsyncMock
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+    from custom_components.securitas.verisure_owa_api.exceptions import (
+        OperationTimeoutError,
+    )
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "D"  # disarmed
+    alarm._last_state = AlarmControlPanelState.DISARMED
+    alarm._state = AlarmControlPanelState.DISARMED
+    alarm.client.arm_alarm = AsyncMock(
+        side_effect=OperationTimeoutError("Poll operation timed out after 120.0s")
+    )
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as mock_notify:
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY  # optimistic target
+    assert alarm._attr_extra_state_attributes.get("state_provisional") is True
+    assert mock_notify.call_args[0][2] == "arm_unconfirmed"
+
+
+def test_coordinator_status_clears_provisional_and_dismisses():
+    """A fresh authoritative status clears the provisional flag and dismisses
+    the unconfirmed notification."""
+    from custom_components.securitas.coordinators import AlarmStatusData
+
+    alarm = make_alarm()
+    alarm._set_state_provisional(True)
+
+    # Build AlarmStatusData with an SStatus carrying a real proto code.
+    # SStatus uses pydantic with populate_by_name=True so keyword args
+    # must match the Python field names (status, timestamp_update, wifi_connected).
+    status = SStatus(status="D", timestamp_update="1", wifi_connected=False)
+    data = AlarmStatusData(status=status, protom_response="D")
+
+    alarm._update_from_coordinator(data)
+
+    # Provisional flag must be cleared.
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+
+    # async_create_task must have been called to schedule the dismiss.
+    alarm.hass.async_create_task.assert_called()
+
+    # Verify the dismiss targets the correct notification id.
+    # hass.services.async_call is a MagicMock; calling it (inside the
+    # coroutine-like object passed to async_create_task) records the call
+    # synchronously — _consume_coro only calls .close() on the return value.
+    call = alarm.hass.services.async_call.call_args
+    assert call is not None, "hass.services.async_call was not called"
+    assert call.kwargs["domain"] == "persistent_notification"
+    assert call.kwargs["service"] == "dismiss"
+    assert call.kwargs["service_data"]["notification_id"].endswith(
+        "operation_unconfirmed_123456"
+    )
+
+
+def test_subpanel_coordinator_status_clears_provisional_and_dismisses():
+    """Axis sub-panels override _update_from_coordinator, so they must also
+    reconcile a provisional flag on a fresh authoritative status (#508)."""
+    from custom_components.securitas.coordinators import AlarmStatusData
+
+    alarm = _make_interior_panel()
+    alarm._set_state_provisional(True)
+
+    status = SStatus(status="D", timestamp_update="1", wifi_connected=False)
+    data = AlarmStatusData(status=status, protom_response="D")
+
+    alarm._update_from_coordinator(data)
+
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+    alarm.hass.async_create_task.assert_called()
+    call = alarm.hass.services.async_call.call_args
+    assert call is not None, "hass.services.async_call was not called"
+    assert call.kwargs["service"] == "dismiss"
+    assert call.kwargs["service_data"]["notification_id"].endswith(
+        "operation_unconfirmed_12345"
+    )
+
+
+async def test_disarm_genuine_failure_rolls_back_and_is_not_provisional():
+    """A non-timeout VerisureOwaError still rolls back + notifies disarm_failed
+    and must NOT set the provisional flag — only timeouts are provisional."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.securitas.verisure_owa_api.exceptions import (
+        VerisureOwaError,
+    )
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "Q"  # armed_night
+    alarm._last_state = AlarmControlPanelState.ARMED_NIGHT
+    alarm._state = AlarmControlPanelState.ARMED_NIGHT
+    alarm.client.disarm_alarm = AsyncMock(side_effect=VerisureOwaError("boom"))
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as mock_notify:
+        await alarm.async_alarm_disarm()
+
+    # Genuine failure: rolled back to the prior state, NOT provisional.
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+    assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
+    assert mock_notify.call_args[0][2] == "disarm_failed"
+
+
+async def test_disarm_reentry_guard_ignores_overlapping_call():
+    """A second disarm while one is in progress is ignored (no duplicate DARM)."""
+    from unittest.mock import AsyncMock
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "Q"
+    alarm._operation_in_progress = True  # simulate an in-flight operation
+    alarm.client.disarm_alarm = AsyncMock()
+
+    await alarm.async_alarm_disarm()
+
+    alarm.client.disarm_alarm.assert_not_called()
+
+
+async def test_arm_reentry_guard_ignores_overlapping_call():
+    """A second arm while one is in progress is ignored (no duplicate command)."""
+    from unittest.mock import AsyncMock
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "D"
+    alarm._operation_in_progress = True  # simulate an in-flight operation
+    alarm.client.arm_alarm = AsyncMock()
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    alarm.client.arm_alarm.assert_not_called()

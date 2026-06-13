@@ -64,7 +64,11 @@
                         "name": "Avancé",
                         "data": {
                             "scan_interval": "Intervalle de mise à jour en secondes (0 désactive les mises à jour automatiques)",
-                            "delay_check_operation": "Délai entre les requêtes API (sec)"
+                            "delay_check_operation": "Délai entre les requêtes API (sec)",
+                            "operation_poll_timeout": "Délai d'attente de confirmation (secondes)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Durée d'attente de la confirmation d'une action d'armement/désarmement par le panneau. Augmentez-la si vous recevez des avertissements de délai dépassé."
                         }
                     },
                     "pin": {
@@ -118,7 +122,11 @@
                         "name": "Avancé",
                         "data": {
                             "scan_interval": "Intervalle de mise à jour en secondes (0 désactive les mises à jour automatiques)",
-                            "delay_check_operation": "Délai entre les requêtes API (sec)"
+                            "delay_check_operation": "Délai entre les requêtes API (sec)",
+                            "operation_poll_timeout": "Délai d'attente de confirmation (secondes)"
+                        },
+                        "data_description": {
+                            "operation_poll_timeout": "Durée d'attente de la confirmation d'une action d'armement/désarmement par le panneau. Augmentez-la si vous recevez des avertissements de délai dépassé."
                         }
                     },
                     "pin": {

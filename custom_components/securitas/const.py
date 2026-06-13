@@ -48,6 +48,7 @@ CONF_CODE_ARM_REQUIRED = "code_arm_required"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"
+CONF_OPERATION_POLL_TIMEOUT = "operation_poll_timeout"
 CONF_MAP_HOME = "map_home"
 CONF_MAP_AWAY = "map_away"
 CONF_MAP_NIGHT = "map_night"
@@ -78,6 +79,11 @@ DEFAULT_CODE_ARM_REQUIRED = False
 DEFAULT_ENABLE_ACTIVITY_POLLING = False
 DEFAULT_FORCE_ARM_NOTIFICATIONS = True
 DEFAULT_DELAY_CHECK_OPERATION = 2
+# Wall-clock seconds to wait for an arm/disarm confirmation poll to leave
+# the WAIT state before treating the operation as accepted-but-unconfirmed.
+# Raised from the legacy hard-coded 60 s — the IT (SDVECU) backend routinely
+# stays on `alarm-manager.processing.request` longer than that (issue #508).
+DEFAULT_OPERATION_POLL_TIMEOUT = 120.0
 DEFAULT_CODE = ""
 DEFAULT_COUNTRY = "ES"
 API_CACHE_TTL = 60  # seconds — sensor data changes hourly at most
