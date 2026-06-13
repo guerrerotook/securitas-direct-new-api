@@ -8305,3 +8305,32 @@ async def test_disarm_timeout_is_provisional_not_failed():
     assert alarm._attr_extra_state_attributes.get("state_provisional") is True
     assert mock_notify.call_args[0][2] == "disarm_unconfirmed"
     alarm.coordinator.async_request_refresh.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_arm_timeout_is_provisional_not_failed():
+    """OperationTimeoutError after accepted arm => optimistic target state +
+    provisional flag + unconfirmed notification, NOT a rollback/failure."""
+    from unittest.mock import AsyncMock
+    from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+    from custom_components.securitas.verisure_owa_api.exceptions import (
+        OperationTimeoutError,
+    )
+
+    alarm = make_alarm()
+    alarm._last_proto_code = "D"  # disarmed
+    alarm._last_state = AlarmControlPanelState.DISARMED
+    alarm._state = AlarmControlPanelState.DISARMED
+    alarm.client.arm_alarm = AsyncMock(
+        side_effect=OperationTimeoutError("Poll operation timed out after 120.0s")
+    )
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as mock_notify:
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY  # optimistic target
+    assert alarm._attr_extra_state_attributes.get("state_provisional") is True
+    assert mock_notify.call_args[0][2] == "arm_unconfirmed"
+    alarm.coordinator.async_request_refresh.assert_awaited()

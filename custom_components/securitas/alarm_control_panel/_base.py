@@ -977,6 +977,22 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 context=user_context,
                 exceptions=forced_excs,
             )
+        except OperationTimeoutError as err:
+            # Arm accepted (xSArmPanel res: OK) but confirmation poll timed
+            # out. Optimistically reflect the target and reconcile via the
+            # coordinator — never roll back to the pre-arm state (#508).
+            self._set_waf_blocked(False)
+            self._set_state_provisional(True)
+            self.update_status_alarm(self._optimistic_status(target))
+            _LOGGER.warning(
+                "Arm not confirmed within timeout for %s; state provisional, "
+                "awaiting reconciliation: %s",
+                self.installation.number,
+                err.log_detail(),
+            )
+            self._notify_operation_unconfirmed("arm_unconfirmed")
+            self.async_write_ha_state()
+            await self.coordinator.async_request_refresh()
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state
