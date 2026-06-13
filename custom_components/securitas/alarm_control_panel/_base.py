@@ -311,21 +311,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if is_proto_letter(proto_code):
             self._last_proto_code = proto_code
         # A fresh authoritative status reconciles any provisional
-        # (accepted-but-unconfirmed) arm/disarm: clear the flag and dismiss
-        # the unconfirmed notification. (#508)
+        # (accepted-but-unconfirmed) arm/disarm: clearing the flag also
+        # dismisses the unconfirmed notification. (#508)
         if self._attr_extra_state_attributes.get("state_provisional"):
             self._set_state_provisional(False)
-            self.hass.async_create_task(
-                self.hass.services.async_call(
-                    domain="persistent_notification",
-                    service="dismiss",
-                    service_data={
-                        "notification_id": (
-                            f"{DOMAIN}.operation_unconfirmed_{self.installation.number}"
-                        ),
-                    },
-                )
-            )
         if proto_code == PROTO_DISARMED:
             self._state = AlarmControlPanelState.DISARMED
             self._last_unmapped_logged = None
@@ -811,11 +800,25 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._attr_extra_state_attributes.pop("refresh_failed", None)
 
     def _set_state_provisional(self, provisional: bool) -> None:
-        """Flag the entity state as provisional (accepted-but-unconfirmed)."""
+        """Flag the entity state as provisional (accepted-but-unconfirmed).
+
+        Clearing the flag also dismisses the unconfirmed notification, so the
+        notification ID lives in one place — mirrors ``_set_waf_blocked``.
+        """
         if provisional:
             self._attr_extra_state_attributes["state_provisional"] = True
-        else:
-            self._attr_extra_state_attributes.pop("state_provisional", None)
+        elif self._attr_extra_state_attributes.pop("state_provisional", None):
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    domain="persistent_notification",
+                    service="dismiss",
+                    service_data={
+                        "notification_id": (
+                            f"{DOMAIN}.operation_unconfirmed_{self.installation.number}"
+                        ),
+                    },
+                )
+            )
 
     def _optimistic_status(self, target: AlarmState) -> OperationStatus:
         """Build an OperationStatus reflecting the *intended* target state.
@@ -844,6 +847,30 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 "timeout": str(int(timeout)),
             },
         )
+
+    async def _handle_operation_timeout(
+        self, err: OperationTimeoutError, *, verb: str, target: AlarmState
+    ) -> None:
+        """Handle an accepted-but-unconfirmed arm/disarm (poll timed out, #508).
+
+        The command was accepted (``res: OK``) but the confirmation poll didn't
+        resolve within ``poll_timeout``. Reflect the target optimistically
+        (the fail-safe direction) and let the coordinator's ``xSStatus`` read
+        reconcile — never roll back or report a failure.
+        """
+        self._set_waf_blocked(False)
+        self._set_state_provisional(True)
+        self.update_status_alarm(self._optimistic_status(target))
+        _LOGGER.warning(
+            "%s not confirmed within timeout for %s; state provisional, "
+            "awaiting reconciliation: %s",
+            verb.capitalize(),
+            self.installation.number,
+            err.log_detail(),
+        )
+        self._notify_operation_unconfirmed(f"{verb}_unconfirmed")
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
     def _set_waf_blocked(self, blocked: bool) -> None:
         """Track WAF rate-limit state for the alarm card."""
@@ -909,23 +936,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 context=user_context,
             )
         except OperationTimeoutError as err:
-            # Command accepted (xSDisarmPanel res: OK) but the confirmation
-            # poll didn't resolve within poll_timeout. The panel is almost
-            # certainly actioning it (issue #508, IT backend). Reflect the
-            # target optimistically (fail-safe) and let the coordinator's
-            # xSStatus read reconcile — do NOT roll back or report a failure.
-            self._set_waf_blocked(False)
-            self._set_state_provisional(True)
-            self.update_status_alarm(self._optimistic_status(target))
-            _LOGGER.warning(
-                "Disarm not confirmed within timeout for %s; state provisional, "
-                "awaiting reconciliation: %s",
-                self.installation.number,
-                err.log_detail(),
-            )
-            self._notify_operation_unconfirmed("disarm_unconfirmed")
-            self.async_write_ha_state()
-            await self.coordinator.async_request_refresh()
+            await self._handle_operation_timeout(err, verb="disarm", target=target)
         except VerisureOwaError as err:
             self._state = self._last_state
             _LOGGER.error(
@@ -1004,21 +1015,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 exceptions=forced_excs,
             )
         except OperationTimeoutError as err:
-            # Arm accepted (xSArmPanel res: OK) but confirmation poll timed
-            # out. Optimistically reflect the target and reconcile via the
-            # coordinator — never roll back to the pre-arm state (#508).
-            self._set_waf_blocked(False)
-            self._set_state_provisional(True)
-            self.update_status_alarm(self._optimistic_status(target))
-            _LOGGER.warning(
-                "Arm not confirmed within timeout for %s; state provisional, "
-                "awaiting reconciliation: %s",
-                self.installation.number,
-                err.log_detail(),
-            )
-            self._notify_operation_unconfirmed("arm_unconfirmed")
-            self.async_write_ha_state()
-            await self.coordinator.async_request_refresh()
+            await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
             self._state = self._last_state
