@@ -70,6 +70,13 @@ class ActivityCategory(StrEnum):
     # unreachable. Mirror of COMMUNICATION_FAILED — the panel emits this
     # when comms recover so the user can correlate outages.
     COMMUNICATION_RESTORED = "communication_restored"
+    # Connected smart-lock (DR device) door signals — the lock opening and
+    # then auto-locking. Distinct events so cards can icon them separately.
+    DOOR_OPENED = "door_opened"
+    DOOR_CLOSED = "door_closed"
+    # A Verisure-app "routine" fired — a user-scheduled automation that can
+    # arm/disarm the alarm on a schedule.
+    ROUTINE_EXECUTED = "routine_executed"
     UNKNOWN = "unknown"
 
 
@@ -141,6 +148,15 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # "Estado de las comunicaciones" — emitted when the panel's link to the
     # central/website returns to normal after a period of being unreachable.
     3121: ActivityCategory.COMMUNICATION_RESTORED,
+    # Connected smart-lock (DR device) door signals. Seen on a French panel as
+    # "Porte ouverte" (324, lock opened) / "Porte fermée" (325, lock auto-locked
+    # a few minutes later). GitHub #512.
+    324: ActivityCategory.DOOR_OPENED,
+    325: ActivityCategory.DOOR_CLOSED,
+    # A Verisure-app "routine" fired (source=ROUTINES) — a user-scheduled
+    # automation that can arm/disarm the alarm. Seen as "Routine exécutée".
+    # GitHub #513.
+    70: ActivityCategory.ROUTINE_EXECUTED,
 }
 
 

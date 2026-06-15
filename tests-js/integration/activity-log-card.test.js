@@ -547,6 +547,38 @@ describe("verisure-owa-activity-log-card extra branches", () => {
     expect(card.shadowRoot.querySelector(".card-header").textContent).toBe("Recent");
   });
 
+  it.each([
+    ["door_opened", "mdi:door-open", "Door opened"],
+    ["door_closed", "mdi:door-closed", "Door closed"],
+    ["routine_executed", "mdi:robot", "Routine executed"],
+  ])(
+    "renders the %s category with its own icon, label, and no unknown prompt",
+    (category, icon, label) => {
+      const card = mountActivityCard({
+        hass: makeHass({
+          states: {
+            [ENTITY]: makeActivityLogEntity({
+              events: [
+                {
+                  id_signal: `${category}-1`,
+                  time: "2026-06-14 19:21:54",
+                  category,
+                  alias: label,
+                },
+              ],
+            }),
+          },
+        }),
+      });
+      const html = card.shadowRoot.innerHTML;
+      expect(html).toContain(icon);
+      // Not falling through to the unknown icon / prompt.
+      expect(html).not.toContain("mdi:help-circle");
+      expect(card.shadowRoot.querySelector(".unknown-prompt")).toBeNull();
+      expect(card.shadowRoot.querySelector(".category").textContent).toBe(label);
+    },
+  );
+
   it("renders an event whose category is not in CATEGORY_ICONS with the unknown icon", () => {
     const card = mountActivityCard({
       hass: makeHass({

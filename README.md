@@ -309,7 +309,7 @@ If you want every event to fire on the bus, turn on continuous polling under **S
 
 Each entry carries a **category** — a stable label for the type of event. The full list:
 
-`armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `alarm`, `alarm_resolved`, `tampering`, `sabotage`, `image_request`, `power_cut`, `power_restored`, `status_check`, `communication_failed`, `communication_restored`, `unknown`.
+`armed`, `armed_with_exceptions`, `arming_failed`, `disarmed`, `alarm`, `alarm_resolved`, `tampering`, `sabotage`, `image_request`, `power_cut`, `power_restored`, `status_check`, `communication_failed`, `communication_restored`, `door_opened`, `door_closed`, `routine_executed`, `unknown`.
 
 ### Activity events vs the alarm panel entity
 
