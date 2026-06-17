@@ -1132,6 +1132,22 @@ class TestActivityEventCategory:
         a period of being unreachable.  Mirror of COMMUNICATION_FAILED."""
         assert self._ev(3121).category == ActivityCategory.COMMUNICATION_RESTORED
 
+    def test_door_events(self):
+        """324 / 325 are the connected smart-lock (DR device) door signals.
+
+        Seen on a French panel as "Porte ouverte" (324) / "Porte fermée" (325)
+        — the lock opening and then auto-locking a few minutes later. GitHub
+        #512."""
+        assert self._ev(324).category == ActivityCategory.DOOR_OPENED
+        assert self._ev(325).category == ActivityCategory.DOOR_CLOSED
+
+    def test_routine_executed(self):
+        """70 fires when a Verisure-app "routine" runs (source=ROUTINES).
+
+        Routines are user-scheduled automations that can arm/disarm the alarm.
+        Seen as "Routine exécutée". GitHub #513."""
+        assert self._ev(70).category == ActivityCategory.ROUTINE_EXECUTED
+
     def test_unknown_codes(self):
         """Codes we haven't seen fall through to UNKNOWN — future-proofing."""
         assert self._ev(99999).category == ActivityCategory.UNKNOWN

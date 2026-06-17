@@ -39,6 +39,9 @@ export const TRANSLATIONS = {
       status_check: "Status check",
       communication_failed: "Communication failed",
       communication_restored: "Communication restored",
+      door_opened: "Door opened",
+      door_closed: "Door closed",
+      routine_executed: "Routine executed",
       unknown: "Unknown event",
     },
     exception_status: {
@@ -74,6 +77,9 @@ export const TRANSLATIONS = {
       status_check: "Comprobación de estado",
       communication_failed: "Fallo de comunicación",
       communication_restored: "Comunicación restablecida",
+      door_opened: "Puerta abierta",
+      door_closed: "Puerta cerrada",
+      routine_executed: "Rutina ejecutada",
       unknown: "Evento desconocido",
     },
     exception_status: {
@@ -109,6 +115,9 @@ export const TRANSLATIONS = {
       status_check: "Verifica di stato",
       communication_failed: "Errore di comunicazione",
       communication_restored: "Comunicazione ripristinata",
+      door_opened: "Porta aperta",
+      door_closed: "Porta chiusa",
+      routine_executed: "Routine eseguita",
       unknown: "Evento sconosciuto",
     },
     exception_status: {
@@ -144,6 +153,9 @@ export const TRANSLATIONS = {
       status_check: "Vérification de l'état",
       communication_failed: "Échec de communication",
       communication_restored: "Communication rétablie",
+      door_opened: "Porte ouverte",
+      door_closed: "Porte fermée",
+      routine_executed: "Routine exécutée",
       unknown: "Événement inconnu",
     },
     exception_status: {
@@ -179,6 +191,9 @@ export const TRANSLATIONS = {
       status_check: "Verificação de estado",
       communication_failed: "Falha de comunicação",
       communication_restored: "Comunicação restaurada",
+      door_opened: "Porta aberta",
+      door_closed: "Porta fechada",
+      routine_executed: "Rotina executada",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -214,6 +229,9 @@ export const TRANSLATIONS = {
       status_check: "Verificação de status",
       communication_failed: "Falha de comunicação",
       communication_restored: "Comunicação restaurada",
+      door_opened: "Porta aberta",
+      door_closed: "Porta fechada",
+      routine_executed: "Rotina executada",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -249,6 +267,9 @@ export const TRANSLATIONS = {
       status_check: "Comprovació d'estat",
       communication_failed: "Error de comunicació",
       communication_restored: "Comunicació restablerta",
+      door_opened: "Porta oberta",
+      door_closed: "Porta tancada",
+      routine_executed: "Rutina executada",
       unknown: "Esdeveniment desconegut",
     },
     exception_status: {
@@ -289,6 +310,9 @@ const CATEGORY_ICONS = {
   status_check: "mdi:lan-check",
   communication_failed: "mdi:lan-disconnect",
   communication_restored: "mdi:lan-connect",
+  door_opened: "mdi:door-open",
+  door_closed: "mdi:door-closed",
+  routine_executed: "mdi:robot",
   unknown: "mdi:help-circle",
 };
 
@@ -307,6 +331,12 @@ const CATEGORY_COLORS = {
   status_check: "var(--secondary-text-color)",
   communication_failed: "var(--error-color, #db4437)",
   communication_restored: "var(--success-color, #43a047)",
+  // Lock opened — an access event, blue/info like an arm-state change.
+  door_opened: "var(--info-color, #039be5)",
+  // Lock auto-closed (secured again) — green like the other "restored" states.
+  door_closed: "var(--success-color, #43a047)",
+  // Routine fired — informational, neutral like status_check.
+  routine_executed: "var(--secondary-text-color)",
   unknown: "var(--secondary-text-color)",
 };
 
