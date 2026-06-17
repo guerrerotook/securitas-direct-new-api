@@ -4,7 +4,7 @@ import vitest from "eslint-plugin-vitest";
 
 export default [
   {
-    ignores: ["node_modules/**", "coverage/**", ".vitest-cache/**"],
+    ignores: ["node_modules/**", "coverage/**", ".vitest-cache/**", ".venv*/**", "venv/**"],
   },
   js.configs.recommended,
   {
