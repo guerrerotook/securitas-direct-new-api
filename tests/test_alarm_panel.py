@@ -168,11 +168,27 @@ class TestForceArmExpiredMobileMessageTranslation:
 # manifest the same way and the test scaffolding can't be constructed — skip
 # those tests rather than fake them, since the real-HA assertions are what
 # give them value.
-_HAS_OBJECT_ID_BASE_KWARG = (
-    "object_id_base"
-    in inspect.signature(
-        _er_for_feature_detect.EntityRegistry.async_get_or_create
-    ).parameters
+def _param_names(func) -> set[str]:
+    """Return *func*'s parameter names without evaluating its annotations.
+
+    On Python 3.14 ``inspect.signature`` eagerly evaluates annotations, which
+    raises ``NameError`` for HA functions whose annotations reference
+    TYPE_CHECKING-only names (e.g. ``ConfigEntry`` on ``async_get_or_create``).
+    We only need the parameter names for feature detection, so request the
+    FORWARDREF format to skip evaluation. On Python 3.13 ``annotationlib``
+    doesn't exist and plain ``signature`` already returns the names safely.
+    """
+    try:
+        from annotationlib import Format
+
+        sig = inspect.signature(func, annotation_format=Format.FORWARDREF)
+    except ImportError:
+        sig = inspect.signature(func)
+    return set(sig.parameters)
+
+
+_HAS_OBJECT_ID_BASE_KWARG = "object_id_base" in _param_names(
+    _er_for_feature_detect.EntityRegistry.async_get_or_create
 )
 _DELETED_REGISTRY_ENTRY_HAS_ALIASES = "aliases" in {
     field.name for field in attr.fields(DeletedRegistryEntry)
