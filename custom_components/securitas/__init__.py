@@ -46,6 +46,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CAMERA_CARD_URL,
     CARD_BASE_URL,
     CARD_URL,
+    CHIP_CARD_BASE_URL,
+    CHIP_CARD_URL,
     ACTIVITY_LOG_CARD_BASE_URL,
     ACTIVITY_LOG_CARD_URL,
     CONF_ADVANCED,
@@ -810,6 +812,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         panel_dir = str(Path(__file__).parent / "www")
         await hass.http.async_register_static_paths(
             [
+                # cache_headers=False (HA serves Last-Modified → conditional
+                # 304 revalidation) rather than a long max-age. The registered
+                # card entry points are content-hash busted (?v=<hash>-<version>)
+                # and could be cached hard, BUT they import shared ES modules
+                # (verisure-owa-alarm-shared.js, verisure-owa-card-utils.js) by
+                # bare relative path with no ?v= — a long max-age would serve
+                # those stale for ~31 days after an update, breaking a freshly
+                # fetched entry point that imports a changed export. Until those
+                # bare imports are themselves cache-busted, revalidation is the
+                # correct choice. (Cold-load latency is addressed instead by
+                # keeping the always-visible chip in its own small resource.)
                 StaticPathConfig(
                     "/verisure-owa-panel",
                     panel_dir,
@@ -826,6 +839,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ]
         )
         await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
+        # Register the lightweight chip/badge module as its own resource so the
+        # always-visible alarm chip renders without waiting for the heavy
+        # alarm-card bundle above.
+        await _register_card_resource(
+            hass, CHIP_CARD_BASE_URL, CHIP_CARD_URL, "chip_card_resource_id"
+        )
         await _register_card_resource(
             hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
         )
@@ -1096,6 +1115,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
                 handler.removeFilter(transient_log_filter)
 
         await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
+        await _unregister_card_resource(hass, CHIP_CARD_URL, "chip_card_resource_id")
         await _unregister_card_resource(
             hass, CAMERA_CARD_URL, "camera_card_resource_id"
         )

@@ -1,6 +1,8 @@
 """Lovelace card resource registration for the Verisure OWA cards.
 
-The integration ships three custom Lovelace cards under www/. Each one is
+The integration ships several custom Lovelace card modules under www/ (the
+alarm card, the lightweight alarm chip/badge, the camera card, and the
+activity-log card). Each one is
 registered as a Lovelace resource (preferred) so it survives HA restarts,
 or — if the resources storage isn't available — falls back to
 add_extra_js_url for the lifetime of the running session.

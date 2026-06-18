@@ -1,7 +1,9 @@
 // Shared utilities for the Verisure OWA Lovelace cards.
 //
-// Loaded as an ES module (the cards' static path is served with
-// cache_headers=False, so updates here propagate alongside card updates).
+// Loaded as an ES module via a bare relative import (no ?v= cache-bust), so
+// the cards' static path is served with cache_headers=False (revalidation)
+// to ensure edits here propagate on the next load rather than being pinned by
+// a long max-age. See the StaticPathConfig note in __init__.py.
 
 export function escHtml(str) {
   return String(str)

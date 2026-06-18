@@ -5,6 +5,9 @@
 
 import { describe, it, expect } from "vitest";
 import "../../custom_components/securitas/www/verisure-owa-alarm-card.js";
+// The chip/badge live in their own module (a separate Lovelace resource in
+// production); import it so those elements are defined under test.
+import "../../custom_components/securitas/www/verisure-owa-alarm-chip.js";
 import { makeHass } from "../fixtures/hass.js";
 import { makeAlarmEntity } from "../fixtures/entities.js";
 

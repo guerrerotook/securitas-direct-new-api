@@ -660,11 +660,18 @@ class TestAsyncSetupEntry:
         assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
 
-        # Verify all three card JS URLs are registered (alarm + camera + events)
-        assert mock_add_js.call_count == 3
+        # Verify all card JS URLs are registered (alarm + chip + camera + events)
+        assert mock_add_js.call_count == 4
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
+            for u in js_urls
+        )
+        # The lightweight chip/badge module is registered as its own resource so
+        # the always-visible alarm chip renders without first downloading the
+        # heavy alarm-card bundle.
+        assert any(
+            u.startswith("/verisure-owa-panel/verisure-owa-alarm-chip.js?v=")
             for u in js_urls
         )
         assert any(
@@ -675,6 +682,50 @@ class TestAsyncSetupEntry:
             u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
             for u in js_urls
         )
+
+    async def test_setup_static_paths_use_revalidation_not_long_cache(
+        self, hass, mock_hub
+    ):
+        """Card static paths must be served with cache_headers=False.
+
+        cache_headers=True applies a 31-day ``max-age`` with no revalidation.
+        The registered entry points are content-hash busted (``?v=<hash>-...``)
+        and could be cached hard, but they import shared ES modules
+        (verisure-owa-alarm-shared.js, verisure-owa-card-utils.js) by bare
+        relative path with NO ``?v=`` — a long max-age would serve those stale
+        for up to 31 days after an update, breaking a freshly fetched entry
+        point that imports a changed export. Until every bare import is itself
+        cache-busted, revalidation (cache_headers=False) is the correct, safe
+        choice. This test guards against re-introducing the staleness bug by
+        flipping the flag without busting the bare imports.
+        """
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch("custom_components.securitas.frontend.add_extra_js_url"),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        hass.http.async_register_static_paths.assert_awaited_once()
+        call_args = hass.http.async_register_static_paths.call_args[0][0]
+        assert call_args, "expected static path configs to be registered"
+        for cfg in call_args:
+            assert cfg.cache_headers is False, (
+                f"{cfg.url_path} must NOT use a long max-age while the cards "
+                "import shared modules by bare path without a ?v= cache-bust"
+            )
 
     async def test_setup_skips_card_when_no_http(self, hass, mock_hub):
         """When hass.http is None, neither static paths nor extra JS should be registered."""
@@ -729,9 +780,9 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        # All three cards registered exactly once despite two setup calls
+        # All card resources registered exactly once despite two setup calls
         # (guarded by card_registered flag)
-        assert mock_add_js.call_count == 3
+        assert mock_add_js.call_count == 4
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
