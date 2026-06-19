@@ -13,10 +13,13 @@
 // both are imported here so this single legacy resource still defines every
 // element, as it did before the split.
 //
-// ES modules dedup by URL, so loading both this file AND the canonical
-// /verisure-owa-panel/...js resources causes the canonical code to run once:
-// customElements.define is guarded by `if (!customElements.get(...))` to make
-// any duplicate-registration attempt a silent no-op.
+// A user who has BOTH this legacy resource and the canonical
+// /verisure-owa-panel/...js resources registered loads the canonical modules
+// twice (the import URLs here differ from _card_url's ?v=<hash>-<version>
+// resource URLs, so the ES-module loader doesn't dedup them). That's a
+// harmless, legacy-only redundant fetch: customElements.define is guarded by
+// `if (!customElements.get(...))` and the customCards/customBadges pushes by
+// `.find(...)`, so the second run's registrations are silent no-ops.
 //
 // To collapse the dual-resource situation entirely, remove the
 // /securitas_panel/securitas-alarm-card.js entry from Settings →
