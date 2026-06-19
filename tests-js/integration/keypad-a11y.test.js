@@ -65,4 +65,22 @@ describe("PIN keypad accessible names are present and localized", () => {
     expect(cancel?.getAttribute("aria-label")).toBe("Cancelar");
     expect(del?.getAttribute("aria-label")).toBe("Borrar");
   });
+
+  it("badge popup close (✕) button exposes a Spanish aria-label", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = makeHass({
+      language: "es",
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    document.body.appendChild(badge);
+
+    badge._openDialog(); // tap → more-info opens this popup
+
+    const closeBtn = [...document.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Cerrar",
+    );
+    expect(closeBtn).toBeTruthy();
+    expect(closeBtn.title).toBe("Cerrar");
+  });
 });
