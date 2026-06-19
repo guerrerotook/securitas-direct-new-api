@@ -60,6 +60,11 @@ export const TRANSLATIONS = {
     unknown_event_prompt: "Please screenshot this event and create an issue at https://github.com/guerrerotook/securitas-direct-new-api/issues so that we can document this unknown event type.",
     image_loading: "Loading image…",
     image_unavailable: "Image not available",
+    editor_entity: "Activity log entity",
+    editor_limit: "Number of events to show",
+    editor_title: "Card title (optional)",
+    editor_max_height: "Max card height (e.g. 400px, 60vh)",
+    editor_hide_categories: "Categories to hide",
   },
   es: {
     category: {
@@ -98,6 +103,11 @@ export const TRANSLATIONS = {
     unknown_event_prompt: "Captura una imagen de este evento y abre una incidencia en https://github.com/guerrerotook/securitas-direct-new-api/issues para que podamos documentar este tipo de evento desconocido.",
     image_loading: "Cargando imagen…",
     image_unavailable: "Imagen no disponible",
+    editor_entity: "Entidad del registro de actividad",
+    editor_limit: "Número de eventos a mostrar",
+    editor_title: "Título de la tarjeta (opcional)",
+    editor_max_height: "Altura máxima de la tarjeta (p. ej. 400px, 60vh)",
+    editor_hide_categories: "Categorías a ocultar",
   },
   it: {
     category: {
@@ -136,6 +146,11 @@ export const TRANSLATIONS = {
     unknown_event_prompt: "Fai uno screenshot di questo evento e apri una segnalazione su https://github.com/guerrerotook/securitas-direct-new-api/issues così possiamo documentare questo tipo di evento sconosciuto.",
     image_loading: "Caricamento immagine…",
     image_unavailable: "Immagine non disponibile",
+    editor_entity: "Entità del registro attività",
+    editor_limit: "Numero di eventi da mostrare",
+    editor_title: "Titolo della scheda (opzionale)",
+    editor_max_height: "Altezza massima della scheda (es. 400px, 60vh)",
+    editor_hide_categories: "Categorie da nascondere",
   },
   fr: {
     category: {
@@ -174,6 +189,11 @@ export const TRANSLATIONS = {
     unknown_event_prompt: "Prenez une capture d'écran de cet événement et créez un ticket sur https://github.com/guerrerotook/securitas-direct-new-api/issues afin que nous puissions documenter ce type d'événement inconnu.",
     image_loading: "Chargement de l'image…",
     image_unavailable: "Image indisponible",
+    editor_entity: "Entité du journal d’activité",
+    editor_limit: "Nombre d’événements à afficher",
+    editor_title: "Titre de la carte (facultatif)",
+    editor_max_height: "Hauteur max. de la carte (p. ex. 400px, 60vh)",
+    editor_hide_categories: "Catégories à masquer",
   },
   pt: {
     category: {
@@ -212,6 +232,11 @@ export const TRANSLATIONS = {
     image_loading: "A carregar imagem…",
     verisure_record: "Registo Verisure",
     image_unavailable: "Imagem não disponível",
+    editor_entity: "Entidade do registo de atividade",
+    editor_limit: "Número de eventos a mostrar",
+    editor_title: "Título do cartão (opcional)",
+    editor_max_height: "Altura máxima do cartão (ex.: 400px, 60vh)",
+    editor_hide_categories: "Categorias a ocultar",
   },
   "pt-BR": {
     category: {
@@ -250,6 +275,11 @@ export const TRANSLATIONS = {
     image_loading: "Carregando imagem…",
     verisure_record: "Registro Verisure",
     image_unavailable: "Imagem indisponível",
+    editor_entity: "Entidade do registo de atividade",
+    editor_limit: "Número de eventos a mostrar",
+    editor_title: "Título do cartão (opcional)",
+    editor_max_height: "Altura máxima do cartão (ex.: 400px, 60vh)",
+    editor_hide_categories: "Categorias a ocultar",
   },
   ca: {
     category: {
@@ -288,6 +318,11 @@ export const TRANSLATIONS = {
     unknown_event_prompt: "Feu una captura de pantalla d'aquest esdeveniment i obriu una incidència a https://github.com/guerrerotook/securitas-direct-new-api/issues perquè puguem documentar aquest tipus d'esdeveniment desconegut.",
     image_loading: "Carregant imatge…",
     image_unavailable: "Imatge no disponible",
+    editor_entity: "Entitat del registre d’activitat",
+    editor_limit: "Nombre d’esdeveniments a mostrar",
+    editor_title: "Títol de la targeta (opcional)",
+    editor_max_height: "Alçada màxima de la targeta (p. ex. 400px, 60vh)",
+    editor_hide_categories: "Categories a amagar",
   },
 };
 
@@ -1165,11 +1200,11 @@ class VerisureOwaActivityLogCardEditor extends HTMLElement {
       },
     ];
     entityForm.computeLabel = (s) => {
-      if (s.name === "entity") return "Activity log entity";
-      if (s.name === "limit") return "Number of events to show";
-      if (s.name === "title") return "Card title (optional)";
-      if (s.name === "max_height") return "Max card height (e.g. 400px, 60vh)";
-      if (s.name === "hide_categories") return "Categories to hide";
+      if (s.name === "entity") return _t(lang, "editor_entity");
+      if (s.name === "limit") return _t(lang, "editor_limit");
+      if (s.name === "title") return _t(lang, "editor_title");
+      if (s.name === "max_height") return _t(lang, "editor_max_height");
+      if (s.name === "hide_categories") return _t(lang, "editor_hide_categories");
       return s.name;
     };
     entityForm.addEventListener("value-changed", (e) => {

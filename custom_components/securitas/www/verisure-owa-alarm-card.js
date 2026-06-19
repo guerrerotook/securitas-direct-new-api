@@ -203,7 +203,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
           </div>
 
           <!-- ── Unavailable notice ── -->
-          ${isUnavailable ? `<div class="unavailable-msg">Entity is ${cfg.label.toLowerCase()}.</div>` : ""}
+          ${isUnavailable ? `<div class="unavailable-msg">${_t(lang, "entity_state_notice", { state: cfg.label })}</div>` : ""}
 
           <!-- ── WAF rate-limit banner ── -->
           ${wafBlocked ? `<div class="waf-banner"><ha-icon icon="mdi:shield-alert"></ha-icon> ${_t(lang, "waf_blocked")}</div>` : ""}
@@ -301,9 +301,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
             ${[1,2,3,4,5,6,7,8,9].map(n =>
               `<button class="key" data-key="${n}">${n}</button>`
             ).join("")}
-            <button class="key key-cancel" data-key="cancel" aria-label="Cancel" title="Cancel">✕</button>
+            <button class="key key-cancel" data-key="cancel" aria-label="${_t(lang, "cancel")}" title="${_t(lang, "cancel")}">✕</button>
             <button class="key" data-key="0">0</button>
-            <button class="key key-del" data-key="del" aria-label="Backspace" title="Backspace">⌫</button>
+            <button class="key key-del" data-key="del" aria-label="${_t(lang, "delete")}" title="${_t(lang, "delete")}">⌫</button>
           </div>
           <button class="btn btn-arm pin-confirm" data-action="confirm-pin">${_t(lang, "confirm")}</button>
         </div>`;
@@ -897,11 +897,11 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
         select: {
           mode: "dropdown",
           options: [
-            { value: "none",           label: "None" },
-            { value: "more-info",      label: "Open dialog" },
-            { value: "navigate",       label: "Navigate" },
-            { value: "perform-action", label: "Perform action" },
-            { value: "arm_or_disarm",  label: "Arm or disarm" },
+            { value: "none",           label: _t(lang, "editor_action_none") },
+            { value: "more-info",      label: _t(lang, "editor_action_more_info") },
+            { value: "navigate",       label: _t(lang, "editor_action_navigate") },
+            { value: "perform-action", label: _t(lang, "editor_action_perform") },
+            { value: "arm_or_disarm",  label: _t(lang, "editor_action_arm_or_disarm") },
           ],
         },
       },
@@ -917,7 +917,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     navForm.hass   = this._hass;
     navForm.data   = { navigation_path: current.navigation_path || "" };
     navForm.schema = [{ name: "navigation_path", selector: { navigation: {} } }];
-    navForm.computeLabel = () => "Navigation path";
+    navForm.computeLabel = () => _t(lang, "editor_navigation_path");
     navFields.appendChild(navForm);
     section.appendChild(navFields);
 
@@ -926,12 +926,12 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     perfFields.className = "conditional-fields";
     perfFields.style.display = currentAction === "perform-action" ? "" : "none";
     const perfInput = document.createElement("ha-textfield");
-    perfInput.label       = "Action (e.g. light.turn_on)";
+    perfInput.label       = _t(lang, "editor_perform_action");
     perfInput.placeholder = "domain.service";
     perfInput.value       = current.perform_action || "";
     perfInput.style.width = "100%";
     const perfDataInput = document.createElement("ha-textfield");
-    perfDataInput.label       = "Data (JSON, optional)";
+    perfDataInput.label       = _t(lang, "editor_perform_data");
     perfDataInput.placeholder = '{"entity_id": "light.living_room"}';
     perfDataInput.value       = current.data ? JSON.stringify(current.data) : "";
     perfDataInput.style.width = "100%";
@@ -965,7 +965,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
           },
         },
       }];
-      armForm.computeLabel = () => "Arm state";
+      armForm.computeLabel = () => _t(lang, "editor_arm_state");
       armFields.appendChild(armForm);
     }
     section.appendChild(armFields);
@@ -1122,19 +1122,19 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     // ── State colors (ha-expansion-panel) ────────────────────────────────────
     const colorsSlot = this.shadowRoot.getElementById("colors-slot");
     const expansionPanel = document.createElement("ha-expansion-panel");
-    expansionPanel.header = "State Colors";
+    expansionPanel.header = _t(lang, "editor_state_colors");
     const colorsContent = document.createElement("div");
     colorsContent.style.padding = "8px 0 4px 0";
     colorsContent.innerHTML = `
-      <div class="section-hint">Optional — leave at default or pick a custom color per state.</div>
+      <div class="section-hint">${_t(lang, "editor_colors_hint")}</div>
       <div class="color-grid">
-        ${COLOR_EDITOR_STATES.map(({ state, label }) => {
+        ${COLOR_EDITOR_STATES.map(({ state }) => {
           const override = colors[state];
           const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
           return `
-            <span>${label}</span>
+            <span>${_t(lang, STATE_LABEL_KEYS[state] || state)}</span>
             <input type="color" data-state="${state}" value="${pickerVal}" />
-            <button class="reset-btn" data-reset="${state}" title="Reset to default" ${override ? "" : "hidden"}>↺</button>`;
+            <button class="reset-btn" data-reset="${state}" title="${_t(lang, "editor_reset_default")}" ${override ? "" : "hidden"}>↺</button>`;
         }).join("")}
       </div>`;
     expansionPanel.appendChild(colorsContent);
@@ -1255,9 +1255,10 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       : { action: "none" };
     const dblDefaults  = { action: "none" };
 
-    gestureSlot.appendChild(this._buildGestureSection("tap",        "Tap action",        tapDefaults));
-    gestureSlot.appendChild(this._buildGestureSection("hold",       "Hold action",       holdDefaults));
-    gestureSlot.appendChild(this._buildGestureSection("double_tap", "Double-tap action", dblDefaults));
+    const lang = this._hass?.language || "en";
+    gestureSlot.appendChild(this._buildGestureSection("tap",        _t(lang, "editor_tap_action"),        tapDefaults));
+    gestureSlot.appendChild(this._buildGestureSection("hold",       _t(lang, "editor_hold_action"),       holdDefaults));
+    gestureSlot.appendChild(this._buildGestureSection("double_tap", _t(lang, "editor_double_tap_action"), dblDefaults));
   }
 
 

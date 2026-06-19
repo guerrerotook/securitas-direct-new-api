@@ -30,6 +30,7 @@ export const TRANSLATIONS = {
     ago_days: "{n}d ago",
     card_name: "Verisure Camera Card",
     card_description: "Displays a Verisure camera image with capture trigger and timestamp.",
+    capture: "Capture",
   },
   es: {
     editor_entity: "Entidad",
@@ -42,6 +43,7 @@ export const TRANSLATIONS = {
     ago_days: "hace {n}d",
     card_name: "Tarjeta de Cámara Verisure",
     card_description: "Muestra la imagen de una cámara Verisure con captura y marca de tiempo.",
+    capture: "Capturar",
   },
   fr: {
     editor_entity: "Entité",
@@ -54,6 +56,7 @@ export const TRANSLATIONS = {
     ago_days: "il y a {n}j",
     card_name: "Carte Caméra Verisure",
     card_description: "Affiche l’image d’une caméra Verisure avec capture et horodatage.",
+    capture: "Capturer",
   },
   it: {
     editor_entity: "Entità",
@@ -66,6 +69,7 @@ export const TRANSLATIONS = {
     ago_days: "{n}g fa",
     card_name: "Scheda Camera Verisure",
     card_description: "Mostra l’immagine di una camera Verisure con cattura e timestamp.",
+    capture: "Cattura",
   },
   pt: {
     editor_entity: "Entidade",
@@ -78,6 +82,7 @@ export const TRANSLATIONS = {
     ago_days: "há {n}d",
     card_name: "Cartão de Câmara Verisure",
     card_description: "Mostra a imagem de uma câmara Verisure com captura e marca temporal.",
+    capture: "Capturar",
   },
   "pt-BR": {
     editor_entity: "Entidade",
@@ -90,6 +95,7 @@ export const TRANSLATIONS = {
     ago_days: "{n}d atrás",
     card_name: "Cartão de Câmera Verisure",
     card_description: "Exibe a imagem de uma câmera Verisure com captura e marca de tempo.",
+    capture: "Capturar",
   },
   ca: {
     editor_entity: "Entitat",
@@ -102,6 +108,7 @@ export const TRANSLATIONS = {
     ago_days: "fa {n}d",
     card_name: "Targeta de Càmera Verisure",
     card_description: "Mostra la imatge d’una càmera Verisure amb captura i marca de temps.",
+    capture: "Captura",
   },
 };
 
@@ -379,7 +386,7 @@ class VerisureOwaCameraCard extends HTMLElement {
           <span class="name">${escHtml(name)}</span>
           ${timestamp ? `<span class="timestamp" title="${escHtml(absolute)}">${escHtml(relative)}</span>` : ""}
         </div>
-        <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn">
+        <button class="refresh-btn${this._refreshing ? " spinning" : ""}" id="refresh-btn" aria-label="${escHtml(_t(lang, "capture"))}" title="${escHtml(_t(lang, "capture"))}">
           <ha-icon icon="mdi:refresh"></ha-icon>
         </button>
       </div>

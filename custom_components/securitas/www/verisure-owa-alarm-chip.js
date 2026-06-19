@@ -159,9 +159,9 @@ class VerisureOwaAlarmBadge extends HTMLElement {
           ${[1,2,3,4,5,6,7,8,9].map(n =>
             `<button data-badge-key="${n}" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${n}</button>`
           ).join("")}
-          <button data-badge-key="cancel" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
+          <button data-badge-key="cancel" aria-label="${_t(lang, "cancel")}" title="${_t(lang, "cancel")}" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
           <button data-badge-key="0" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">0</button>
-          <button data-badge-key="del" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
+          <button data-badge-key="del" aria-label="${_t(lang, "delete")}" title="${_t(lang, "delete")}" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
         </div>
       ` : `
         <input id="badge-pin-input" type="password" autocomplete="off"
