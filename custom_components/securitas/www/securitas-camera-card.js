@@ -5,4 +5,4 @@
 // verisure-owa-camera-card AND securitas-camera-card (plus their
 // -editor variants) so old dashboards using `custom:securitas-camera-card`
 // keep rendering. ES modules dedup by URL.
-import "./verisure-owa-camera-card.js";
+import "./verisure-owa-camera-card.js?v=5.4.0";

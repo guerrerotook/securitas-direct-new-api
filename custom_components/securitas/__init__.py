@@ -812,25 +812,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         panel_dir = str(Path(__file__).parent / "www")
         await hass.http.async_register_static_paths(
             [
-                # cache_headers=False (HA serves Last-Modified → conditional
-                # 304 revalidation) rather than a long max-age. The registered
-                # card entry points are content-hash busted (?v=<hash>-<version>)
-                # and could be cached hard, BUT they import shared ES modules
-                # (verisure-owa-alarm-shared.js, verisure-owa-card-utils.js) by
-                # bare relative path with no ?v= — a long max-age would serve
-                # those stale for ~31 days after an update, breaking a freshly
-                # fetched entry point that imports a changed export. Until those
-                # bare imports are themselves cache-busted, revalidation is the
-                # correct choice. (Cold-load latency is addressed instead by
-                # keeping the always-visible chip in its own small resource.)
+                # cache_headers=True gives the (large) card bundles a long
+                # max-age so the browser / companion app serves them from cache
+                # instead of re-downloading on every cold dashboard open — which
+                # made the alarm chip render 5-10s late on a slow network.
+                #
+                # Safe on THIS path because every URL the integration emits here
+                # is cache-busted:
+                #  - registered entry points via _card_url's ?v=<hash>-<version>
+                #    (content-hash — busts whenever the file changes), and
+                #  - their bare cross-module imports (shared.js, card-utils.js)
+                #    carry a ?v=<version> query stamped into the import specifiers
+                #    (enforced by card-cache-busting.test.js).
+                # The shared modules are version- (not hash-) busted, which is
+                # sufficient because users only receive new files via a HACS
+                # update, which by definition bumps the manifest version, and the
+                # test forces the stamps to track that version — so every
+                # delivered change yields new URLs and nothing is served stale.
                 StaticPathConfig(
                     "/verisure-owa-panel",
                     panel_dir,
-                    cache_headers=False,
+                    cache_headers=True,
                 ),
-                # Kept indefinitely so anyone who hardcoded the
-                # /securitas_panel/... path into a Markdown card,
-                # picture-glance, or external link doesn't break.
+                # Legacy path kept indefinitely so anyone who hardcoded a
+                # /securitas_panel/... URL into a Markdown card, picture-glance,
+                # or external link before v5 doesn't break. cache_headers=False
+                # here (revalidation): these are user-hardcoded URLs WITHOUT a
+                # ?v= bust token, so a long max-age would pin them stale for ~31
+                # days after an update. Revalidation keeps them fresh. The
+                # bytes we actually want hard-cached are served via
+                # /verisure-owa-panel above.
                 StaticPathConfig(
                     "/securitas_panel",
                     panel_dir,

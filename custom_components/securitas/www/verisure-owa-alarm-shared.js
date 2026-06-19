@@ -4,10 +4,11 @@
 // Split out of verisure-owa-alarm-card.js so the lightweight chip/badge can
 // load from their own small module without pulling in the heavy card + editor
 // code — keeping the always-visible alarm chip fast to render on a cold
-// dashboard load. Updates still propagate: the cards' static path is
-// content-hash busted (?v=<hash>-<version>).
+// dashboard load. Imported with a ?v=<version> cache-bust query so it can be
+// served with a long max-age yet still re-fetched on each release (kept in
+// sync by tests-js/integration/card-cache-busting.test.js).
 
-import { formatTranslation } from "./verisure-owa-card-utils.js";
+import { formatTranslation } from "./verisure-owa-card-utils.js?v=5.4.0";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {
