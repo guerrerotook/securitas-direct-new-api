@@ -660,12 +660,33 @@ class TestAsyncSetupEntry:
         assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
 
-        # Verify all three card JS URLs are registered (alarm + camera + events)
-        assert mock_add_js.call_count == 3
+        # Verify all card JS URLs are registered (alarm + chip + camera + events)
+        assert mock_add_js.call_count == 4
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
             for u in js_urls
+        )
+        # The lightweight chip/badge module is registered as its own resource so
+        # the always-visible alarm chip renders without first downloading the
+        # heavy alarm-card bundle.
+        assert any(
+            u.startswith("/verisure-owa-panel/verisure-owa-alarm-chip.js?v=")
+            for u in js_urls
+        )
+        # ...and it must be registered BEFORE the heavy alarm card: in the
+        # add_extra_js_url fallback, resources inject as ordered
+        # <script type="module"> tags that execute in document order, so the
+        # lightweight chip must come first to render ASAP on cold load.
+        chip_idx = next(
+            i for i, u in enumerate(js_urls) if "verisure-owa-alarm-chip.js" in u
+        )
+        card_idx = next(
+            i for i, u in enumerate(js_urls) if "verisure-owa-alarm-card.js" in u
+        )
+        assert chip_idx < card_idx, (
+            f"chip ({chip_idx}) must register before card ({card_idx}) so it "
+            "loads first in the add_extra_js_url fallback"
         )
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-camera-card.js?v=")
@@ -675,6 +696,49 @@ class TestAsyncSetupEntry:
             u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
             for u in js_urls
         )
+
+    async def test_setup_static_paths_cache_policy(self, hass, mock_hub):
+        """Static paths use a differential cache policy.
+
+        ``/verisure-owa-panel`` (cache_headers=True): the integration only ever
+        emits cache-busted URLs here — entry points via ``_card_url``
+        (``?v=<hash>-<version>``) and their bare imports via a ``?v=<version>``
+        query stamped in the JS (enforced by
+        tests-js/integration/card-cache-busting.test.js) — so a long max-age is
+        safe and gives the cold-load speed-up (the alarm chip no longer renders
+        5-10s late).
+
+        ``/securitas_panel`` (cache_headers=False): legacy path for pre-v5 URLs
+        users hardcoded into resources/Markdown cards. Those URLs carry NO
+        ``?v=`` bust token, so a long max-age would pin them stale ~31 days
+        after an update; revalidation keeps them fresh.
+        """
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch("custom_components.securitas.frontend.add_extra_js_url"),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        hass.http.async_register_static_paths.assert_awaited_once()
+        call_args = hass.http.async_register_static_paths.call_args[0][0]
+        cache_by_path = {cfg.url_path: cfg.cache_headers for cfg in call_args}
+        assert cache_by_path == {
+            "/verisure-owa-panel": True,
+            "/securitas_panel": False,
+        }, cache_by_path
 
     async def test_setup_skips_card_when_no_http(self, hass, mock_hub):
         """When hass.http is None, neither static paths nor extra JS should be registered."""
@@ -729,9 +793,9 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        # All three cards registered exactly once despite two setup calls
+        # All card resources registered exactly once despite two setup calls
         # (guarded by card_registered flag)
-        assert mock_add_js.call_count == 3
+        assert mock_add_js.call_count == 4
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")

@@ -46,6 +46,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CAMERA_CARD_URL,
     CARD_BASE_URL,
     CARD_URL,
+    CHIP_CARD_BASE_URL,
+    CHIP_CARD_URL,
     ACTIVITY_LOG_CARD_BASE_URL,
     ACTIVITY_LOG_CARD_URL,
     CONF_ADVANCED,
@@ -810,20 +812,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         panel_dir = str(Path(__file__).parent / "www")
         await hass.http.async_register_static_paths(
             [
+                # cache_headers=True gives the (large) card bundles a long
+                # max-age so the browser / companion app serves them from cache
+                # instead of re-downloading on every cold dashboard open — which
+                # made the alarm chip render 5-10s late on a slow network.
+                #
+                # Safe on THIS path because every URL the integration emits here
+                # is cache-busted:
+                #  - registered entry points via _card_url's ?v=<hash>-<version>
+                #    (content-hash — busts whenever the file changes), and
+                #  - their bare cross-module imports (shared.js, card-utils.js)
+                #    carry a ?v=<version> query stamped into the import specifiers
+                #    (enforced by card-cache-busting.test.js).
+                # The shared modules are version- (not hash-) busted, which is
+                # sufficient because users only receive new files via a HACS
+                # update, which by definition bumps the manifest version, and the
+                # test forces the stamps to track that version — so every
+                # delivered change yields new URLs and nothing is served stale.
                 StaticPathConfig(
                     "/verisure-owa-panel",
                     panel_dir,
-                    cache_headers=False,
+                    cache_headers=True,
                 ),
-                # Kept indefinitely so anyone who hardcoded the
-                # /securitas_panel/... path into a Markdown card,
-                # picture-glance, or external link doesn't break.
+                # Legacy path kept indefinitely so anyone who hardcoded a
+                # /securitas_panel/... URL into a Markdown card, picture-glance,
+                # or external link before v5 doesn't break. cache_headers=False
+                # here (revalidation): these are user-hardcoded URLs WITHOUT a
+                # ?v= bust token, so a long max-age would pin them stale for ~31
+                # days after an update. Revalidation keeps them fresh. The
+                # bytes we actually want hard-cached are served via
+                # /verisure-owa-panel above.
                 StaticPathConfig(
                     "/securitas_panel",
                     panel_dir,
                     cache_headers=False,
                 ),
             ]
+        )
+        # Register the lightweight chip/badge module FIRST so the always-visible
+        # alarm chip renders ASAP on cold load. Resource order matters in the
+        # add_extra_js_url fallback: the URLs inject as ordered
+        # <script type="module"> tags that execute in document order, so the
+        # heavy alarm card must not precede the chip.
+        await _register_card_resource(
+            hass, CHIP_CARD_BASE_URL, CHIP_CARD_URL, "chip_card_resource_id"
         )
         await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
         await _register_card_resource(
@@ -1096,6 +1128,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
                 handler.removeFilter(transient_log_filter)
 
         await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
+        await _unregister_card_resource(hass, CHIP_CARD_URL, "chip_card_resource_id")
         await _unregister_card_resource(
             hass, CAMERA_CARD_URL, "camera_card_resource_id"
         )

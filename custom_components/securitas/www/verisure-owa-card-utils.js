@@ -1,7 +1,10 @@
 // Shared utilities for the Verisure OWA Lovelace cards.
 //
-// Loaded as an ES module (the cards' static path is served with
-// cache_headers=False, so updates here propagate alongside card updates).
+// Imported by the other card modules with a ?v=<version> cache-bust query, so
+// the static path can be served with cache_headers=True (long max-age) without
+// pinning a stale copy: each release changes the query and the browser
+// re-fetches. Keep the ?v= in sync with the integration version — enforced by
+// tests-js/integration/card-cache-busting.test.js.
 
 export function escHtml(str) {
   return String(str)
