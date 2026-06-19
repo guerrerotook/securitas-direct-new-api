@@ -553,14 +553,15 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(document.querySelector("#badge-pin-input")).toBeNull();
   });
 
-  it("badge dialog wires up a connection 'disconnected' listener and unsubscribes on close", () => {
-    let unsubCalled = false;
+  it("badge dialog wires up a connection 'disconnected' listener and removes it on close", () => {
+    // HA's connection.addEventListener returns void (not an unsubscribe), so
+    // the dialog must remove the SAME listener via removeEventListener on close
+    // — otherwise each open leaks a "disconnected" handler.
     const hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
       connection: {
-        addEventListener: vi.fn(() => () => {
-          unsubCalled = true;
-        }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     });
     const badge = mountBadge({ hass });
@@ -574,11 +575,12 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
       "disconnected",
       expect.any(Function),
     );
-    // Closing via the close button should call the unsub fn.
+    const handler = hass.connection.addEventListener.mock.calls[0][1];
+    // Closing the dialog removes that exact listener (no leak).
     const dialogCard = document.body.querySelector("securitas-alarm-card");
     const closeBtn = dialogCard.parentElement.querySelector("button");
     closeBtn.click();
-    expect(unsubCalled).toBe(true);
+    expect(hass.connection.removeEventListener).toHaveBeenCalledWith("disconnected", handler);
   });
 
   it("badge skips re-render when neither state nor force_arm_available change", () => {

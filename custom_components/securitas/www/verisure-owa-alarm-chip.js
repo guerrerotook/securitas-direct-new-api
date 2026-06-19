@@ -159,9 +159,9 @@ class VerisureOwaAlarmBadge extends HTMLElement {
           ${[1,2,3,4,5,6,7,8,9].map(n =>
             `<button data-badge-key="${n}" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${n}</button>`
           ).join("")}
-          <button data-badge-key="cancel" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
+          <button data-badge-key="cancel" aria-label="${_t(lang, "cancel")}" title="${_t(lang, "cancel")}" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
           <button data-badge-key="0" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">0</button>
-          <button data-badge-key="del" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
+          <button data-badge-key="del" aria-label="${_t(lang, "delete")}" title="${_t(lang, "delete")}" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
         </div>
       ` : `
         <input id="badge-pin-input" type="password" autocomplete="off"
@@ -247,6 +247,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     }
 
     this._dialogOpen = true;
+    const lang = this._hass?.language || "en";
 
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
@@ -265,6 +266,8 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
     const closeBtn = document.createElement("button");
     closeBtn.textContent = "\u2715";
+    closeBtn.setAttribute("aria-label", _t(lang, "close"));
+    closeBtn.title = _t(lang, "close");
     Object.assign(closeBtn.style, {
       position: "absolute", top: "8px", right: "8px", width: "32px", height: "32px",
       border: "none", borderRadius: "50%", background: "var(--secondary-background-color)",
@@ -306,11 +309,15 @@ class VerisureOwaAlarmBadge extends HTMLElement {
       if (e.target === overlay) close();
     });
 
-    // Close overlay when HA connection drops (e.g. restart)
+    // Close overlay when HA connection drops (e.g. restart). The connection's
+    // addEventListener returns void, so we build our own unsubscribe via
+    // removeEventListener (capturing the same conn) — otherwise each open would
+    // leak a "disconnected" listener.
     if (this._hass?.connection) {
-      this._unsubConnection = this._hass.connection.addEventListener(
-        "disconnected", close
-      );
+      const conn = this._hass.connection;
+      conn.addEventListener("disconnected", close);
+      this._unsubConnection = () =>
+        conn.removeEventListener("disconnected", close);
     }
   }
 
