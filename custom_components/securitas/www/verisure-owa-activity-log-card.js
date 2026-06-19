@@ -275,7 +275,7 @@ export const TRANSLATIONS = {
     image_loading: "Carregando imagem…",
     verisure_record: "Registro Verisure",
     image_unavailable: "Imagem indisponível",
-    editor_entity: "Entidade do registo de atividade",
+    editor_entity: "Entidade do registro de atividade",
     editor_limit: "Número de eventos a mostrar",
     editor_title: "Título do cartão (opcional)",
     editor_max_height: "Altura máxima do cartão (ex.: 400px, 60vh)",
@@ -1199,13 +1199,13 @@ class VerisureOwaActivityLogCardEditor extends HTMLElement {
         },
       },
     ];
+    // Every schema field maps to an `editor_<name>` key. _t returns the key
+    // unchanged when there's no translation, so an unmapped field falls back to
+    // its raw name rather than showing "editor_<name>".
     entityForm.computeLabel = (s) => {
-      if (s.name === "entity") return _t(lang, "editor_entity");
-      if (s.name === "limit") return _t(lang, "editor_limit");
-      if (s.name === "title") return _t(lang, "editor_title");
-      if (s.name === "max_height") return _t(lang, "editor_max_height");
-      if (s.name === "hide_categories") return _t(lang, "editor_hide_categories");
-      return s.name;
+      const key = `editor_${s.name}`;
+      const label = _t(lang, key);
+      return label === key ? s.name : label;
     };
     entityForm.addEventListener("value-changed", (e) => {
       this._config = { ...this._config, ...e.detail.value };

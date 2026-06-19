@@ -128,7 +128,7 @@ export const TRANSLATIONS = {
     editor_arm_modes_empty: "Cette entit\u00e9 ne prend en charge aucun mode d\u2019armement.",
     editor_arm_state_no_modes: "Activez au moins un mode d\u2019armement ci-dessus pour configurer cette action.",
     delete: "Supprimer",
-    entity_state_notice: "\u00c9tat de l\u2019entit\u00e9 : {state}",
+    entity_state_notice: "\u00c9tat de l\u2019entit\u00e9\u00a0: {state}",
     editor_state_colors: "Couleurs d\u2019\u00e9tat",
     editor_colors_hint: "Facultatif \u2014 laissez la valeur par d\u00e9faut ou choisissez une couleur personnalis\u00e9e par \u00e9tat.",
     editor_reset_default: "R\u00e9initialiser par d\u00e9faut",
@@ -264,15 +264,17 @@ export const STATE_COLOR_DEFAULTS = {
   triggered:           "#F44336",
 };
 
-// States shown in the color editor (excludes transient/unavailable states)
+// States shown in the color editor (excludes transient/unavailable states).
+// Labels are localized at render time via _t(STATE_LABEL_KEYS[state]); this is
+// just the ordered state list.
 export const COLOR_EDITOR_STATES = [
-  { state: "disarmed",            label: "Disarmed" },
-  { state: "armed_away",          label: "Armed Away" },
-  { state: "armed_home",          label: "Armed Home" },
-  { state: "armed_night",         label: "Armed Night" },
-  { state: "armed_vacation",      label: "Armed Vacation" },
-  { state: "armed_custom_bypass", label: "Armed Custom / Bypass" },
-  { state: "triggered",           label: "Triggered" },
+  "disarmed",
+  "armed_away",
+  "armed_home",
+  "armed_night",
+  "armed_vacation",
+  "armed_custom_bypass",
+  "triggered",
 ];
 
 export const STATE_LABEL_KEYS = {

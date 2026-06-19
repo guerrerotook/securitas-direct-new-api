@@ -1128,7 +1128,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     colorsContent.innerHTML = `
       <div class="section-hint">${_t(lang, "editor_colors_hint")}</div>
       <div class="color-grid">
-        ${COLOR_EDITOR_STATES.map(({ state }) => {
+        ${COLOR_EDITOR_STATES.map((state) => {
           const override = colors[state];
           const pickerVal = override || STATE_COLOR_DEFAULTS[state] || "#808080";
           return `
