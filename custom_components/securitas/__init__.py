@@ -849,13 +849,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ),
             ]
         )
-        await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
-        # Register the lightweight chip/badge module as its own resource so the
-        # always-visible alarm chip renders without waiting for the heavy
-        # alarm-card bundle above.
+        # Register the lightweight chip/badge module FIRST so the always-visible
+        # alarm chip renders ASAP on cold load. Resource order matters in the
+        # add_extra_js_url fallback: the URLs inject as ordered
+        # <script type="module"> tags that execute in document order, so the
+        # heavy alarm card must not precede the chip.
         await _register_card_resource(
             hass, CHIP_CARD_BASE_URL, CHIP_CARD_URL, "chip_card_resource_id"
         )
+        await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
         await _register_card_resource(
             hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
         )

@@ -674,6 +674,20 @@ class TestAsyncSetupEntry:
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-chip.js?v=")
             for u in js_urls
         )
+        # ...and it must be registered BEFORE the heavy alarm card: in the
+        # add_extra_js_url fallback, resources inject as ordered
+        # <script type="module"> tags that execute in document order, so the
+        # lightweight chip must come first to render ASAP on cold load.
+        chip_idx = next(
+            i for i, u in enumerate(js_urls) if "verisure-owa-alarm-chip.js" in u
+        )
+        card_idx = next(
+            i for i, u in enumerate(js_urls) if "verisure-owa-alarm-card.js" in u
+        )
+        assert chip_idx < card_idx, (
+            f"chip ({chip_idx}) must register before card ({card_idx}) so it "
+            "loads first in the add_extra_js_url fallback"
+        )
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-camera-card.js?v=")
             for u in js_urls
