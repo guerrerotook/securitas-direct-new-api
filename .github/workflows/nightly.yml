@@ -1,0 +1,72 @@
+name: Nightly (latest deps)
+
+# Runs the repo's checks against the LATEST upstream dependencies (Home
+# Assistant, the test harness, HACS/hassfest) on a daily schedule. This is an
+# early-warning system for breakage introduced by new HA releases, kept
+# SEPARATE from PR CI (tests.yaml / validate.yaml) which pin/range their deps.
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests-latest:
+    name: Tests against latest HA + harness
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libturbojpeg0-dev
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install latest dependencies
+        run: |
+          pip install --upgrade pip
+          # Pull the newest HA core + custom-component test harness, ignoring the
+          # pinned/ranged versions in requirements_test.txt. Then install the
+          # repo's remaining test requirements (PyJWT, PyTurboJPEG, plugins) on
+          # top — pip keeps the already-upgraded HA/phcc unless a hard conflict
+          # forces otherwise.
+          pip install --upgrade homeassistant pytest-homeassistant-custom-component
+          pip install --upgrade -r requirements_test.txt
+
+      - name: Show resolved versions
+        run: pip list
+
+      - name: Run ${{ matrix.suite }} tests
+        run: |
+          if [ "${{ matrix.suite }}" = "unit" ]; then
+            MARKER="not integration"
+          else
+            MARKER="integration"
+          fi
+          python -m pytest tests/ -v --tb=short -m "$MARKER" -p no:cov
+
+  validate-latest:
+    name: Validate against latest HA (hassfest + HACS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
