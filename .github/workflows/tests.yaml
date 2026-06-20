@@ -10,9 +10,9 @@ jobs:
     name: Ruff lint & format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
 
@@ -28,9 +28,9 @@ jobs:
     name: Pylint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
 
@@ -46,9 +46,9 @@ jobs:
     name: Pyright
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
 
@@ -77,12 +77,12 @@ jobs:
           - { ha-channel: minimum, suite: unit, python-version: "3.13" }
           - { ha-channel: minimum, suite: integration, python-version: "3.13" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libturbojpeg0-dev
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -126,7 +126,7 @@ jobs:
             --cov --cov-report=term-missing --no-cov-on-fail
 
       - name: Upload coverage data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.ha-channel }}-${{ matrix.suite }}
           path: .coverage.${{ matrix.ha-channel }}.${{ matrix.suite }}*
@@ -139,9 +139,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
 
@@ -150,12 +150,12 @@ jobs:
       # Gate on the stable channel only — code is identical across channels,
       # so running the gate 3x would just multiply CI minutes for no signal.
       - name: Download unit coverage (stable)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-stable-unit
 
       - name: Download integration coverage (stable)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-stable-integration
 
