@@ -2,6 +2,22 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.4.0
+
+The always-visible alarm chip now appears almost instantly on a cold dashboard load, the activity log recognises smart-lock door and Verisure-routine events instead of labelling them "Unknown", and the card UI is fully localized and screen-reader friendly.
+
+### Performance
+
+**The alarm chip and badge load fast on a cold start ([#518](https://github.com/guerrerotook/securitas-direct-new-api/pull/518)).**  The always-visible Verisure alarm chip used to live inside the 90 KB alarm-card bundle, so on a cold companion-app load the whole bundle had to download before the chip could register and render — it could take 5–10 seconds to appear, long enough that the alarm might trigger before you could tap to disarm.  The chip and badge are now split into their own lightweight module (a ~43 KB render path) that loads independently of the heavy card and editor, so the chip shows up almost immediately.  Card bundles are now also hard-cached for 31 days with version-stamped imports, so the browser and companion app serve them from cache on later cold opens instead of re-downloading them — with a CI guard that keeps every cache-bust token in sync with the release version.
+
+### Added
+
+**Smart-lock door and Verisure-routine events in the activity log ([#512](https://github.com/guerrerotook/securitas-direct-new-api/issues/512), [#513](https://github.com/guerrerotook/securitas-direct-new-api/issues/513)).**  Three panel event types used to show up as "Unknown event": a connected smart lock opening a door and auto-locking it again a few minutes later, and a Verisure-app routine firing — the user-scheduled automations that can arm or disarm the alarm.  They are now recognised as distinct **Door opened**, **Door closed**, and **Routine executed** categories, each with its own icon, colour, and label in every supported language.
+
+### Changed
+
+**Full frontend localization and accessibility pass ([#519](https://github.com/guerrerotook/securitas-direct-new-api/pull/519)).**  The strings that were still hardcoded in English across the alarm, camera, and activity-log cards — the PIN keypad's clear and delete buttons, the unavailable-state notice, the alarm-card editor labels, the camera capture button, and the activity-log editor labels — are now translated in every supported language.  The PIN keypad, camera capture, and popup close buttons also gained accessible names so screen readers can announce them, and a dialog connection-listener leak was fixed.  Automated CI guards now block any new untranslated string or hardcoded English UI label.
+
 ## v5.3.0
 
 Arm and disarm no longer report a false failure — and roll the panel back to a stale, untrustworthy state — when the backend accepts the command but is slow to confirm it.
