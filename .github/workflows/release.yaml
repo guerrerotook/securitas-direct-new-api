@@ -49,6 +49,35 @@ jobs:
             exit 1
           fi
 
+      - name: Build release notes from changelog
+        # The release notes are the curated, user-facing CHANGES.md section for
+        # this version (a pre-release suffix resolves to the base ## vX.Y.Z
+        # heading). Run it here — before any commit/tag/push — so a release with
+        # no changelog entry fails early instead of leaving a dangling tag.
+        run: |
+          python3 <<'PY'
+          import os, sys
+
+          version = os.environ["VERSION"]
+          heading = f"## v{version.split('-', 1)[0]}"  # pre-release suffix → base heading
+          lines = open("CHANGES.md", encoding="utf-8").read().splitlines()
+
+          start = next((i for i, ln in enumerate(lines) if ln.strip() == heading), None)
+          if start is None:
+              sys.exit(f"No '{heading}' section in CHANGES.md for version {version!r}")
+          end = next(
+              (j for j in range(start + 1, len(lines)) if lines[j].startswith("## ")),
+              len(lines),
+          )
+          section = "\n".join(lines[start + 1 : end]).strip("\n")
+          if not section.strip():
+              sys.exit(f"'{heading}' section in CHANGES.md is empty")
+          with open("release-notes.md", "w", encoding="utf-8") as f:
+              f.write(section + "\n")
+          PY
+          echo "----- release notes -----"
+          cat release-notes.md
+
       - name: Bump manifest versions
         run: |
           python3 <<'PY'
@@ -110,7 +139,7 @@ jobs:
           fi
           gh release create "v$VERSION" \
             --title "v$VERSION" \
-            --generate-notes \
+            --notes-file release-notes.md \
             $prerelease_flag
 
       - name: Roll branch forward to the next minor (final releases only)
