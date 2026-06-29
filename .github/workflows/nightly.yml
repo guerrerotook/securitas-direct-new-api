@@ -32,7 +32,11 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          # Match the dev/stable channel in tests.yaml: the latest HA line
+          # (2026.3+) requires 3.14, so the "latest deps" lane must run here
+          # too — on 3.13 pip would silently cap HA at the newest 3.13-compatible
+          # release instead of the actual latest.
+          python-version: "3.14"
 
       - name: Install latest dependencies
         run: |
