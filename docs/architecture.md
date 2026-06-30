@@ -1126,6 +1126,16 @@ Three parallel jobs run on every PR and push to main:
 2. **Pyright** — `pyright custom_components/verisure_owa/` for static type checking
 3. **Tests** — `pytest` with `--cov-fail-under=90` to enforce minimum coverage
 
+### Nightly workflow (`.github/workflows/nightly.yml`)
+
+A scheduled run (cron `41 4 * * *`, plus `workflow_dispatch`) exercises the repo
+against the **latest** upstream dependencies, separate from the pinned/ranged PR
+CI. It installs the newest Home Assistant core + `pytest-homeassistant-custom-component`
+and runs the unit + integration suites, and validates with hassfest + HACS
+against current HA. This is an early-warning system for breakage from new HA
+releases; it does not gate PRs. All other CI/validation/release workflows live
+alongside it under `.github/workflows/`.
+
 ## File reference
 
 | File | Lines | Purpose |
