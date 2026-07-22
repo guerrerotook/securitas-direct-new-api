@@ -2094,3 +2094,72 @@ class TestStaticPathAliases:
         paths = [cfg.url_path for cfg in call_args]
         assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
+
+
+# ===========================================================================
+# TestServiceDescriptionTargets
+# ===========================================================================
+
+
+class TestServiceDescriptionTargets:
+    """Regression guard: service ``target`` entity filters must be lists.
+
+    These descriptions reach HA via ``async_set_service_schema``, which copies
+    ``target`` through *unchanged* — unlike ``services.yaml``, which is
+    validated by ``TargetSelector.CONFIG_SCHEMA`` and normalised with
+    ``cv.ensure_list``. HA's automation-editor lookup
+    (``_get_automation_component_domains``) iterates ``target["entity"]``
+    expecting a list of ``{integration, domain}`` mappings; a bare mapping
+    iterates to its *string keys* and raises ``AttributeError``, which aborts
+    the shared cross-integration lookup and breaks the action/target picker for
+    *every* integration while this one is loaded (PR #525).
+    """
+
+    def test_target_entity_filters_are_lists(self):
+        """Every service ``target["entity"]`` must be a list of mapping filters."""
+        from custom_components.securitas import (
+            _ALIASED_SERVICES,
+            _V5_ENTITY_SERVICES,
+        )
+
+        schemas = [(name, schema) for name, _sr, schema in _ALIASED_SERVICES]
+        schemas += [
+            (spec["service_name"], spec["schema"])
+            for spec in _V5_ENTITY_SERVICES
+            if spec.get("schema")
+        ]
+        targets = [
+            (name, schema["target"]["entity"])
+            for name, schema in schemas
+            if schema.get("target", {}).get("entity") is not None
+        ]
+
+        # Guard against a vacuous pass if the specs move or lose their targets.
+        assert targets, "no service target entity filters found — did the specs move?"
+
+        for service_name, entity in targets:
+            assert isinstance(entity, list), (
+                f"{service_name}: target['entity'] must be a list of mapping "
+                f"filters (async_set_service_schema does not run cv.ensure_list), "
+                f"got {type(entity).__name__}"
+            )
+            assert entity and all(isinstance(item, dict) for item in entity), (
+                f"{service_name}: target['entity'] must be a non-empty list of "
+                "mapping filters"
+            )
+            # HA's entity-filter schema normalises `domain` with cv.ensure_list
+            # (helpers/selector.py) — but only on the validated services.yaml
+            # path. async_set_service_schema skips that, so a bare-string domain
+            # reaches _AutomationComponentLookupData.create unchanged, where
+            # `set(config.get("domain", []))` turns "alarm_control_panel" into a
+            # set of single characters and the filter then matches no entity.
+            for filt in entity:
+                if "domain" in filt:
+                    domain = filt["domain"]
+                    assert isinstance(domain, list) and all(
+                        isinstance(d, str) for d in domain
+                    ), (
+                        f"{service_name}: entity filter 'domain' must be a list "
+                        f"of strings so it survives async_set_service_schema's "
+                        f"unvalidated copy; got {domain!r}"
+                    )

@@ -2,6 +2,14 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.4.1
+
+A fix for the Home Assistant automation editor, which became unusable — for every integration, not just this one — whenever this integration was loaded.
+
+### Fixed
+
+**Automation editor "Target could not be loaded" while the integration is loaded ([#525](https://github.com/guerrerotook/securitas-direct-new-api/pull/525)).**  On recent Home Assistant (reproduced on 2026.7.1), adding *any* action in the automation editor failed: the target picker showed "Target could not be loaded" and the websocket call returned `unknown_error` — for every device, not only this integration's entities.  The six services registered through `async_set_service_schema` declared their `target` entity filter as a bare mapping (`{"integration": …, "domain": …}`).  Unlike `services.yaml` — which Home Assistant validates and normalises with `cv.ensure_list` at every level — that registration path copies the target through unchanged, so the automation-editor lookup iterated the mapping's string keys and raised `AttributeError`.  Because Home Assistant builds that lookup once across *all* installed integrations, the single malformed entry aborted it for every device.  Both the entity filter and its `domain` are now declared as lists — the outer list stops the crash, and the inner list keeps the filter matching this integration's own entities — with a regression test guarding the shape.  Thanks to [@MarcelHoell](https://github.com/MarcelHoell) for the diagnosis and fix.
+
 ## v5.4.0
 
 The always-visible alarm chip now appears almost instantly on a cold dashboard load, the activity log recognises smart-lock door and Verisure-routine events instead of labelling them "Unknown event", and the card UI is fully localised and screen-reader friendly.
