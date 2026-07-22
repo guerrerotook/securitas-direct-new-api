@@ -8,7 +8,7 @@
 // served with a long max-age yet still re-fetched on each release (kept in
 // sync by tests-js/integration/card-cache-busting.test.js).
 
-import { formatTranslation } from "./verisure-owa-card-utils.js?v=5.4.0";
+import { formatTranslation } from "./verisure-owa-card-utils.js?v=5.4.1";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {
