@@ -294,6 +294,58 @@ class TestGetSentinelData:
         assert result.alias == ""
         assert result.temperature == 0
 
+    async def test_null_status_returns_empty_sentinel(self, client, transport):
+        """A matched device with null status degrades to empty, not a crash."""
+        transport.execute.return_value = sentinel_response(
+            devices=[
+                {
+                    "alias": "Living Room",
+                    "status": None,
+                    "zone": "1",
+                },
+            ],
+        )
+
+        inst = _make_installation()
+        service = _make_service(
+            attributes=[Attribute(name="zone", value="1", active=True)]
+        )
+        result = await client.get_sentinel_data(inst, service)
+
+        assert isinstance(result, Sentinel)
+        assert result.alias == ""
+        assert result.temperature == 0
+        assert result.humidity == 0
+        assert result.air_quality == ""
+
+    async def test_null_core_reading_returns_empty_sentinel(self, client, transport):
+        """A matched device whose status is present but missing a core reading
+        (null humidity/temperature) degrades to empty, not a crash."""
+        transport.execute.return_value = sentinel_response(
+            devices=[
+                {
+                    "alias": "Living Room",
+                    "status": {
+                        "temperature": 22,
+                        "humidity": None,
+                        "airQualityCode": 3,
+                    },
+                    "zone": "1",
+                },
+            ],
+        )
+
+        inst = _make_installation()
+        service = _make_service(
+            attributes=[Attribute(name="zone", value="1", active=True)]
+        )
+        result = await client.get_sentinel_data(inst, service)
+
+        assert isinstance(result, Sentinel)
+        assert result.alias == ""
+        assert result.temperature == 0
+        assert result.humidity == 0
+
 
 # ── get_air_quality_data tests ───────────────────────────────────────────────
 
@@ -359,6 +411,40 @@ class TestGetAirQualityData:
         assert result is not None
         assert result.value is None
         assert result.status_current == 2
+
+    async def test_null_current_defaults_status_current_to_zero(
+        self, client, transport
+    ):
+        """A null status.current defaults status_current to 0, not a crash."""
+        transport.execute.return_value = air_quality_response(
+            data={
+                "status": {"current": None, "avg6h": 80},
+                "hours": [{"id": "1", "value": "70"}],
+            }
+        )
+
+        inst = _make_installation()
+        result = await client.get_air_quality_data(inst, "1")
+
+        assert result is not None
+        assert result.status_current == 0
+        assert result.value == 70
+
+    async def test_null_status_defaults_status_current_to_zero(self, client, transport):
+        """A null status object defaults status_current to 0, not a crash."""
+        transport.execute.return_value = air_quality_response(
+            data={
+                "status": None,
+                "hours": [{"id": "1", "value": "70"}],
+            }
+        )
+
+        inst = _make_installation()
+        result = await client.get_air_quality_data(inst, "1")
+
+        assert result is not None
+        assert result.status_current == 0
+        assert result.value == 70
 
 
 # ── list_installations tests ─────────────────────────────────────────────────

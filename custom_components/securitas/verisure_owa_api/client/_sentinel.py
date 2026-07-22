@@ -59,13 +59,23 @@ class _SentinelMixin(_ClientBase):
 
         if target_device is None:
             return empty
+        status = target_device.get("status")
+        if (
+            status is None
+            or status.get("humidity") is None
+            or status.get("temperature") is None
+        ):
+            # A matched device can arrive with a null status or missing core
+            # readings during transient backend hiccups; degrade to empty
+            # rather than crash the coordinator.
+            return empty
 
-        air_quality_code = target_device["status"].get("airQualityCode")
+        air_quality_code = status.get("airQualityCode")
         return Sentinel(
-            alias=target_device["alias"],
+            alias=target_device.get("alias") or "",
             air_quality=str(air_quality_code) if air_quality_code is not None else "",
-            humidity=int(target_device["status"]["humidity"]),
-            temperature=int(target_device["status"]["temperature"]),
+            humidity=int(status["humidity"]),
+            temperature=int(status["temperature"]),
             zone=target_device.get("zone", ""),
         )
 
@@ -111,8 +121,10 @@ class _SentinelMixin(_ClientBase):
             except (ValueError, TypeError):
                 pass
 
-        status = aq_data.get("status", {})
+        # status may be null, and current may be present-but-null, during
+        # transient backend hiccups — coalesce both to 0 rather than crash.
+        status = aq_data.get("status") or {}
         return AirQuality(
             value=value,
-            status_current=int(status.get("current", 0)),
+            status_current=int(status.get("current") or 0),
         )

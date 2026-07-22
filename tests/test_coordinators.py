@@ -59,9 +59,14 @@ def _make_hass() -> MagicMock:
 
 
 def _make_client() -> AsyncMock:
-    """Create a mock VerisureOwaClient with async methods."""
+    """Create a mock VerisureOwaClient with async methods.
+
+    Defaults to a password-bearing account so the relogin path is exercised;
+    refresh-token-only tests override ``client.password = ""``.
+    """
     client = AsyncMock(spec=VerisureOwaClient)
     client.protom_response = ""
+    client.password = "test-password"
     return client
 
 
@@ -298,6 +303,75 @@ class TestAlarmCoordinator:
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
         client.record_auth_recovery_failure.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_persistent_session_expired_without_password_does_not_reauth(self):
+        """Repro of the 2026-07-21 reauth: a 403 'Invalid session, try again
+        later' survives the client's own refresh+retry, and with no stored
+        password login() can only raise 'no password available'. That must be
+        treated as transient (retry), never turned into a reauth prompt."""
+        hass = _make_hass()
+        client = _make_client()
+        client.password = ""  # refresh-token-only account (v5.1.0+)
+        queue = _make_queue()
+        installation = _make_installation()
+
+        expired = SessionExpiredError(
+            "Invalid session. Please, try again later.", http_status=403
+        )
+        client.get_general_status.side_effect = expired
+        # A password-less relogin can only ever fail this way:
+        client.login.side_effect = AuthenticationError(
+            "Cannot login: no password available (refresh token rejected)."
+        )
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(UpdateFailed) as exc_info:
+            await coord._async_update_data()
+        client.login.assert_not_awaited()
+        # The original server error is preserved for diagnostics and chaining,
+        # not replaced by a fabricated one.
+        client.record_auth_recovery_failure.assert_called_once_with(expired)
+        assert exc_info.value.__cause__ is expired
+
+    @pytest.mark.asyncio
+    async def test_genuine_dead_token_on_fetch_triggers_reauth(self):
+        """A genuinely dead refresh token (err 60067) surfaces as a genuine auth
+        error straight out of the fetch (via _ensure_auth), not as a
+        SessionExpiredError. It must prompt reauth, not be swallowed as a
+        transient UpdateFailed."""
+        hass = _make_hass()
+        client = _make_client()
+        client.password = ""
+        queue = _make_queue()
+        installation = _make_installation()
+
+        dead = VerisureOwaError("Invalid Session")
+        dead.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        client.get_general_status.side_effect = dead
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
+
+    @pytest.mark.asyncio
+    async def test_authentication_error_on_fetch_triggers_reauth(self):
+        """An AuthenticationError reaching the fetch (a dead refresh token the
+        password-less client could not recover) prompts reauth rather than being
+        wrapped as a transient UpdateFailed."""
+        hass = _make_hass()
+        client = _make_client()
+        client.password = ""
+        queue = _make_queue()
+        installation = _make_installation()
+
+        client.get_general_status.side_effect = AuthenticationError(
+            "Cannot login: no password available (refresh token rejected)."
+        )
+
+        coord = self._make_coordinator(hass, client, queue, installation)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await coord._async_update_data()
 
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────
@@ -716,6 +790,25 @@ class TestCameraCoordinator:
 
         coord = self._make_coordinator(hass, client, queue, installation, cameras)
         with pytest.raises(UpdateFailed):
+            await coord._async_update_data()
+
+    @pytest.mark.asyncio
+    async def test_genuine_auth_failure_triggers_reauth(self):
+        """A genuine auth failure (dead refresh token) from a thumbnail fetch
+        must propagate to reauth, not be swallowed as a per-camera skip."""
+        hass = _make_hass()
+        client = _make_client()
+        client.password = ""
+        queue = _make_queue()
+        installation = _make_installation()
+        cameras = self._make_cameras(2)
+
+        client.get_thumbnail.side_effect = AuthenticationError(
+            "Cannot login: no password available (refresh token rejected)."
+        )
+
+        coord = self._make_coordinator(hass, client, queue, installation, cameras)
+        with pytest.raises(ConfigEntryAuthFailed):
             await coord._async_update_data()
 
     @pytest.mark.asyncio
