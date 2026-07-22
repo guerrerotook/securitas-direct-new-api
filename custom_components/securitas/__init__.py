@@ -547,7 +547,9 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
                 },
             },
             "target": {
-                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
+                "entity": [
+                    {"integration": "securitas", "domain": "alarm_control_panel"}
+                ]
             },
         },
     ),
@@ -562,7 +564,9 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             ),
             "fields": {},
             "target": {
-                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
+                "entity": [
+                    {"integration": "securitas", "domain": "alarm_control_panel"}
+                ]
             },
         },
     ),
@@ -657,7 +661,9 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
             ),
             "fields": {},
             "target": {
-                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
+                "entity": [
+                    {"integration": "securitas", "domain": "alarm_control_panel"}
+                ]
             },
         },
     },
@@ -672,7 +678,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                 "supersedes the deprecated VerisureCaptureButton entity."
             ),
             "fields": {},
-            "target": {"entity": {"integration": "securitas", "domain": "camera"}},
+            "target": {"entity": [{"integration": "securitas", "domain": "camera"}]},
         },
     },
     {
@@ -685,7 +691,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                 "Foreground-refresh the activity timeline for an installation."
             ),
             "fields": {},
-            "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
+            "target": {"entity": [{"integration": "securitas", "domain": "sensor"}]},
         },
     },
     {
@@ -721,7 +727,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                     "selector": {"text": {}},
                 },
             },
-            "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
+            "target": {"entity": [{"integration": "securitas", "domain": "sensor"}]},
         },
     },
 )
