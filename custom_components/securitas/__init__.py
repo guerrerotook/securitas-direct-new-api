@@ -517,6 +517,32 @@ async def _fetch_and_cache_installations(
 
 ALIAS_DOMAIN = "verisure_owa"
 
+
+def _entity_target(domain: str) -> dict[str, Any]:
+    """Build a service ``target`` scoped to this integration's entities.
+
+    Both the ``entity`` filter list *and* its inner ``domain`` must be lists.
+    ``async_set_service_schema`` copies ``target`` through unchanged — unlike
+    ``services.yaml``, which HA normalises with ``cv.ensure_list`` at every
+    level (``helpers/selector.py``). Two failures follow from a bare mapping:
+
+    * A bare ``entity`` mapping is iterated to its string keys by HA's
+      automation-editor lookup, raising ``AttributeError`` and aborting the
+      shared cross-integration lookup — breaking the action/target picker for
+      *every* integration.
+    * A bare ``domain`` string reaches ``_AutomationComponentLookupData.create``
+      unnormalised, where ``set(config.get("domain", []))`` turns
+      ``"alarm_control_panel"`` into a set of single characters, so the filter
+      then matches no entity and these services are never offered for their own
+      entities.
+
+    Constructing both shapes here once keeps both bugs unrepresentable at the
+    call sites (guarded by
+    ``tests/test_init.py::TestServiceDescriptionTargets``).
+    """
+    return {"entity": [{"integration": DOMAIN, "domain": [domain]}]}
+
+
 # Tuples of (service_name, supports_response, schema_for_async_set_service_schema).
 # Every service the integration registers under `DOMAIN` (= "securitas") via
 # platform.async_register_entity_service is also exposed under `verisure_owa.<X>`
@@ -546,9 +572,7 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
                     "selector": {"text": {"type": "password"}},
                 },
             },
-            "target": {
-                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
-            },
+            "target": _entity_target("alarm_control_panel"),
         },
     ),
     (
@@ -561,9 +585,7 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
                 "notification."
             ),
             "fields": {},
-            "target": {
-                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
-            },
+            "target": _entity_target("alarm_control_panel"),
         },
     ),
 )
@@ -656,9 +678,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                 "deprecated VerisureRefreshButton entity."
             ),
             "fields": {},
-            "target": {
-                "entity": {"integration": "securitas", "domain": "alarm_control_panel"}
-            },
+            "target": _entity_target("alarm_control_panel"),
         },
     },
     {
@@ -672,7 +692,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                 "supersedes the deprecated VerisureCaptureButton entity."
             ),
             "fields": {},
-            "target": {"entity": {"integration": "securitas", "domain": "camera"}},
+            "target": _entity_target("camera"),
         },
     },
     {
@@ -685,7 +705,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                 "Foreground-refresh the activity timeline for an installation."
             ),
             "fields": {},
-            "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
+            "target": _entity_target("sensor"),
         },
     },
     {
@@ -721,7 +741,7 @@ _V5_ENTITY_SERVICES: tuple[dict[str, Any], ...] = (
                     "selector": {"text": {}},
                 },
             },
-            "target": {"entity": {"integration": "securitas", "domain": "sensor"}},
+            "target": _entity_target("sensor"),
         },
     },
 )
