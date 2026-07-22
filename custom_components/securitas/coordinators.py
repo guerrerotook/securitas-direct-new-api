@@ -14,7 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -127,26 +127,60 @@ class ActivityData:
 # ── Error handling ───────────────────────────────────────────────────────────
 
 
-async def _handle_session_expired(client: VerisureOwaClient) -> None:
-    """Re-login after a SessionExpiredError, routing by failure type.
+def _raise_fetch_error(err: VerisureOwaError, label: str) -> NoReturn:
+    """Map a data-fetch VerisureOwaError to reauth vs. retry.
 
-    Genuine auth failures (bad credentials, account blocked, 2FA, revoked
-    token) raise ConfigEntryAuthFailed to trigger the HA reauth flow. Transient
-    server-side failures raise UpdateFailed so the coordinator retries on the
-    next interval — we never force a reauth prompt for a backend wobble.
+    A genuinely dead session — bad credentials, account blocked, 2FA, or an
+    explicitly invalid/revoked token (err 60067/60052) — reaching the fetch
+    means the refresh-token chain is broken with no way to recover unattended:
+    raise ConfigEntryAuthFailed so HA prompts reauth. Everything else is a
+    transient backend wobble → UpdateFailed (retry next poll).
     """
+    if is_genuine_auth_failure(err):
+        raise ConfigEntryAuthFailed(f"Re-authentication required: {err}") from err
+    raise UpdateFailed(f"{label} update failed: {err}") from err
+
+
+async def _handle_session_expired(
+    client: VerisureOwaClient, err: SessionExpiredError
+) -> None:
+    """Recover from a SessionExpiredError that survived the client's own
+    refresh-and-retry.
+
+    Reaching here means the auth token was refreshed successfully (a *failed*
+    refresh raises a different error the caller classifies), yet the server
+    still returned "Invalid session, try again later" — a transient backend
+    desync, not a dead token. A refresh-token-only account (no stored password,
+    the norm since v5.1.0) has nothing stronger to try: login() would only raise
+    "no password available", which must NOT be allowed to masquerade as a
+    genuine credential failure and force a needless reauth. Treat it as
+    transient and retry next poll.
+
+    When a password is available, attempt a full re-login (it can recover a
+    genuinely dead refresh token) and classify the outcome.
+    """
+    if not client.password:
+        # The token was just refreshed successfully, so this lingering 403 is a
+        # transient backend desync. Keep the server's original error for
+        # diagnostics and chaining rather than fabricating a generic one.
+        client.record_auth_recovery_failure(err)
+        raise UpdateFailed(f"Transient session error, will retry: {err}") from err
     try:
         await client.login()
-    except (VerisureOwaError, asyncio.TimeoutError) as err:
+    except (VerisureOwaError, asyncio.TimeoutError) as login_err:
         owa_err = (
-            err
-            if isinstance(err, VerisureOwaError)
-            else VerisureOwaError(f"Login timed out: {err!r}")
+            login_err
+            if isinstance(login_err, VerisureOwaError)
+            else VerisureOwaError(f"Login timed out: {login_err!r}")
         )
         if is_genuine_auth_failure(owa_err):
-            raise ConfigEntryAuthFailed(f"Re-authentication failed: {owa_err}") from err
+            raise ConfigEntryAuthFailed(
+                f"Re-authentication failed: {owa_err}"
+            ) from login_err
         client.record_auth_recovery_failure(owa_err)
-        raise UpdateFailed(f"Transient auth error, will retry: {owa_err}") from err
+        raise UpdateFailed(
+            f"Transient auth error, will retry: {owa_err}"
+        ) from login_err
 
 
 async def _fetch_with_session_recovery[T](
@@ -156,28 +190,27 @@ async def _fetch_with_session_recovery[T](
 ) -> T:
     """Run *fetcher* with one-shot session-expired recovery.
 
-    On SessionExpiredError, re-login then retry once. WAFBlockedError and any
-    remaining VerisureOwaError are wrapped as UpdateFailed messages keyed on
-    *label* — the human-readable subject for the failure.
-
-    Re-login (on SessionExpiredError) may itself raise ConfigEntryAuthFailed
-    for a genuine credential failure, or UpdateFailed for a transient relogin
-    error — both propagate uncaught.
+    On SessionExpiredError, recover (relogin for a password account; transient
+    retry for a refresh-token-only one) then retry once. A genuine auth failure
+    surfacing from the fetch itself — e.g. a dead refresh token (err 60067)
+    raised out of the client's pre-request auth check — raises
+    ConfigEntryAuthFailed for reauth; WAFBlockedError and any other
+    VerisureOwaError become UpdateFailed keyed on *label*.
     """
     try:
         return await fetcher()
-    except SessionExpiredError:
-        await _handle_session_expired(client)
+    except SessionExpiredError as expired:
+        await _handle_session_expired(client, expired)
         try:
             return await fetcher()
         except WAFBlockedError as err:
             raise UpdateFailed(f"WAF blocked {label.lower()} request: {err}") from err
         except VerisureOwaError as err:
-            raise UpdateFailed(f"{label} update failed: {err}") from err
+            _raise_fetch_error(err, label)
     except WAFBlockedError as err:
         raise UpdateFailed(f"WAF blocked {label.lower()} request: {err}") from err
     except VerisureOwaError as err:
-        raise UpdateFailed(f"{label} update failed: {err}") from err
+        _raise_fetch_error(err, label)
 
 
 # ── AlarmCoordinator ─────────────────────────────────────────────────────────
@@ -486,10 +519,12 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
     ) -> dict[str, ThumbnailResponse]:
         """Fetch thumbnails for all cameras, preserving previous on failure.
 
-        SessionExpiredError and WAFBlockedError are re-raised so the caller
-        can handle auth/WAF issues at the coordinator level.  Other
-        VerisureOwaError instances are treated as individual camera
-        failures — logged and skipped.
+        SessionExpiredError, WAFBlockedError, and genuine auth failures (a dead
+        refresh token surfacing from a thumbnail fetch) are re-raised so the
+        caller can handle auth/WAF issues at the coordinator level — otherwise a
+        genuinely dead session would be silently swallowed per-camera and never
+        prompt reauth. Other VerisureOwaError instances are treated as
+        individual camera failures — logged and skipped.
         """
         thumbnails: dict[str, ThumbnailResponse] = {}
         for camera in self._cameras:
@@ -505,6 +540,8 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
             except (SessionExpiredError, WAFBlockedError):
                 raise
             except VerisureOwaError as err:
+                if is_genuine_auth_failure(err):
+                    raise
                 _LOGGER.warning(
                     "Failed to fetch thumbnail for camera %s (zone %s): %s",
                     camera.name,
