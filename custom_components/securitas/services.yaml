@@ -15,8 +15,8 @@ force_arm:
     windows) from a previous failed arm attempt.
   target:
     entity:
-      integration: securitas
-      domain: alarm_control_panel
+      - integration: securitas
+        domain: alarm_control_panel
   fields:
     code:
       example: "1234"
@@ -31,8 +31,8 @@ force_arm_cancel:
     Cancel a pending force-arm and dismiss the arming-exception notification.
   target:
     entity:
-      integration: securitas
-      domain: alarm_control_panel
+      - integration: securitas
+        domain: alarm_control_panel
 
 ## refresh_activity_log, fetch_activity_image, refresh_alarm and
 ## capture_image are v5+ services available ONLY under verisure_owa.*
