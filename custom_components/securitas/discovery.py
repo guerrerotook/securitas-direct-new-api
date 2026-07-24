@@ -26,6 +26,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Backoff schedule for the lock-config retry chain.
 _LOCK_CONFIG_RETRY_DELAYS = (60, 120, 300)  # seconds between attempts
+_CONTACT_STATUS_SERVICE = "HOMESTT"
 
 
 async def _discover_contacts(
@@ -39,6 +40,9 @@ async def _discover_contacts(
     from .binary_sensor import ContactOpeningSensor
 
     try:
+        services = await hub.get_services(installation)
+        if not any(service.request == _CONTACT_STATUS_SERVICE for service in services):
+            return
         contacts = await hub.get_contact_devices(installation)
     except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
         _LOGGER.warning(

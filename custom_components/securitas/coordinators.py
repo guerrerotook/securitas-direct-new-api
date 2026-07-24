@@ -51,7 +51,6 @@ from .verisure_owa_api.models import (
     SmartLockMode,
     SStatus,
     ThumbnailResponse,
-    TimedValue,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -499,75 +498,19 @@ class ContactCoordinator(DataUpdateCoordinator[ContactData]):
         self._client = client
         self._queue = queue
         self._installation = installation
-        self._contacts = {contact.zone_id: contact for contact in contacts}
-        self._use_status_fallback = False
+        self._zone_ids = {contact.zone_id for contact in contacts}
 
-    @staticmethod
-    def _normalize_name(value: str) -> str:
-        """Normalize contact names for matching status exceptions."""
-        return "".join(
-            character for character in value.casefold() if character.isalnum()
-        )
-
-    async def _fetch_status_fallback(self) -> ContactData:
-        """Derive contact states from the general-status exception list."""
-        status = await self._queue.submit(
-            self._client.get_general_status,
+    async def _fetch(self) -> ContactData:
+        states = await self._queue.submit(
+            self._client.get_contact_states,
             self._installation,
             priority=ApiQueue.BACKGROUND,
         )
-        if status.exceptions is None:
-            return ContactData()
-
-        open_names = {
-            self._normalize_name(str(exception.get("alias", "")))
-            for exception in status.exceptions
-            if exception.get("alias")
-        }
-        return ContactData(
-            states={
-                contact.zone_id: ContactState(
-                    id=contact.id,
-                    zone_id=contact.zone_id,
-                    magnetic_state=TimedValue(
-                        value=(
-                            "open"
-                            if self._normalize_name(contact.name) in open_names
-                            else "closed"
-                        ),
-                        timestamp=status.timestamp_update,
-                    ),
-                    timestamp=status.timestamp_update,
-                )
-                for contact in self._contacts.values()
-            }
-        )
-
-    async def _fetch(self) -> ContactData:
-        if self._use_status_fallback:
-            return await self._fetch_status_fallback()
-
-        try:
-            states = await self._queue.submit(
-                self._client.get_contact_states,
-                self._installation,
-                priority=ApiQueue.BACKGROUND,
-            )
-        except VerisureOwaError as err:
-            capability_error = "unauthorized request for current capabilities"
-            if capability_error not in err.message.casefold():
-                raise
-            self._use_status_fallback = True
-            _LOGGER.info(
-                "Detailed contact state is unavailable; using general-status exceptions"
-            )
-            return await self._fetch_status_fallback()
-
         return ContactData(
             states={
                 state.zone_id: state
                 for state in states
-                if state.zone_id in self._contacts
+                if state.zone_id in self._zone_ids
             }
         )
 
