@@ -13,9 +13,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureDevice
-from .coordinators import AlarmCoordinator
+from .coordinators import AlarmCoordinator, ContactCoordinator
 from .entity import securitas_device_info
-from .verisure_owa_api import Installation
+from .verisure_owa_api import ContactDevice, Installation
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +33,10 @@ async def async_setup_entry(
         for device in securitas_devices
     ]
     async_add_entities(entities, False)
+
+    # Contacts are discovered after platform setup so a transient Verisure
+    # device-list failure cannot delay or prevent integration startup.
+    entry_data["binary_sensor_add_entities"] = async_add_entities
 
 
 class WifiConnectedSensor(  # type: ignore[override]
@@ -63,3 +67,36 @@ class WifiConnectedSensor(  # type: ignore[override]
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.status.wifi_connected
+
+
+class ContactOpeningSensor(  # type: ignore[override]
+    CoordinatorEntity[ContactCoordinator],
+    BinarySensorEntity,
+):
+    """Magnetic door/window contact exposed as an opening sensor."""
+
+    _attr_device_class = BinarySensorDeviceClass.OPENING
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        coordinator: ContactCoordinator,
+        installation: Installation,
+        contact: ContactDevice,
+    ) -> None:
+        super().__init__(coordinator)
+        self._zone_id = contact.zone_id
+        self._attr_name = contact.name
+        self._attr_unique_id = (
+            f"v4_securitas_direct.{installation.number}_contact_{contact.zone_id}"
+        )
+        self._attr_device_info = securitas_device_info(installation)
+
+    @property
+    def is_on(self) -> bool | None:  # type: ignore[override]
+        """Return True when the magnetic contact reports open."""
+        if self.coordinator.data is None:
+            return None
+        state = self.coordinator.data.states.get(self._zone_id)
+        return state.is_open if state is not None else None

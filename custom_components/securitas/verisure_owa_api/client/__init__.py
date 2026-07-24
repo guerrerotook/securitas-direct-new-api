@@ -10,6 +10,7 @@ private sibling modules:
 - ``_activity`` — panel timeline.
 - ``_lock`` — smart-lock status / config / mode change.
 - ``_camera`` — camera discovery / capture / thumbnail / full image.
+- ``_contact`` — magnetic opening-contact discovery and state.
 - ``_sentinel`` — comfort sensors and air-quality.
 - ``_installation`` — installation list + service catalog.
 
@@ -27,6 +28,7 @@ from ._activity import _ActivityMixin
 from ._alarm import _AlarmMixin
 from ._auth import _AuthMixin
 from ._camera import _CameraMixin
+from ._contact import _ContactMixin
 from ._installation import _InstallationMixin
 from ._lock import SMARTLOCK_DEVICE_ID, _LockMixin
 from ._sentinel import _SentinelMixin
@@ -55,6 +57,7 @@ class VerisureOwaClient(  # pylint: disable=too-many-ancestors
     _ActivityMixin,
     _LockMixin,
     _CameraMixin,
+    _ContactMixin,
     _SentinelMixin,
     _InstallationMixin,
 ):

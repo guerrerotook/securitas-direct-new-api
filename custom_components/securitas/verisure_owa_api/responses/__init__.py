@@ -29,6 +29,7 @@ from .camera import (
     RequestImagesStatusEnvelope,
     ThumbnailEnvelope,
 )
+from .contact import ContactStatusEnvelope
 from .errors import ErrorResponse, GraphQLError, GraphQLErrorData
 from .installation import InstallationListEnvelope, ServicesEnvelope
 from .lock import (
@@ -50,6 +51,7 @@ __all__ = [
     "ChangeLockModeStatusEnvelope",
     "CheckAlarmEnvelope",
     "CheckAlarmStatusEnvelope",
+    "ContactStatusEnvelope",
     "DanalockConfigEnvelope",
     "DanalockConfigStatusEnvelope",
     "DeviceListEnvelope",

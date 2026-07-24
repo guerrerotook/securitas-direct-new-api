@@ -227,6 +227,19 @@ DEVICE_LIST_QUERY = (
     " } }"
 )
 
+CONTACT_STATUS_QUERY = (
+    "query xSGetDSRDevicesInfo($numinst: String!) {"
+    " xSGetDSRDevicesInfo(numinst: $numinst) {"
+    " res armStatus timestamp devices {"
+    " id zoneId version"
+    " batteryVoltage { value timestamp }"
+    " rssiRf { value timestamp }"
+    " firmwareVersion { value timestamp }"
+    " magneticState { value timestamp }"
+    " timestamp"
+    " } } }"
+)
+
 REQUEST_IMAGES_MUTATION = (
     "mutation RequestImages($numinst: String!, $panel: String!,"
     " $devices: [Int]!, $mediaType: Int, $resolution: Int,"

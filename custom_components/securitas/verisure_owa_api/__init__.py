@@ -23,6 +23,8 @@ from .models import (  # noqa: F401
     ArmCommand,
     Attribute,
     CameraDevice,
+    ContactDevice,
+    ContactState,
     Installation,
     InteriorMode,
     LockAutolock,
@@ -38,6 +40,7 @@ from .models import (  # noqa: F401
     SmartLockMode,
     SmartLockModeStatus,
     ThumbnailResponse,
+    TimedValue,
     is_proto_letter,
     parse_proto_code,
 )

@@ -1931,8 +1931,8 @@ class TestAsyncDiscoverDevices:
     """Tests for _async_discover_devices() ordering and event signalling."""
 
     @pytest.mark.asyncio
-    async def test_locks_discovered_before_cameras(self):
-        """Locks must submit to the queue before cameras (options-flow latency).
+    async def test_locks_discovered_before_contacts_and_cameras(self):
+        """Locks must submit before contacts and cameras (options-flow latency).
 
         Locks gate the Lock Automation options step; cameras don't. Order the
         sequential awaits so a user opening options waits only on lock work.
@@ -1953,6 +1953,9 @@ class TestAsyncDiscoverDevices:
         async def fake_discover_locks(*_args, **_kwargs):
             call_order.append("locks")
 
+        async def fake_discover_contacts(*_args, **_kwargs):
+            call_order.append("contacts")
+
         entry = MagicMock()
         entry.entry_id = "entry-1"
         hass.data[DOMAIN][entry.entry_id] = {
@@ -1970,11 +1973,15 @@ class TestAsyncDiscoverDevices:
                 "custom_components.securitas.discovery._discover_locks",
                 new=fake_discover_locks,
             ),
+            patch(
+                "custom_components.securitas.discovery._discover_contacts",
+                new=fake_discover_contacts,
+            ),
         ):
             await _async_discover_devices(hass, entry)
 
-        assert call_order == ["locks", "cameras"], (
-            f"Expected locks before cameras, got {call_order}"
+        assert call_order == ["locks", "contacts", "cameras"], (
+            f"Expected locks before contacts and cameras, got {call_order}"
         )
 
     @pytest.mark.asyncio
@@ -2003,6 +2010,10 @@ class TestAsyncDiscoverDevices:
             ),
             patch(
                 "custom_components.securitas.discovery._discover_locks",
+                new=AsyncMock(),
+            ),
+            patch(
+                "custom_components.securitas.discovery._discover_contacts",
                 new=AsyncMock(),
             ),
         ):
@@ -2040,6 +2051,10 @@ class TestAsyncDiscoverDevices:
             patch(
                 "custom_components.securitas.discovery._discover_locks",
                 new=boom,
+            ),
+            patch(
+                "custom_components.securitas.discovery._discover_contacts",
+                new=AsyncMock(),
             ),
         ):
             # Whether or not the function re-raises, the event must be set.

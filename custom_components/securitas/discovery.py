@@ -1,6 +1,6 @@
-"""Background discovery for cameras and locks.
+"""Background discovery for cameras, contacts, and locks.
 
-Cameras and locks are discovered asynchronously after async_setup_entry
+Cameras, contacts, and locks are discovered asynchronously after async_setup_entry
 returns so a transient API failure during discovery doesn't block the
 integration from coming up. Each discovery path is best-effort: failures
 are logged but never raise.
@@ -15,7 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinators import CameraCoordinator
+from .coordinators import CameraCoordinator, ContactCoordinator
 
 if TYPE_CHECKING:
     from .hub import VerisureDevice, VerisureHub
@@ -26,6 +26,63 @@ _LOGGER = logging.getLogger(__name__)
 
 # Backoff schedule for the lock-config retry chain.
 _LOCK_CONFIG_RETRY_DELAYS = (60, 120, 300)  # seconds between attempts
+_CONTACT_STATUS_SERVICE = "HOMESTT"
+
+
+async def _discover_contacts(
+    hass: HomeAssistant,
+    hub: VerisureHub,
+    installation: Installation,
+    entry_data: dict[str, Any],
+    entry: ConfigEntry,
+) -> None:
+    """Discover magnetic contacts and add opening-sensor entities."""
+    from .binary_sensor import ContactOpeningSensor
+
+    try:
+        services = await hub.get_services(installation)
+        if not any(service.request == _CONTACT_STATUS_SERVICE for service in services):
+            return
+        contacts = await hub.get_contact_devices(installation)
+    except Exception:  # pylint: disable=broad-exception-caught  # background discovery must not crash
+        _LOGGER.warning(
+            "Failed to get magnetic contacts for %s",
+            installation.number,
+            exc_info=True,
+        )
+        return
+
+    add_entities = entry_data.get("binary_sensor_add_entities")
+    if not contacts or add_entities is None:
+        return
+
+    coordinator = ContactCoordinator(
+        hass,
+        hub.client,
+        hub.api_queue,
+        installation,
+        contacts=contacts,
+        update_interval=entry_data["scan_interval"],
+        config_entry=entry,
+    )
+    entry_data["contact_coordinator"] = coordinator
+    add_entities(
+        [
+            ContactOpeningSensor(coordinator, installation, contact)
+            for contact in contacts
+        ],
+        False,
+    )
+    entry.async_create_background_task(
+        hass,
+        coordinator.async_refresh(),
+        "verisure_owa_contact_refresh",
+    )
+    _LOGGER.info(
+        "Contact discovery for %s registered %d opening sensor(s)",
+        installation.number,
+        len(contacts),
+    )
 
 
 async def _discover_cameras(
@@ -260,10 +317,10 @@ async def _discover_locks(
 
 
 async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Discover cameras and locks in the background after setup.
+    """Discover cameras, contacts, and locks in the background after setup.
 
-    Locks run before cameras so a user opening the Lock Automation options
-    step doesn't wait on the camera-device query in between. The shared
+    Locks run before contacts and cameras so a user opening the Lock Automation
+    options step doesn't wait on other device queries in between. The shared
     ApiQueue still serializes all calls, so this is purely a reorder, not a
     parallelization — request rate is unchanged.
     """
@@ -279,6 +336,7 @@ async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> No
         for device in devices:
             installation = device.installation
             await _discover_locks(hass, client, installation, entry_data, entry)
+            await _discover_contacts(hass, client, installation, entry_data, entry)
             await _discover_cameras(hass, client, installation, entry_data, entry)
     finally:
         # Always signal completion so the options-flow await unblocks even

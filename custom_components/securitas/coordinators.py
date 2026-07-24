@@ -1,10 +1,11 @@
 """DataUpdateCoordinators for Verisure OWA HA integration.
 
-Four coordinators replace per-entity independent polling:
+Domain coordinators replace per-entity independent polling:
 - AlarmCoordinator: alarm status polling
 - SentinelCoordinator: environmental sensor data
 - LockCoordinator: smart lock mode status
 - CameraCoordinator: camera thumbnails
+- ContactCoordinator: magnetic opening contacts
 """
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ from .verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
     CameraDevice,
+    ContactDevice,
+    ContactState,
     Installation,
     Sentinel,
     Service,
@@ -109,6 +112,13 @@ class CameraData:
 
     thumbnails: dict[str, ThumbnailResponse] = field(default_factory=dict)
     full_images: dict[str, bytes] = field(default_factory=dict)
+
+
+@dataclass
+class ContactData:
+    """Data returned by ContactCoordinator, keyed by contact zone ID."""
+
+    states: dict[str, ContactState] = field(default_factory=dict)
 
 
 @dataclass
@@ -459,6 +469,54 @@ class LockCoordinator(DataUpdateCoordinator[LockData]):
     async def _async_update_data(self) -> LockData:
         """Fetch lock modes via the API queue."""
         return await _fetch_with_session_recovery(self._client, self._fetch, "Lock")
+
+
+# ── ContactCoordinator ───────────────────────────────────────────────────────
+
+
+class ContactCoordinator(DataUpdateCoordinator[ContactData]):
+    """Coordinator for magnetic opening-contact states."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: VerisureOwaClient,
+        queue: ApiQueue,
+        installation: Installation,
+        *,
+        contacts: list[ContactDevice],
+        update_interval: timedelta,
+        config_entry: ConfigEntry | None = None,
+    ) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            config_entry=config_entry,
+            name="verisure_owa_contacts",
+            update_interval=update_interval,
+        )
+        self._client = client
+        self._queue = queue
+        self._installation = installation
+        self._zone_ids = {contact.zone_id for contact in contacts}
+
+    async def _fetch(self) -> ContactData:
+        states = await self._queue.submit(
+            self._client.get_contact_states,
+            self._installation,
+            priority=ApiQueue.BACKGROUND,
+        )
+        return ContactData(
+            states={
+                state.zone_id: state
+                for state in states
+                if state.zone_id in self._zone_ids
+            }
+        )
+
+    async def _async_update_data(self) -> ContactData:
+        """Fetch contact states via the API queue."""
+        return await _fetch_with_session_recovery(self._client, self._fetch, "Contact")
 
 
 # ── CameraCoordinator ────────────────────────────────────────────────────────

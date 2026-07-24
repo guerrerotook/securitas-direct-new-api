@@ -1053,6 +1053,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "activity_coordinator": activity_coord,
             "activity_listener_unsub": activity_listener_unsub,
             "config_entry": entry,
+            "scan_interval": scan_interval,
         }
         # Signalled by _async_discover_devices once lock discovery has either
         # populated registered_locks or definitively failed. The options-flow
@@ -1085,7 +1086,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-        # Discover cameras and locks in the background after setup completes.
+        # Discover cameras, contacts, and locks after setup completes.
         # This avoids blocking startup with API calls.
         entry.async_create_background_task(
             hass,

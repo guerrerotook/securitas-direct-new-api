@@ -36,6 +36,7 @@ from .verisure_owa_api import (
     ApiDomains,
     AuthenticationError,
     CameraDevice,
+    ContactDevice,
     Installation,
     OperationStatus,
     OtpPhone,
@@ -188,6 +189,7 @@ class VerisureHub:
         self.camera_images: dict[str, bytes] = {}
         self.camera_timestamps: dict[str, str] = {}
         self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
+        self._contact_devices_cache: dict[str, list[ContactDevice]] = {}
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
         # Coalesce concurrent full-image fetches for the same id_signal — two
         # dashboard cards on the same camera share one API call.
@@ -275,6 +277,21 @@ class VerisureHub:
             priority=ApiQueue.BACKGROUND,
         )
         self._camera_devices_cache[key] = devices
+        return devices
+
+    async def get_contact_devices(
+        self, installation: Installation
+    ) -> list[ContactDevice]:
+        """Get magnetic opening contacts for an installation (cached)."""
+        key = installation.number
+        if key in self._contact_devices_cache:
+            return self._contact_devices_cache[key]
+        devices = await self._api_queue.submit(
+            self.client.get_contact_devices,
+            installation,
+            priority=ApiQueue.BACKGROUND,
+        )
+        self._contact_devices_cache[key] = devices
         return devices
 
     def is_capturing(self, installation_number: str, zone_id: str) -> bool:

@@ -19,6 +19,8 @@ from custom_components.securitas.coordinators import (
     AlarmStatusData,
     CameraCoordinator,
     CameraData,
+    ContactCoordinator,
+    ContactData,
     LockCoordinator,
     LockData,
     SentinelCoordinator,
@@ -39,12 +41,15 @@ from custom_components.securitas.verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
     CameraDevice,
+    ContactDevice,
+    ContactState,
     Installation,
     Sentinel,
     Service,
     SmartLockMode,
     SStatus,
     ThumbnailResponse,
+    TimedValue,
 )
 from .conftest import make_installation
 
@@ -585,7 +590,7 @@ class TestLockCoordinator:
 
     @pytest.mark.asyncio
     async def test_session_expired_retries_login_then_auth_failed(self):
-        """SessionExpiredError retries login; genuine auth failure raises ConfigEntryAuthFailed."""
+        """Session expiry followed by rejected credentials requires reauth."""
         hass = _make_hass()
         client = _make_client()
         queue = _make_queue()
@@ -611,6 +616,65 @@ class TestLockCoordinator:
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):
             await coord._async_update_data()
+
+
+class TestContactCoordinator:
+    """Tests for magnetic contact polling."""
+
+    def _make_coordinator(
+        self,
+        hass: MagicMock,
+        client: AsyncMock,
+        queue: AsyncMock,
+        installation: Installation,
+    ) -> ContactCoordinator:
+        return ContactCoordinator(
+            hass,
+            client,
+            queue,
+            installation,
+            contacts=[
+                ContactDevice(
+                    id="1",
+                    zone_id="MG01",
+                    name="Front door",
+                    device_type="MG",
+                )
+            ],
+            update_interval=timedelta(seconds=60),
+        )
+
+    @pytest.mark.asyncio
+    async def test_successful_update_indexes_known_zones(self) -> None:
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        known = ContactState(zone_id="MG01", magnetic_state=TimedValue(value="open"))
+        unrelated = ContactState(
+            zone_id="MG99", magnetic_state=TimedValue(value="closed")
+        )
+        client.get_contact_states.return_value = [known, unrelated]
+
+        result = await self._make_coordinator(
+            hass, client, queue, installation
+        )._async_update_data()
+
+        assert isinstance(result, ContactData)
+        assert result.states == {"MG01": known}
+
+    @pytest.mark.asyncio
+    async def test_api_failure_is_retryable(self) -> None:
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        client.get_contact_states.side_effect = VerisureOwaError("unavailable")
+
+        with pytest.raises(UpdateFailed):
+            await self._make_coordinator(
+                hass, client, queue, installation
+            )._async_update_data()
 
 
 # ── CameraCoordinator ────────────────────────────────────────────────────────

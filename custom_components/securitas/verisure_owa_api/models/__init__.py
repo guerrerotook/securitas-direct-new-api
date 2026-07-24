@@ -26,6 +26,7 @@ from .alarm import (
 )
 from .auth import OtpPhone
 from .camera import CameraDevice, ThumbnailResponse
+from .contact import ContactDevice, ContactState, TimedValue
 from .installation import Installation
 from .lock import (
     LockAutolock,
@@ -50,6 +51,8 @@ __all__ = [
     "ArmCommand",
     "Attribute",
     "CameraDevice",
+    "ContactDevice",
+    "ContactState",
     "Installation",
     "InteriorMode",
     "LockAutolock",
@@ -65,6 +68,7 @@ __all__ = [
     "SmartLockMode",
     "SmartLockModeStatus",
     "ThumbnailResponse",
+    "TimedValue",
     "is_proto_letter",
     "parse_proto_code",
 ]
