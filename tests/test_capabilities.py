@@ -1,7 +1,7 @@
 """Tests for capability JWT decoding and detection helpers."""
 
-from datetime import datetime, timedelta
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from custom_components.securitas.verisure_owa_api.client import (

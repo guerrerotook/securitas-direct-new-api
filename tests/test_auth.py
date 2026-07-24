@@ -1,6 +1,5 @@
 """Tests for VerisureOwaClient authentication flow."""
 
-import asyncio
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -10,8 +9,8 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     AuthenticationError,
     SessionExpiredError,
-    VerisureOwaError,
     TwoFactorRequiredError,
+    VerisureOwaError,
 )
 
 from .conftest import (
@@ -22,7 +21,6 @@ from .conftest import (
     refresh_response,
     validate_device_response,
 )
-
 
 # ── login() ──────────────────────────────────────────────────────────────────
 
@@ -257,7 +255,7 @@ class TestCheckAuthenticationToken:
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.refresh_token = AsyncMock(side_effect=TimeoutError())
         api.login = AsyncMock()
 
         with pytest.raises(VerisureOwaError):
@@ -272,7 +270,7 @@ class TestCheckAuthenticationToken:
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.refresh_token = AsyncMock(side_effect=TimeoutError())
         api.login = AsyncMock()
 
         with pytest.raises(VerisureOwaError) as exc_info:

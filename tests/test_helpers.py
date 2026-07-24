@@ -1,6 +1,5 @@
 """Tests for VerisureOwaClient helper methods."""
 
-import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -12,7 +11,6 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
 )
 
 from .conftest import make_jwt
-
 
 # ── _decode_auth_token() ────────────────────────────────────────────────────
 
@@ -153,7 +151,7 @@ class TestPollOperation:
         """Should catch asyncio.TimeoutError and continue polling."""
         check_fn = AsyncMock(
             side_effect=[
-                asyncio.TimeoutError("connection timeout"),
+                TimeoutError("connection timeout"),
                 {"res": "OK", "msg": "done"},
             ]
         )
@@ -248,7 +246,7 @@ class TestCheckAuthenticationTokenErrorHandling:
         VerisureOwaError and propagated (transient), not funneled into login."""
         api.authentication_token = None
         api.refresh_token_value = "some-refresh-token"
-        api.refresh_token = AsyncMock(side_effect=asyncio.TimeoutError())
+        api.refresh_token = AsyncMock(side_effect=TimeoutError())
         api.login = AsyncMock()
 
         with pytest.raises(VerisureOwaError):

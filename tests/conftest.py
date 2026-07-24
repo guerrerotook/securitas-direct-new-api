@@ -1,45 +1,12 @@
 """Shared fixtures for the Verisure OWA HA integration tests."""
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
-
-from .mock_graphql import MockGraphQLServer
-
-from custom_components.securitas import (
-    CONF_CODE_ARM_REQUIRED,
-    CONF_COUNTRY,
-    CONF_DELAY_CHECK_OPERATION,
-    CONF_DEVICE_INDIGITALL,
-    CONF_ENTRY_ID,
-    CONF_MAP_AWAY,
-    CONF_MAP_CUSTOM,
-    CONF_MAP_HOME,
-    CONF_MAP_NIGHT,
-    CONF_MAP_VACATION,
-    CONF_NOTIFY_GROUP,
-    CONF_FORCE_ARM_NOTIFICATIONS,
-    DEFAULT_DELAY_CHECK_OPERATION,
-    DEFAULT_SCAN_INTERVAL,
-    DOMAIN,
-    VerisureDevice,
-    VerisureHub,
-)
-from custom_components.securitas.verisure_owa_api.client import (
-    VerisureOwaClient,
-)
-from custom_components.securitas.verisure_owa_api.http_transport import (
-    HttpTransport,
-)
-from custom_components.securitas.verisure_owa_api.const import (
-    PERI_DEFAULTS,
-    STD_DEFAULTS,
-)
-from custom_components.securitas.verisure_owa_api.models import Installation
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -49,6 +16,38 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 
+from custom_components.securitas import (
+    CONF_CODE_ARM_REQUIRED,
+    CONF_COUNTRY,
+    CONF_DELAY_CHECK_OPERATION,
+    CONF_DEVICE_INDIGITALL,
+    CONF_ENTRY_ID,
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_MAP_AWAY,
+    CONF_MAP_CUSTOM,
+    CONF_MAP_HOME,
+    CONF_MAP_NIGHT,
+    CONF_MAP_VACATION,
+    CONF_NOTIFY_GROUP,
+    DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    VerisureDevice,
+    VerisureHub,
+)
+from custom_components.securitas.verisure_owa_api.client import (
+    VerisureOwaClient,
+)
+from custom_components.securitas.verisure_owa_api.const import (
+    PERI_DEFAULTS,
+    STD_DEFAULTS,
+)
+from custom_components.securitas.verisure_owa_api.http_transport import (
+    HttpTransport,
+)
+from custom_components.securitas.verisure_owa_api.models import Installation
+
+from .mock_graphql import MockGraphQLServer
 
 # ── integration-marker auto-application ───────────────────────────────────────
 #
@@ -93,7 +92,7 @@ SECRET = "test-secret"
 
 def make_jwt(exp_minutes: int = 15, **extra_claims) -> str:
     """Create a real HS256 JWT with a known expiry."""
-    exp = datetime.now(tz=timezone.utc) + timedelta(minutes=exp_minutes)
+    exp = datetime.now(tz=UTC) + timedelta(minutes=exp_minutes)
     payload = {"exp": exp, "sub": "test-user", **extra_claims}
     return jwt.encode(payload, SECRET, algorithm="HS256")
 

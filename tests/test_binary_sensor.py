@@ -11,9 +11,7 @@ from custom_components.securitas.coordinators import (
     AlarmStatusData,
 )
 from custom_components.securitas.verisure_owa_api.models import SStatus
-
 from tests.conftest import make_installation
-
 
 # ---------------------------------------------------------------------------
 # Helper

@@ -26,4 +26,23 @@ exclude_also = [
 ]
 
 [tool.ruff]
-exclude = [".claude"]
+# docs/ is prose: ruff 0.16 began formatting Python fenced in Markdown, which
+# only reflows the illustrative snippets there — not something we want ruff to
+# police. Its job here is the package and its tests.
+exclude = [".claude", "docs"]
+target-version = "py313"
+
+[tool.ruff.lint]
+# Enforce an explicit rule set rather than ruff's defaults, which shift between
+# releases: 0.16.0 expanded the defaults and reddened this job on an untouched
+# tree. Pinning the rules we enforce (not the ruff version) lets CI install the
+# latest ruff and still stay green. This set mirrors the sibling integrations.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# Line width is left to `ruff format`; E501 would otherwise only fire on long
+# string literals and comments the formatter deliberately leaves intact.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test fixtures legitimately carry mutable class attributes (RUF012) and assert
+# that mutation raises *any* exception (B017) — both are noise in test code.
+"tests/**/*.py" = ["RUF012", "B017"]

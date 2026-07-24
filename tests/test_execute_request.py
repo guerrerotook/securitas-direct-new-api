@@ -5,7 +5,6 @@ from custom_components.securitas.verisure_owa_api.client import (
     generate_uuid,
 )
 
-
 # ── generate_uuid tests ──────────────────────────────────────────────────────
 
 

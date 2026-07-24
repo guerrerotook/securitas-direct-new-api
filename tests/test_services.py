@@ -5,6 +5,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from custom_components.securitas.verisure_owa_api.exceptions import (
+    VerisureOwaError,
+)
 from custom_components.securitas.verisure_owa_api.models import (
     Attribute,
     Installation,
@@ -12,12 +15,8 @@ from custom_components.securitas.verisure_owa_api.models import (
     Service,
     SmartLockMode,
 )
-from custom_components.securitas.verisure_owa_api.exceptions import (
-    VerisureOwaError,
-)
 
 from .conftest import make_jwt
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 

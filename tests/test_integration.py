@@ -7,12 +7,13 @@ runs (header construction, JSON parsing, error handling), unlike the unit tests
 which patch _execute_request directly.
 """
 
+import contextlib
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
 from custom_components.securitas.verisure_owa_api.exceptions import (
@@ -32,14 +33,13 @@ from .mock_graphql import (
     graphql_installations,
     graphql_login,
     graphql_login_error,
-    graphql_services,
     graphql_sentinel,
+    graphql_services,
     make_doorlock_service,
     make_jwt,
     make_sentinel_service,
     queue_standard_setup,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,15 +75,17 @@ async def _setup(
     """
     entry = _make_entry(hass, **overrides)
     mock_http = server.make_http_client()
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=mock_http,
-    ):
-        with patch(
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=mock_http,
+        ),
+        patch(
             "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
-        ) as mock_fwd:
-            mock_fwd.return_value = True
-            result = await async_setup_entry(hass, entry)
+        ) as mock_fwd,
+    ):
+        mock_fwd.return_value = True
+        result = await async_setup_entry(hass, entry)
     _SETUP_ENTRIES.append((hass, entry))
     return entry, result
 
@@ -95,10 +97,8 @@ async def _unload_setup_entries():
     while _SETUP_ENTRIES:
         hass, entry = _SETUP_ENTRIES.pop()
         if hass.data.get(DOMAIN, {}).get(entry.entry_id) is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await async_unload_entry(hass, entry)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
 
 
 # ── Setup & entity creation ───────────────────────────────────────────────────
@@ -474,12 +474,14 @@ async def test_setup_connection_error_raises_not_ready(
         def post(self, url, **kwargs):
             raise ClientConnectorError(_conn_key, OSError("connection refused"))
 
-    with patch(
-        "custom_components.securitas.async_get_clientsession",
-        return_value=_FailPost(),
+    with (
+        patch(
+            "custom_components.securitas.async_get_clientsession",
+            return_value=_FailPost(),
+        ),
+        pytest.raises(ConfigEntryNotReady),
     ):
-        with pytest.raises(ConfigEntryNotReady):
-            await async_setup_entry(hass, entry)
+        await async_setup_entry(hass, entry)
 
 
 # ── Services create correct entities ─────────────────────────────────────────

@@ -15,7 +15,7 @@ class CheckAlarmEnvelope(BaseModel):
     """Response envelope for xSCheckAlarm."""
 
     class Data(BaseModel):
-        xSCheckAlarm: _ResMsgRef  # noqa: N815
+        xSCheckAlarm: _ResMsgRef
 
     data: Data
 
@@ -24,7 +24,7 @@ class CheckAlarmStatusEnvelope(BaseModel):
     """Response envelope for xSCheckAlarmStatus."""
 
     class Data(BaseModel):
-        xSCheckAlarmStatus: _OperationResult  # noqa: N815
+        xSCheckAlarmStatus: _OperationResult
 
     data: Data
 
@@ -33,7 +33,7 @@ class GeneralStatusEnvelope(BaseModel):
     """Response envelope for xSStatus."""
 
     class Data(BaseModel):
-        xSStatus: SStatus  # noqa: N815
+        xSStatus: SStatus
 
     data: Data
 
@@ -42,7 +42,7 @@ class ArmPanelEnvelope(BaseModel):
     """Response envelope for xSArmPanel."""
 
     class Data(BaseModel):
-        xSArmPanel: _ResMsgRef  # noqa: N815
+        xSArmPanel: _ResMsgRef
 
     data: Data
 
@@ -51,7 +51,7 @@ class ArmStatusEnvelope(BaseModel):
     """Response envelope for xSArmStatus."""
 
     class Data(BaseModel):
-        xSArmStatus: _OperationResult  # noqa: N815
+        xSArmStatus: _OperationResult
 
     data: Data
 
@@ -60,7 +60,7 @@ class DisarmPanelEnvelope(BaseModel):
     """Response envelope for xSDisarmPanel."""
 
     class Data(BaseModel):
-        xSDisarmPanel: _ResMsgRef  # noqa: N815
+        xSDisarmPanel: _ResMsgRef
 
     data: Data
 
@@ -69,7 +69,7 @@ class DisarmStatusEnvelope(BaseModel):
     """Response envelope for xSDisarmStatus."""
 
     class Data(BaseModel):
-        xSDisarmStatus: _OperationResult  # noqa: N815
+        xSDisarmStatus: _OperationResult
 
     data: Data
 
@@ -87,9 +87,9 @@ class GetExceptionsEnvelope(BaseModel):
     class _Inner(_NullSafeBase):
         res: str = ""
         msg: str | None = None
-        exceptions: "list[GetExceptionsEnvelope._ZoneException] | None" = None
+        exceptions: list[GetExceptionsEnvelope._ZoneException] | None = None
 
     class Data(BaseModel):
-        xSGetExceptions: "GetExceptionsEnvelope._Inner"  # noqa: N815
+        xSGetExceptions: GetExceptionsEnvelope._Inner
 
     data: Data

@@ -20,7 +20,7 @@ class LoginEnvelope(BaseModel):
 
         res: str = ""
         msg: str | None = None
-        hash: str | None = None  # noqa: A003
+        hash: str | None = None
         refresh_token: str | None = Field(default=None, validation_alias="refreshToken")
         legals: Any | None = None
         change_password: bool | None = Field(
@@ -32,7 +32,7 @@ class LoginEnvelope(BaseModel):
         main_user: bool | None = Field(default=None, validation_alias="mainUser")
 
     class Data(BaseModel):
-        xSLoginToken: "LoginEnvelope._Inner"  # noqa: N815
+        xSLoginToken: LoginEnvelope._Inner
 
     data: Data
 
@@ -45,7 +45,7 @@ class RefreshLoginEnvelope(BaseModel):
 
         res: str = ""
         msg: str | None = None
-        hash: str | None = None  # noqa: A003
+        hash: str | None = None
         refresh_token: str | None = Field(default=None, validation_alias="refreshToken")
         legals: Any | None = None
         change_password: bool | None = Field(
@@ -57,7 +57,7 @@ class RefreshLoginEnvelope(BaseModel):
         main_user: bool | None = Field(default=None, validation_alias="mainUser")
 
     class Data(BaseModel):
-        xSRefreshLogin: "RefreshLoginEnvelope._Inner"  # noqa: N815
+        xSRefreshLogin: RefreshLoginEnvelope._Inner
 
     data: Data
 
@@ -70,12 +70,12 @@ class ValidateDeviceEnvelope(BaseModel):
 
         res: str = ""
         msg: str | None = None
-        hash: str | None = None  # noqa: A003
+        hash: str | None = None
         refresh_token: str | None = Field(default=None, validation_alias="refreshToken")
         legals: Any | None = None
 
     class Data(BaseModel):
-        xSValidateDevice: "ValidateDeviceEnvelope._Inner"  # noqa: N815
+        xSValidateDevice: ValidateDeviceEnvelope._Inner
 
     data: Data
 
@@ -84,6 +84,6 @@ class SendOtpEnvelope(BaseModel):
     """Response envelope for xSSendOtp."""
 
     class Data(BaseModel):
-        xSSendOtp: _ResMsg  # noqa: N815
+        xSSendOtp: _ResMsg
 
     data: Data

@@ -16,7 +16,6 @@ from custom_components.securitas.verisure_owa_api.http_transport import (
     HttpTransport,
 )
 
-
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -118,12 +117,14 @@ class TestHttpTransport:
         )
         _mock_post(session, [dns_err1, dns_err2])
 
-        with patch(
-            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(VerisureOwaError, match="Connection error"),
         ):
-            with pytest.raises(VerisureOwaError, match="Connection error"):
-                await transport.execute(content={}, headers={})
+            await transport.execute(content={}, headers={})
 
     async def test_rate_limit_retry_with_retry_after(self, transport, session):
         """403 with Retry-After header retries after the specified delay."""

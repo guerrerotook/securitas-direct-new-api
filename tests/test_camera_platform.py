@@ -1,18 +1,18 @@
 """Tests for camera platform entities."""
 
 import base64
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 
+from custom_components.securitas import DOMAIN
+from custom_components.securitas.coordinators import CameraCoordinator, CameraData
+from custom_components.securitas.entity import camera_device_info
+from custom_components.securitas.verisure_owa_api import Installation
 from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
-from custom_components.securitas.verisure_owa_api import Installation
-from custom_components.securitas import DOMAIN
-from custom_components.securitas.coordinators import CameraCoordinator, CameraData
-from custom_components.securitas.entity import camera_device_info
 
 
 class TestCameraDeviceInfo:
@@ -117,6 +117,7 @@ class TestVerisureCamera:
     ):
         """Camera is the primary entity of its device -- no name suffix is set."""
         from homeassistant.helpers.entity import UNDEFINED
+
         from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
@@ -220,7 +221,7 @@ class TestVerisureCamera:
 
         mock_hass.async_add_executor_job.assert_called_once()
         assert result == placeholder_bytes
-        assert cam_module._PLACEHOLDER_IMAGE == placeholder_bytes
+        assert placeholder_bytes == cam_module._PLACEHOLDER_IMAGE
 
     @pytest.mark.asyncio
     async def test_placeholder_cached_after_first_load(
@@ -249,8 +250,8 @@ class TestVerisureCamera:
     def test_device_info_uses_camera_sub_device(
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
-        from custom_components.securitas.camera import VerisureCamera
         from custom_components.securitas import DOMAIN
+        from custom_components.securitas.camera import VerisureCamera
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         info = cam.device_info
@@ -506,8 +507,8 @@ class TestVerisureCaptureButton:
     def test_device_info_uses_camera_sub_device(
         self, mock_hub, installation, camera_device
     ):
-        from custom_components.securitas.button import VerisureCaptureButton
         from custom_components.securitas import DOMAIN
+        from custom_components.securitas.button import VerisureCaptureButton
 
         btn = VerisureCaptureButton(mock_hub, installation, camera_device)
         info = btn.device_info
@@ -614,11 +615,11 @@ class TestVerisureCameraFull:
         self, mock_coordinator, mock_hub, installation, camera_device
     ):
         """Both camera entities must share the same HA device (same identifiers)."""
+        from custom_components.securitas import DOMAIN
         from custom_components.securitas.camera import (
             VerisureCamera,
             VerisureCameraFull,
         )
-        from custom_components.securitas import DOMAIN
 
         thumb_cam = VerisureCamera(
             mock_coordinator, mock_hub, installation, camera_device

@@ -21,7 +21,7 @@ class DeviceListEnvelope(BaseModel):
         devices: list[dict[str, Any]] | None = None
 
     class Data(BaseModel):
-        xSDeviceList: "DeviceListEnvelope._Inner"  # noqa: N815
+        xSDeviceList: DeviceListEnvelope._Inner
 
     data: Data
 
@@ -30,7 +30,7 @@ class RequestImagesEnvelope(BaseModel):
     """Response envelope for xSRequestImages."""
 
     class Data(BaseModel):
-        xSRequestImages: _ResMsgRef  # noqa: N815
+        xSRequestImages: _ResMsgRef
 
     data: Data
 
@@ -45,7 +45,7 @@ class RequestImagesStatusEnvelope(BaseModel):
         status: str | None = None
 
     class Data(BaseModel):
-        xSRequestImagesStatus: "RequestImagesStatusEnvelope._Inner"  # noqa: N815
+        xSRequestImagesStatus: RequestImagesStatusEnvelope._Inner
 
     data: Data
 
@@ -54,7 +54,7 @@ class ThumbnailEnvelope(BaseModel):
     """Response envelope for xSGetThumbnail."""
 
     class Data(BaseModel):
-        xSGetThumbnail: ThumbnailResponse  # noqa: N815
+        xSGetThumbnail: ThumbnailResponse
 
     data: Data
 
@@ -66,6 +66,6 @@ class PhotoImagesEnvelope(BaseModel):
         devices: list[dict[str, Any]] | None = None
 
     class Data(BaseModel):
-        xSGetPhotoImages: "PhotoImagesEnvelope._Inner"  # noqa: N815
+        xSGetPhotoImages: PhotoImagesEnvelope._Inner
 
     data: Data

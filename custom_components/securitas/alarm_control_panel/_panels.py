@@ -30,12 +30,12 @@ from ..verisure_owa_api import (
     is_proto_letter,
 )
 from ..verisure_owa_api.command_resolver import (
+    PROTO_TO_ALARM_STATE,
+    VERISURE_OWA_STATE_TO_ALARM_STATE,
     AlarmState,
     AnnexMode,
     InteriorMode,
     PerimeterMode,
-    PROTO_TO_ALARM_STATE,
-    VERISURE_OWA_STATE_TO_ALARM_STATE,
 )
 from ._base import BaseVerisureOwaAlarmPanel, build_partial_disarm_target
 
@@ -104,9 +104,9 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
 
         affected = [self, *self._affected_axis_subpanels(circuits)]
         for entity in affected:
-            entity._operation_in_progress = True  # noqa: SLF001  # pylint: disable=protected-access
-            entity._operation_epoch += 1  # noqa: SLF001  # pylint: disable=protected-access
-            entity._force_state(AlarmControlPanelState.DISARMING)  # noqa: SLF001  # pylint: disable=protected-access
+            entity._operation_in_progress = True  # pylint: disable=protected-access
+            entity._operation_epoch += 1  # pylint: disable=protected-access
+            entity._force_state(AlarmControlPanelState.DISARMING)  # pylint: disable=protected-access
         try:
             result = await self._execute_transition(target)
         except VerisureOwaError as err:
@@ -119,8 +119,8 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             # provisional semantics to this multi-entity path is a tracked
             # follow-up, not handled in this change.
             for entity in affected:
-                entity._state = entity._last_state  # noqa: SLF001  # pylint: disable=protected-access
-                entity._operation_in_progress = False  # noqa: SLF001  # pylint: disable=protected-access
+                entity._state = entity._last_state  # pylint: disable=protected-access
+                entity._operation_in_progress = False  # pylint: disable=protected-access
                 entity.async_write_ha_state()
             _LOGGER.error(
                 "Partial disarm failed for %s circuits %s: %s",
@@ -131,7 +131,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             return False
         for entity in affected:
             entity.update_status_alarm(result)
-            entity._operation_in_progress = False  # noqa: SLF001  # pylint: disable=protected-access
+            entity._operation_in_progress = False  # pylint: disable=protected-access
             entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True

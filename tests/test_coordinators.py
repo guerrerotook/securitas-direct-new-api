@@ -7,11 +7,11 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.coordinators import (
     ActivityCoordinator,
     ActivityData,
@@ -24,14 +24,13 @@ from custom_components.securitas.coordinators import (
     SentinelCoordinator,
     SentinelData,
 )
-from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AuthenticationError,
-    VerisureOwaError,
     SessionExpiredError,
+    VerisureOwaError,
     WAFBlockedError,
 )
 from custom_components.securitas.verisure_owa_api.models import (
@@ -46,6 +45,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     SStatus,
     ThumbnailResponse,
 )
+
 from .conftest import make_installation
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -289,7 +289,6 @@ class TestAlarmCoordinator:
     async def test_session_expired_login_timeout_raises_update_failed(self):
         """A raw asyncio.TimeoutError from relogin is treated as transient
         (UpdateFailed + recorded), not an uncaught traceback or reauth."""
-        import asyncio as _asyncio
 
         hass = _make_hass()
         client = _make_client()
@@ -297,7 +296,7 @@ class TestAlarmCoordinator:
         installation = _make_installation()
 
         client.get_general_status.side_effect = SessionExpiredError("expired")
-        client.login.side_effect = _asyncio.TimeoutError()
+        client.login.side_effect = TimeoutError()
 
         coord = self._make_coordinator(hass, client, queue, installation)
         with pytest.raises(UpdateFailed):

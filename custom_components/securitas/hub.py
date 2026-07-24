@@ -7,7 +7,6 @@ from functools import partial
 from typing import Any
 
 from aiohttp import ClientSession
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_DEVICE_ID,
@@ -23,8 +22,8 @@ from .api_queue import ApiQueue
 from .const import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
-    CONF_OPERATION_POLL_TIMEOUT,
     CONF_DEVICE_INDIGITALL,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_REFRESH_TOKEN,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DOMAIN,
@@ -39,11 +38,11 @@ from .verisure_owa_api import (
     Installation,
     OperationStatus,
     OtpPhone,
+    Service,
     SmartLock,
     SmartLockMode,
-    VerisureOwaError,
-    Service,
     ThumbnailResponse,
+    VerisureOwaError,
 )
 from .verisure_owa_api.client import VerisureOwaClient
 from .verisure_owa_api.http_transport import HttpTransport
@@ -402,7 +401,7 @@ class VerisureHub:
                 thumbnail.signal_type,
                 priority=ApiQueue.BACKGROUND,
             )
-        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
+        except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.warning(
                 "Could not fetch full image for %s",
                 camera_device.name,

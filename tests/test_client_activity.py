@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
@@ -25,7 +25,7 @@ SECRET = "test-secret"
 
 
 def _make_jwt(**claims) -> str:
-    exp = datetime.now(tz=timezone.utc) + timedelta(minutes=15)
+    exp = datetime.now(tz=UTC) + timedelta(minutes=15)
     return jwt.encode(
         {"exp": exp, "sub": "test-user", **claims}, SECRET, algorithm="HS256"
     )
