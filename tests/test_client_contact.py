@@ -166,12 +166,18 @@ class TestGetContactStates:
                     "zoneId": "MR02",
                     "magneticState": {"value": "closed", "timestamp": None},
                 },
+                {
+                    "id": None,
+                    "zoneId": None,
+                    "magneticState": {"value": None, "timestamp": None},
+                },
             ]
         )
 
         result = await client.get_contact_states(make_installation())
 
-        assert [state.is_open for state in result] == [True, False]
+        assert [state.is_open for state in result] == [True, False, None]
+        assert result[2].zone_id == ""
         request = transport.execute.call_args.args[0]
         assert request["operationName"] == "xSGetDSRDevicesInfo"
         assert "magneticState" in request["query"]

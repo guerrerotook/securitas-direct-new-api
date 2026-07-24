@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..pydantic_utils import NullSafeBase
+
 
 class ContactDevice(BaseModel):
     """A magnetic opening contact from xSDeviceList (MG or MR)."""
@@ -24,7 +26,7 @@ class TimedValue(BaseModel):
     timestamp: str | None = None
 
 
-class ContactState(BaseModel):
+class ContactState(NullSafeBase):
     """Latest DSR state for a magnetic contact."""
 
     model_config = ConfigDict(populate_by_name=True)

@@ -15,7 +15,7 @@ class ContactStatusEnvelope(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
 
         res: str = ""
-        arm_status: str | None = Field(default=None, validation_alias="armStatus")
+        arm_status: str | int | None = Field(default=None, validation_alias="armStatus")
         timestamp: str | None = None
         devices: list[ContactState] | None = None
 
