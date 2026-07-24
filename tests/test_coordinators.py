@@ -676,6 +676,50 @@ class TestContactCoordinator:
                 hass, client, queue, installation
             )._async_update_data()
 
+    @pytest.mark.asyncio
+    async def test_capability_denied_falls_back_to_general_status(self) -> None:
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        client.get_contact_states.side_effect = VerisureOwaError(
+            "6: Unauthorized request for current capabilities."
+        )
+        client.get_general_status.return_value = SStatus(
+            timestamp_update="2024-01-01 12:00:00",
+            exceptions=[
+                {"alias": "Front door", "deviceType": "MG", "status": "OPEN"}
+            ],
+        )
+        coordinator = self._make_coordinator(hass, client, queue, installation)
+
+        first = await coordinator._async_update_data()
+        second = await coordinator._async_update_data()
+
+        assert first.states["MG01"].is_open is True
+        assert second.states["MG01"].is_open is True
+        assert client.get_contact_states.await_count == 1
+        assert client.get_general_status.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_status_fallback_marks_unlisted_contacts_closed(self) -> None:
+        hass = _make_hass()
+        client = _make_client()
+        queue = _make_queue()
+        installation = _make_installation()
+        client.get_contact_states.side_effect = VerisureOwaError(
+            "Unauthorized request for current capabilities"
+        )
+        client.get_general_status.return_value = SStatus(
+            exceptions=[{"alias": "Another door", "deviceType": "MG"}]
+        )
+
+        result = await self._make_coordinator(
+            hass, client, queue, installation
+        )._async_update_data()
+
+        assert result.states["MG01"].is_open is False
+
 
 # ── CameraCoordinator ────────────────────────────────────────────────────────
 
