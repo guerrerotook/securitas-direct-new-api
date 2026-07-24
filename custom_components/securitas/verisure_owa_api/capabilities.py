@@ -6,13 +6,13 @@ capabilities data and decide what features the integration should expose.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from .models import Attribute, Installation, Service
 
 
 def detect_peri(
-    installation: Installation | None | object,
+    installation: Installation | object | None,
     services: Iterable[Service],
     capabilities: frozenset[str],
 ) -> bool:

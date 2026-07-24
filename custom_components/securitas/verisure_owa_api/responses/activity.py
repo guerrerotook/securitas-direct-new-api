@@ -16,6 +16,6 @@ class ActivityEnvelope(BaseModel):
         reg: list[ActivityEvent] | None = None
 
     class Data(BaseModel):
-        xSActV2: "ActivityEnvelope._Inner"  # noqa: N815
+        xSActV2: ActivityEnvelope._Inner
 
     data: Data

@@ -12,7 +12,6 @@ HACS upgraders don't see duplicated entities with ``_2`` suffixes.
 from __future__ import annotations
 
 import pytest
-
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 

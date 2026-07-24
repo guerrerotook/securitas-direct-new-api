@@ -1,10 +1,10 @@
 """Tests for custom_components/verisure_owa/__init__.py."""
 
+import contextlib
 from collections import OrderedDict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -14,7 +14,6 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
@@ -22,6 +21,7 @@ from custom_components.securitas import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -29,7 +29,6 @@ from custom_components.securitas import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
-    CONF_FORCE_ARM_NOTIFICATIONS,
     DOMAIN,
     PLATFORMS,
     VerisureDevice,
@@ -50,16 +49,14 @@ from custom_components.securitas.verisure_owa_api.const import (
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AuthenticationError,
-    VerisureOwaError,
     TwoFactorRequiredError,
+    VerisureOwaError,
 )
-
 from tests.conftest import (
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: patch VerisureHub preserving __name__
@@ -1899,6 +1896,7 @@ class TestDiscoverCameras:
     async def test_exception_from_get_camera_devices_is_caught(self, caplog):
         """An exception in get_camera_devices must not propagate — log warning and continue."""
         import logging
+
         from custom_components.securitas import _discover_cameras
         from tests.conftest import make_installation
 
@@ -2032,6 +2030,7 @@ class TestAsyncDiscoverDevices:
         async def boom(*_args, **_kwargs):
             raise RuntimeError("discovery exploded")
 
+        # Whether or not the function re-raises, the event must be set.
         with (
             patch(
                 "custom_components.securitas.discovery._discover_cameras",
@@ -2041,12 +2040,9 @@ class TestAsyncDiscoverDevices:
                 "custom_components.securitas.discovery._discover_locks",
                 new=boom,
             ),
+            contextlib.suppress(RuntimeError),
         ):
-            # Whether or not the function re-raises, the event must be set.
-            try:
-                await _async_discover_devices(hass, entry)
-            except RuntimeError:
-                pass
+            await _async_discover_devices(hass, entry)
 
         assert event.is_set()
 
@@ -2062,7 +2058,7 @@ class TestStaticPathAliases:
     @pytest.fixture
     def mock_hub(self):
         """Create a mock VerisureHub for setup tests."""
-        from tests.conftest import make_securitas_hub_mock, make_installation
+        from tests.conftest import make_installation, make_securitas_hub_mock
 
         hub = make_securitas_hub_mock()
         hub.client.list_installations = AsyncMock(return_value=[make_installation()])

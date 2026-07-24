@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from custom_components.securitas.verisure_owa_api.responses import (
     ActivityEnvelope,
     ArmStatusEnvelope,
@@ -16,7 +15,6 @@ from custom_components.securitas.verisure_owa_api.responses import (
     SmartlockConfigEnvelope,
     ThumbnailEnvelope,
 )
-
 
 # ── LoginEnvelope ─────────────────────────────────────────────────────────────
 

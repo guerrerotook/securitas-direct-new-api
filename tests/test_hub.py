@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.const import CONF_PASSWORD
 
 from custom_components.securitas.api_queue import ApiQueue

@@ -8,6 +8,9 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     UnexpectedStateError,
 )
 from custom_components.securitas.verisure_owa_api.models import (
+    PROTO_TO_STATE,
+    STATE_TO_COMMAND,
+    STATE_TO_PROTO,
     ActivityCategory,
     ActivityEvent,
     ActivityException,
@@ -24,7 +27,6 @@ from custom_components.securitas.verisure_owa_api.models import (
     OperationStatus,
     OtpPhone,
     PerimeterMode,
-    PROTO_TO_STATE,
     ProtoCode,
     Sentinel,
     Service,
@@ -32,12 +34,9 @@ from custom_components.securitas.verisure_owa_api.models import (
     SmartLockMode,
     SmartLockModeStatus,
     SStatus,
-    STATE_TO_COMMAND,
-    STATE_TO_PROTO,
     ThumbnailResponse,
     parse_proto_code,
 )
-
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
 

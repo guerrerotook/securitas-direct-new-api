@@ -6,11 +6,10 @@ error handling — while returning canned responses.
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import jwt
-
 
 # ── JWT helper ────────────────────────────────────────────────────────────────
 
@@ -19,7 +18,7 @@ _JWT_SECRET = "test-secret"
 
 def make_jwt(exp_minutes: int = 60, **extra_claims) -> str:
     """Create a real HS256 JWT with a known expiry."""
-    exp = datetime.now(tz=timezone.utc) + timedelta(minutes=exp_minutes)
+    exp = datetime.now(tz=UTC) + timedelta(minutes=exp_minutes)
     payload = {"exp": exp, "sub": "test-user", **extra_claims}
     return jwt.encode(payload, _JWT_SECRET, algorithm="HS256")
 
@@ -533,7 +532,7 @@ def graphql_air_quality(
     hour_value: str = "114",
     hour_id: str = "18:00",
     status_current: int = 1,
-    hours: list | None | object = _UNSET,
+    hours: list | object | None = _UNSET,
 ) -> dict:
     """xSAirQuality response.
 

@@ -31,9 +31,9 @@ from . import (
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
-    CONF_OPERATION_POLL_TIMEOUT,
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
@@ -41,12 +41,12 @@ from . import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
-    CONF_FORCE_ARM_NOTIFICATIONS,
-    DEFAULT_FORCE_ARM_NOTIFICATIONS,
+    CONF_OPERATION_POLL_TIMEOUT,
     COUNTRY_CODES,
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -55,6 +55,7 @@ from . import (
     _resolve_flow_capabilities,
     generate_uuid,
 )
+from .api_queue import ApiQueue
 from .const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
@@ -64,11 +65,10 @@ from .const import (
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_LOCK_AUTOMATIONS,
-    DEFAULT_ENABLE_ACTIVITY_POLLING,
     CONF_REFRESH_TOKEN,
+    DEFAULT_ENABLE_ACTIVITY_POLLING,
     LOCK_CIRCUITS,
 )
-from .api_queue import ApiQueue
 from .verisure_owa_api import (
     PERI_DEFAULTS,
     STATE_LABELS,
@@ -77,8 +77,8 @@ from .verisure_owa_api import (
     AuthenticationError,
     Installation,
     OtpPhone,
-    VerisureOwaError,
     TwoFactorRequiredError,
+    VerisureOwaError,
     dropdown_options,
 )
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
@@ -283,7 +283,7 @@ def _get_notify_options(hass: HomeAssistant) -> list[dict[str, str]]:
     """Build notify service dropdown options."""
     notify_services = sorted(
         svc
-        for svc in hass.services.async_services().get("notify", {}).keys()
+        for svc in hass.services.async_services().get("notify", {})
         if svc not in _NOTIFY_EXCLUDE
     )
     return [{"value": "", "label": "(disabled)"}] + [
@@ -531,7 +531,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
                 errors={"base": "invalid_otp"},
             )
-        except Exception as err:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except Exception as err:  # pylint: disable=broad-exception-caught
             _LOGGER.error(
                 "send_sms_code raised unexpected %s: %s", type(err).__name__, err
             )

@@ -16,26 +16,26 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureHub
+from .api_queue import ApiQueue
 from .const import (
-    CONF_LOCK_AUTOMATIONS,
+    CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
-    CIRCUIT_ANNEX,
+    CONF_LOCK_AUTOMATIONS,
 )
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity
 from .verisure_owa_api import (
     Installation,
-    VerisureOwaError,
     SmartLock,
+    VerisureOwaError,
 )
-from .api_queue import ApiQueue
 from .verisure_owa_api.client import SMARTLOCK_DEVICE_ID
 from .verisure_owa_api.models import (
     AlarmState,
+    AnnexMode,
     InteriorMode,
     PerimeterMode,
-    AnnexMode,
 )
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ def _lock_status_name(status: str) -> str:
 # indistinguishable except by waiting out the physical actuation.  So the
 # ceiling must still cover the worst case.  Upstream PR #413 measured ~6s to
 # start + ~4.5s to complete (~10.5s typical) and validated a 15s wait; 7
-# attempts × 3s spans ~18s, comfortably past that, so we never declare failure
+# attempts x 3s spans ~18s, comfortably past that, so we never declare failure
 # before the lock has had time to act.  (This wait was lost when
 # change_lock_mode moved to the generic submit-and-poll scaffold, which returns
 # on the ~2s command ack.)  Until the cache removal in this branch, this
@@ -506,7 +506,7 @@ class VerisureLock(  # type: ignore[override]
         # clobber the transitional state during this read.
         try:
             pre_mode = await self._read_lock_mode(priority=ApiQueue.FOREGROUND)
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except Exception:  # pylint: disable=broad-exception-caught
             pre_mode = None
         pre_ts = pre_mode.status_timestamp if pre_mode is not None else ""
         try:
@@ -575,7 +575,7 @@ class VerisureLock(  # type: ignore[override]
         for attempt in range(1, self._verify_attempts + 1):
             try:
                 mode = await self._read_lock_mode(priority=ApiQueue.FOREGROUND)
-            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            except Exception:  # pylint: disable=broad-exception-caught
                 mode = None
 
             if mode is not None:

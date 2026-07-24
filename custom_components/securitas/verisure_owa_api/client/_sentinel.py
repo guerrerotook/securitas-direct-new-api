@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from ..graphql_queries import AIR_QUALITY_QUERY, SENTINEL_QUERY
@@ -116,10 +117,8 @@ class _SentinelMixin(_ClientBase):
         value: int | None = None
         hours = aq_data.get("hours") or []
         if hours:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 value = int(hours[-1].get("value", 0))
-            except (ValueError, TypeError):
-                pass
 
         # status may be null, and current may be present-but-null, during
         # transient backend hiccups — coalesce both to 0 rather than crash.

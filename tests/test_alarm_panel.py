@@ -1,15 +1,14 @@
 """Tests for alarm_control_panel entity logic."""
 
 import inspect
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import attr
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-from homeassistant.components.alarm_control_panel import AlarmControlPanelEntityFeature  # type: ignore[attr-defined]
+from homeassistant.components.alarm_control_panel import (
+    AlarmControlPanelEntityFeature,  # type: ignore[attr-defined]
+)
 from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelState,
     CodeFormat,
@@ -18,11 +17,27 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as _er_for_feature_detect
 from homeassistant.helpers.entity_registry import DeletedRegistryEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.securitas.verisure_owa_api.models import (
-    Installation,
-    OperationStatus,
-    SStatus,
+from custom_components.securitas.alarm_control_panel import (
+    CombinedVerisureOwaAlarmPanel,
+)
+from custom_components.securitas.const import (
+    CONF_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_FORCE_ARM_NOTIFICATIONS,
+)
+from custom_components.securitas.coordinators import (
+    AlarmCoordinator,
+    AlarmStatusData,
+)
+from custom_components.securitas.events import (
+    ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+    FORCE_ARM_EXPIRED_EVENT_TYPE,
+)
+from custom_components.securitas.verisure_owa_api.command_resolver import (
+    AlarmState,
+    InteriorMode,
+    PerimeterMode,
 )
 from custom_components.securitas.verisure_owa_api.const import (
     PERI_DEFAULTS,
@@ -34,25 +49,10 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     ArmingExceptionError,
     VerisureOwaError,
 )
-from custom_components.securitas.alarm_control_panel import (
-    CombinedVerisureOwaAlarmPanel,
-)
-from custom_components.securitas.coordinators import (
-    AlarmCoordinator,
-    AlarmStatusData,
-)
-from custom_components.securitas.verisure_owa_api.command_resolver import (
-    AlarmState,
-    InteriorMode,
-    PerimeterMode,
-)
-from custom_components.securitas.const import (
-    CONF_FORCE_ARM_NOTIFICATIONS,
-    DEFAULT_FORCE_ARM_NOTIFICATIONS,
-)
-from custom_components.securitas.events import (
-    ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
-    FORCE_ARM_EXPIRED_EVENT_TYPE,
+from custom_components.securitas.verisure_owa_api.models import (
+    Installation,
+    OperationStatus,
+    SStatus,
 )
 
 
@@ -4801,11 +4801,11 @@ class TestExecuteTransitionRefusesUnknownState:
         (instead of the panel's later polled type-5xx 'Error conectando'
         message — which dedups against this synthetic row via the
         HA_INJECTABLE_CATEGORIES filter in the coordinator)."""
-        from custom_components.securitas.verisure_owa_api.models import (
-            ActivityCategory,
-        )
         from custom_components.securitas.verisure_owa_api.exceptions import (
             VerisureOwaError,
+        )
+        from custom_components.securitas.verisure_owa_api.models import (
+            ActivityCategory,
         )
 
         alarm = make_alarm()
@@ -4830,11 +4830,11 @@ class TestExecuteTransitionRefusesUnknownState:
         """A failed disarm round-trip (panel-side comms error) injects
         COMMUNICATION_FAILED so the timeline picks up the failure with HA
         context."""
-        from custom_components.securitas.verisure_owa_api.models import (
-            ActivityCategory,
-        )
         from custom_components.securitas.verisure_owa_api.exceptions import (
             VerisureOwaError,
+        )
+        from custom_components.securitas.verisure_owa_api.models import (
+            ActivityCategory,
         )
 
         alarm = make_alarm()
@@ -6122,13 +6122,14 @@ class TestPerimeterSubPanel:
         assert target.annex == AnnexMode.OFF  # preserved
 
     def test_extract_state(self):
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
             PerimeterMode,
         )
-        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
 
         panel = _make_perimeter_panel()
         on = panel._extract_state(
@@ -6276,13 +6277,14 @@ class TestAnnexSubPanel:
         assert s.perimeter == PerimeterMode.ON  # preserved
 
     def test_extract_state(self):
+        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
             AnnexMode,
             InteriorMode,
             PerimeterMode,
         )
-        from homeassistant.components.alarm_control_panel import AlarmControlPanelState
 
         panel = _make_annex_panel()
         on = panel._extract_state(
@@ -6595,10 +6597,10 @@ class TestSubPanelSetup:
 
     def _setup_kwargs(self, *, options: dict, has_peri: bool, has_annex: bool):
         """Build hass/entry/coordinator suitable for invoking async_setup_entry."""
-        from custom_components.securitas.const import DOMAIN
         from custom_components.securitas import (
             VerisureDevice,
         )
+        from custom_components.securitas.const import DOMAIN
 
         installation = Installation(
             number="123456",
@@ -6644,8 +6646,8 @@ class TestSubPanelSetup:
     @pytest.mark.asyncio
     async def test_only_combined_when_no_toggles(self):
         from custom_components.securitas.alarm_control_panel import (
-            async_setup_entry,
             CombinedVerisureOwaAlarmPanel,
+            async_setup_entry,
         )
 
         hass, entry = self._setup_kwargs(options={}, has_peri=True, has_annex=True)
@@ -6673,8 +6675,8 @@ class TestSubPanelSetup:
         reload the integration to recover.
         """
         from custom_components.securitas.alarm_control_panel import (
-            async_setup_entry,
             PerimeterVerisureOwaAlarmPanel,
+            async_setup_entry,
         )
         from custom_components.securitas.const import CONF_ENABLE_PERIMETER_PANEL
 
@@ -6702,8 +6704,8 @@ class TestSubPanelSetup:
         for the rationale — saved toggle is the source of truth.
         """
         from custom_components.securitas.alarm_control_panel import (
-            async_setup_entry,
             AnnexVerisureOwaAlarmPanel,
+            async_setup_entry,
         )
         from custom_components.securitas.const import CONF_ENABLE_ANNEX_PANEL
 
@@ -6734,8 +6736,8 @@ class TestSubPanelSetup:
         entity-creation guard must match.
         """
         from custom_components.securitas.alarm_control_panel import (
-            async_setup_entry,
             InteriorVerisureOwaAlarmPanel,
+            async_setup_entry,
         )
         from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
 
@@ -6765,8 +6767,8 @@ class TestSubPanelSetup:
         capability-detection failure at startup permanently hide the entity.
         """
         from custom_components.securitas.alarm_control_panel import (
-            async_setup_entry,
             InteriorVerisureOwaAlarmPanel,
+            async_setup_entry,
         )
         from custom_components.securitas.const import CONF_ENABLE_INTERIOR_PANEL
 
@@ -6792,9 +6794,9 @@ class TestSubPanelSetup:
             async_setup_entry,
         )
         from custom_components.securitas.const import (
+            CONF_ENABLE_ANNEX_PANEL,
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
-            CONF_ENABLE_ANNEX_PANEL,
         )
 
         hass, entry = self._setup_kwargs(
@@ -6827,14 +6829,14 @@ class TestSubPanelSetup:
     async def test_alarm_entities_lookup_only_combined(self):
         """Combined panel is the one registered in alarm_entities for force_arm services."""
         from custom_components.securitas.alarm_control_panel import (
-            async_setup_entry,
             CombinedVerisureOwaAlarmPanel,
+            async_setup_entry,
         )
         from custom_components.securitas.const import (
-            DOMAIN,
+            CONF_ENABLE_ANNEX_PANEL,
             CONF_ENABLE_INTERIOR_PANEL,
             CONF_ENABLE_PERIMETER_PANEL,
-            CONF_ENABLE_ANNEX_PANEL,
+            DOMAIN,
         )
 
         hass, entry = self._setup_kwargs(
@@ -6932,9 +6934,9 @@ class TestBuildPartialDisarmTarget:
         )
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         current = AlarmState(
@@ -6953,9 +6955,9 @@ class TestBuildPartialDisarmTarget:
         )
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         current = AlarmState(
@@ -6974,9 +6976,9 @@ class TestBuildPartialDisarmTarget:
         )
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         current = AlarmState(
@@ -7016,9 +7018,9 @@ class TestExecutePartialDisarm:
     async def test_returns_true_on_success_and_calls_execute_transition(self):
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         panel = make_alarm()  # existing helper
@@ -7046,9 +7048,9 @@ class TestExecutePartialDisarm:
         from custom_components.securitas.verisure_owa_api import VerisureOwaError
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         panel = make_alarm()
@@ -7073,14 +7075,15 @@ class TestExecutePartialDisarm:
         so the UI reflects an in-flight auto-disarm instead of jumping silently
         from armed to disarmed when the next coordinator poll arrives.
         """
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            InteriorMode,
-            PerimeterMode,
-            AnnexMode,
-        )
         from homeassistant.components.alarm_control_panel.const import (
             AlarmControlPanelState,
+        )
+
+        from custom_components.securitas.verisure_owa_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
         )
 
         panel = make_alarm()
@@ -7109,9 +7112,9 @@ class TestExecutePartialDisarm:
         rather than waiting for the next poll."""
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         panel = make_alarm()
@@ -7135,15 +7138,16 @@ class TestExecutePartialDisarm:
         execute_partial_disarm should drive its state through DISARMING and into
         the post-result state too — so users see the same animation as a direct
         sub-panel disarm."""
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            InteriorMode,
-            PerimeterMode,
-            AnnexMode,
-        )
-        from custom_components.securitas.const import DOMAIN
         from homeassistant.components.alarm_control_panel.const import (
             AlarmControlPanelState,
+        )
+
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            AlarmState,
+            AnnexMode,
+            InteriorMode,
+            PerimeterMode,
         )
 
         panel = make_alarm()
@@ -7588,7 +7592,7 @@ class TestCombinedPanelEntityIdHealer:
         rewritten to canonical. Otherwise a delete/re-add cycle would silently
         discard the user's chosen slug on re-add.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from homeassistant.helpers import entity_registry as er
 
@@ -7614,7 +7618,7 @@ class TestCombinedPanelEntityIdHealer:
             "alarm_control_panel.chiesa_nuova_alarm_corso_vittorio_emanuele_252_roma"
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
             DeletedRegistryEntry(
                 entity_id=custom_entity_id,
@@ -7856,7 +7860,7 @@ class TestSubPanelEntityIdHealer:
         The healer must rewrite the tombstone's ``entity_id`` to the canonical
         slot so the next async_get_or_create restores onto the correct slug.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from homeassistant.helpers import entity_registry as er
         from homeassistant.util import slugify
@@ -7885,7 +7889,7 @@ class TestSubPanelEntityIdHealer:
 
         # Seed the tombstone HA would have left behind after the user
         # deleted the config entry from the UI.
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
             DeletedRegistryEntry(
                 entity_id=broken,
@@ -7990,7 +7994,7 @@ class TestSubPanelEntityIdHealer:
         """A sub-panel tombstone holding a user-customized entity_id must NOT
         be rewritten to canonical.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from homeassistant.helpers import entity_registry as er
 
@@ -8015,7 +8019,7 @@ class TestSubPanelEntityIdHealer:
         circuit = suffix.lstrip("_")
         custom_entity_id = f"alarm_control_panel.chiesa_nuova_{circuit}"
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ent_reg.deleted_entities[("alarm_control_panel", DOMAIN, unique_id)] = (
             DeletedRegistryEntry(
                 entity_id=custom_entity_id,
@@ -8059,6 +8063,7 @@ class TestCombinedPanelRegistration:
 
     def _make_client(self):
         from unittest.mock import MagicMock
+
         from custom_components.securitas.verisure_owa_api.const import STD_DEFAULTS
 
         client = MagicMock()
@@ -8086,6 +8091,7 @@ class TestCombinedPanelRegistration:
 
     async def _run_setup(self, hass, entry, async_add_entities):
         from unittest.mock import MagicMock, patch
+
         from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
             async_setup_entry,
@@ -8118,10 +8124,11 @@ class TestCombinedPanelRegistration:
     async def test_combined_panels_keyed_by_installation_number_multi(self):
         """With two installations, combined_alarm_panels must be a dict with one entry per installation."""
         from unittest.mock import MagicMock
+
+        from custom_components.securitas import DOMAIN
         from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas import DOMAIN
         from custom_components.securitas.coordinators import AlarmCoordinator
 
         device_a = self._make_device("111111", "Main Home")
@@ -8167,10 +8174,11 @@ class TestCombinedPanelRegistration:
     async def test_combined_panel_per_installation_with_single_install(self):
         """With one installation, combined_alarm_panels must be a dict with exactly one entry."""
         from unittest.mock import MagicMock
+
+        from custom_components.securitas import DOMAIN
         from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
         )
-        from custom_components.securitas import DOMAIN
         from custom_components.securitas.coordinators import AlarmCoordinator
 
         device = self._make_device("654321", "Test Home")
@@ -8299,7 +8307,9 @@ async def test_disarm_timeout_is_provisional_not_failed():
     """OperationTimeoutError after accepted disarm => optimistic disarmed +
     provisional flag + unconfirmed notification, NOT a rollback/failure."""
     from unittest.mock import AsyncMock
+
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
     from custom_components.securitas.verisure_owa_api.exceptions import (
         OperationTimeoutError,
     )
@@ -8328,7 +8338,9 @@ async def test_arm_timeout_is_provisional_not_failed():
     """OperationTimeoutError after accepted arm => optimistic target state +
     provisional flag + unconfirmed notification, NOT a rollback/failure."""
     from unittest.mock import AsyncMock
+
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
+
     from custom_components.securitas.verisure_owa_api.exceptions import (
         OperationTimeoutError,
     )
@@ -8452,6 +8464,7 @@ async def test_disarm_reentry_guard_ignores_overlapping_call():
 async def test_arm_reentry_guard_ignores_overlapping_call():
     """A second arm while one is in progress is ignored (no duplicate command)."""
     from unittest.mock import AsyncMock
+
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
 
     alarm = make_alarm()
