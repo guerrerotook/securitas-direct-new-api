@@ -19,7 +19,7 @@ class InstallationListEnvelope(BaseModel):
         installations: list[Installation]
 
     class Data(BaseModel):
-        xSInstallations: "InstallationListEnvelope._Inner"  # noqa: N815
+        xSInstallations: InstallationListEnvelope._Inner
 
     data: Data
 
@@ -40,9 +40,9 @@ class ServicesEnvelope(BaseModel):
     class _Inner(_NullSafeBase):
         res: str = ""
         msg: str | None = None
-        installation: "ServicesEnvelope._Installation | None" = None
+        installation: ServicesEnvelope._Installation | None = None
 
     class Data(BaseModel):
-        xSSrv: "ServicesEnvelope._Inner"  # noqa: N815
+        xSSrv: ServicesEnvelope._Inner
 
     data: Data

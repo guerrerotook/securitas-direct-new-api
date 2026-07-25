@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-
 _COORDINATORS_LOGGER = "custom_components.securitas.coordinators"
 
 # Phrases identifying transient backend conditions that HA's DataUpdateCoordinator
@@ -37,7 +36,7 @@ class TransientCoordinatorErrorFilter(logging.Filter):
             return True
         try:
             message = record.getMessage()
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # filter must never crash
+        except Exception:  # pylint: disable=broad-exception-caught  # filter must never crash
             return True
         if any(phrase in message for phrase in _TRANSIENT_PHRASES):
             record.levelno = logging.WARNING
@@ -70,10 +69,7 @@ class SensitiveDataFilter(logging.Filter):
         """Register an installation number for partial masking."""
         if not number:
             return
-        if len(number) <= 4:
-            masked = "***"
-        else:
-            masked = "***" + number[-4:]
+        masked = "***" if len(number) <= 4 else "***" + number[-4:]
         self._secrets[number] = masked
 
     def update_secret(self, key: str, value: str | None) -> None:
@@ -120,7 +116,7 @@ class SensitiveDataFilter(logging.Filter):
                 record.args = tuple(self._redact_value(a) for a in record.args)
             elif isinstance(record.args, dict):
                 record.args = {k: self._redact_value(v) for k, v in record.args.items()}
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # filter must never crash
+        except Exception:  # pylint: disable=broad-exception-caught  # filter must never crash
             pass  # Never break logging
 
         return True

@@ -7,6 +7,23 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.securitas.api_queue import ApiQueue
+from custom_components.securitas.coordinators import (
+    ActivityData,
+    LockData,
+    SentinelData,
+)
+from custom_components.securitas.lock import VerisureLock
+from custom_components.securitas.sensor import (
+    ActivityLogSensor,
+    SentinelAirQuality,
+    SentinelAirQualityStatus,
+    SentinelHumidity,
+    SentinelTemperature,
+)
+from custom_components.securitas.verisure_owa_api.exceptions import (
+    VerisureOwaError,
+)
 from custom_components.securitas.verisure_owa_api.models import (
     ActivityEvent,
     AirQuality,
@@ -20,24 +37,6 @@ from custom_components.securitas.verisure_owa_api.models import (
     SmartLockMode,
     SmartLockModeStatus,
 )
-from custom_components.securitas.verisure_owa_api.exceptions import (
-    VerisureOwaError,
-)
-from custom_components.securitas.sensor import (
-    ActivityLogSensor,
-    SentinelAirQuality,
-    SentinelAirQualityStatus,
-    SentinelHumidity,
-    SentinelTemperature,
-)
-from custom_components.securitas.coordinators import (
-    ActivityData,
-    LockData,
-    SentinelData,
-)
-from custom_components.securitas.api_queue import ApiQueue
-from custom_components.securitas.lock import VerisureLock
-
 
 # ---------------------------------------------------------------------------
 # Helper factories
@@ -1331,9 +1330,9 @@ class TestVerisureLockAlarmListener:
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         return AlarmState(
@@ -1363,12 +1362,12 @@ class TestVerisureLockAlarmListener:
         assert lock._state == "1"
 
     def test_armed_circuits_helper_excludes_off_modes(self):
-        from custom_components.securitas.lock import _armed_circuits
         from custom_components.securitas.const import (
+            CIRCUIT_ANNEX,
             CIRCUIT_INTERIOR,
             CIRCUIT_PERIMETER,
-            CIRCUIT_ANNEX,
         )
+        from custom_components.securitas.lock import _armed_circuits
 
         s = self._state(i="OFF", p="ON", a="OFF")
         assert _armed_circuits(s) == {CIRCUIT_PERIMETER}
@@ -1401,9 +1400,9 @@ class TestVerisureLockAutoLockOnArm:
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         return AlarmState(
@@ -2398,9 +2397,9 @@ class TestVerisureLockUnlockDisarm:
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         return AlarmState(
@@ -2522,9 +2521,9 @@ class TestVerisureLockUnlockDisarmFailure:
     def _state(self, *, i="OFF", p="OFF", a="OFF"):
         from custom_components.securitas.verisure_owa_api.models import (
             AlarmState,
+            AnnexMode,
             InteriorMode,
             PerimeterMode,
-            AnnexMode,
         )
 
         return AlarmState(

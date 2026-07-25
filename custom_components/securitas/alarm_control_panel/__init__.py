@@ -15,11 +15,11 @@ from __future__ import annotations
 import logging
 
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import (
     AddEntitiesCallback,
     async_get_current_platform,
@@ -114,7 +114,7 @@ async def _heal_combined_panel_entity_id(
     """
     try:
         ent_reg = er.async_get(hass)
-    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
+    except Exception:  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
     our_unique_id = f"v4_securitas_direct.{installation.number}"
     alias_slug = slugify(installation.alias)
@@ -126,7 +126,7 @@ async def _heal_combined_panel_entity_id(
         our_entity_id = ent_reg.async_get_entity_id(
             "alarm_control_panel", DOMAIN, our_unique_id
         )
-    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
         return
     if our_entity_id is None or our_entity_id == canonical:
         return
@@ -186,7 +186,7 @@ async def _heal_subpanel_entity_id(
     """
     try:
         ent_reg = er.async_get(hass)
-    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
+    except Exception:  # pylint: disable=broad-exception-caught  # heal is best-effort; never fail setup
         return
     our_unique_id = f"v4_securitas_direct.{installation.number}{suffix}"
     alias_slug = slugify(installation.alias)
@@ -202,7 +202,7 @@ async def _heal_subpanel_entity_id(
         our_entity_id = ent_reg.async_get_entity_id(
             "alarm_control_panel", DOMAIN, our_unique_id
         )
-    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
         return
     if our_entity_id is None or our_entity_id == canonical:
         return
@@ -344,7 +344,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
             )
             all_entities.append(peri_panel)
-            axis_panels[peri_panel._AXIS] = peri_panel  # noqa: SLF001  # pylint: disable=protected-access
+            axis_panels[peri_panel._AXIS] = peri_panel  # pylint: disable=protected-access
 
         if enable_annex:
             annex_panel = AnnexVerisureOwaAlarmPanel(
@@ -354,7 +354,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
             )
             all_entities.append(annex_panel)
-            axis_panels[annex_panel._AXIS] = annex_panel  # noqa: SLF001  # pylint: disable=protected-access
+            axis_panels[annex_panel._AXIS] = annex_panel  # pylint: disable=protected-access
 
         if enable_interior:
             interior_panel = InteriorVerisureOwaAlarmPanel(
@@ -364,7 +364,7 @@ async def async_setup_entry(
                 coordinator=coordinator,
             )
             all_entities.append(interior_panel)
-            axis_panels[interior_panel._AXIS] = interior_panel  # noqa: SLF001  # pylint: disable=protected-access
+            axis_panels[interior_panel._AXIS] = interior_panel  # pylint: disable=protected-access
 
     async_add_entities(all_entities, False)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}

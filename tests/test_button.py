@@ -1,20 +1,19 @@
 """Tests for button entity (VerisureRefreshButton)."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from custom_components.securitas import DOMAIN
 from custom_components.securitas.button import (
     VerisureRefreshButton,
     async_setup_entry,
 )
-from custom_components.securitas import DOMAIN
-
 from tests.conftest import (
     make_installation,
     make_securitas_hub_mock,
     setup_integration_data,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

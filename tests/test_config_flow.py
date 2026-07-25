@@ -3,6 +3,18 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
+from homeassistant.const import (
+    CONF_CODE,
+    CONF_DEVICE_ID,
+    CONF_PASSWORD,
+    CONF_SCAN_INTERVAL,
+    CONF_TOKEN,
+    CONF_UNIQUE_ID,
+    CONF_USERNAME,
+)
+from homeassistant.data_entry_flow import FlowResultType, section
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
     CONF_ADVANCED,
@@ -27,28 +39,16 @@ from custom_components.securitas.const import (
     CONF_REFRESH_TOKEN,
 )
 from custom_components.securitas.verisure_owa_api import (
+    PERI_DEFAULTS,
+    STD_DEFAULTS,
     AccountBlockedError,
     Attribute,
     AuthenticationError,
     OtpPhone,
-    PERI_DEFAULTS,
-    STD_DEFAULTS,
+    TwoFactorRequiredError,
     VerisureOwaError,
     VerisureOwaState,
-    TwoFactorRequiredError,
 )
-from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
-from homeassistant.const import (
-    CONF_CODE,
-    CONF_DEVICE_ID,
-    CONF_PASSWORD,
-    CONF_SCAN_INTERVAL,
-    CONF_TOKEN,
-    CONF_UNIQUE_ID,
-    CONF_USERNAME,
-)
-from homeassistant.data_entry_flow import FlowResultType, section
-
 from tests.conftest import (
     FAKE_JWT,
     FAKE_REFRESH_TOKEN,
@@ -56,8 +56,6 @@ from tests.conftest import (
     make_installation,
     make_securitas_hub_mock,
 )
-
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 @pytest.fixture(autouse=True)

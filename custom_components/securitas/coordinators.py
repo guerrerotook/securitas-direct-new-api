@@ -13,7 +13,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
 
 from homeassistant.config_entries import ConfigEntry
@@ -23,9 +23,9 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
+from .events import HA_INJECTABLE_CATEGORIES
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
 from .verisure_owa_api.client import VerisureOwaClient
-from .events import HA_INJECTABLE_CATEGORIES
 from .verisure_owa_api.command_resolver import (
     PROTO_TO_ALARM_STATE,
     AlarmState,
@@ -33,8 +33,8 @@ from .verisure_owa_api.command_resolver import (
     PerimeterMode,
 )
 from .verisure_owa_api.exceptions import (
-    VerisureOwaError,
     SessionExpiredError,
+    VerisureOwaError,
     WAFBlockedError,
     is_genuine_auth_failure,
 )
@@ -167,7 +167,7 @@ async def _handle_session_expired(
         raise UpdateFailed(f"Transient session error, will retry: {err}") from err
     try:
         await client.login()
-    except (VerisureOwaError, asyncio.TimeoutError) as login_err:
+    except (TimeoutError, VerisureOwaError) as login_err:
         owa_err = (
             login_err
             if isinstance(login_err, VerisureOwaError)
@@ -561,7 +561,7 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
         parsed = _parse_panel_time(thumbnail.timestamp)
         if parsed is None:
             return False
-        age = datetime.now(tz=timezone.utc) - parsed.replace(tzinfo=timezone.utc)
+        age = datetime.now(tz=UTC) - parsed.replace(tzinfo=UTC)
         return age < timedelta(hours=max_age_hours)
 
     async def _fetch_full_image(
@@ -595,7 +595,7 @@ class CameraCoordinator(DataUpdateCoordinator[CameraData]):
                     thumbnail.signal_type,
                     priority=ApiQueue.BACKGROUND,
                 )
-        except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
+        except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.warning(
                 "Failed to fetch full image for camera zone %s",
                 zone_id,

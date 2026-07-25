@@ -17,7 +17,7 @@ class SmartlockConfigEnvelope(BaseModel):
     """Response envelope for xSGetSmartlockConfig."""
 
     class Data(BaseModel):
-        xSGetSmartlockConfig: SmartLock  # noqa: N815
+        xSGetSmartlockConfig: SmartLock
 
     data: Data
 
@@ -26,7 +26,7 @@ class DanalockConfigEnvelope(BaseModel):
     """Response envelope for xSGetDanalockConfig."""
 
     class Data(BaseModel):
-        xSGetDanalockConfig: _ResMsgRef  # noqa: N815
+        xSGetDanalockConfig: _ResMsgRef
 
     data: Data
 
@@ -43,7 +43,7 @@ class DanalockConfigStatusEnvelope(BaseModel):
         features: LockFeatures | None = None
 
     class Data(BaseModel):
-        xSGetDanalockConfigStatus: "DanalockConfigStatusEnvelope._Inner"  # noqa: N815
+        xSGetDanalockConfigStatus: DanalockConfigStatusEnvelope._Inner
 
     data: Data
 
@@ -60,7 +60,7 @@ class LockModeEnvelope(BaseModel):
         )
 
     class Data(BaseModel):
-        xSGetLockCurrentMode: "LockModeEnvelope._Inner"  # noqa: N815
+        xSGetLockCurrentMode: LockModeEnvelope._Inner
 
     data: Data
 
@@ -69,7 +69,7 @@ class ChangeLockModeEnvelope(BaseModel):
     """Response envelope for xSChangeSmartlockMode."""
 
     class Data(BaseModel):
-        xSChangeSmartlockMode: _ResMsgRef  # noqa: N815
+        xSChangeSmartlockMode: _ResMsgRef
 
     data: Data
 
@@ -88,6 +88,6 @@ class ChangeLockModeStatusEnvelope(BaseModel):
         status: str | None = None
 
     class Data(BaseModel):
-        xSChangeSmartlockModeStatus: "ChangeLockModeStatusEnvelope._Inner"  # noqa: N815
+        xSChangeSmartlockModeStatus: ChangeLockModeStatusEnvelope._Inner
 
     data: Data

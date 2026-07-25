@@ -16,9 +16,9 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import jwt
 from aiohttp import ClientConnectorError
 from pydantic import BaseModel, ValidationError
-import jwt
 
 from ..exceptions import (
     OperationTimeoutError,
@@ -198,7 +198,7 @@ class _ClientBase:
         if self._on_refresh_token_changed is not None:
             try:
                 self._on_refresh_token_changed(value)
-            except Exception:  # pylint: disable=broad-exception-caught  # noqa: BLE001
+            except Exception:  # pylint: disable=broad-exception-caught
                 _LOGGER.warning(
                     "on_refresh_token_changed callback raised; refresh token "
                     "stored in memory but host persistence may have failed",
@@ -459,10 +459,7 @@ class _ClientBase:
                     if await self.refresh_token():  # type: ignore[attr-defined]
                         return
                     _LOGGER.warning("Refresh token failed, falling back to login")
-                except (
-                    VerisureOwaError,
-                    asyncio.TimeoutError,
-                ) as err:
+                except (TimeoutError, VerisureOwaError) as err:
                     owa_err = (
                         err
                         if isinstance(err, VerisureOwaError)
@@ -694,7 +691,7 @@ class _ClientBase:
                 await asyncio.sleep(delay)
             try:
                 result = await check_fn()
-            except (ClientConnectorError, asyncio.TimeoutError) as err:
+            except (TimeoutError, ClientConnectorError) as err:
                 _LOGGER.warning("Transient error during poll, retrying: %s", err)
                 first = False
                 continue

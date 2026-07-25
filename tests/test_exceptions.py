@@ -5,23 +5,22 @@ from __future__ import annotations
 import pytest
 
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    AccountBlockedError,
     APIConnectionError,
     APIResponseError,
-    AccountBlockedError,
     ArmingExceptionError,
     AuthenticationError,
     ImageCaptureError,
     OperationFailedError,
     OperationTimeoutError,
-    VerisureOwaError,
     SessionExpiredError,
     TwoFactorRequiredError,
     UnexpectedStateError,
+    VerisureOwaError,
     WAFBlockedError,
     _error_code_from_body,
     is_genuine_auth_failure,
 )
-
 
 # ── Subclass checks ───────────────────────────────────────────────────────────
 

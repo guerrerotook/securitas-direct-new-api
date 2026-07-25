@@ -7,12 +7,12 @@ inherit the bulk of their behaviour from BaseVerisureOwaAlarmPanel here.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import datetime
-from datetime import timedelta
 import logging
-from typing import Any
 import uuid
+from collections.abc import Callable
+from datetime import timedelta
+from typing import Any
 
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.components.alarm_control_panel import (
@@ -60,28 +60,28 @@ from ..events import (
 )
 from ..notification_translations import get_notification_strings
 from ..verisure_owa_api import (
-    ArmingExceptionError,
-    Installation,
-    OperationStatus,
     PROTO_DISARMED,
     PROTO_TO_STATE,
     STATE_LABELS,
     STATE_TO_COMMAND,
+    ArmingExceptionError,
+    Installation,
+    OperationStatus,
     VerisureOwaError,
     VerisureOwaState,
     is_proto_letter,
 )
-from ..verisure_owa_api.exceptions import OperationTimeoutError
 from ..verisure_owa_api.command_resolver import (
     ALARM_STATE_TO_PROTO,
+    PROTO_TO_ALARM_STATE,
     AlarmState,
     AnnexMode,
     CommandResolver,
     CommandStep,
     InteriorMode,
     PerimeterMode,
-    PROTO_TO_ALARM_STATE,
 )
+from ..verisure_owa_api.exceptions import OperationTimeoutError
 from ..verisure_owa_api.models import ActivityCategory, ActivityException
 
 # Map HA alarm state names to config keys
@@ -1279,16 +1279,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         holds context at any time.
         """
         for panel in self._siblings_on_installation():
-            if panel._force_context is None:  # noqa: SLF001  # pylint: disable=protected-access
+            if panel._force_context is None:  # pylint: disable=protected-access
                 continue
             # Fire the public event first (panel attribution), then wipe
             # the panel's context. The integration's own dismissed-event
             # handler clears the shared notification.
-            panel._fire_arming_exception_dismissed_event(  # noqa: SLF001  # pylint: disable=protected-access
+            panel._fire_arming_exception_dismissed_event(  # pylint: disable=protected-access
                 reason=reason,
                 new_mode=new_mode,
             )
-            panel._clear_force_context()  # noqa: SLF001  # pylint: disable=protected-access
+            panel._clear_force_context()  # pylint: disable=protected-access
             # Push the wiped `force_arm_available` / `arm_exceptions`
             # attributes to HA's state machine on every cleared panel.
             # `self` will be re-written by the caller's downstream

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from custom_components.securitas.const import DOMAIN
 from custom_components.securitas.coordinators import (
     ActivityCoordinator,
     ActivityData,
@@ -18,12 +19,11 @@ from custom_components.securitas.events import (
     make_synthetic_event,
     resolve_ha_user,
 )
-from custom_components.securitas.const import DOMAIN
-from custom_components.securitas.verisure_owa_api.models import Installation
 from custom_components.securitas.verisure_owa_api.models import (
     ActivityCategory,
     ActivityEvent,
     ActivityException,
+    Installation,
 )
 
 
@@ -52,7 +52,7 @@ class TestFireActivityEvents:
 
         fire_activity_events(hass, "2654190", events)
 
-        # 2 events × 2 names each = 4 fires
+        # 2 events x 2 names each = 4 fires
         assert hass.bus.async_fire.call_count == 4
 
     def test_both_event_types_are_emitted(self):
@@ -109,7 +109,7 @@ class TestFireActivityEvents:
         fire_activity_events(hass, "2654190", [ev1, ev2])
 
         calls = hass.bus.async_fire.call_args_list
-        # Pair per event: (verisure_owa_activity, securitas_activity) × 2
+        # Pair per event: (verisure_owa_activity, securitas_activity) x 2
         assert [c[0][0] for c in calls] == [
             "verisure_owa_activity",
             "securitas_activity",
@@ -144,7 +144,7 @@ class TestAttachActivityListener:
         callback = coord.async_add_listener.call_args[0][0]
         callback()
 
-        # 1 event × 2 names = 2 fires
+        # 1 event x 2 names = 2 fires
         assert hass.bus.async_fire.call_count == 2
         types = [c[0][0] for c in hass.bus.async_fire.call_args_list]
         assert types == ["verisure_owa_activity", "securitas_activity"]

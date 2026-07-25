@@ -120,10 +120,13 @@ def _find_bare_dict_violations(files: list[Path]) -> list[str]:
                         )
 
             # Check variable annotations
-            if isinstance(node, ast.AnnAssign) and node.annotation:
-                if _has_bare_dict(node.annotation):
-                    target = ast.dump(node.target) if node.target else "?"
-                    violations.append(f"{path.name}:{node.lineno} (variable {target})")
+            if (
+                isinstance(node, ast.AnnAssign)
+                and node.annotation
+                and _has_bare_dict(node.annotation)
+            ):
+                target = ast.dump(node.target) if node.target else "?"
+                violations.append(f"{path.name}:{node.lineno} (variable {target})")
 
     return violations
 

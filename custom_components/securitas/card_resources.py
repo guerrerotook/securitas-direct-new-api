@@ -10,6 +10,7 @@ add_extra_js_url for the lifetime of the running session.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from homeassistant.components import frontend
@@ -71,10 +72,8 @@ async def _unregister_card_resource(
     """Remove a card Lovelace resource on unload."""
     resource_id = hass.data.get(DOMAIN, {}).get(storage_key)
     if not resource_id:
-        try:
+        with contextlib.suppress(Exception):
             frontend.remove_extra_js_url(hass, card_url)
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
         return
     try:
         lovelace_data = hass.data.get("lovelace")

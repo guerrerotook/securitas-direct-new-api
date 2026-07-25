@@ -3,25 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from datetime import timedelta
-import logging
 from pathlib import Path
-import time
 from typing import Any
 from uuid import uuid4
 
 import voluptuous as vol
-
-from homeassistant.components import frontend  # noqa: F401 — re-exported so tests can patch
+from homeassistant.components import (
+    frontend,  # noqa: F401 — re-exported so tests can patch
+)
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import (
-    ConfigEntryAuthFailed,
-    ConfigEntryNotReady,
-    HomeAssistantError,
-)
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -32,6 +28,11 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    HomeAssistantError,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.service import (
@@ -40,7 +41,13 @@ from homeassistant.helpers.service import (
 )
 
 from .api_queue import ApiQueue
+from .card_resources import (
+    _register_card_resource,
+    _unregister_card_resource,
+)
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
+    ACTIVITY_LOG_CARD_BASE_URL,
+    ACTIVITY_LOG_CARD_URL,
     API_CACHE_TTL,
     CAMERA_CARD_BASE_URL,
     CAMERA_CARD_URL,
@@ -48,37 +55,35 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CARD_URL,
     CHIP_CARD_BASE_URL,
     CHIP_CARD_URL,
-    ACTIVITY_LOG_CARD_BASE_URL,
-    ACTIVITY_LOG_CARD_URL,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
-    CONF_OPERATION_POLL_TIMEOUT,
     CONF_DEVICE_INDIGITALL,
+    CONF_ENABLE_ACTIVITY_POLLING,
+    CONF_ENABLE_ANNEX_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
     CONF_ENTRY_ID,
+    CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
+    CONF_LOCK_AUTOMATIONS,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
-    CONF_FORCE_ARM_NOTIFICATIONS,
-    CONF_ENABLE_INTERIOR_PANEL,
-    CONF_ENABLE_PERIMETER_PANEL,
-    CONF_ENABLE_ANNEX_PANEL,
-    CONF_ENABLE_ACTIVITY_POLLING,
-    CONF_LOCK_AUTOMATIONS,
+    CONF_OPERATION_POLL_TIMEOUT,
     CONF_REFRESH_TOKEN,
     CONF_UNSUPPORTED_COMMANDS,
-    DEFAULT_ENABLE_ACTIVITY_POLLING,
-    DEFAULT_FORCE_ARM_NOTIFICATIONS,
     COUNTRY_CODES,
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_COUNTRY,
     DEFAULT_DELAY_CHECK_OPERATION,
+    DEFAULT_ENABLE_ACTIVITY_POLLING,
+    DEFAULT_FORCE_ARM_NOTIFICATIONS,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -96,10 +101,6 @@ from .coordinators import (  # noqa: F401
     LockCoordinator,
     SentinelCoordinator,
 )
-from .card_resources import (  # noqa: F401 — re-exported for backwards compatibility
-    _register_card_resource,
-    _unregister_card_resource,
-)
 from .discovery import (  # noqa: F401 — re-exported for backwards compatibility
     _async_discover_devices,
     _discover_cameras,
@@ -107,7 +108,6 @@ from .discovery import (  # noqa: F401 — re-exported for backwards compatibili
     _schedule_lock_config_retry,
 )
 from .events import attach_activity_listener
-from .migrate_unique_ids import migrate_unique_ids
 from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     VerisureDevice,
     VerisureHub,
@@ -115,12 +115,13 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
     _notify,
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
+from .migrate_unique_ids import migrate_unique_ids
 from .verisure_owa_api import (
     ApiDomains,
     AuthenticationError,
     Installation,
-    VerisureOwaError,
     TwoFactorRequiredError,
+    VerisureOwaError,
     generate_device_id,
     generate_uuid,
 )
@@ -789,7 +790,7 @@ def register_service_aliases(hass: HomeAssistant) -> None:
         async_set_service_schema(hass, ALIAS_DOMAIN, service_name, schema)
 
 
-async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  # noqa: ARG001  # pylint: disable=unused-argument
+async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  # pylint: disable=unused-argument
     """Integration-wide setup, called once regardless of config entries.
 
     Surfaces a Repairs issue if an orphaned ``custom_components/verisure_owa/``

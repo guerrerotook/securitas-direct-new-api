@@ -62,7 +62,7 @@ PROTO_TO_STATE: dict[str, VerisureOwaState] = {
     "C": VerisureOwaState.PARTIAL_NIGHT_PERI,
     "T": VerisureOwaState.TOTAL,
     "A": VerisureOwaState.TOTAL_PERI,
-    # Annex-armed codes (interior-mode-bit × annex-bit, no perimeter).
+    # Annex-armed codes (interior-mode-bit x annex-bit, no perimeter).
     # Source: issue #441 status-code table.
     "X": VerisureOwaState.ANNEX_ONLY,  # main disarmed,  annex armed
     "R": VerisureOwaState.PARTIAL_DAY_ANNEX,  # main day,       annex armed
@@ -140,8 +140,8 @@ def dropdown_options(*, has_peri: bool, has_annex: bool) -> list[VerisureOwaStat
 
     Always offers the four interior modes. Adds peri-bearing variants when
     has_peri, annex-bearing variants when has_annex, and peri+annex variants
-    when both are set. The combined-panel mappings cover every interior ×
-    perimeter × annex combination the panel can sit in, so users can map
+    when both are set. The combined-panel mappings cover every interior x
+    perimeter x annex combination the panel can sit in, so users can map
     any HA button to any reachable state.
     """
     options: list[VerisureOwaState] = list(STD_OPTIONS)

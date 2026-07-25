@@ -3,12 +3,10 @@
 import base64
 import json
 
-
 from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
-
 
 # ── Dataclass tests ──────────────────────────────────────────────────────────
 

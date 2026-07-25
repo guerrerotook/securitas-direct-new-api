@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import jwt
@@ -25,7 +25,6 @@ from custom_components.securitas.verisure_owa_api.models import (
     SStatus,
 )
 
-
 # ── JWT helpers ──────────────────────────────────────────────────────────────
 
 SECRET = "test-secret"
@@ -33,7 +32,7 @@ SECRET = "test-secret"
 
 def make_jwt(exp_minutes: int = 15, **extra_claims) -> str:
     """Create a real HS256 JWT with a known expiry."""
-    exp = datetime.now(tz=timezone.utc) + timedelta(minutes=exp_minutes)
+    exp = datetime.now(tz=UTC) + timedelta(minutes=exp_minutes)
     payload = {"exp": exp, "sub": "test-user", **extra_claims}
     return jwt.encode(payload, SECRET, algorithm="HS256")
 

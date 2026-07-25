@@ -4,7 +4,6 @@ import pytest
 
 from custom_components.securitas.const import COUNTRY_CODES, SENTINEL_SERVICE_NAMES
 from custom_components.securitas.verisure_owa_api.const import (
-    CommandType,
     PERI_DEFAULTS,
     PERI_OPTIONS,
     PROTO_TO_STATE,
@@ -12,10 +11,10 @@ from custom_components.securitas.verisure_owa_api.const import (
     STATE_TO_COMMAND,
     STD_DEFAULTS,
     STD_OPTIONS,
+    CommandType,
     VerisureOwaState,
     dropdown_options,
 )
-
 
 # ── SENTINEL_SERVICE_NAMES ───────────────────────────────────────────────────
 
@@ -438,10 +437,10 @@ class TestCountryCodes:
 
 def test_lock_automations_constants_exist():
     from custom_components.securitas.const import (
-        CONF_LOCK_AUTOMATIONS,
+        CIRCUIT_ANNEX,
         CIRCUIT_INTERIOR,
         CIRCUIT_PERIMETER,
-        CIRCUIT_ANNEX,
+        CONF_LOCK_AUTOMATIONS,
         LOCK_CIRCUITS,
     )
 

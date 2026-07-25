@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..exceptions import VerisureOwaError
 from ..graphql_queries import (
     CHANGE_LOCK_MODE_MUTATION,
     CHANGE_LOCK_MODE_STATUS_QUERY,
@@ -20,7 +21,6 @@ from ..models import (
     SmartLockMode,
     SmartLockModeStatus,
 )
-from ..exceptions import VerisureOwaError
 from ..responses import (
     ChangeLockModeEnvelope,
     DanalockConfigEnvelope,
@@ -129,7 +129,7 @@ class _LockMixin(_ClientBase):
                     device_id,
                     exc_info=True,
                 )
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.debug(
                 "Smartlock config fetch failed unexpectedly for %s device %s, "
                 "trying Danalock",
@@ -141,7 +141,7 @@ class _LockMixin(_ClientBase):
         # ── Danalock fallback (two-phase polling) ──
         try:
             return await self._get_danalock_config(installation, device_id)
-        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except Exception:  # pylint: disable=broad-exception-caught
             _LOGGER.debug(
                 "Danalock config fetch also failed for %s device %s",
                 installation.number,

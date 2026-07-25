@@ -20,7 +20,7 @@ class SentinelEnvelope(BaseModel):
         forecast: dict[str, Any] | None = None
 
     class Data(BaseModel):
-        xSComfort: "SentinelEnvelope._Inner"  # noqa: N815
+        xSComfort: SentinelEnvelope._Inner
 
     data: Data
 
@@ -33,6 +33,6 @@ class AirQualityEnvelope(BaseModel):
         data: dict[str, Any] | None = None
 
     class Data(BaseModel):
-        xSAirQuality: "AirQualityEnvelope._Inner"  # noqa: N815
+        xSAirQuality: AirQualityEnvelope._Inner
 
     data: Data

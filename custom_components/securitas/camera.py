@@ -32,7 +32,7 @@ _placeholder_lock: asyncio.Lock | None = None
 
 async def _get_placeholder_image(hass: HomeAssistant) -> bytes:
     """Return the placeholder JPEG, reading the file once via the executor."""
-    global _PLACEHOLDER_IMAGE, _placeholder_lock  # pylint: disable=global-statement  # noqa: PLW0603
+    global _PLACEHOLDER_IMAGE, _placeholder_lock  # pylint: disable=global-statement
     cached = _PLACEHOLDER_IMAGE
     if cached is not None:
         return cached

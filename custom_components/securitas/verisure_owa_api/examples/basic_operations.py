@@ -7,9 +7,9 @@ from uuid import uuid4
 import aiohttp
 from verisure_owa_api import (
     _LOGGER,
-    VerisureOwaClient,
-    HttpTransport,
     ApiDomains,
+    HttpTransport,
+    VerisureOwaClient,
     VerisureOwaError,
     generate_device_id,
     generate_uuid,

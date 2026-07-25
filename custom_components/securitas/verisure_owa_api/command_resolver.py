@@ -12,12 +12,12 @@ from dataclasses import dataclass
 
 from .const import VerisureOwaState
 from .models import (
+    PROTO_TO_STATE,
     AlarmState,
     AnnexMode,
     InteriorMode,
     PerimeterMode,
     ProtoCode,
-    PROTO_TO_STATE,
 )
 
 # Re-export for backward compatibility
@@ -269,7 +269,7 @@ class CommandResolver:
         if target.perimeter == PerimeterMode.ON and target.interior != InteriorMode.OFF:
             arm_cmd = _INTERIOR_ARM[target.interior]
             combined = _COMBINED_ARM.get(target.interior, [])
-            all_cmds = list(combined) + [f"{arm_cmd}+PERI1"]
+            all_cmds = [*list(combined), f"{arm_cmd}+PERI1"]
             cmds = self._filter_unsupported(all_cmds)
             return [CommandStep(commands=cmds)]
 

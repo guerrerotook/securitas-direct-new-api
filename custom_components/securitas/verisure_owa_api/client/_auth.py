@@ -76,13 +76,14 @@ class _AuthMixin(_ClientBase):
                     raise _new from err
                 if result_json.get("data"):
                     data = result_json["data"]
-                    if data.get("xSLoginToken"):
-                        if data["xSLoginToken"].get("needDeviceAuthorization"):
-                            _new = TwoFactorRequiredError(
-                                err.message, http_status=err.http_status
-                            )
-                            _new.response_body = result_json
-                            raise _new from err
+                    if data.get("xSLoginToken") and data["xSLoginToken"].get(
+                        "needDeviceAuthorization"
+                    ):
+                        _new = TwoFactorRequiredError(
+                            err.message, http_status=err.http_status
+                        )
+                        _new.response_body = result_json
+                        raise _new from err
                     _new = AuthenticationError(err.message, http_status=err.http_status)
                     _new.response_body = result_json
                     raise _new from err
