@@ -75,7 +75,8 @@
                         "name": "Codice PIN per disattivare",
                         "data": {
                             "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
-                            "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme"
+                            "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
+                            "lock_code_required": "Richiedere anche il codice PIN (se presente) per le operazioni sulla serratura"
                         }
                     },
                     "notifications": {
@@ -133,7 +134,8 @@
                         "name": "Codice PIN per disattivare",
                         "data": {
                             "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
-                            "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme"
+                            "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
+                            "lock_code_required": "Richiedere anche il codice PIN (se presente) per le operazioni sulla serratura"
                         }
                     },
                     "notifications": {

@@ -75,7 +75,8 @@
                         "name": "Codi PIN per desarmar",
                         "data": {
                             "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
-                            "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma"
+                            "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
+                            "lock_code_required": "Requerir també el codi PIN (si n'hi ha) per a les operacions del pany"
                         }
                     },
                     "notifications": {
@@ -133,7 +134,8 @@
                         "name": "Codi PIN per desarmar",
                         "data": {
                             "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
-                            "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma"
+                            "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
+                            "lock_code_required": "Requerir també el codi PIN (si n'hi ha) per a les operacions del pany"
                         }
                     },
                     "notifications": {

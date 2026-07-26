@@ -73,6 +73,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | ------- | ------ | ------- | ----------- |
 | **PIN code for disarming** | PIN code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Numeric or alphanumeric. |
 | | Require PIN to arm | No | When enabled, the PIN is also required to arm (not just disarm). No effect if no PIN is set. |
+| | Require PIN for lock operations | No | When enabled, the same local PIN must also be supplied to lock, unlock, or open any smart lock on this installation. No effect if no PIN is set. Only manual lock/unlock/open calls are gated — [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are unaffected. |
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 | | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming (advanced)](#force-arming-advanced). |
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
@@ -232,6 +233,10 @@ If your installation includes Sentinel devices, the integration automatically cr
 ## Smart Locks
 
 Smart door locks become lock entities you can operate from HA — multiple locks per installation, each with its own entity. If your lock supports latch hold-back, the entity also gets an **Open** action that unlatches the door without unlocking it.
+
+### Requiring a PIN for lock operations
+
+Turn on **Require PIN for lock operations** (in the [PIN code section](#settings)) to reuse the same local alarm PIN as a gate on locking, unlocking, and opening. Once enabled, HA prompts for the PIN — via the lock's more-info dialog keypad, or a `code` field on the `lock.lock` / `lock.unlock` / `lock.open` service calls — and rejects the action if it doesn't match. This only affects manual/service-triggered operations; the [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations below are internal and never prompt for a PIN.
 
 ### Lock automations
 

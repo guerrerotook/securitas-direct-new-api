@@ -68,6 +68,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
     CONF_LOCK_AUTOMATIONS,
+    CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
@@ -84,6 +85,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_ENABLE_ACTIVITY_POLLING,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_LOCK_CODE_REQUIRED,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -216,6 +218,7 @@ def add_device_information[T: dict](config: T) -> T:
 _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_CODE,
     CONF_CODE_ARM_REQUIRED,
+    CONF_LOCK_CODE_REQUIRED,
     CONF_SCAN_INTERVAL,
     CONF_MAP_HOME,
     CONF_MAP_AWAY,
@@ -229,6 +232,7 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
+    CONF_LOCK_CODE_REQUIRED,
     CONF_OPERATION_POLL_TIMEOUT,
 )
 
@@ -302,6 +306,9 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_CODE] = _opt(CONF_CODE, DEFAULT_CODE)
     config[CONF_CODE_ARM_REQUIRED] = _opt(
         CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
+    )
+    config[CONF_LOCK_CODE_REQUIRED] = _opt(
+        CONF_LOCK_CODE_REQUIRED, DEFAULT_LOCK_CODE_REQUIRED
     )
     config[CONF_SCAN_INTERVAL] = _opt(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     config[CONF_DELAY_CHECK_OPERATION] = _opt(

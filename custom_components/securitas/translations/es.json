@@ -75,7 +75,8 @@
                         "name": "Código PIN para desarmar",
                         "data": {
                             "code": "Código PIN (dejar vacío si no hay PIN)",
-                            "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma"
+                            "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
+                            "lock_code_required": "Requerir también código PIN (si lo hay) para las operaciones de la cerradura"
                         }
                     },
                     "notifications": {
@@ -133,7 +134,8 @@
                         "name": "Código PIN para desarmar",
                         "data": {
                             "code": "Código PIN (dejar vacío si no hay PIN)",
-                            "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma"
+                            "code_arm_required": "Requerir también código PIN (si lo hay) para armar alarma",
+                            "lock_code_required": "Requerir también código PIN (si lo hay) para las operaciones de la cerradura"
                         }
                     },
                     "notifications": {

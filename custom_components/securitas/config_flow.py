@@ -35,6 +35,7 @@ from . import (
     CONF_ENTRY_ID,
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
+    CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
@@ -47,6 +48,7 @@ from . import (
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_LOCK_CODE_REQUIRED,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -321,6 +323,12 @@ def _build_settings_schema(
                     CONF_CODE_ARM_REQUIRED,
                     default=defaults.get(
                         CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_LOCK_CODE_REQUIRED,
+                    default=defaults.get(
+                        CONF_LOCK_CODE_REQUIRED, DEFAULT_LOCK_CODE_REQUIRED
                     ),
                 ): bool,
             }
@@ -918,6 +926,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 CONF_CODE: DEFAULT_CODE,
                 CONF_CODE_ARM_REQUIRED: DEFAULT_CODE_ARM_REQUIRED,
+                CONF_LOCK_CODE_REQUIRED: DEFAULT_LOCK_CODE_REQUIRED,
             },
             notify_options,
             extra_fields=extra_fields,
@@ -1047,6 +1056,9 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_CODE: self._get(CONF_CODE, DEFAULT_CODE),
                 CONF_CODE_ARM_REQUIRED: self._get(
                     CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
+                ),
+                CONF_LOCK_CODE_REQUIRED: self._get(
+                    CONF_LOCK_CODE_REQUIRED, DEFAULT_LOCK_CODE_REQUIRED
                 ),
                 CONF_NOTIFY_GROUP: self._get(CONF_NOTIFY_GROUP, ""),
                 CONF_FORCE_ARM_NOTIFICATIONS: self._get(
