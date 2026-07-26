@@ -133,9 +133,12 @@
                     "pin": {
                         "name": "Codi PIN per desarmar",
                         "data": {
-                            "code": "Codi PIN (deixeu-lo buit per no usar cap PIN)",
+                            "code": "Codi PIN",
                             "code_arm_required": "Requerir també el codi PIN (si n'hi ha) per armar l'alarma",
                             "lock_code_required": "Requerir també el codi PIN (si n'hi ha) per a les operacions del pany"
+                        },
+                        "data_description": {
+                            "code": "Només es desa un hash, mai el PIN. Es mostra com a ●●●●●●●● quan ja hi ha un PIN configurat — deixeu-lo tal com és per mantenir-lo, buideu-lo per eliminar-lo, o introduïu un PIN nou per substituir-lo. Deixeu-lo buit si no voleu cap PIN."
                         }
                     },
                     "notifications": {

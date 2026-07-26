@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 import jwt
 import pytest
 from homeassistant.const import (
-    CONF_CODE,
     CONF_DEVICE_ID,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
@@ -18,6 +17,8 @@ from homeassistant.const import (
 
 from custom_components.securitas import (
     CONF_CODE_ARM_REQUIRED,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
@@ -35,6 +36,7 @@ from custom_components.securitas import (
     VerisureDevice,
     VerisureHub,
 )
+from custom_components.securitas.pin_crypto import hash_pin
 from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
@@ -256,6 +258,10 @@ def make_config_entry_data(
 
     ``has_peri`` controls which default mappings are used but is no longer
     stored in entry data — capability detection is now runtime-only.
+
+    ``code`` is the raw PIN; it's hashed here (CONF_CODE_HASH/
+    CONF_CODE_IS_NUMERIC) since that's what's actually persisted — the PIN
+    is never stored in plain text. Empty ``code`` means "no PIN configured".
     """
     defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
 
@@ -271,7 +277,8 @@ def make_config_entry_data(
         CONF_USERNAME: username,
         CONF_PASSWORD: password,
         CONF_COUNTRY: country,
-        CONF_CODE: code,
+        CONF_CODE_HASH: hash_pin(code) if code else None,
+        CONF_CODE_IS_NUMERIC: code.isdigit() if code else False,
         CONF_CODE_ARM_REQUIRED: code_arm_required,
         CONF_SCAN_INTERVAL: scan_interval,
         CONF_DELAY_CHECK_OPERATION: delay_check_operation,

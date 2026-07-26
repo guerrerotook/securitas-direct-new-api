@@ -57,6 +57,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CHIP_CARD_URL,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
@@ -118,6 +120,7 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
+from .pin_crypto import hash_pin
 from .verisure_owa_api import (
     ApiDomains,
     AuthenticationError,
@@ -216,7 +219,8 @@ def add_device_information[T: dict](config: T) -> T:
 # we *replace* these rather than merge, so a key cleared in options (e.g.
 # CONF_MAP_VACATION) doesn't leave a stale value lingering in entry.data.
 _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
-    CONF_CODE,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_CODE_ARM_REQUIRED,
     CONF_LOCK_CODE_REQUIRED,
     CONF_SCAN_INTERVAL,
@@ -266,8 +270,22 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _hash_legacy_plaintext_code(mapping: dict[str, Any]) -> None:
+    """Replace a legacy plain-text CONF_CODE in *mapping* with its hash.
+
+    Mutates *mapping* in place: drops the raw PIN and, if it was non-empty,
+    writes CONF_CODE_HASH + CONF_CODE_IS_NUMERIC (captured before the value
+    is discarded — isdigit()-ness can't be recovered from the hash later).
+    A missing or empty CONF_CODE (no PIN configured) leaves both keys unset.
+    """
+    plain_code = mapping.pop(CONF_CODE, None)
+    if plain_code:
+        mapping[CONF_CODE_HASH] = hash_pin(plain_code)
+        mapping[CONF_CODE_IS_NUMERIC] = plain_code.isdigit()
+
+
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Reject pre-v3 entries; bump v3 → v4 and drop the obsolete CONF_TOKEN."""
+    """Reject pre-v3 entries; bump v3 → v4 → v5 (hash the plain-text PIN)."""
     if config_entry.version < 3:
         _LOGGER.error(
             "Config entry %s uses format v%s which is no longer supported. "
@@ -282,6 +300,18 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         new_data = dict(config_entry.data)
         new_data.pop(CONF_TOKEN, None)
         hass.config_entries.async_update_entry(config_entry, data=new_data, version=4)
+
+    if config_entry.version == 4:
+        # Both entry.data (fresh installs, or pre-options-flow entries) and
+        # entry.options (once the options flow has run at least once — see
+        # _OPTIONS_MANAGED_FIELDS) may carry a plain-text CONF_CODE.
+        new_data = dict(config_entry.data)
+        new_options = dict(config_entry.options)
+        _hash_legacy_plaintext_code(new_data)
+        _hash_legacy_plaintext_code(new_options)
+        hass.config_entries.async_update_entry(
+            config_entry, data=new_data, options=new_options, version=5
+        )
 
     return True
 
@@ -302,7 +332,8 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_PASSWORD] = entry.data.get(CONF_PASSWORD, "")
     config[CONF_REFRESH_TOKEN] = entry.data.get(CONF_REFRESH_TOKEN, "")
     config[CONF_COUNTRY] = entry.data.get(CONF_COUNTRY, None)
-    config[CONF_CODE] = _opt(CONF_CODE, DEFAULT_CODE)
+    config[CONF_CODE_HASH] = _opt(CONF_CODE_HASH, None)
+    config[CONF_CODE_IS_NUMERIC] = _opt(CONF_CODE_IS_NUMERIC, False)
     config[CONF_CODE_ARM_REQUIRED] = _opt(
         CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
     )

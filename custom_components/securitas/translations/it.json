@@ -133,9 +133,12 @@
                     "pin": {
                         "name": "Codice PIN per disattivare",
                         "data": {
-                            "code": "Codice PIN (lasciare vuoto per non usare un PIN)",
+                            "code": "Codice PIN",
                             "code_arm_required": "Richiedere anche il codice PIN (se presente) per attivare l'allarme",
                             "lock_code_required": "Richiedere anche il codice PIN (se presente) per le operazioni sulla serratura"
+                        },
+                        "data_description": {
+                            "code": "Viene salvato solo un hash, mai il PIN stesso. Mostrato come ●●●●●●●● quando è già configurato un PIN — lascialo invariato per mantenerlo, svuotalo per rimuoverlo, oppure inserisci un nuovo PIN per sostituirlo. Lascia vuoto se non vuoi un PIN."
                         }
                     },
                     "notifications": {

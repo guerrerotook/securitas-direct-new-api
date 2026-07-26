@@ -29,6 +29,8 @@ from homeassistant.helpers.selector import (
 from . import (
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
@@ -71,6 +73,7 @@ from .const import (
     DEFAULT_ENABLE_ACTIVITY_POLLING,
     LOCK_CIRCUITS,
 )
+from .pin_crypto import hash_pin
 from .verisure_owa_api import (
     PERI_DEFAULTS,
     STATE_LABELS,
@@ -85,9 +88,15 @@ from .verisure_owa_api import (
 )
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
 
-VERSION = 4
-
 _LOGGER = logging.getLogger(__name__)
+
+# Shown as the PIN field's pre-filled value when a PIN is already configured
+# (its hash can't be redisplayed). Resubmitted verbatim = "keep the existing
+# PIN"; cleared = "remove the PIN"; anything else = "set this as the new PIN".
+# Bullets rather than plain asterisks so an actual PIN of literal "*"s can't
+# collide with it, and a fixed length so the field never leaks the real PIN's
+# length.
+_CODE_UNCHANGED_SENTINEL = "●" * 8
 
 # Max seconds the Lock Automation options step waits for background lock
 # discovery to finish before falling through. Sized to cover the worst case
@@ -293,6 +302,32 @@ def _get_notify_options(hass: HomeAssistant) -> list[dict[str, str]]:
     ]
 
 
+def _resolve_code_submission(
+    raw_code: str,
+    existing_hash: str | None,
+    existing_is_numeric: bool,
+) -> tuple[str | None, bool]:
+    """Translate the raw PIN field submission into what to persist.
+
+    Returns ``(code_hash, code_is_numeric)`` for CONF_CODE_HASH /
+    CONF_CODE_IS_NUMERIC. Both are always returned explicitly (never
+    omitted) because these are options-managed fields that get *replaced*
+    wholesale from entry.options on every save (see _OPTIONS_MANAGED_FIELDS
+    in __init__.py) — leaving either key out would silently drop the
+    existing PIN instead of carrying it forward.
+
+    - Resubmitted verbatim as the mask sentinel → carry the existing hash
+      forward unchanged (the user didn't touch the field).
+    - Blank → clear the PIN.
+    - Anything else → hash it as the new PIN.
+    """
+    if existing_hash and raw_code == _CODE_UNCHANGED_SENTINEL:
+        return existing_hash, existing_is_numeric
+    if not raw_code:
+        return None, False
+    return hash_pin(raw_code), raw_code.isdigit()
+
+
 def _build_settings_schema(
     defaults: dict[str, Any],
     notify_options: list[dict[str, str]],
@@ -307,8 +342,15 @@ def _build_settings_schema(
     and a collapsed Advanced section. Section payloads are flattened back
     to top-level keys by ``_flatten_sections`` before persistence — the
     saved data shape is unchanged.
+
+    The PIN field can't be pre-filled with the real value (only its hash is
+    stored). When ``defaults`` carries a CONF_CODE_HASH, the field shows
+    ``_CODE_UNCHANGED_SENTINEL`` instead — see ``_resolve_code_submission``
+    for how the three possible submissions (sentinel / blank / new value)
+    are interpreted.
     """
-    code_val = defaults.get(CONF_CODE, DEFAULT_CODE)
+    has_existing_code = bool(defaults.get(CONF_CODE_HASH))
+    code_val = _CODE_UNCHANGED_SENTINEL if has_existing_code else DEFAULT_CODE
     code_field = (
         vol.Optional(CONF_CODE, description={"suggested_value": code_val})
         if use_suggested
@@ -419,7 +461,7 @@ def _build_settings_schema(
 class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow."""
 
-    VERSION = 4
+    VERSION = 5
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     def __init__(self) -> None:
@@ -909,7 +951,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Step 3: PIN, scan interval, notifications, sub-panel toggles."""
         if user_input is not None:
             user_input = _flatten_sections(user_input)
-            user_input.setdefault(CONF_CODE, DEFAULT_CODE)
+            raw_code = user_input.pop(CONF_CODE, DEFAULT_CODE)
+            # Fresh install — there's no existing PIN to carry forward, so
+            # any non-blank value (including the sentinel, which can't
+            # collide here since nothing pre-filled the field) is new.
+            code_hash, code_is_numeric = _resolve_code_submission(raw_code, None, False)
+            user_input[CONF_CODE_HASH] = code_hash
+            user_input[CONF_CODE_IS_NUMERIC] = code_is_numeric
             # Toggles belong on entry.options, not entry.data.
             for key in PANEL_OPTION_KEYS:
                 if key in user_input:
@@ -924,7 +972,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = _build_settings_schema(
             {
-                CONF_CODE: DEFAULT_CODE,
+                CONF_CODE_HASH: None,
                 CONF_CODE_ARM_REQUIRED: DEFAULT_CODE_ARM_REQUIRED,
                 CONF_LOCK_CODE_REQUIRED: DEFAULT_LOCK_CODE_REQUIRED,
             },
@@ -1031,7 +1079,14 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         """Step 1: General settings."""
         if user_input is not None:
             user_input = _flatten_sections(user_input)
-            user_input.setdefault(CONF_CODE, DEFAULT_CODE)
+            raw_code = user_input.pop(CONF_CODE, DEFAULT_CODE)
+            code_hash, code_is_numeric = _resolve_code_submission(
+                raw_code,
+                self._get(CONF_CODE_HASH, None),
+                self._get(CONF_CODE_IS_NUMERIC, False),
+            )
+            user_input[CONF_CODE_HASH] = code_hash
+            user_input[CONF_CODE_IS_NUMERIC] = code_is_numeric
             self._general_data = user_input
             return await self.async_step_mappings()
 
@@ -1053,7 +1108,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
 
         schema = _build_settings_schema(
             {
-                CONF_CODE: self._get(CONF_CODE, DEFAULT_CODE),
+                CONF_CODE_HASH: self._get(CONF_CODE_HASH, None),
                 CONF_CODE_ARM_REQUIRED: self._get(
                     CONF_CODE_ARM_REQUIRED, DEFAULT_CODE_ARM_REQUIRED
                 ),

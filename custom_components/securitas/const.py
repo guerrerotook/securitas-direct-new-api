@@ -51,6 +51,15 @@ CONF_ADVANCED = "advanced"
 CONF_COUNTRY = "country"
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_CODE_ARM_REQUIRED = "code_arm_required"
+# The alarm/lock PIN is persisted hashed (see pin_crypto.hash_pin), never as
+# plain text — CONF_CODE (homeassistant.const) is only used as the config-
+# flow/options-flow form field name for the raw user-entered value, which is
+# hashed before being written to entry.data/entry.options under these keys.
+CONF_CODE_HASH = "code_hash"
+# isdigit()-ness of the raw PIN, captured at hash time — needed for
+# code_format (NUMBER vs TEXT) since that can no longer be derived from the
+# (irreversible) hash itself.
+CONF_CODE_IS_NUMERIC = "code_is_numeric"
 CONF_DEVICE_INDIGITALL = "idDeviceIndigitall"
 CONF_ENTRY_ID = "entry_id"
 CONF_DELAY_CHECK_OPERATION = "delay_check_operation"

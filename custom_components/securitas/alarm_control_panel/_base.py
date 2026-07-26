@@ -20,7 +20,7 @@ from homeassistant.components.alarm_control_panel import (
     CodeFormat,  # type: ignore[attr-defined]
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
-from homeassistant.const import CONF_CODE, CONF_SCAN_INTERVAL
+from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_call_later
@@ -40,6 +40,8 @@ from ..const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_OPERATION_POLL_TIMEOUT,
     CONF_UNSUPPORTED_COMMANDS,
     DEFAULT_OPERATION_POLL_TIMEOUT,
@@ -59,6 +61,7 @@ from ..events import (
     inject_ha_event,
 )
 from ..notification_translations import get_notification_strings
+from ..pin_crypto import verify_pin
 from ..verisure_owa_api import (
     PROTO_DISARMED,
     PROTO_TO_STATE,
@@ -213,14 +216,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         )
         self._operation_in_progress: bool = False
         self._operation_epoch: int = 0
-        self._code: str | None = client.config.get(CONF_CODE, None)
+        self._code_hash: str | None = client.config.get(CONF_CODE_HASH, None)
         self._attr_code_format: CodeFormat | None = None
-        if self._code:
+        if self._code_hash:
+            is_numeric = client.config.get(CONF_CODE_IS_NUMERIC, False)
             self._attr_code_format = (
-                CodeFormat.NUMBER if self._code.isdigit() else CodeFormat.TEXT
+                CodeFormat.NUMBER if is_numeric else CodeFormat.TEXT
             )
         self._attr_code_arm_required: bool = (
-            client.config.get(CONF_CODE_ARM_REQUIRED, False) if self._code else False
+            client.config.get(CONF_CODE_ARM_REQUIRED, False)
+            if self._code_hash
+            else False
         )
 
         self._last_arm_result: OperationStatus | None = None
@@ -418,13 +424,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _check_code_for_arm_if_required(self, code: str | None) -> bool:
         """Check the code only if arming requires a code and a PIN is configured."""
-        if not self._code or not self.code_arm_required:
+        if not self._code_hash or not self.code_arm_required:
             return True
         return self._check_code(code)
 
     def _check_code(self, code: str | None) -> bool:
-        """Check that the code entered in the panel matches the code in the config."""
-        result: bool = not self._code or self._code == code
+        """Check that the code entered in the panel matches the configured PIN hash."""
+        result: bool = not self._code_hash or verify_pin(code, self._code_hash)
         if not result:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,

@@ -34,6 +34,7 @@ from custom_components.securitas.events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
 )
+from custom_components.securitas.pin_crypto import hash_pin
 from custom_components.securitas.verisure_owa_api.command_resolver import (
     AlarmState,
     InteriorMode,
@@ -403,7 +404,8 @@ def make_alarm(
 ) -> CombinedVerisureOwaAlarmPanel:
     """Create a CombinedVerisureOwaAlarmPanel with mocked dependencies.
 
-    ``code`` sets the CONF_CODE value that check_code() compares against.
+    ``code`` is the raw PIN that check_code() should accept; it's hashed
+    into config["code_hash"] since the entity only ever reads the hash.
     """
     installation = Installation(
         number="123456",
@@ -422,7 +424,8 @@ def make_alarm(
         config["scan_interval"] = 120
 
     if code is not None:
-        config["code"] = code
+        config["code_hash"] = hash_pin(code) if code else None
+        config["code_is_numeric"] = code.isdigit() if code else False
 
     client = MagicMock()
     client.config = config
@@ -1708,7 +1711,8 @@ class TestCheckCodeForArmIfRequired:
             "map_night": "partial_night",
             "map_custom": "not_used",
             "scan_interval": 120,
-            "code": "5678",
+            "code_hash": hash_pin("5678"),
+            "code_is_numeric": True,
             "code_arm_required": True,
         }
         alarm = make_alarm(config=config)
@@ -1723,7 +1727,8 @@ class TestCheckCodeForArmIfRequired:
             "map_night": "partial_night",
             "map_custom": "not_used",
             "scan_interval": 120,
-            "code": "5678",
+            "code_hash": hash_pin("5678"),
+            "code_is_numeric": True,
             "code_arm_required": True,
         }
         alarm = make_alarm(config=config)
@@ -3490,7 +3495,8 @@ class TestForceArmCodeGate:
         config = {
             **STD_DEFAULTS,
             "scan_interval": 120,
-            "code": "1234",
+            "code_hash": hash_pin("1234"),
+            "code_is_numeric": True,
             "code_arm_required": code_required,
         }
         return make_alarm(config=config)

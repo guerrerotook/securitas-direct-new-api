@@ -116,9 +116,12 @@
                     "pin": {
                         "name": "PIN code for disarming",
                         "data": {
-                            "code": "PIN code (leave empty for no PIN)",
+                            "code": "PIN code",
                             "code_arm_required": "Also require PIN code (if any) to arm alarm",
                             "lock_code_required": "Also require PIN code (if any) for lock/unlock operations"
+                        },
+                        "data_description": {
+                            "code": "Only a hash is stored, never the PIN itself. Shown as ●●●●●●●● when a PIN is already set — leave it as-is to keep it, clear it to remove it, or enter a new PIN to replace it. Leave blank if you don't want a PIN."
                         }
                     },
                     "notifications": {
