@@ -1930,6 +1930,41 @@ class TestCodeHashMigration:
         assert verify_pin("1111", entry.data[CONF_CODE_HASH])
         assert verify_pin("2222", entry.options[CONF_CODE_HASH])
 
+    @pytest.mark.parametrize(
+        "legacy_value",
+        [1234, ["1234"], {"pin": "1234"}, None],
+        ids=["int", "list", "dict", "null"],
+    )
+    async def test_non_string_legacy_code_does_not_abort_migration(
+        self, hass, legacy_value
+    ):
+        """A corrupt CONF_CODE must not take the whole entry down.
+
+        An int reaches hash_pin and dies on .encode(); a list isn't hashable
+        and dies as a memo key. Either raises out of async_migrate_entry, so
+        HA marks the entry failed and the integration doesn't load at all —
+        a far worse outcome than an unusable PIN the user can simply clear.
+        """
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = legacy_value
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        assert await async_migrate_entry(hass, entry) is True
+        assert entry.version == 5
+        assert "code" not in entry.data
+        # Whatever it becomes, the entry stays loadable and the key is present.
+        assert CONF_CODE_HASH in entry.data
+
     async def test_pin_cleared_in_options_is_not_resurrected(self, hass):
         """An empty CONF_CODE in options must keep shadowing the one in data.
 

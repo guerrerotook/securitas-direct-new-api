@@ -301,7 +301,15 @@ def _hash_legacy_plaintext_code(
     """
     if CONF_CODE not in mapping:
         return
-    plain_code = mapping.pop(CONF_CODE)
+    raw = mapping.pop(CONF_CODE)
+    # Storage is JSON, so a hand-edited entry can hand us an int, a list, or
+    # null. Coerce rather than trust: an int would die in hash_pin's
+    # .encode(), and a list isn't even hashable as a memo key — both raise
+    # out of async_migrate_entry, which fails the whole entry and stops the
+    # integration loading. An unusable PIN the user can clear in the options
+    # dialog is a much better outcome, and coercing keeps the realistic case
+    # (a JSON number that was meant as a PIN) working exactly as intended.
+    plain_code = "" if raw is None else str(raw)
     if plain_code not in seen:
         seen[plain_code] = encode_pin(plain_code)
     mapping[CONF_CODE_HASH], mapping[CONF_CODE_IS_NUMERIC] = seen[plain_code]

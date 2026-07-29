@@ -1,8 +1,17 @@
 """Tests for pin_crypto — PIN hashing and verification."""
 
+import hashlib
+import secrets
+import time
+
 import pytest
 
-from custom_components.securitas.pin_crypto import encode_pin, hash_pin, verify_pin
+from custom_components.securitas.pin_crypto import (
+    _ITERATIONS,
+    encode_pin,
+    hash_pin,
+    verify_pin,
+)
 
 
 def test_verify_accepts_matching_pin():
@@ -96,6 +105,38 @@ def test_verify_rejects_corrupt_fields_without_raising(encoded):
     unhandled ValueError instead of a clean "wrong PIN".
     """
     assert verify_pin("1234", encoded) is False
+
+
+def test_verify_rejects_absurd_iteration_count_without_computing_it():
+    """A corrupted iteration count must be rejected, not honoured.
+
+    verify_pin runs on the event loop by design, on a cost we measured and
+    accepted. Trusting the persisted count turns that bounded cost into an
+    unbounded one: a garbled or hand-edited entry would hang every
+    arm/disarm. The rejection has to be cheap — if this test is slow, the
+    bound isn't being applied before the derivation.
+    """
+    _alg, _iters, salt_hex, hash_hex = hash_pin("1234").split("$")
+    forged = f"pbkdf2_sha256${10**12}${salt_hex}${hash_hex}"
+
+    started = time.monotonic()
+    assert verify_pin("1234", forged) is False
+    assert time.monotonic() - started < 1.0
+
+
+def test_verify_still_accepts_a_raised_iteration_count():
+    """The bound must leave headroom to raise _ITERATIONS later.
+
+    The encoded format carries the count precisely so old entries keep
+    verifying across a bump; a bound that forbade any increase would defeat
+    that.
+    """
+    salt = secrets.token_bytes(16)
+    raised = _ITERATIONS * 4
+    derived = hashlib.pbkdf2_hmac("sha256", b"1234", salt, raised)
+    encoded = f"pbkdf2_sha256${raised}${salt.hex()}${derived.hex()}"
+
+    assert verify_pin("1234", encoded) is True
 
 
 def test_verify_rejects_unknown_algorithm_tag():

@@ -24,6 +24,14 @@ _ALGORITHM = "pbkdf2_sha256"
 _ITERATIONS = 600_000
 _SALT_BYTES = 16
 
+# Ceiling on the iteration count read back out of a persisted hash. The count
+# is embedded so that raising _ITERATIONS keeps old entries verifiable, so this
+# has to leave generous headroom — but it can't be unbounded: verification runs
+# on the event loop, and a corrupted or hand-edited entry carrying a huge count
+# would otherwise hang every arm/disarm (or, past OpenSSL's own limit, raise
+# OverflowError, which is not a ValueError and would escape the guard below).
+_MAX_ITERATIONS = 10_000_000
+
 
 def hash_pin(pin: str) -> str:
     """Hash *pin*, returning a self-describing string safe to persist.
@@ -70,8 +78,12 @@ def verify_pin(pin: str | None, encoded: str | None) -> bool:
         algorithm, iterations_str, salt_hex, hash_hex = encoded.split("$")
         if algorithm != _ALGORITHM:
             return False
+        iterations = int(iterations_str)
+        # Bound before deriving, never after — the point is to not do the work.
+        if not 0 < iterations <= _MAX_ITERATIONS:
+            return False
         derived = hashlib.pbkdf2_hmac(
-            "sha256", pin.encode(), bytes.fromhex(salt_hex), int(iterations_str)
+            "sha256", pin.encode(), bytes.fromhex(salt_hex), iterations
         )
         expected = bytes.fromhex(hash_hex)
     except (AttributeError, TypeError, ValueError):
