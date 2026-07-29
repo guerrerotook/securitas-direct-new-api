@@ -207,13 +207,11 @@ class VerisureLock(  # type: ignore[override]
 
         # Reuse the alarm's local PIN (CONF_CODE) to gate lock/unlock/open —
         # opt-in via CONF_LOCK_CODE_REQUIRED, no effect when no PIN is set.
-        self._code: str | None = client.config.get(CONF_CODE, None)
-        self._code_required: bool = False
-        self._attr_code_format: str | None = None
-        if self._code:
-            self._code_required = client.config.get(CONF_LOCK_CODE_REQUIRED, False)
-            if self._code_required:
-                self._attr_code_format = r"^\d+$" if self._code.isdigit() else r".+"
+        # Publishing a code_format is what makes HA demand (and prompt for) a
+        # code, so it doubles as the "gate is on" flag.
+        self._code: str | None = client.config.get(CONF_CODE)
+        if self._code and client.config.get(CONF_LOCK_CODE_REQUIRED, False):
+            self._attr_code_format = r"^\d+$" if self._code.isdigit() else r".+"
 
         self._operation_in_progress: bool = False
         self._config_retry_unsubs: list[Callable[[], None]] = []
@@ -477,22 +475,27 @@ class VerisureLock(  # type: ignore[override]
 
     # -- Lock/unlock operations ----------------------------------------------
 
-    def _check_code(self, code: str | None) -> bool:
-        """Check the code entered by the user against the configured alarm PIN.
+    def _check_code(self, code: str | None) -> None:
+        """Reject the operation unless *code* matches the configured alarm PIN.
 
-        No-op (always True) unless CONF_LOCK_CODE_REQUIRED is enabled and a
-        PIN is configured. Only guards manual service calls (async_lock /
-        async_unlock / async_open) — internal automations like auto-lock-on-
-        arm call ``_change_lock_mode`` directly and never go through here.
+        A no-op unless CONF_LOCK_CODE_REQUIRED is enabled and a PIN is
+        configured — ``code_format`` is only published in that case, and its
+        presence is what turns the gate on. Only guards manual service calls
+        (async_lock / async_unlock / async_open) — internal automations like
+        auto-lock-on-arm call ``_change_lock_mode`` directly and never go
+        through here.
+
+        On the real service path this only ever fires for a code that is
+        *well-formed but wrong*: HA's own ``add_default_code`` has already
+        rejected a missing or malformed one against ``code_format`` before
+        ``async_lock`` is reached.
         """
-        result: bool = not self._code_required or self._code == code
-        if not result:
+        if self.code_format and code != self._code:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="invalid_pin_code",
                 translation_placeholders={"entity_id": self.entity_id},
             )
-        return result
 
     async def _change_lock_mode(
         self,
