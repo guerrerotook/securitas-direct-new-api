@@ -860,6 +860,10 @@ async def test_options_init_pin_field_is_masked_input(hass):
 
     _marker, validator = _find_code_field(result["data_schema"])
     assert validator.config["type"] == "password"
+    # Without this a password manager can autofill over the mask sentinel,
+    # silently replacing the PIN with an unrelated saved password that can
+    # no longer be read back to notice.
+    assert validator.config["autocomplete"] == "new-password"
 
 
 async def test_config_flow_pin_field_is_masked_input(hass):

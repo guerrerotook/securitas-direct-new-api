@@ -1880,6 +1880,56 @@ class TestCodeHashMigration:
         assert entry.version == 5
         assert CONF_CODE_HASH not in entry.data
 
+    async def test_same_pin_in_data_and_options_yields_one_hash(self, hass):
+        """A PIN present in both mappings is hashed once, not twice.
+
+        Hashing is salted, so hashing each mapping independently would leave
+        data and options holding different encodings of the same PIN. That
+        makes ``_synced_entry_data`` see a diff where there is none, costing
+        every upgrading user with a PIN a spurious entry reload.
+        """
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1234"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": "1234"},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.data[CONF_CODE_HASH] == entry.options[CONF_CODE_HASH]
+        assert verify_pin("1234", entry.data[CONF_CODE_HASH])
+
+    async def test_different_pins_in_data_and_options_stay_distinct(self, hass):
+        """Sharing a hash must not collapse two genuinely different PINs."""
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1111"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": "2222"},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert verify_pin("1111", entry.data[CONF_CODE_HASH])
+        assert verify_pin("2222", entry.options[CONF_CODE_HASH])
+
     async def test_pin_cleared_in_options_is_not_resurrected(self, hass):
         """An empty CONF_CODE in options must keep shadowing the one in data.
 

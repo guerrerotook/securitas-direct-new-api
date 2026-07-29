@@ -62,7 +62,7 @@ def verify_pin(pin: str | None, encoded: str | None) -> bool:
     on the disarm path, not as an unhandled exception. Both the shape check
     and the field parsing are inside the guard — a string can split into
     four parts and still carry a non-hex salt or a non-numeric iteration
-    count.
+    count — or not be a string at all, if the entry was edited by hand.
     """
     if pin is None or not encoded:
         return False
@@ -74,6 +74,6 @@ def verify_pin(pin: str | None, encoded: str | None) -> bool:
             "sha256", pin.encode(), bytes.fromhex(salt_hex), int(iterations_str)
         )
         expected = bytes.fromhex(hash_hex)
-    except ValueError:
+    except (AttributeError, TypeError, ValueError):
         return False
     return hmac.compare_digest(derived, expected)

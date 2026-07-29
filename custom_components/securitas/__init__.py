@@ -276,7 +276,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-def _hash_legacy_plaintext_code(mapping: dict[str, Any]) -> None:
+def _hash_legacy_plaintext_code(
+    mapping: dict[str, Any], seen: dict[str, tuple[str | None, bool]]
+) -> None:
     """Replace a legacy plain-text CONF_CODE in *mapping* with its hash.
 
     Mutates *mapping* in place: drops the raw PIN and writes CONF_CODE_HASH +
@@ -289,12 +291,20 @@ def _hash_legacy_plaintext_code(mapping: dict[str, Any]) -> None:
     data). So an empty PIN writes CONF_CODE_HASH=None rather than leaving the
     key unset, which would stop shadowing and resurrect the old PIN. A
     mapping with no CONF_CODE at all is left untouched.
+
+    *seen* memoises encodings across the data and options mappings, which
+    usually hold the *same* PIN. Hashing is salted, so encoding each one
+    separately would leave them holding different strings for one PIN —
+    making ``_synced_entry_data`` see a diff that isn't there and costing
+    every upgrading user a spurious entry reload. Genuinely different PINs
+    still get their own encoding.
     """
     if CONF_CODE not in mapping:
         return
-    mapping[CONF_CODE_HASH], mapping[CONF_CODE_IS_NUMERIC] = encode_pin(
-        mapping.pop(CONF_CODE)
-    )
+    plain_code = mapping.pop(CONF_CODE)
+    if plain_code not in seen:
+        seen[plain_code] = encode_pin(plain_code)
+    mapping[CONF_CODE_HASH], mapping[CONF_CODE_IS_NUMERIC] = seen[plain_code]
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -320,8 +330,9 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         # _OPTIONS_MANAGED_FIELDS) may carry a plain-text CONF_CODE.
         new_data = dict(config_entry.data)
         new_options = dict(config_entry.options)
-        _hash_legacy_plaintext_code(new_data)
-        _hash_legacy_plaintext_code(new_options)
+        seen: dict[str, tuple[str | None, bool]] = {}
+        _hash_legacy_plaintext_code(new_data, seen)
+        _hash_legacy_plaintext_code(new_options, seen)
         hass.config_entries.async_update_entry(
             config_entry, data=new_data, options=new_options, version=5
         )

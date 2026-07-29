@@ -362,7 +362,14 @@ def _build_settings_schema(
     pin_section = section(
         vol.Schema(
             {
-                code_field: selector({"text": {"type": "password"}}),
+                # autocomplete="new-password" keeps password managers from
+                # autofilling over the mask sentinel: that would silently
+                # replace the alarm PIN with an unrelated saved password, and
+                # unlike before hashing, the value can't be read back to spot
+                # it.
+                code_field: selector(
+                    {"text": {"type": "password", "autocomplete": "new-password"}}
+                ),
                 vol.Optional(
                     CONF_CODE_ARM_REQUIRED,
                     default=defaults.get(
