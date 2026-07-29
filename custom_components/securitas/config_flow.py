@@ -72,6 +72,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     DEFAULT_ENABLE_ACTIVITY_POLLING,
     LOCK_CIRCUITS,
+    PANEL_OPTION_KEYS,
 )
 from .pin_crypto import encode_pin
 from .verisure_owa_api import (
@@ -114,11 +115,6 @@ LOCK_DISCOVERY_WAIT_TIMEOUT: float = 15.0
 #   card with no actions and no useful body and never reach a real device.
 _NOTIFY_EXCLUDE = {"notify", "send_message", "persistent_notification"}
 
-PANEL_OPTION_KEYS = (
-    CONF_ENABLE_PERIMETER_PANEL,
-    CONF_ENABLE_INTERIOR_PANEL,
-    CONF_ENABLE_ANNEX_PANEL,
-)
 
 # Section keys for the grouped settings schema. Persisted-data shape stays
 # flat — the handlers flatten these section payloads back to top-level keys.

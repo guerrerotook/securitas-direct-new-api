@@ -91,6 +91,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    PANEL_OPTION_KEYS,
     PLATFORMS,
     SENTINEL_SERVICE_NAMES,
     SIGNAL_CAMERA_STATE,
@@ -249,16 +250,30 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
 def _synced_entry_data(entry: ConfigEntry) -> dict[str, Any] | None:
     """Return entry.data with options-managed fields aligned to entry.options.
 
-    Returns ``None`` when no change is needed, or when entry.options is empty
-    (fresh install — initial config-flow values live in entry.data and are
-    the source of truth until the options flow runs at least once).
+    Returns ``None`` when no change is needed, or while entry.options is not
+    yet authoritative (fresh install — initial config-flow values live in
+    entry.data and are the source of truth until the options flow runs at
+    least once).
 
     Otherwise drops options-managed keys from entry.data and re-applies them
     from entry.options, so a key the user cleared in options doesn't keep its
     previous value in data — which `_opt()` (and the options form's
-    `_suggested_map` fallback) would otherwise resurrect.
+    `_suggested_map` fallback) would otherwise resurrect. That replace step
+    is only sound because clearing a field is always recorded *explicitly*
+    (``_normalize_mapping_input`` turns a cleared mapping into ``""``), so a
+    key missing from a saved options dict means "the options flow never wrote
+    this", not "the user cleared it".
+
+    Which is exactly why "not yet authoritative" can't just mean "empty":
+    ``_create_entry_for_installation`` seeds entry.options with the sub-panel
+    toggles alone, leaving the PIN, mappings, scan interval and the rest in
+    entry.data. Treating that partial dict as authoritative deletes every
+    managed key it doesn't mention — silently disabling the PIN gate and
+    losing the mappings on the first entry.data write after install (HA
+    dispatches update listeners on data-only writes, and
+    ``_persist_refresh_token`` writes data on the first successful login).
     """
-    if not entry.options:
+    if not entry.options or not set(entry.options) - set(PANEL_OPTION_KEYS):
         return None
     new_data = {k: v for k, v in entry.data.items() if k not in _OPTIONS_MANAGED_FIELDS}
     new_data.update(entry.options)
