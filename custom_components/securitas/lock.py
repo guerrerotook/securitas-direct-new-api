@@ -495,7 +495,7 @@ class VerisureLock(  # type: ignore[override]
         rejected a missing or malformed one against ``code_format`` before
         ``async_lock`` is reached.
         """
-        if self.code_format and not verify_pin(code, self._code_hash or ""):
+        if self.code_format and not verify_pin(code, self._code_hash):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="invalid_pin_code",

@@ -21,7 +21,7 @@ from custom_components.securitas.coordinators import (
     SentinelData,
 )
 from custom_components.securitas.lock import VerisureLock
-from custom_components.securitas.pin_crypto import hash_pin
+from custom_components.securitas.pin_crypto import encode_pin
 from custom_components.securitas.sensor import (
     ActivityLogSensor,
     SentinelAirQuality,
@@ -133,11 +133,12 @@ def make_lock(
             built by production code.
     """
     installation = make_installation()
+    code_hash, code_is_numeric = encode_pin(code)
     client = MagicMock()
     client.config = config or {
         "scan_interval": 120,
-        CONF_CODE_HASH: hash_pin(code) if code else None,
-        CONF_CODE_IS_NUMERIC: code.isdigit() if code else False,
+        CONF_CODE_HASH: code_hash,
+        CONF_CODE_IS_NUMERIC: code_is_numeric,
         CONF_LOCK_CODE_REQUIRED: code_required,
     }
     client.session = AsyncMock()

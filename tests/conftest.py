@@ -36,7 +36,7 @@ from custom_components.securitas import (
     VerisureDevice,
     VerisureHub,
 )
-from custom_components.securitas.pin_crypto import hash_pin
+from custom_components.securitas.pin_crypto import encode_pin
 from custom_components.securitas.verisure_owa_api.client import (
     VerisureOwaClient,
 )
@@ -264,6 +264,7 @@ def make_config_entry_data(
     is never stored in plain text. Empty ``code`` means "no PIN configured".
     """
     defaults = PERI_DEFAULTS if has_peri else STD_DEFAULTS
+    _code_hash, _code_is_numeric = encode_pin(code)
 
     def _mapping(key: str, override: str | None) -> dict[str, str]:
         """Build {key: value} from explicit override → default → omit."""
@@ -277,8 +278,8 @@ def make_config_entry_data(
         CONF_USERNAME: username,
         CONF_PASSWORD: password,
         CONF_COUNTRY: country,
-        CONF_CODE_HASH: hash_pin(code) if code else None,
-        CONF_CODE_IS_NUMERIC: code.isdigit() if code else False,
+        CONF_CODE_HASH: _code_hash,
+        CONF_CODE_IS_NUMERIC: _code_is_numeric,
         CONF_CODE_ARM_REQUIRED: code_arm_required,
         CONF_SCAN_INTERVAL: scan_interval,
         CONF_DELAY_CHECK_OPERATION: delay_check_operation,

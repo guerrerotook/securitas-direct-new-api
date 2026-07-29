@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.securitas.pin_crypto import hash_pin, verify_pin
+from custom_components.securitas.pin_crypto import encode_pin, hash_pin, verify_pin
 
 
 def test_verify_accepts_matching_pin():
@@ -18,6 +18,38 @@ def test_verify_rejects_wrong_pin():
 def test_verify_rejects_none_pin():
     encoded = hash_pin("1234")
     assert verify_pin(None, encoded) is False
+
+
+@pytest.mark.parametrize("encoded", [None, ""], ids=["none", "empty"])
+def test_verify_rejects_falsy_encoded(encoded):
+    """No PIN configured is "no match", not a crash and not a free pass.
+
+    Callers rely on this to express the no-PIN case directly rather than
+    routing it through the corrupt-hash handler.
+    """
+    assert verify_pin("1234", encoded) is False
+
+
+def test_encode_pin_returns_verifiable_hash_and_numeric_flag():
+    encoded, is_numeric = encode_pin("1234")
+
+    assert is_numeric is True
+    assert verify_pin("1234", encoded)
+    assert not verify_pin("9999", encoded)
+
+
+def test_encode_pin_marks_non_numeric_pins():
+    encoded, is_numeric = encode_pin("ab12")
+
+    assert is_numeric is False
+    assert verify_pin("ab12", encoded)
+
+
+@pytest.mark.parametrize("pin", [None, ""], ids=["none", "empty"])
+def test_encode_pin_clears_both_keys_when_no_pin(pin):
+    """Cleared, not omitted — the caller writes both keys either way, so an
+    empty options value keeps shadowing a stale entry.data PIN."""
+    assert encode_pin(pin) == (None, False)
 
 
 def test_hash_is_salted_differently_each_time():

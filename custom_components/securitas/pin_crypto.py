@@ -8,15 +8,17 @@ copy of ``entry.data``/``entry.options`` (config backups, support requests,
 verification is possible, never recovery.
 
 Uses PBKDF2-HMAC-SHA256 from the stdlib rather than a dedicated password-
-hashing library (bcrypt/argon2) so no extra pip dependency is added to the
-HACS manifest for what is, cryptographically, a low-entropy 4-8 digit code.
+hashing library. HA does ship bcrypt as a hard dependency, so that route is
+available — we deliberately don't take it, to avoid resting the PIN format
+on a transitive dep of core, for what is cryptographically a low-entropy
+4-8 digit code either way.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import os
+import secrets
 
 _ALGORITHM = "pbkdf2_sha256"
 _ITERATIONS = 600_000
@@ -30,17 +32,30 @@ def hash_pin(pin: str) -> str:
     the algorithm and iteration count lets a future bump to the iteration
     count verify old entries correctly without a migration step.
     """
-    salt = os.urandom(_SALT_BYTES)
+    salt = secrets.token_bytes(_SALT_BYTES)
     derived = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, _ITERATIONS)
     return f"{_ALGORITHM}${_ITERATIONS}${salt.hex()}${derived.hex()}"
 
 
-def verify_pin(pin: str | None, encoded: str) -> bool:
+def encode_pin(pin: str | None) -> tuple[str | None, bool]:
+    """Return the ``(CONF_CODE_HASH, CONF_CODE_IS_NUMERIC)`` pair to persist.
+
+    The two keys are always written together: digit-ness has to be captured
+    from the raw PIN here, because it can't be recovered from the hash
+    afterwards. An empty or absent PIN yields ``(None, False)`` — cleared,
+    not omitted, so the keys keep their meaning when ``entry.options``
+    shadows ``entry.data``.
+    """
+    return (hash_pin(pin), pin.isdigit()) if pin else (None, False)
+
+
+def verify_pin(pin: str | None, encoded: str | None) -> bool:
     """Return True if *pin* matches the hash produced by ``hash_pin``.
 
-    Callers are expected to already know a PIN is configured (i.e. only call
-    this when ``encoded`` is non-empty) — this function does not special-case
-    "no PIN configured"; see ``_check_code`` call sites.
+    A falsy *encoded* means no PIN is configured and returns False. That is
+    only the absence of a match — deciding what "no PIN configured" *permits*
+    is entity policy, and stays at the call sites (see ``_check_code`` in
+    ``alarm_control_panel/_base.py``, which accepts any code in that case).
 
     Any unusable *encoded* value is rejected rather than raised on: a config
     entry that has been truncated or hand-edited should read as "wrong PIN"
@@ -49,7 +64,7 @@ def verify_pin(pin: str | None, encoded: str) -> bool:
     four parts and still carry a non-hex salt or a non-numeric iteration
     count.
     """
-    if pin is None:
+    if pin is None or not encoded:
         return False
     try:
         algorithm, iterations_str, salt_hex, hash_hex = encoded.split("$")

@@ -73,7 +73,7 @@ from .const import (
     DEFAULT_ENABLE_ACTIVITY_POLLING,
     LOCK_CIRCUITS,
 )
-from .pin_crypto import hash_pin
+from .pin_crypto import encode_pin
 from .verisure_owa_api import (
     PERI_DEFAULTS,
     STATE_LABELS,
@@ -317,15 +317,16 @@ def _resolve_code_submission(
     existing PIN instead of carrying it forward.
 
     - Resubmitted verbatim as the mask sentinel → carry the existing hash
-      forward unchanged (the user didn't touch the field).
+      forward unchanged (the user didn't touch the field). Reusing it rather
+      than re-hashing also keeps the value stable: hashing is salted, so a
+      fresh hash on every save would churn CONF_CODE_HASH and trigger a
+      pointless entry reload via async_update_options.
     - Blank → clear the PIN.
     - Anything else → hash it as the new PIN.
     """
     if existing_hash and raw_code == _CODE_UNCHANGED_SENTINEL:
         return existing_hash, existing_is_numeric
-    if not raw_code:
-        return None, False
-    return hash_pin(raw_code), raw_code.isdigit()
+    return encode_pin(raw_code)
 
 
 def _build_settings_schema(
@@ -952,13 +953,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Step 3: PIN, scan interval, notifications, sub-panel toggles."""
         if user_input is not None:
             user_input = _flatten_sections(user_input)
-            raw_code = user_input.pop(CONF_CODE, DEFAULT_CODE)
-            # Fresh install — there's no existing PIN to carry forward, so
-            # any non-blank value (including the sentinel, which can't
-            # collide here since nothing pre-filled the field) is new.
-            code_hash, code_is_numeric = _resolve_code_submission(raw_code, None, False)
-            user_input[CONF_CODE_HASH] = code_hash
-            user_input[CONF_CODE_IS_NUMERIC] = code_is_numeric
+            # Fresh install — nothing pre-filled the field, so there is no
+            # existing PIN to carry forward and no sentinel to interpret.
+            user_input[CONF_CODE_HASH], user_input[CONF_CODE_IS_NUMERIC] = encode_pin(
+                user_input.pop(CONF_CODE, DEFAULT_CODE)
+            )
             # Toggles belong on entry.options, not entry.data.
             for key in PANEL_OPTION_KEYS:
                 if key in user_input:

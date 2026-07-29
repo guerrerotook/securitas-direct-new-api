@@ -120,7 +120,7 @@ from .hub import (  # noqa: F401 — re-exported for backwards compatibility
 )
 from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
-from .pin_crypto import hash_pin
+from .pin_crypto import encode_pin
 from .verisure_owa_api import (
     ApiDomains,
     AuthenticationError,
@@ -292,9 +292,9 @@ def _hash_legacy_plaintext_code(mapping: dict[str, Any]) -> None:
     """
     if CONF_CODE not in mapping:
         return
-    plain_code = mapping.pop(CONF_CODE)
-    mapping[CONF_CODE_HASH] = hash_pin(plain_code) if plain_code else None
-    mapping[CONF_CODE_IS_NUMERIC] = bool(plain_code) and plain_code.isdigit()
+    mapping[CONF_CODE_HASH], mapping[CONF_CODE_IS_NUMERIC] = encode_pin(
+        mapping.pop(CONF_CODE)
+    )
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

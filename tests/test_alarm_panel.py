@@ -34,7 +34,7 @@ from custom_components.securitas.events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
 )
-from custom_components.securitas.pin_crypto import hash_pin
+from custom_components.securitas.pin_crypto import encode_pin, hash_pin
 from custom_components.securitas.verisure_owa_api.command_resolver import (
     AlarmState,
     InteriorMode,
@@ -424,8 +424,7 @@ def make_alarm(
         config["scan_interval"] = 120
 
     if code is not None:
-        config["code_hash"] = hash_pin(code) if code else None
-        config["code_is_numeric"] = code.isdigit() if code else False
+        config["code_hash"], config["code_is_numeric"] = encode_pin(code)
 
     client = MagicMock()
     client.config = config
