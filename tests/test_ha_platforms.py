@@ -1285,6 +1285,22 @@ class TestVerisureLockPinCode:
 
         lock._client.change_lock_mode.assert_not_awaited()
 
+    async def test_async_unlock_succeeds_with_correct_code(self):
+        lock = make_lock(code="1234", code_required=True, poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_unlock(code="1234")
+
+        assert lock._state == "1"
+
+    async def test_async_open_succeeds_with_correct_code(self):
+        lock = make_lock(code="1234", code_required=True, poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_open(code="1234")
+
+        assert lock._state == "1"
+
     async def test_async_unlock_succeeds_without_code_when_not_required(self):
         """Default behaviour (toggle off) is unaffected — no code needed."""
         lock = make_lock(poll_status="1")
@@ -1293,6 +1309,32 @@ class TestVerisureLockPinCode:
         await lock.async_unlock()
 
         assert lock._state == "1"
+
+    async def test_service_call_without_code_is_rejected_before_dispatch(self):
+        """A `lock.lock` call that omits the PIN never reaches the integration.
+
+        Home Assistant validates the supplied code against ``code_format``
+        in ``add_default_code`` *before* calling ``async_lock``, so the error
+        users see is core's ``add_default_code`` — not our ``invalid_pin_code``.
+        This is what breaks existing automations that don't pass ``code:``.
+        """
+        lock = make_lock(code="1234", code_required=True)
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        with pytest.raises(ServiceValidationError) as err:
+            await lock.async_handle_lock_service()
+
+        assert err.value.translation_key == "add_default_code"
+        lock._client.change_lock_mode.assert_not_awaited()
+
+    async def test_service_call_with_correct_code_locks(self):
+        """The full service path — core's validation then ours — lets the PIN through."""
+        lock = make_lock(code="1234", code_required=True, poll_status="2")
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        await lock.async_handle_lock_service(code="1234")
+
+        assert lock._state == "2"
 
 
 class TestVerisureLockCoordinatorUpdate:

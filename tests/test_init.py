@@ -1,7 +1,7 @@
 """Tests for custom_components/verisure_owa/__init__.py."""
 
 import contextlib
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,12 +17,14 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
+    _OPTIONS_MANAGED_FIELDS,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
+    CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
@@ -883,6 +885,21 @@ class TestAsyncSetupEntry:
 # ===========================================================================
 
 
+class TestOptionsManagedFields:
+    """Tests for the _OPTIONS_MANAGED_FIELDS tuple."""
+
+    def test_each_field_listed_once(self):
+        """A key listed twice is a copy/paste slip — harmless but misleading."""
+        duplicates = sorted(
+            key for key, count in Counter(_OPTIONS_MANAGED_FIELDS).items() if count > 1
+        )
+        assert not duplicates
+
+    def test_lock_code_required_is_options_managed(self):
+        """Clearing the lock PIN toggle in options must not resurrect it from data."""
+        assert CONF_LOCK_CODE_REQUIRED in _OPTIONS_MANAGED_FIELDS
+
+
 class TestBuildConfigDict:
     """Tests for _build_config_dict() helper."""
 
@@ -926,6 +943,22 @@ class TestBuildConfigDict:
         entry = MockConfigEntry(domain=DOMAIN, data=data, options={CONF_CODE: "9999"})
         config, _ = _build_config_dict(entry)
         assert config[CONF_CODE] == "9999"
+
+    def test_lock_code_required_from_options(self):
+        """The lock PIN toggle set in options reaches the client config."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=make_config_entry_data(),
+            options={CONF_LOCK_CODE_REQUIRED: True},
+        )
+        config, _ = _build_config_dict(entry)
+        assert config[CONF_LOCK_CODE_REQUIRED] is True
+
+    def test_lock_code_required_defaults_off(self):
+        """Entries predating the option come up with the gate off."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        config, _ = _build_config_dict(entry)
+        assert config[CONF_LOCK_CODE_REQUIRED] is False
 
     def test_mapping_config_included(self):
         """Map config keys should be in the returned config."""
