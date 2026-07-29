@@ -91,6 +91,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    PANEL_OPTION_KEYS,
     PLATFORMS,
     SENTINEL_SERVICE_NAMES,
     SIGNAL_CAMERA_STATE,
@@ -237,28 +238,47 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
     CONF_FORCE_ARM_NOTIFICATIONS,
-    CONF_ENABLE_INTERIOR_PANEL,
-    CONF_ENABLE_PERIMETER_PANEL,
-    CONF_ENABLE_ANNEX_PANEL,
+    *PANEL_OPTION_KEYS,
     CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
     CONF_OPERATION_POLL_TIMEOUT,
 )
 
 
+def _options_are_authoritative(entry: ConfigEntry) -> bool:
+    """Return True once entry.options is the source of truth for its fields.
+
+    Until the options flow runs, it isn't. ``_create_entry_for_installation``
+    seeds entry.options with ``PANEL_OPTION_KEYS`` (the sub-panel toggles)
+    alone, leaving the PIN, mappings, scan interval and everything else in
+    entry.data — so "has the options flow run?" is not the same question as
+    "is entry.options non-empty?", and answering it with the latter is what
+    let ``_synced_entry_data`` delete nine managed keys from a fresh install.
+
+    Seed and test share one constant, and the seed is driven by it
+    (``async_step_options`` moves exactly ``PANEL_OPTION_KEYS`` into options),
+    so the two can't drift apart.
+    """
+    return not set(entry.options).issubset(PANEL_OPTION_KEYS)
+
+
 def _synced_entry_data(entry: ConfigEntry) -> dict[str, Any] | None:
     """Return entry.data with options-managed fields aligned to entry.options.
 
-    Returns ``None`` when no change is needed, or when entry.options is empty
-    (fresh install — initial config-flow values live in entry.data and are
-    the source of truth until the options flow runs at least once).
+    Returns ``None`` when no change is needed, or while entry.options is not
+    yet authoritative (see ``_options_are_authoritative``) — on a fresh
+    install the config-flow values live in entry.data and are the source of
+    truth until the options flow runs at least once.
 
     Otherwise drops options-managed keys from entry.data and re-applies them
     from entry.options, so a key the user cleared in options doesn't keep its
     previous value in data — which `_opt()` (and the options form's
-    `_suggested_map` fallback) would otherwise resurrect.
+    `_suggested_map` fallback) would otherwise resurrect. That replace step
+    relies on clearing being recorded *explicitly*: see
+    ``_normalize_mapping_input``, which turns a cleared mapping into ``""``
+    precisely so its absence can't be mistaken for "never written".
     """
-    if not entry.options:
+    if not _options_are_authoritative(entry):
         return None
     new_data = {k: v for k, v in entry.data.items() if k not in _OPTIONS_MANAGED_FIELDS}
     new_data.update(entry.options)

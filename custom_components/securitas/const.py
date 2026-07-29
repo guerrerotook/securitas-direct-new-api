@@ -75,6 +75,15 @@ CONF_INSTALLATION = "installation"
 CONF_ENABLE_INTERIOR_PANEL = "enable_interior_panel"
 CONF_ENABLE_PERIMETER_PANEL = "enable_perimeter_panel"
 CONF_ENABLE_ANNEX_PANEL = "enable_annex_panel"
+# The sub-panel toggles, which are the *only* options-managed keys the config
+# flow seeds into entry.options when it creates the entry (everything else
+# starts life in entry.data). Lives here rather than in config_flow so
+# __init__ can read it without importing config_flow, which imports __init__.
+PANEL_OPTION_KEYS: tuple[str, ...] = (
+    CONF_ENABLE_PERIMETER_PANEL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_ANNEX_PANEL,
+)
 # Opt-in to continuous background polling of the activity timeline. When off
 # (the default) the ActivityCoordinator runs on-demand only — the activity-log
 # card drives refreshes while it's on screen, so the integration makes no

@@ -23,6 +23,8 @@ from custom_components.securitas import (
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_ENABLE_PERIMETER_PANEL,
     CONF_FORCE_ARM_NOTIFICATIONS,
     CONF_INSTALLATION,
     CONF_LOCK_CODE_REQUIRED,
@@ -34,10 +36,13 @@ from custom_components.securitas import (
     CONF_NOTIFY_GROUP,
     CONFIG_SCHEMA,
     DOMAIN,
+    PANEL_OPTION_KEYS,
     PLATFORMS,
     VerisureDevice,
     VerisureHub,
     _build_config_dict,
+    _options_are_authoritative,
+    _synced_entry_data,
     add_device_information,
     async_migrate_entry,
     async_setup_entry,
@@ -902,6 +907,16 @@ class TestOptionsManagedFields:
         """Clearing the lock PIN toggle in options must not resurrect it from data."""
         assert CONF_LOCK_CODE_REQUIRED in _OPTIONS_MANAGED_FIELDS
 
+    def test_panel_option_keys_are_options_managed(self):
+        """The seed keys must be a subset of the managed set.
+
+        ``_options_are_authoritative`` treats an options dict holding nothing
+        beyond PANEL_OPTION_KEYS as "the options flow hasn't run". A toggle
+        outside _OPTIONS_MANAGED_FIELDS would make the guard discount a key
+        the sync never touches, so the two sets have to stay related.
+        """
+        assert set(PANEL_OPTION_KEYS).issubset(_OPTIONS_MANAGED_FIELDS)
+
 
 class TestBuildConfigDict:
     """Tests for _build_config_dict() helper."""
@@ -1071,6 +1086,69 @@ class TestValidateAndStoreImage:
 
 class TestAsyncUpdateOptions:
     """Tests for async_update_options()."""
+
+    def test_options_none_is_not_authoritative(self):
+        """`options=None` at entry creation must not blow up the guard.
+
+        `_create_entry_for_installation` passes `options=None` when the
+        installation has no sub-panels. HA coerces that to an empty mapping
+        (`MappingProxyType(options or {})`), so `entry.options` is never
+        None — but the guard went from a None-tolerant `not entry.options`
+        to `set(entry.options)`, so pin the coercion we now rely on.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(code="1234"), options=None
+        )
+
+        assert entry.options == {}
+        assert _options_are_authoritative(entry) is False
+        assert _synced_entry_data(entry) is None
+
+    def test_entry_creation_options_do_not_wipe_data(self):
+        """A fresh install's toggles-only options must not gut entry.data.
+
+        See ``_options_are_authoritative`` for why that dict isn't
+        authoritative despite being non-empty.
+        """
+        data = make_config_entry_data(code="1234")
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={
+                CONF_ENABLE_PERIMETER_PANEL: True,
+                CONF_ENABLE_INTERIOR_PANEL: False,
+            },
+        )
+
+        synced = _synced_entry_data(entry)
+
+        assert synced is None, (
+            "entry.data must be left alone until the options flow has run; "
+            f"would have dropped {sorted(set(data) - set(synced))}"
+        )
+
+    async def test_entry_creation_options_still_yield_a_working_pin(self, hass):
+        """The end-to-end consequence: the PIN gate survives the sync.
+
+        Also pins the second half of the win — no entry rewrite means no
+        spurious full reload on the first login after a fresh install.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=make_config_entry_data(code="1234"),
+            options={CONF_ENABLE_PERIMETER_PANEL: True},
+        )
+        entry.add_to_hass(hass)
+
+        with patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload:
+            await async_update_options(hass, entry)
+
+        mock_reload.assert_not_awaited()
+        config, _ = _build_config_dict(entry)
+        assert verify_pin("1234", config[CONF_CODE_HASH])
+        assert config[CONF_MAP_HOME]
 
     async def test_reload_when_options_differ(self, hass):
         """Should reload when options differ from data."""

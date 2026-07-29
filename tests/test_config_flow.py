@@ -41,6 +41,7 @@ from custom_components.securitas.const import (
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_REFRESH_TOKEN,
+    PANEL_OPTION_KEYS,
 )
 from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
@@ -947,6 +948,24 @@ async def test_options_flow_never_persists_the_raw_pin(hass):
     assert verify_pin(_RAW_PIN_PROBE, data[CONF_CODE_HASH])
 
 
+async def test_options_flow_save_is_always_authoritative(hass):
+    """An options-flow save must carry something beyond the panel toggles.
+
+    The other half of `_options_are_authoritative`: it reads a toggles-only
+    options dict as "the options flow hasn't run", so if a save ever produced
+    one the sync would stop running forever and nothing else would notice.
+
+    Over-determined today — the mapping fields are forced present by
+    `_normalize_mapping_input`, and the Advanced section is always shown — so
+    this can't regress from any single field becoming conditional. Pinned
+    anyway because the guard's soundness depends on it, and "several things
+    would all have to change" is not the same as "it is checked".
+    """
+    data, _ = await _save_pin(hass, "1234", "1234")
+
+    assert not set(data).issubset(PANEL_OPTION_KEYS)
+
+
 async def test_options_init_form_includes_activity_polling_toggle(hass):
     """The init form exposes the activity-log background-polling toggle."""
     entry = MockConfigEntry(
@@ -1437,6 +1456,11 @@ async def test_initial_flow_persists_panel_toggles_to_entry_options(hass):
     # doesn't expect to find them.
     assert CONF_ENABLE_PERIMETER_PANEL not in result["data"]
     assert CONF_ENABLE_INTERIOR_PANEL not in result["data"]
+    # Nothing BUT the toggles may be seeded into options at creation.
+    # `_options_are_authoritative` reads a toggles-only options dict as "the
+    # options flow hasn't run yet"; seeding anything else here would make it
+    # report the opposite and let the sync gut entry.data (see #537).
+    assert set(result["options"]).issubset(PANEL_OPTION_KEYS)
 
 
 # ===================================================================
