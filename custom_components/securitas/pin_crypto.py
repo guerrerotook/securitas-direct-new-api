@@ -41,16 +41,24 @@ def verify_pin(pin: str | None, encoded: str) -> bool:
     Callers are expected to already know a PIN is configured (i.e. only call
     this when ``encoded`` is non-empty) — this function does not special-case
     "no PIN configured"; see ``_check_code`` call sites.
+
+    Any unusable *encoded* value is rejected rather than raised on: a config
+    entry that has been truncated or hand-edited should read as "wrong PIN"
+    on the disarm path, not as an unhandled exception. Both the shape check
+    and the field parsing are inside the guard — a string can split into
+    four parts and still carry a non-hex salt or a non-numeric iteration
+    count.
     """
     if pin is None:
         return False
     try:
         algorithm, iterations_str, salt_hex, hash_hex = encoded.split("$")
+        if algorithm != _ALGORITHM:
+            return False
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", pin.encode(), bytes.fromhex(salt_hex), int(iterations_str)
+        )
+        expected = bytes.fromhex(hash_hex)
     except ValueError:
         return False
-    if algorithm != _ALGORITHM:
-        return False
-    derived = hashlib.pbkdf2_hmac(
-        "sha256", pin.encode(), bytes.fromhex(salt_hex), int(iterations_str)
-    )
-    return hmac.compare_digest(derived, bytes.fromhex(hash_hex))
+    return hmac.compare_digest(derived, expected)

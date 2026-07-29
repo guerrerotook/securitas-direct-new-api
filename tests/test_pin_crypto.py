@@ -1,5 +1,7 @@
 """Tests for pin_crypto — PIN hashing and verification."""
 
+import pytest
+
 from custom_components.securitas.pin_crypto import hash_pin, verify_pin
 
 
@@ -28,14 +30,40 @@ def test_hash_is_salted_differently_each_time():
 
 
 def test_hash_is_not_recoverable_plaintext():
-    """The encoded hash must never contain the raw PIN as a substring."""
-    assert "1234" not in hash_pin("1234")
+    """The encoded hash must never contain the raw PIN as a substring.
+
+    The probe PIN is deliberately non-hex. A digit-only PIN like "1234" can
+    turn up by chance inside the salt/digest hex — measured at ~1 run in 750,
+    which is a flaky test rather than a real finding.
+    """
+    assert "syzygy" not in hash_pin("syzygy")
 
 
 def test_verify_handles_malformed_encoded_gracefully():
     """A corrupt/foreign string should be rejected, not raise."""
     assert verify_pin("1234", "not-a-valid-hash") is False
     assert verify_pin("1234", "") is False
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        "pbkdf2_sha256$600000$zz$aa",  # salt isn't hex
+        "pbkdf2_sha256$600000$ab$zz",  # digest isn't hex
+        "pbkdf2_sha256$600000$abc$abcd",  # odd-length hex
+        "pbkdf2_sha256$notanint$ab$cd",  # iteration count isn't a number
+    ],
+    ids=["bad-salt", "bad-digest", "odd-length-hex", "bad-iterations"],
+)
+def test_verify_rejects_corrupt_fields_without_raising(encoded):
+    """Damage *inside* a well-formed shape must be rejected, not raise.
+
+    These split into four parts and carry the right algorithm tag, so they
+    get past the shape check and reach the hex/int parsing. A hand-edited or
+    truncated core.config_entries must not turn every disarm into an
+    unhandled ValueError instead of a clean "wrong PIN".
+    """
+    assert verify_pin("1234", encoded) is False
 
 
 def test_verify_rejects_unknown_algorithm_tag():
