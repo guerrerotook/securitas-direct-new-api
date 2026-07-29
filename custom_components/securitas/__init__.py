@@ -133,6 +133,12 @@ from .verisure_owa_api import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Inert: this integration is config-entry only and ``async_setup`` ignores the
+# YAML config entirely. The schema exists so a legacy ``securitas:`` block from
+# the YAML era doesn't fail config validation at startup — hence ALLOW_EXTRA on
+# the domain schema, which lets keys we no longer declare pass through ignored.
+# Notably there is no PIN field: the PIN is only ever set through the config
+# flow, and is stored hashed (see pin_crypto), so YAML must not invite one.
 CONFIG_SCHEMA = vol.Schema(
     {
         DOMAIN: vol.Schema(
@@ -140,12 +146,12 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Optional(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
-                vol.Optional(CONF_CODE, default=DEFAULT_CODE): str,
                 vol.Optional(
                     CONF_CODE_ARM_REQUIRED, default=DEFAULT_CODE_ARM_REQUIRED
                 ): bool,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
-            }
+            },
+            extra=vol.ALLOW_EXTRA,
         )
     },
     extra=vol.ALLOW_EXTRA,
@@ -273,15 +279,22 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
 def _hash_legacy_plaintext_code(mapping: dict[str, Any]) -> None:
     """Replace a legacy plain-text CONF_CODE in *mapping* with its hash.
 
-    Mutates *mapping* in place: drops the raw PIN and, if it was non-empty,
-    writes CONF_CODE_HASH + CONF_CODE_IS_NUMERIC (captured before the value
-    is discarded — isdigit()-ness can't be recovered from the hash later).
-    A missing or empty CONF_CODE (no PIN configured) leaves both keys unset.
+    Mutates *mapping* in place: drops the raw PIN and writes CONF_CODE_HASH +
+    CONF_CODE_IS_NUMERIC (isdigit()-ness is captured before the value is
+    discarded — it can't be recovered from the hash later).
+
+    Presence is preserved, not just the value: an *empty* CONF_CODE means the
+    user removed the PIN, and in entry.options that emptiness has to keep
+    shadowing a stale entry.data PIN (``_opt`` reads options first, then
+    data). So an empty PIN writes CONF_CODE_HASH=None rather than leaving the
+    key unset, which would stop shadowing and resurrect the old PIN. A
+    mapping with no CONF_CODE at all is left untouched.
     """
-    plain_code = mapping.pop(CONF_CODE, None)
-    if plain_code:
-        mapping[CONF_CODE_HASH] = hash_pin(plain_code)
-        mapping[CONF_CODE_IS_NUMERIC] = plain_code.isdigit()
+    if CONF_CODE not in mapping:
+        return
+    plain_code = mapping.pop(CONF_CODE)
+    mapping[CONF_CODE_HASH] = hash_pin(plain_code) if plain_code else None
+    mapping[CONF_CODE_IS_NUMERIC] = bool(plain_code) and plain_code.isdigit()
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

@@ -786,17 +786,23 @@ async def test_options_init_reads_from_options_first(hass):
 # ===================================================================
 
 
-def _find_code_marker(data_schema):
-    """Walk a (possibly sectioned) schema and return the "code" field marker."""
+def _find_code_field(data_schema):
+    """Walk a (possibly sectioned) schema, returning the "code" (marker, value)."""
     for marker, value in data_schema.schema.items():
         name = getattr(marker, "schema", marker)
         if isinstance(value, section):
-            found = _find_code_marker(value.schema)
+            found = _find_code_field(value.schema)
             if found is not None:
                 return found
         elif name == CONF_CODE:
-            return marker
+            return marker, value
     return None
+
+
+def _find_code_marker(data_schema):
+    """Walk a (possibly sectioned) schema and return the "code" field marker."""
+    found = _find_code_field(data_schema)
+    return found[0] if found else None
 
 
 async def test_options_init_pin_field_shows_mask_when_code_configured(hass):
@@ -814,6 +820,33 @@ async def test_options_init_pin_field_shows_mask_when_code_configured(hass):
 
     marker = _find_code_marker(result["data_schema"])
     assert marker.description["suggested_value"] == _CODE_UNCHANGED_SENTINEL
+
+
+async def test_options_init_pin_field_is_masked_input(hass):
+    """The PIN field must be a password input so a typed PIN isn't shoulder-read."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(code="1234"),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    _marker, validator = _find_code_field(result["data_schema"])
+    assert validator.config["type"] == "password"
+
+
+async def test_config_flow_pin_field_is_masked_input(hass):
+    """The config flow's PIN field must be a password input too."""
+    with _patches(_hub_factory()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["step_id"] == "options"
+    _marker, validator = _find_code_field(result["data_schema"])
+    assert validator.config["type"] == "password"
 
 
 async def test_options_init_pin_field_blank_when_no_code(hass):
@@ -909,6 +942,51 @@ async def test_options_submit_new_value_replaces_pin(hass):
     assert verify_pin("9999", result["data"][CONF_CODE_HASH])
     assert not verify_pin("1234", result["data"][CONF_CODE_HASH])
     assert result["data"][CONF_CODE_IS_NUMERIC] is True
+
+
+# A PIN with no hex characters, so a chance collision with the salt/digest
+# hex can't make the "raw PIN is absent" assertions below pass or fail
+# spuriously.
+_RAW_PIN_PROBE = "syzygy-pin"
+
+
+async def test_config_flow_never_persists_the_raw_pin(hass):
+    """The raw PIN must not survive anywhere in the created entry."""
+    options = {**USER_INPUT_OPTIONS, "pin": {CONF_CODE: _RAW_PIN_PROBE}}
+
+    result = await _complete_full_flow(hass, _hub_factory(), options=options)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_CODE not in result["data"]
+    assert _RAW_PIN_PROBE not in str(result["data"])
+    assert verify_pin(_RAW_PIN_PROBE, result["data"][CONF_CODE_HASH])
+
+
+async def test_options_flow_never_persists_the_raw_pin(hass):
+    """A PIN typed into the options flow is hashed, never stored verbatim."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(code=""),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    flow_id = await _advance_to_mappings(
+        hass, entry, pin_overrides={CONF_CODE: _RAW_PIN_PROBE}
+    )
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: VerisureOwaState.TOTAL.value,
+            CONF_MAP_AWAY: VerisureOwaState.TOTAL.value,
+            CONF_MAP_NIGHT: VerisureOwaState.PARTIAL_NIGHT.value,
+        },
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_CODE not in result["data"]
+    assert _RAW_PIN_PROBE not in str(result["data"])
+    assert verify_pin(_RAW_PIN_PROBE, result["data"][CONF_CODE_HASH])
 
 
 async def test_options_init_form_includes_activity_polling_toggle(hass):

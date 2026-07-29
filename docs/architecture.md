@@ -24,7 +24,7 @@ The integration has three layers:
 │  api_queue.py  (Priority-based rate limiting)                        │
 │  log_filter.py  (SensitiveDataFilter + TransientCoordinatorErrorFilter)│
 │  pin_crypto.py  (hash_pin/verify_pin — PIN stored hashed, never plain)│
-│  migrate.py  (v3→v4 + securitas→verisure_owa rebrand migration)      │
+│  migrate.py  (v3→v5 + securitas→verisure_owa rebrand migration)      │
 ├──────────────────────────────────────────────────────────────────────┤
 │  API Client Layer                                                    │
 │  verisure_owa_api/                                                   │
@@ -307,7 +307,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 **Critical rule:** Platform `async_setup_entry` functions must **never** make API calls. All API-based discovery is deferred to a background task that runs after setup completes. This avoids blocking HA startup.
 
-**Config-entry migration (`async_migrate_entry`):** runs before `async_setup_entry` whenever `entry.version` is below the current `VERSION` (5). Pre-v3 entries are rejected with a user notification. v3 → v4 strips the obsolete `CONF_TOKEN` dead-write key and bumps the version. `CONF_PASSWORD` is intentionally preserved so the next successful login can still happen on legacy entries; it is scrubbed lazily by `VerisureHub._persist_refresh_token` on first capture. v4 → v5 hashes any plain-text `CONF_CODE` still present in `entry.data`/`entry.options` (via `pin_crypto.hash_pin`) into `CONF_CODE_HASH` + `CONF_CODE_IS_NUMERIC`, then drops the plain-text key — see "PIN code validation" below.
+**Config-entry migration (`async_migrate_entry`):** runs before `async_setup_entry` whenever `entry.version` is below the current `VERSION` (5). Pre-v3 entries are rejected with a user notification. v3 → v4 strips the obsolete `CONF_TOKEN` dead-write key and bumps the version. `CONF_PASSWORD` is intentionally preserved so the next successful login can still happen on legacy entries; it is scrubbed lazily by `VerisureHub._persist_refresh_token` on first capture. v4 → v5 hashes any plain-text `CONF_CODE` still present in `entry.data`/`entry.options` (via `pin_crypto.hash_pin`) into `CONF_CODE_HASH` + `CONF_CODE_IS_NUMERIC`, then drops the plain-text key — see "PIN code validation" below. It rewrites the key wherever it was *present*, not just where it was non-empty: an empty `options["code"]` means "the user removed the PIN" and has to keep shadowing a stale `data["code"]` (`_opt` reads options first), so it becomes `CONF_CODE_HASH: None` rather than an absent key, which would stop shadowing and resurrect the old PIN.
 
 ```
 1. Read config entry data into OrderedDict (CONF_PASSWORD optional, CONF_REFRESH_TOKEN preferred)
@@ -484,7 +484,8 @@ The `_get_exceptions()` API call uses the same polling pattern as arm/disarm —
 - `_check_code(code)` — Always checked for disarm. Verifies `code` against `CONF_CODE_HASH` via `pin_crypto.verify_pin`; raises `ServiceValidationError` on mismatch. No PIN configured = any code accepted.
 - `_check_code_for_arm_if_required(code)` — Only checked for arm operations if `code_arm_required` is True AND a PIN is configured.
 - `code_format` — `None` if no PIN configured, `NUMBER` if `CONF_CODE_IS_NUMERIC` is True, `TEXT` otherwise.
-- Options-flow UX: the PIN field can't be pre-filled with the real value, so `config_flow._build_settings_schema` shows a fixed mask sentinel (`●●●●●●●●`) when a PIN is already configured. Resubmitting it unchanged keeps the existing hash; clearing the field removes the PIN; typing anything else hashes it as the new PIN (see `_resolve_code_submission`).
+- `lock.py._check_code(code)` — the same PIN, same hash, gating lock/unlock/open when `CONF_LOCK_CODE_REQUIRED` is on. Publishing `code_format` is what turns the gate on, so it reads `CONF_CODE_HASH`/`CONF_CODE_IS_NUMERIC` too. Anything reading the PIN must go through `verify_pin` — there is no plain-text copy left to compare against.
+- Options-flow UX: the PIN field can't be pre-filled with the real value, so `config_flow._build_settings_schema` shows a fixed mask sentinel (`●●●●●●●●`) when a PIN is already configured. Resubmitting it unchanged keeps the existing hash; clearing the field removes the PIN; typing anything else hashes it as the new PIN (see `_resolve_code_submission`). The field is a password selector, so a newly typed PIN isn't left on screen in the clear.
 
 ### Event-driven force-arm architecture
 

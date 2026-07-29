@@ -32,6 +32,7 @@ from custom_components.securitas import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
+    CONFIG_SCHEMA,
     DOMAIN,
     PLATFORMS,
     VerisureDevice,
@@ -1878,6 +1879,66 @@ class TestCodeHashMigration:
         assert result is True
         assert entry.version == 5
         assert CONF_CODE_HASH not in entry.data
+
+    async def test_pin_cleared_in_options_is_not_resurrected(self, hass):
+        """An empty CONF_CODE in options must keep shadowing the one in data.
+
+        ``_opt()`` reads options first, then data — so a *present but empty*
+        ``options["code"]`` means "the user removed the PIN" and shadows a
+        stale ``data["code"]``. Hashing only non-empty values would leave
+        CONF_CODE_HASH absent from options, which stops shadowing and brings
+        the old PIN back to life.
+        """
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1234"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": ""},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.options[CONF_CODE_HASH] is None
+        config, _ = _build_config_dict(entry)
+        assert config[CONF_CODE_HASH] is None
+
+
+class TestYamlConfigSchema:
+    """The YAML schema is inert — ``async_setup`` ignores its config entirely.
+
+    Kept only so a legacy ``securitas:`` block doesn't fail config validation
+    at startup, which is why it must tolerate keys it no longer declares.
+    """
+
+    def test_legacy_plaintext_code_key_still_validates(self):
+        """A leftover YAML ``code:`` must not break startup after the key was
+        dropped from the schema — it's ignored, not rejected."""
+        config = {
+            DOMAIN: {
+                CONF_USERNAME: "user@example.com",
+                CONF_PASSWORD: "secret",
+                "code": "1234",
+            }
+        }
+
+        assert CONFIG_SCHEMA(config) is not None
+
+    def test_schema_no_longer_declares_a_pin_field(self):
+        """The PIN is never read from YAML, and must never be invited there."""
+        keys = {
+            getattr(marker, "schema", marker)
+            for marker in CONFIG_SCHEMA.schema[DOMAIN].schema
+        }
+        assert "code" not in keys
 
 
 class TestPerDomainQueueSharing:

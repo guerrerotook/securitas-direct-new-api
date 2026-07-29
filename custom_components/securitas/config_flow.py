@@ -347,7 +347,8 @@ def _build_settings_schema(
     stored). When ``defaults`` carries a CONF_CODE_HASH, the field shows
     ``_CODE_UNCHANGED_SENTINEL`` instead — see ``_resolve_code_submission``
     for how the three possible submissions (sentinel / blank / new value)
-    are interpreted.
+    are interpreted. It renders as a password input so a newly typed PIN
+    isn't left on screen in the clear.
     """
     has_existing_code = bool(defaults.get(CONF_CODE_HASH))
     code_val = _CODE_UNCHANGED_SENTINEL if has_existing_code else DEFAULT_CODE
@@ -360,7 +361,7 @@ def _build_settings_schema(
     pin_section = section(
         vol.Schema(
             {
-                code_field: str,
+                code_field: selector({"text": {"type": "password"}}),
                 vol.Optional(
                     CONF_CODE_ARM_REQUIRED,
                     default=defaults.get(
