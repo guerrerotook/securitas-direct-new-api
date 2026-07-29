@@ -33,12 +33,16 @@ from custom_components.securitas import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+from custom_components.securitas.config_flow import SECTION_PIN
 from custom_components.securitas.const import (
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_ENABLE_ANNEX_PANEL,
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_REFRESH_TOKEN,
 )
+from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
     PERI_DEFAULTS,
     STD_DEFAULTS,
@@ -239,15 +243,19 @@ async def _get_to_otp_step(hass, mock_hub):
     return flow_id
 
 
-async def _show_mappings(hass, entry):
-    """Advance the options flow to the mappings step and return the form result."""
+async def _show_mappings(hass, entry, pin=""):
+    """Advance the options flow to the mappings step and return the form result.
+
+    ``pin`` defaults to blank so the ~20 tests that don't care about the PIN
+    don't each pay for a real PBKDF2 derivation (~42ms) they never assert on.
+    """
     result = await hass.config_entries.options.async_init(entry.entry_id)
     flow_id = result["flow_id"]
 
     user_input = _fill_optional_sections(
         result,
         {
-            "pin": {CONF_CODE: "1234", CONF_CODE_ARM_REQUIRED: False},
+            "pin": {CONF_CODE: pin, CONF_CODE_ARM_REQUIRED: False},
             "notifications": {},
             CONF_ADVANCED: {
                 CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -262,9 +270,9 @@ async def _show_mappings(hass, entry):
     return result
 
 
-async def _advance_to_mappings(hass, entry):
+async def _advance_to_mappings(hass, entry, pin=""):
     """Helper to get to the mappings step of options flow."""
-    result = await _show_mappings(hass, entry)
+    result = await _show_mappings(hass, entry, pin=pin)
     assert result["step_id"] == "mappings"
     return result["flow_id"]
 
@@ -773,6 +781,172 @@ async def test_options_init_reads_from_options_first(hass):
     assert result["step_id"] == "init"
 
 
+# ===================================================================
+# TestPinMaskedField — the PIN field shows a mask sentinel (never the real
+# value, only its hash is stored) when a PIN already exists, and interprets
+# the three possible resubmissions: unchanged / cleared / replaced.
+# ===================================================================
+
+
+def _find_code_field(data_schema):
+    """Return the ("code", validator) pair from the PIN section of *data_schema*.
+
+    ``_section_inner_marker`` covers the marker; this adds the validator,
+    which the password-input tests need.
+    """
+    for marker, value in data_schema.schema.items():
+        if getattr(marker, "schema", marker) != SECTION_PIN:
+            continue
+        for inner, validator in value.schema.schema.items():
+            if getattr(inner, "schema", inner) == CONF_CODE:
+                return inner, validator
+    return None
+
+
+async def _save_pin(hass, existing_code, submitted):
+    """Run the options flow end to end, submitting *submitted* in the PIN field.
+
+    Returns the created entry data. ``existing_code`` seeds the entry so the
+    sentinel has (or hasn't) a real hash to carry forward.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(code=existing_code),
+        options={},
+    )
+    entry.add_to_hass(hass)
+    original_hash = entry.data[CONF_CODE_HASH]
+
+    flow_id = await _advance_to_mappings(hass, entry, pin=submitted)
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        user_input={
+            CONF_MAP_HOME: VerisureOwaState.TOTAL.value,
+            CONF_MAP_AWAY: VerisureOwaState.TOTAL.value,
+            CONF_MAP_NIGHT: VerisureOwaState.PARTIAL_NIGHT.value,
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    return result["data"], original_hash
+
+
+async def test_options_init_pin_field_shows_mask_when_code_configured(hass):
+    """The PIN field must show the mask sentinel, never the real PIN."""
+    from custom_components.securitas.config_flow import _CODE_UNCHANGED_SENTINEL
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(code="1234"),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    marker = _section_inner_marker(result["data_schema"], SECTION_PIN, CONF_CODE)
+    assert marker.description["suggested_value"] == _CODE_UNCHANGED_SENTINEL
+
+
+async def test_options_init_pin_field_is_masked_input(hass):
+    """The PIN field must be a password input so a typed PIN isn't shoulder-read."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(code="1234"),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    _marker, validator = _find_code_field(result["data_schema"])
+    assert validator.config["type"] == "password"
+    # Without this a password manager can autofill over the mask sentinel,
+    # silently replacing the PIN with an unrelated saved password that can
+    # no longer be read back to notice.
+    assert validator.config["autocomplete"] == "new-password"
+
+
+async def test_config_flow_pin_field_is_masked_input(hass):
+    """The config flow's PIN field must be a password input too."""
+    with _patches(_hub_factory()):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["step_id"] == "options"
+    _marker, validator = _find_code_field(result["data_schema"])
+    assert validator.config["type"] == "password"
+
+
+async def test_options_init_pin_field_blank_when_no_code(hass):
+    """The PIN field must be blank (not the mask) when no PIN is configured."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(code=""),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    marker = _section_inner_marker(result["data_schema"], SECTION_PIN, CONF_CODE)
+    assert marker.description["suggested_value"] == ""
+
+
+async def test_options_submit_sentinel_keeps_existing_pin(hass):
+    """Resubmitting the mask sentinel unchanged must keep the existing PIN."""
+    from custom_components.securitas.config_flow import _CODE_UNCHANGED_SENTINEL
+
+    data, original_hash = await _save_pin(hass, "1234", _CODE_UNCHANGED_SENTINEL)
+
+    assert data[CONF_CODE_HASH] == original_hash
+    assert verify_pin("1234", data[CONF_CODE_HASH])
+
+
+async def test_options_submit_blank_clears_pin(hass):
+    """Submitting a blank PIN field must clear the existing PIN."""
+    data, _ = await _save_pin(hass, "1234", "")
+
+    assert data[CONF_CODE_HASH] is None
+    assert data[CONF_CODE_IS_NUMERIC] is False
+
+
+async def test_options_submit_new_value_replaces_pin(hass):
+    """Submitting a new PIN value must replace the existing hash."""
+    data, _ = await _save_pin(hass, "1234", "9999")
+
+    assert verify_pin("9999", data[CONF_CODE_HASH])
+    assert not verify_pin("1234", data[CONF_CODE_HASH])
+    assert data[CONF_CODE_IS_NUMERIC] is True
+
+
+# A PIN with no hex characters, so a chance collision with the salt/digest
+# hex can't make the "raw PIN is absent" assertions below pass or fail
+# spuriously.
+_RAW_PIN_PROBE = "syzygy-pin"
+
+
+async def test_config_flow_never_persists_the_raw_pin(hass):
+    """The raw PIN must not survive anywhere in the created entry."""
+    options = {**USER_INPUT_OPTIONS, "pin": {CONF_CODE: _RAW_PIN_PROBE}}
+
+    result = await _complete_full_flow(hass, _hub_factory(), options=options)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert CONF_CODE not in result["data"]
+    assert _RAW_PIN_PROBE not in str(result["data"])
+    assert verify_pin(_RAW_PIN_PROBE, result["data"][CONF_CODE_HASH])
+
+
+async def test_options_flow_never_persists_the_raw_pin(hass):
+    """A PIN typed into the options flow is hashed, never stored verbatim."""
+    data, _ = await _save_pin(hass, "", _RAW_PIN_PROBE)
+
+    assert CONF_CODE not in data
+    assert _RAW_PIN_PROBE not in str(data)
+    assert verify_pin(_RAW_PIN_PROBE, data[CONF_CODE_HASH])
+
+
 async def test_options_init_form_includes_activity_polling_toggle(hass):
     """The init form exposes the activity-log background-polling toggle."""
     entry = MockConfigEntry(
@@ -1114,7 +1288,7 @@ async def test_options_mappings_entry_contains_general_and_mapping_data(hass):
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     # General data should be present
-    assert CONF_CODE in result["data"]
+    assert CONF_CODE_HASH in result["data"]
     assert CONF_SCAN_INTERVAL in result["data"]
     # Mapping data should be present
     assert result["data"][CONF_MAP_HOME] == VerisureOwaState.TOTAL.value

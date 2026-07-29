@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_CODE, CONF_CODE
+from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -22,11 +22,14 @@ from .const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_LOCK_AUTOMATIONS,
     CONF_LOCK_CODE_REQUIRED,
 )
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity
+from .pin_crypto import verify_pin
 from .verisure_owa_api import (
     Installation,
     SmartLock,
@@ -205,13 +208,15 @@ class VerisureLock(  # type: ignore[override]
             ),
         )
 
-        # Reuse the alarm's local PIN (CONF_CODE) to gate lock/unlock/open —
-        # opt-in via CONF_LOCK_CODE_REQUIRED, no effect when no PIN is set.
-        # Publishing a code_format is what makes HA demand (and prompt for) a
-        # code, so it doubles as the "gate is on" flag.
-        self._code: str | None = client.config.get(CONF_CODE)
-        if self._code and client.config.get(CONF_LOCK_CODE_REQUIRED, False):
-            self._attr_code_format = r"^\d+$" if self._code.isdigit() else r".+"
+        # Reuse the alarm's local PIN to gate lock/unlock/open — opt-in via
+        # CONF_LOCK_CODE_REQUIRED, no effect when no PIN is set. Publishing a
+        # code_format is what makes HA demand (and prompt for) a code, so it
+        # doubles as the "gate is on" flag. Only the PIN's hash is stored, so
+        # digit-ness comes from CONF_CODE_IS_NUMERIC (see pin_crypto).
+        self._code_hash: str | None = client.config.get(CONF_CODE_HASH)
+        if self._code_hash and client.config.get(CONF_LOCK_CODE_REQUIRED, False):
+            is_numeric = client.config.get(CONF_CODE_IS_NUMERIC, False)
+            self._attr_code_format = r"^\d+$" if is_numeric else r".+"
 
         self._operation_in_progress: bool = False
         self._config_retry_unsubs: list[Callable[[], None]] = []
@@ -490,7 +495,7 @@ class VerisureLock(  # type: ignore[override]
         rejected a missing or malformed one against ``code_format`` before
         ``async_lock`` is reached.
         """
-        if self.code_format and code != self._code:
+        if self.code_format and not verify_pin(code, self._code_hash):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="invalid_pin_code",

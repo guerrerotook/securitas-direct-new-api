@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.const import (
-    CONF_CODE,
     CONF_DEVICE_ID,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
@@ -19,6 +18,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.securitas import (
     _OPTIONS_MANAGED_FIELDS,
     CONF_CODE_ARM_REQUIRED,
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
     CONF_COUNTRY,
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
@@ -31,6 +32,7 @@ from custom_components.securitas import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
+    CONFIG_SCHEMA,
     DOMAIN,
     PLATFORMS,
     VerisureDevice,
@@ -46,6 +48,7 @@ from custom_components.securitas.hub import (
     _async_notify,
     _notify,
 )
+from custom_components.securitas.pin_crypto import hash_pin, verify_pin
 from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
@@ -287,7 +290,7 @@ class TestVerisureHub:
                 CONF_DEVICE_INDIGITALL: "test-indigitall",
                 CONF_DELAY_CHECK_OPERATION: 2,
                 CONF_SCAN_INTERVAL: 120,
-                CONF_CODE: "",
+                CONF_CODE_HASH: None,
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
@@ -940,9 +943,16 @@ class TestBuildConfigDict:
     def test_options_override_data(self):
         """Options should override data values."""
         data = make_config_entry_data(code="1111")
-        entry = MockConfigEntry(domain=DOMAIN, data=data, options={CONF_CODE: "9999"})
+        options_hash = hash_pin("9999")
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={CONF_CODE_HASH: options_hash, CONF_CODE_IS_NUMERIC: True},
+        )
         config, _ = _build_config_dict(entry)
-        assert config[CONF_CODE] == "9999"
+        assert config[CONF_CODE_HASH] == options_hash
+        assert verify_pin("9999", config[CONF_CODE_HASH])
+        assert not verify_pin("1111", config[CONF_CODE_HASH])
 
     def test_lock_code_required_from_options(self):
         """The lock PIN toggle set in options reaches the client config."""
@@ -996,7 +1006,7 @@ class TestValidateAndStoreImage:
                 CONF_DEVICE_INDIGITALL: "test-indigitall",
                 CONF_DELAY_CHECK_OPERATION: 2,
                 CONF_SCAN_INTERVAL: 120,
-                CONF_CODE: "",
+                CONF_CODE_HASH: None,
                 CONF_CODE_ARM_REQUIRED: False,
             }
         )
@@ -1086,7 +1096,8 @@ class TestAsyncUpdateOptions:
             domain=DOMAIN,
             data=data,
             options={
-                CONF_CODE: data[CONF_CODE],
+                CONF_CODE_HASH: data[CONF_CODE_HASH],
+                CONF_CODE_IS_NUMERIC: data[CONF_CODE_IS_NUMERIC],
                 CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
                 CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
                 CONF_MAP_HOME: data[CONF_MAP_HOME],
@@ -1150,7 +1161,7 @@ class TestAsyncUpdateOptions:
         entry = MockConfigEntry(
             domain=DOMAIN,
             data=make_config_entry_data(code=""),
-            options={CONF_CODE: "1234"},
+            options={CONF_CODE_HASH: hash_pin("1234"), CONF_CODE_IS_NUMERIC: True},
         )
         entry.add_to_hass(hass)
 
@@ -1176,7 +1187,8 @@ class TestAsyncUpdateOptions:
         # spuriously cause a reload — isolating CONF_LOCK_AUTOMATIONS as the
         # only differing setting.
         options = {
-            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_HASH: data[CONF_CODE_HASH],
+            CONF_CODE_IS_NUMERIC: data[CONF_CODE_IS_NUMERIC],
             CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
             CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
             CONF_MAP_HOME: data[CONF_MAP_HOME],
@@ -1214,7 +1226,8 @@ class TestAsyncUpdateOptions:
         )
         # User just saved new options that omit CONF_MAP_VACATION (cleared).
         options = {
-            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_HASH: data[CONF_CODE_HASH],
+            CONF_CODE_IS_NUMERIC: data[CONF_CODE_IS_NUMERIC],
             CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
             CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
             CONF_MAP_HOME: data[CONF_MAP_HOME],
@@ -1248,7 +1261,8 @@ class TestAsyncUpdateOptions:
             map_vacation="partial_night_peri",
         )
         options = {
-            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_HASH: data[CONF_CODE_HASH],
+            CONF_CODE_IS_NUMERIC: data[CONF_CODE_IS_NUMERIC],
             CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
             CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
             CONF_MAP_HOME: data[CONF_MAP_HOME],
@@ -1287,7 +1301,8 @@ class TestAsyncUpdateOptions:
         data = make_config_entry_data()
         data[toggle_key] = False
         options = {
-            CONF_CODE: data[CONF_CODE],
+            CONF_CODE_HASH: data[CONF_CODE_HASH],
+            CONF_CODE_IS_NUMERIC: data[CONF_CODE_IS_NUMERIC],
             CONF_CODE_ARM_REQUIRED: data[CONF_CODE_ARM_REQUIRED],
             CONF_SCAN_INTERVAL: data[CONF_SCAN_INTERVAL],
             CONF_MAP_HOME: data[CONF_MAP_HOME],
@@ -1741,13 +1756,16 @@ class TestAsyncMigrateEntry:
         assert result is False
         assert entry.version == 2
 
-    async def test_migration_v3_migrated_to_v4_strips_legacy_token(self, hass):
-        """v3 → v4 bumps the version and removes the obsolete CONF_TOKEN key.
+    async def test_migration_v3_migrated_to_v5_strips_legacy_token(self, hass):
+        """v3 chains through v4 (drops CONF_TOKEN) straight to v5 in one call.
 
         CONF_PASSWORD is left in place: the next successful login will capture
         a refresh token and the persist-callback strips the password then.
         Doing it here would force a network login from inside async_migrate_entry,
-        which is fragile (offline boots, account-blocked, etc.).
+        which is fragile (offline boots, account-blocked, etc.). The fixture's
+        code is already in hashed form (make_config_entry_data hashes it), so
+        the v4→v5 step is a no-op here — see TestCodeHashMigration for the
+        legacy-plaintext-code cases.
         """
         from homeassistant.const import CONF_TOKEN
 
@@ -1766,15 +1784,40 @@ class TestAsyncMigrateEntry:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        assert entry.version == 4
+        assert entry.version == 5
         assert CONF_TOKEN not in entry.data
         # CONF_PASSWORD intentionally retained — first setup login removes it.
         assert CONF_PASSWORD in entry.data
 
-    async def test_migration_v4_accepted(self, hass):
-        """v4 entry passes through unchanged (current version)."""
+    async def test_migration_v5_accepted(self, hass):
+        """v5 entry passes through unchanged (current version)."""
         data = make_config_entry_data(username="user@example.com")
         data[CONF_INSTALLATION] = "123456"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            unique_id="user@example.com_123456",
+            version=5,
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.version == 5
+
+
+class TestCodeHashMigration:
+    """Tests for the v4→v5 migration step that hashes a legacy plain-text PIN."""
+
+    async def test_plaintext_code_in_data_is_hashed(self, hass):
+        """A plain-text CONF_CODE in entry.data is replaced by its hash."""
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1234"  # legacy plain-text key, pre-migration shape
 
         entry = MockConfigEntry(
             domain=DOMAIN,
@@ -1787,7 +1830,200 @@ class TestAsyncMigrateEntry:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        assert entry.version == 4
+        assert entry.version == 5
+        assert "code" not in entry.data
+        assert verify_pin("1234", entry.data[CONF_CODE_HASH])
+        assert entry.data[CONF_CODE_IS_NUMERIC] is True
+
+    async def test_plaintext_code_in_options_is_hashed(self, hass):
+        """A plain-text CONF_CODE left in entry.options (post options-flow
+        legacy entries) is hashed too, not just entry.data."""
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": "abcd"},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.version == 5
+        assert "code" not in entry.options
+        assert verify_pin("abcd", entry.options[CONF_CODE_HASH])
+        assert entry.options[CONF_CODE_IS_NUMERIC] is False
+
+    async def test_no_code_migrates_cleanly(self, hass):
+        """A v4 entry with no PIN configured migrates to v5 without
+        introducing a spurious hash."""
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.version == 5
+        assert CONF_CODE_HASH not in entry.data
+
+    async def test_same_pin_in_data_and_options_yields_one_hash(self, hass):
+        """A PIN present in both mappings is hashed once, not twice.
+
+        Hashing is salted, so hashing each mapping independently would leave
+        data and options holding different encodings of the same PIN. That
+        makes ``_synced_entry_data`` see a diff where there is none, costing
+        every upgrading user with a PIN a spurious entry reload.
+        """
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1234"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": "1234"},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.data[CONF_CODE_HASH] == entry.options[CONF_CODE_HASH]
+        assert verify_pin("1234", entry.data[CONF_CODE_HASH])
+
+    async def test_different_pins_in_data_and_options_stay_distinct(self, hass):
+        """Sharing a hash must not collapse two genuinely different PINs."""
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1111"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": "2222"},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert verify_pin("1111", entry.data[CONF_CODE_HASH])
+        assert verify_pin("2222", entry.options[CONF_CODE_HASH])
+
+    @pytest.mark.parametrize(
+        "legacy_value",
+        [1234, ["1234"], {"pin": "1234"}, None],
+        ids=["int", "list", "dict", "null"],
+    )
+    async def test_non_string_legacy_code_does_not_abort_migration(
+        self, hass, legacy_value
+    ):
+        """A corrupt CONF_CODE must not take the whole entry down.
+
+        An int reaches hash_pin and dies on .encode(); a list isn't hashable
+        and dies as a memo key. Either raises out of async_migrate_entry, so
+        HA marks the entry failed and the integration doesn't load at all —
+        a far worse outcome than an unusable PIN the user can simply clear.
+        """
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = legacy_value
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        assert await async_migrate_entry(hass, entry) is True
+        assert entry.version == 5
+        assert "code" not in entry.data
+        # Whatever it becomes, the entry stays loadable and the key is present.
+        assert CONF_CODE_HASH in entry.data
+
+    async def test_pin_cleared_in_options_is_not_resurrected(self, hass):
+        """An empty CONF_CODE in options must keep shadowing the one in data.
+
+        ``_opt()`` reads options first, then data — so a *present but empty*
+        ``options["code"]`` means "the user removed the PIN" and shadows a
+        stale ``data["code"]``. Hashing only non-empty values would leave
+        CONF_CODE_HASH absent from options, which stops shadowing and brings
+        the old PIN back to life.
+        """
+        data = make_config_entry_data(username="user@example.com")
+        data[CONF_INSTALLATION] = "123456"
+        del data[CONF_CODE_HASH]
+        del data[CONF_CODE_IS_NUMERIC]
+        data["code"] = "1234"
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=data,
+            options={"code": ""},
+            unique_id="user@example.com_123456",
+            version=4,
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.options[CONF_CODE_HASH] is None
+        config, _ = _build_config_dict(entry)
+        assert config[CONF_CODE_HASH] is None
+
+
+class TestYamlConfigSchema:
+    """The YAML schema is inert — ``async_setup`` ignores its config entirely.
+
+    Kept only so a legacy ``securitas:`` block doesn't fail config validation
+    at startup, which is why it must tolerate keys it no longer declares.
+    """
+
+    def test_legacy_plaintext_code_key_still_validates(self):
+        """A leftover YAML ``code:`` must not break startup after the key was
+        dropped from the schema — it's ignored, not rejected."""
+        config = {
+            DOMAIN: {
+                CONF_USERNAME: "user@example.com",
+                CONF_PASSWORD: "secret",
+                "code": "1234",
+            }
+        }
+
+        assert CONFIG_SCHEMA(config) is not None
+
+    def test_schema_no_longer_declares_a_pin_field(self):
+        """The PIN is never read from YAML, and must never be invited there."""
+        keys = {
+            getattr(marker, "schema", marker)
+            for marker in CONFIG_SCHEMA.schema[DOMAIN].schema
+        }
+        assert "code" not in keys
 
 
 class TestPerDomainQueueSharing:

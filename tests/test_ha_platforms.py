@@ -5,17 +5,23 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from homeassistant.const import CONF_CODE
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.securitas import DOMAIN, _build_config_dict
 from custom_components.securitas.api_queue import ApiQueue
-from custom_components.securitas.const import CONF_LOCK_CODE_REQUIRED
+from custom_components.securitas.const import (
+    CONF_CODE_HASH,
+    CONF_CODE_IS_NUMERIC,
+    CONF_LOCK_CODE_REQUIRED,
+)
 from custom_components.securitas.coordinators import (
     ActivityData,
     LockData,
     SentinelData,
 )
 from custom_components.securitas.lock import VerisureLock
+from custom_components.securitas.pin_crypto import encode_pin
 from custom_components.securitas.sensor import (
     ActivityLogSensor,
     SentinelAirQuality,
@@ -39,6 +45,7 @@ from custom_components.securitas.verisure_owa_api.models import (
     SmartLockMode,
     SmartLockModeStatus,
 )
+from tests.conftest import make_config_entry_data
 
 # ---------------------------------------------------------------------------
 # Helper factories
@@ -107,6 +114,7 @@ def make_lock(
     poll_status: str | None = None,
     code: str | None = None,
     code_required: bool = False,
+    config: dict | None = None,
 ):
     """Create a VerisureLock with mocked dependencies.
 
@@ -115,14 +123,22 @@ def make_lock(
             lockStatus for the device.  If *None*, ``get_lock_modes``
             returns an empty list (so ``_get_lock_state`` returns UNKNOWN
             and the optimistic fallback is used).
-        code: Configured alarm PIN (``CONF_CODE``), or ``None`` for no PIN.
+        code: Raw alarm PIN, or ``None`` for no PIN. Stored hashed
+            (``CONF_CODE_HASH``/``CONF_CODE_IS_NUMERIC``) to match what
+            ``_build_config_dict`` actually puts on ``client.config`` — the
+            raw PIN is never persisted.
         code_required: ``CONF_LOCK_CODE_REQUIRED`` toggle.
+        config: Full ``client.config`` override, bypassing ``code``/
+            ``code_required``. Use to drive the entity from a config dict
+            built by production code.
     """
     installation = make_installation()
+    code_hash, code_is_numeric = encode_pin(code)
     client = MagicMock()
-    client.config = {
+    client.config = config or {
         "scan_interval": 120,
-        CONF_CODE: code,
+        CONF_CODE_HASH: code_hash,
+        CONF_CODE_IS_NUMERIC: code_is_numeric,
         CONF_LOCK_CODE_REQUIRED: code_required,
     }
     client.session = AsyncMock()
@@ -1240,6 +1256,28 @@ class TestVerisureLockPinCode:
     def test_code_format_text_for_alphanumeric_pin(self):
         lock = make_lock(code="ab12", code_required=True)
         assert lock.code_format == r".+"
+
+    def test_code_gate_reads_the_keys_build_config_dict_writes(self):
+        """The gate must engage on a config built by production code.
+
+        ``make_lock`` hand-rolls ``client.config``, so a rename of the PIN
+        config keys can silently disable the gate in production while every
+        other test in this class stays green. Drive the entity from a real
+        ``_build_config_dict`` result so the two can't drift apart.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=make_config_entry_data(code="1234"),
+            options={CONF_LOCK_CODE_REQUIRED: True},
+        )
+        config, _ = _build_config_dict(entry)
+
+        lock = make_lock(config=config)
+
+        assert lock.code_format == r"^\d+$"
+        with pytest.raises(ServiceValidationError):
+            lock._check_code("9999")
+        lock._check_code("1234")  # correct PIN — must not raise
 
     async def test_async_lock_succeeds_with_correct_code(self):
         lock = make_lock(code="1234", code_required=True, poll_status="2")
