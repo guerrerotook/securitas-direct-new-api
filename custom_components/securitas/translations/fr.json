@@ -75,7 +75,8 @@
                         "name": "Code PIN pour désarmer",
                         "data": {
                             "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
-                            "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme"
+                            "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
+                            "lock_code_required": "Exiger également le code PIN (s'il y en a un) pour les opérations sur la serrure"
                         }
                     },
                     "notifications": {
@@ -133,7 +134,8 @@
                         "name": "Code PIN pour désarmer",
                         "data": {
                             "code": "Code PIN (laisser vide pour ne pas utiliser de PIN)",
-                            "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme"
+                            "code_arm_required": "Exiger également le code PIN (s'il y en a un) pour armer l'alarme",
+                            "lock_code_required": "Exiger également le code PIN (s'il y en a un) pour les opérations sur la serrure"
                         }
                     },
                     "notifications": {

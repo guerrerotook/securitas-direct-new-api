@@ -73,6 +73,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | ------- | ------ | ------- | ----------- |
 | **PIN code for disarming** | PIN code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Numeric or alphanumeric. |
 | | Require PIN to arm | No | When enabled, the PIN is also required to arm (not just disarm). No effect if no PIN is set. |
+| | Require PIN for lock operations | No | When enabled, the same local PIN must be supplied on every lock, unlock, or open call for any smart lock on this installation — **including from your own automations and scripts, which will fail until they pass a `code`**. No effect if no PIN is set. The integration's own [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are unaffected. See [Requiring a PIN for lock operations](#requiring-a-pin-for-lock-operations). |
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 | | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming (advanced)](#force-arming-advanced). |
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
@@ -232,6 +233,33 @@ If your installation includes Sentinel devices, the integration automatically cr
 ## Smart Locks
 
 Smart door locks become lock entities you can operate from HA — multiple locks per installation, each with its own entity. If your lock supports latch hold-back, the entity also gets an **Open** action that unlatches the door without unlocking it.
+
+### Requiring a PIN for lock operations
+
+Turn on **Require PIN for lock operations** (in the [PIN code section](#settings)) to reuse the same local alarm PIN as a gate on locking, unlocking, and opening. Once enabled, **every** `lock.lock` / `lock.unlock` / `lock.open` call has to carry the PIN, and one that carries the wrong PIN — or none at all — is rejected.
+
+Worth enabling if you use [auto-disarm on unlock](#lock-automations): without it, unlocking the door from HA disarms the alarm without ever asking for the PIN that the alarm panel itself requires.
+
+In the UI you're prompted for it: pressing lock, unlock, or open from the lock's more-info dialog, an Entities-card row, or a tile card's lock features pops up a code prompt. Home Assistant renders that prompt for locks as a plain text field rather than the numeric keypad you get on the alarm panel — locks publish their code format as a free-form regex, which the frontend uses only to validate what you type. Nothing this integration can change.
+
+> [!WARNING]
+> **This breaks anything that locks or unlocks without a PIN.** Only the Home Assistant UI prompts. Automations, scripts, REST/WebSocket callers, **and anything bridging your lock outwards — HomeKit, Alexa, Google Assistant, Assist** — get no prompt, so they start failing the moment you enable this option, with *"The code for `lock.front_door` doesn't match pattern `^\d+$`"*.
+>
+> Automations and scripts need the PIN passed explicitly:
+>
+> ```yaml
+> action: lock.unlock
+> target:
+>   entity_id: lock.front_door
+> data:
+>   code: "1234"
+> ```
+>
+> Bridges are configured separately — HomeKit Bridge, for instance, has its own per-entity `code` option that has to be set to the same PIN. Check everything that touches your locks before turning this on: silently losing voice or HomeKit control of a physical door is the sharpest edge of this feature.
+
+Leave Home Assistant's own **Default code** setting on the lock entity (**Settings → Devices & services → Entities → _your lock_ → ⚙️**) **empty**. If it's filled in, HA substitutes it on every call and never prompts you — so if it matches your PIN the gate silently protects nothing, and if it doesn't match, **every lock and unlock fails with no way to enter the right PIN**. Clearing the field is the way back.
+
+The integration's own [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are internal — they never prompt for or require a PIN.
 
 ### Lock automations
 

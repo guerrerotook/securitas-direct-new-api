@@ -110,6 +110,10 @@ SENTINEL_SERVICE_NAMES: frozenset[str] = frozenset({"CONFORT", "COMFORTO", "COMF
 # Lock automations (issue #449) — per-lock auto-lock-on-arm and
 # auto-disarm-on-unlock configuration.
 CONF_LOCK_AUTOMATIONS = "lock_automations"
+# Reuse the alarm's local PIN (CONF_CODE) to gate lock/unlock/open on smart
+# locks. No effect when CONF_CODE is empty.
+CONF_LOCK_CODE_REQUIRED = "lock_code_required"
+DEFAULT_LOCK_CODE_REQUIRED = False
 CIRCUIT_INTERIOR = "interior"
 CIRCUIT_PERIMETER = "perimeter"
 CIRCUIT_ANNEX = "annex"

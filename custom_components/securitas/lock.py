@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_CODE, CONF_CODE
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -22,6 +23,7 @@ from .const import (
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
     CONF_LOCK_AUTOMATIONS,
+    CONF_LOCK_CODE_REQUIRED,
 )
 from .coordinators import LockCoordinator
 from .entity import VerisureEntity
@@ -202,6 +204,14 @@ class VerisureLock(  # type: ignore[override]
                 else None
             ),
         )
+
+        # Reuse the alarm's local PIN (CONF_CODE) to gate lock/unlock/open —
+        # opt-in via CONF_LOCK_CODE_REQUIRED, no effect when no PIN is set.
+        # Publishing a code_format is what makes HA demand (and prompt for) a
+        # code, so it doubles as the "gate is on" flag.
+        self._code: str | None = client.config.get(CONF_CODE)
+        if self._code and client.config.get(CONF_LOCK_CODE_REQUIRED, False):
+            self._attr_code_format = r"^\d+$" if self._code.isdigit() else r".+"
 
         self._operation_in_progress: bool = False
         self._config_retry_unsubs: list[Callable[[], None]] = []
@@ -465,6 +475,28 @@ class VerisureLock(  # type: ignore[override]
 
     # -- Lock/unlock operations ----------------------------------------------
 
+    def _check_code(self, code: str | None) -> None:
+        """Reject the operation unless *code* matches the configured alarm PIN.
+
+        A no-op unless CONF_LOCK_CODE_REQUIRED is enabled and a PIN is
+        configured — ``code_format`` is only published in that case, and its
+        presence is what turns the gate on. Only guards manual service calls
+        (async_lock / async_unlock / async_open) — internal automations like
+        auto-lock-on-arm call ``_change_lock_mode`` directly and never go
+        through here.
+
+        On the real service path this only ever fires for a code that is
+        *well-formed but wrong*: HA's own ``add_default_code`` has already
+        rejected a missing or malformed one against ``code_format`` before
+        ``async_lock`` is reached.
+        """
+        if self.code_format and code != self._code:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_pin_code",
+                translation_placeholders={"entity_id": self.entity_id},
+            )
+
     async def _change_lock_mode(
         self,
         lock_state: bool,
@@ -656,6 +688,7 @@ class VerisureLock(  # type: ignore[override]
         raise HomeAssistantError(message)
 
     async def async_lock(self, **kwargs: Any) -> None:
+        self._check_code(kwargs.get(ATTR_CODE))
         error = await self._change_lock_mode(
             lock_state=True,
             transitional_state=LOCK_STATUS_LOCKING,
@@ -734,9 +767,11 @@ class VerisureLock(  # type: ignore[override]
         )
 
     async def async_unlock(self, **kwargs: Any) -> None:
+        self._check_code(kwargs.get(ATTR_CODE))
         await self._perform_user_unlock("Unlock")
 
     async def async_open(self, **kwargs: Any) -> None:
+        self._check_code(kwargs.get(ATTR_CODE))
         await self._perform_user_unlock("Open")
 
     @property
