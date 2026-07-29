@@ -243,7 +243,9 @@ Worth enabling if you use [auto-disarm on unlock](#lock-automations): without it
 In the UI you're prompted for it: pressing lock, unlock, or open from the lock's more-info dialog, an Entities-card row, or a tile card's lock features pops up a code prompt. Home Assistant renders that prompt for locks as a plain text field rather than the numeric keypad you get on the alarm panel — locks publish their code format as a free-form regex, which the frontend uses only to validate what you type. Nothing this integration can change.
 
 > [!WARNING]
-> **This breaks existing automations.** Automations, scripts, and API callers get no prompt — they have to pass the PIN themselves:
+> **This breaks anything that locks or unlocks without a PIN.** Only the Home Assistant UI prompts. Automations, scripts, REST/WebSocket callers, **and anything bridging your lock outwards — HomeKit, Alexa, Google Assistant, Assist** — get no prompt, so they start failing the moment you enable this option, with *"The code for `lock.front_door` doesn't match pattern `^\d+$`"*.
+>
+> Automations and scripts need the PIN passed explicitly:
 >
 > ```yaml
 > action: lock.unlock
@@ -253,9 +255,9 @@ In the UI you're prompted for it: pressing lock, unlock, or open from the lock's
 >   code: "1234"
 > ```
 >
-> Anything that locks or unlocks without a `code` starts failing the moment you enable this option, with *"requires a code matching …"*. Check your automations before turning it on.
+> Bridges are configured separately — HomeKit Bridge, for instance, has its own per-entity `code` option that has to be set to the same PIN. Check everything that touches your locks before turning this on: silently losing voice or HomeKit control of a physical door is the sharpest edge of this feature.
 
-Home Assistant's own **Default code** setting on the lock entity (**Settings → Devices & services → Entities → _your lock_ → ⚙️**) overrides the prompt: fill it in and HA supplies that code on every call, so you're never asked and the gate stops protecting anything. Leave it empty for the PIN to have any effect.
+Leave Home Assistant's own **Default code** setting on the lock entity (**Settings → Devices & services → Entities → _your lock_ → ⚙️**) **empty**. If it's filled in, HA substitutes it on every call and never prompts you — so if it matches your PIN the gate silently protects nothing, and if it doesn't match, **every lock and unlock fails with no way to enter the right PIN**. Clearing the field is the way back.
 
 The integration's own [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are internal — they never prompt for or require a PIN.
 

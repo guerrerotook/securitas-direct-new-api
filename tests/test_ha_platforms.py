@@ -1336,6 +1336,33 @@ class TestVerisureLockPinCode:
 
         assert lock._state == "2"
 
+    @pytest.mark.parametrize(
+        "service",
+        [
+            "async_handle_lock_service",
+            "async_handle_unlock_service",
+            "async_handle_open_service",
+        ],
+    )
+    async def test_service_call_with_wrong_but_well_formed_code_is_rejected(
+        self, service: str
+    ):
+        """The case that proves the gate isn't just core's regex.
+
+        A numeric ``code_format`` already makes core reject an empty or
+        non-numeric code, so a *well-formed but wrong* PIN is the only thing
+        ``_check_code`` catches on its own — and it must catch it on every
+        gated service, not just lock.
+        """
+        lock = make_lock(code="1234", code_required=True)
+        lock._client.change_lock_mode = AsyncMock(return_value=SmartLockModeStatus())
+
+        with pytest.raises(ServiceValidationError) as err:
+            await getattr(lock, service)(code="9999")
+
+        assert err.value.translation_key == "invalid_pin_code"
+        lock._client.change_lock_mode.assert_not_awaited()
+
 
 class TestVerisureLockCoordinatorUpdate:
     """Tests for VerisureLock coordinator-driven state updates."""

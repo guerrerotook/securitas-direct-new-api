@@ -23,6 +23,7 @@ from custom_components.securitas import (
     CONF_DELAY_CHECK_OPERATION,
     CONF_DEVICE_INDIGITALL,
     CONF_INSTALLATION,
+    CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
     CONF_MAP_CUSTOM,
     CONF_MAP_HOME,
@@ -1382,6 +1383,17 @@ async def test_options_init_renders_peri_toggle_via_published_cache(hass):
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "init"
     assert _form_has_field(result, CONF_ENABLE_PERIMETER_PANEL)
+
+
+async def test_options_init_renders_lock_pin_toggle(hass):
+    """The lock-PIN toggle is offered in the options form's PIN section."""
+    entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data(), options={})
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["step_id"] == "init"
+    assert _form_has_field(result, CONF_LOCK_CODE_REQUIRED)
 
 
 # ===================================================================
