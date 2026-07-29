@@ -307,13 +307,6 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 **Critical rule:** Platform `async_setup_entry` functions must **never** make API calls. All API-based discovery is deferred to a background task that runs after setup completes. This avoids blocking HA startup.
 
-**Options → data sync (`_synced_entry_data`, via the `async_update_options` listener):** `_OPTIONS_MANAGED_FIELDS` are *replaced* wholesale in `entry.data` from `entry.options`, not merged, so a field the user cleared can't linger in data and get resurrected by `_opt()` (which reads options first, then data). Two invariants make that sound, and both must hold if you touch this:
-
-1. **Clearing is always recorded explicitly.** HA's frontend omits a cleared select from `user_input` entirely, so `_normalize_mapping_input` turns each cleared mapping back into an explicit `""`. A key *missing* from a saved options dict therefore means "the options flow never wrote this", never "the user cleared it".
-2. **The sync only runs once `entry.options` is authoritative.** `_create_entry_for_installation` seeds options with `PANEL_OPTION_KEYS` (the sub-panel toggles) alone, leaving the PIN, mappings, scan interval and the rest in `entry.data`. An options dict holding nothing beyond those toggles means the options flow hasn't run yet, and the guard returns `None` rather than treating it as authoritative.
-
-Dropping invariant 2 is not cosmetic: HA dispatches update listeners on **data-only** writes, and `VerisureHub._persist_refresh_token` writes `entry.data` on the first successful login. A fresh install with a sub-panel enabled would therefore have its PIN hash and every mapping deleted within minutes of setup — silently disabling the PIN gate, since `_check_code` accepts any code once `CONF_CODE_HASH` is gone.
-
 **Config-entry migration (`async_migrate_entry`):** runs before `async_setup_entry` whenever `entry.version` is below the current `VERSION` (5). Pre-v3 entries are rejected with a user notification. v3 → v4 strips the obsolete `CONF_TOKEN` dead-write key and bumps the version. `CONF_PASSWORD` is intentionally preserved so the next successful login can still happen on legacy entries; it is scrubbed lazily by `VerisureHub._persist_refresh_token` on first capture. v4 → v5 hashes any plain-text `CONF_CODE` still present in `entry.data`/`entry.options` (via `pin_crypto.hash_pin`) into `CONF_CODE_HASH` + `CONF_CODE_IS_NUMERIC`, then drops the plain-text key — see "PIN code validation" below. It rewrites the key wherever it was *present*, not just where it was non-empty: an empty `options["code"]` means "the user removed the PIN" and has to keep shadowing a stale `data["code"]` (`_opt` reads options first), so it becomes `CONF_CODE_HASH: None` rather than an absent key, which would stop shadowing and resurrect the old PIN.
 
 ```
@@ -365,7 +358,16 @@ Lock discovery uses the `LockCoordinator` created during setup. For locks whose 
 
 ### Options update (`async_update_options`)
 
-When the user changes options (PIN code, scan interval, alarm mappings, etc.), the listener merges the new options into the config entry data and reloads the integration. This triggers a full teardown and re-setup.
+When the user changes options (PIN code, scan interval, alarm mappings, etc.), the listener syncs the new options into the config entry data and reloads the integration. This triggers a full teardown and re-setup.
+
+The sync (`_synced_entry_data`) **replaces** the `_OPTIONS_MANAGED_FIELDS` in `entry.data` from `entry.options` rather than merging them, so a field the user cleared can't linger in data and get resurrected by `_opt()` (which reads options first, then data). Two things make that sound, and both matter if you touch this:
+
+1. **Clearing is recorded explicitly, so absence means "never written".** HA's frontend omits a cleared select from `user_input` entirely, so `_normalize_mapping_input` turns each cleared mapping back into an explicit `""`, and `_resolve_code_submission` always returns both PIN keys. **Exception:** the three `PANEL_OPTION_KEYS` toggles are only added to the schema when `_build_panel_extra_fields` sees the capability, and `_resolve_flow_capabilities` falls back to `(False, False)` until detection runs after a restart — so an options save in that window legitimately omits them. They are the one set for which "absent" is ambiguous.
+2. **The sync only runs once `entry.options` is authoritative** (`_options_are_authoritative`). `_create_entry_for_installation` seeds options with `PANEL_OPTION_KEYS` alone, leaving the PIN, mappings, scan interval and the rest in `entry.data`, so a non-empty options dict does *not* imply the options flow has run.
+
+Point 2 is not cosmetic. HA dispatches update listeners on **data-only** writes, and `VerisureHub._persist_refresh_token` writes `entry.data` on the first successful login — so treating a fresh install's toggles-only options dict as authoritative deleted the PIN hash and every mapping within minutes of setup, silently disabling the gate (`_check_code` accepts any code once `CONF_CODE_HASH` is gone). Note the two sets above coincide: the keys the config flow seeds are the keys the options flow may legitimately omit, both because the toggles are capability-gated rather than always present.
+
+Because this design *writes* `entry.data`, a wrong authoritative-ness answer is destructive and unrecoverable. Resolving options-vs-data at read time instead — leaving `entry.data` untouched — would turn that into a transient wrong read; worth considering if this machinery causes trouble again.
 
 ### VerisureDevice (`hub.py`)
 
