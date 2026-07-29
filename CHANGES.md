@@ -2,6 +2,17 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.5.0
+
+The local alarm PIN can now guard your smart locks as well as the alarm panel.
+
+### Added
+
+**Require the alarm PIN for smart lock operations ([#535](https://github.com/guerrerotook/securitas-direct-new-api/pull/535)).**  A new opt-in setting — **Require PIN for lock operations**, in the PIN section of the integration options — extends the local PIN you already use for disarming to locking, unlocking, and opening your smart locks.  There is no second PIN to manage: it reuses the one that is already there, and it is off by default and inert unless a PIN is set, so nothing changes until you turn it on.  It closes a real gap for anyone using [auto-disarm on unlock](https://github.com/guerrerotook/securitas-direct-new-api#lock-automations) — until now, unlocking the door from Home Assistant disarmed the alarm *without* ever asking for the PIN the alarm panel itself demands.  The integration's own auto-lock-on-arm and auto-disarm-on-unlock automations stay internal and are never gated.  Thanks to [@edwin-anne](https://github.com/edwin-anne) for the feature.
+
+> [!WARNING]
+> **Enabling this breaks anything that locks or unlocks without supplying the PIN.**  Only the Home Assistant UI prompts for it.  Your own automations and scripts need `code:` adding to their `lock.lock` / `lock.unlock` / `lock.open` calls, and anything bridging your locks outwards — HomeKit, Alexa, Google Assistant, Assist — has to be configured separately (HomeKit Bridge, for example, has its own per-entity `code` option).  Home Assistant's per-entity **Default code** setting must also be left empty, or it will either bypass the PIN or, if it is wrong, block every lock and unlock with no way to enter the right one.  See [Requiring a PIN for lock operations](https://github.com/guerrerotook/securitas-direct-new-api#requiring-a-pin-for-lock-operations) before turning it on.
+
 ## v5.4.1
 
 Three fixes: the Home Assistant automation editor no longer breaks — for every integration, not just this one — whenever this integration is loaded; token-only accounts are no longer dragged to a re-authentication prompt by transient backend session errors; and the coordinator degrades gracefully instead of crashing when the comfort / air-quality API returns partial sensor data.
