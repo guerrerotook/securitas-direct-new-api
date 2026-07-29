@@ -41,6 +41,7 @@ from custom_components.securitas import (
     VerisureDevice,
     VerisureHub,
     _build_config_dict,
+    _options_are_authoritative,
     _synced_entry_data,
     add_device_information,
     async_migrate_entry,
@@ -1085,6 +1086,23 @@ class TestValidateAndStoreImage:
 
 class TestAsyncUpdateOptions:
     """Tests for async_update_options()."""
+
+    def test_options_none_is_not_authoritative(self):
+        """`options=None` at entry creation must not blow up the guard.
+
+        `_create_entry_for_installation` passes `options=None` when the
+        installation has no sub-panels. HA coerces that to an empty mapping
+        (`MappingProxyType(options or {})`), so `entry.options` is never
+        None — but the guard went from a None-tolerant `not entry.options`
+        to `set(entry.options)`, so pin the coercion we now rely on.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(code="1234"), options=None
+        )
+
+        assert entry.options == {}
+        assert _options_are_authoritative(entry) is False
+        assert _synced_entry_data(entry) is None
 
     def test_entry_creation_options_do_not_wipe_data(self):
         """A fresh install's toggles-only options must not gut entry.data.
