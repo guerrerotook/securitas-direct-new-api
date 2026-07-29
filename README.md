@@ -71,7 +71,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 
 | Section | Option | Default | Description |
 | ------- | ------ | ------- | ----------- |
-| **PIN code for disarming** | PIN code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Numeric or alphanumeric. |
+| **PIN code for disarming** | PIN code | _(empty)_ | Optional local PIN for the HA alarm panel. This PIN is **not** sent to Verisure — it only protects the panel in Home Assistant. Numeric or alphanumeric. Only a hash of it is stored, so the field shows `●●●●●●●●` once a PIN is set rather than the PIN itself — see [How the PIN is stored](#how-the-pin-is-stored). |
 | | Require PIN to arm | No | When enabled, the PIN is also required to arm (not just disarm). No effect if no PIN is set. |
 | | Require PIN for lock operations | No | When enabled, the same local PIN must be supplied on every lock, unlock, or open call for any smart lock on this installation — **including from your own automations and scripts, which will fail until they pass a `code`**. No effect if no PIN is set. The integration's own [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are unaffected. See [Requiring a PIN for lock operations](#requiring-a-pin-for-lock-operations). |
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
@@ -83,6 +83,22 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 | | Operation poll timeout | 120s | How long to wait for the panel to confirm an arm/disarm action before treating it as accepted-but-unconfirmed (range 60–300s). Raise this if arm/disarm operations log `not confirmed within timeout` warnings. |
+
+### How the PIN is stored
+
+Your PIN is stored as a one-way hash, never as plain text, so a config backup or a support request can't disclose it. The integration can check a PIN you type against the stored hash, but it can't read the PIN back out — not even to show it to you.
+
+That's why the field can't be pre-filled with your actual PIN. When one is already set it shows a fixed `●●●●●●●●` mask instead, and what you do with that mask decides what happens:
+
+| In the PIN field | Result |
+| ---------------- | ------ |
+| Leave `●●●●●●●●` untouched | Keeps your current PIN |
+| Clear the field | Removes the PIN entirely |
+| Type something else | Replaces it with what you typed |
+
+The mask is always eight characters regardless of how long your PIN really is. If you forget your PIN there's no way to recover it — clear the field and set a new one.
+
+Upgrading from an earlier version migrates any existing plain-text PIN to a hash automatically, with nothing for you to do.
 
 ## Alarm State Mappings
 

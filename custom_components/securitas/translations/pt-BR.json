@@ -133,12 +133,9 @@
                     "pin": {
                         "name": "Código PIN para desarmar",
                         "data": {
-                            "code": "Código PIN",
+                            "code": "Código PIN (deixar vazio para não usar PIN)",
                             "code_arm_required": "Exigir também o código PIN (se houver) para armar o alarme",
                             "lock_code_required": "Exigir também o código PIN (se houver) para as operações da fechadura"
-                        },
-                        "data_description": {
-                            "code": "Apenas um hash é armazenado, nunca o PIN em si. Exibido como ●●●●●●●● quando já existe um PIN configurado — deixe como está para mantê-lo, apague para removê-lo, ou digite um novo PIN para substituí-lo. Deixe em branco se não quiser um PIN."
                         }
                     },
                     "notifications": {
