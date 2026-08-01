@@ -32,6 +32,7 @@ from .const import (
 from .log_filter import SensitiveDataFilter
 from .notification_translations import get_notification_strings
 from .verisure_owa_api import (
+    APIConnectionError,
     ApiDomains,
     AuthenticationError,
     CameraDevice,
@@ -198,11 +199,16 @@ class VerisureHub:
         With no password to fall back on, a rejected refresh token raises
         AuthenticationError so the caller can map it to ConfigEntryAuthFailed —
         sending an empty password to the API would just waste a round trip.
+
+        A network-level failure is *not* a rejected token and must not take that
+        path: it propagates so setup maps it to ConfigEntryNotReady and retries.
         """
         if self.client.refresh_token_value:
             try:
                 if await self.client.refresh_token():
                     return
+            except APIConnectionError:
+                raise
             except VerisureOwaError as err:
                 _LOGGER.warning("Refresh failed: %s", err.log_detail())
             if not self.client.password:

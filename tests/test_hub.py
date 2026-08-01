@@ -14,6 +14,7 @@ from custom_components.securitas.const import (
 )
 from custom_components.securitas.hub import VerisureHub
 from custom_components.securitas.verisure_owa_api import (
+    APIConnectionError,
     AuthenticationError,
     VerisureOwaError,
 )
@@ -199,6 +200,28 @@ class TestLogin:
         with pytest.raises(AuthenticationError):
             await hub.login()
 
+        hub.client.login.assert_not_awaited()
+
+    async def test_connection_error_does_not_masquerade_as_auth_failure(self):
+        """Connection failure propagates instead of raising AuthenticationError.
+
+        On a token-only account a swallowed refresh error hits the "no password
+        available" branch, which HA surfaces as a reauth prompt.
+        """
+        hub = make_hub()
+        hub.client.refresh_token_value = "healthy-refresh-token"
+        hub.client.password = ""
+        hub.client.refresh_token = AsyncMock(
+            side_effect=APIConnectionError(
+                "Connection error with URL https://x: ConnectionTimeoutError"
+            )
+        )
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(APIConnectionError) as exc_info:
+            await hub.login()
+
+        assert not isinstance(exc_info.value, AuthenticationError)
         hub.client.login.assert_not_awaited()
 
 

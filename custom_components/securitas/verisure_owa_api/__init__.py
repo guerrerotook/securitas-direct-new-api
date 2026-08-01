@@ -19,6 +19,7 @@ from .const import (  # noqa: F401
 from .domains import ApiDomains  # noqa: F401
 from .exceptions import (  # noqa: F401
     AccountBlockedError,
+    APIConnectionError,
     ArmingExceptionError,
     AuthenticationError,
     TwoFactorRequiredError,
