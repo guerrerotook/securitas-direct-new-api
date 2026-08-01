@@ -4,7 +4,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.5.0
 
-The local alarm PIN can now guard your smart locks as well as the alarm panel.
+The local alarm PIN can now guard your smart locks as well as the alarm panel, and the integration no longer stays down permanently after a network hiccup during Home Assistant startup.
 
 ### Added
 
@@ -12,6 +12,10 @@ The local alarm PIN can now guard your smart locks as well as the alarm panel.
 
 > [!WARNING]
 > **Enabling this breaks anything that locks or unlocks without supplying the PIN.**  Only the Home Assistant UI prompts for it.  Your own automations and scripts need `code:` adding to their `lock.lock` / `lock.unlock` / `lock.open` calls, and anything bridging your locks outwards — HomeKit, Alexa, Google Assistant, Assist — has to be configured separately (HomeKit Bridge, for example, has its own per-entity `code` option).  Home Assistant's per-entity **Default code** setting must also be left empty, or it will either bypass the PIN or, if it is wrong, block every lock and unlock with no way to enter the right one.  See [Requiring a PIN for lock operations](https://github.com/guerrerotook/securitas-direct-new-api#requiring-a-pin-for-lock-operations) before turning it on.
+
+### Fixed
+
+**Integration stayed down after a network blip during Home Assistant startup ([#540](https://github.com/guerrerotook/securitas-direct-new-api/pull/540)).**  A connect timeout escaped the transport unwrapped, so Home Assistant recorded a permanent setup failure it never retries and the integration stayed down until a manual reload.  Network-level failures are now raised as `APIConnectionError` and retried; connection resets and truncated response bodies, which escaped the same way, are covered too.  The distinct type also stops two callers misreading a dropped packet as a refusal: polling for confirmation of an arm, disarm or lock keeps retrying instead of aborting a command the panel already accepted, and a blip during a token refresh no longer prompts re-authentication on token-only accounts.
 
 ## v5.4.1
 
