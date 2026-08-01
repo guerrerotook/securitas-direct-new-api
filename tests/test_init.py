@@ -58,6 +58,7 @@ from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    APIConnectionError,
     AuthenticationError,
     TwoFactorRequiredError,
     VerisureOwaError,
@@ -482,6 +483,27 @@ class TestAsyncSetupEntry:
             pytest.raises(ConfigEntryNotReady),
         ):
             await async_setup_entry(hass, entry)
+
+    async def test_setup_connection_error_retries_rather_than_prompting_reauth(
+        self, hass, mock_hub
+    ):
+        """Connection failure during login raises ConfigEntryNotReady, not AuthFailed."""
+        mock_hub.login = AsyncMock(
+            side_effect=APIConnectionError(
+                "Connection error with URL https://x: ConnectionTimeoutError"
+            )
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            pytest.raises(ConfigEntryNotReady) as exc_info,
+        ):
+            await async_setup_entry(hass, entry)
+
+        assert not isinstance(exc_info.value, ConfigEntryAuthFailed)
 
     async def test_setup_login_error_does_not_leak_response_body(self, hass, mock_hub):
         """User-facing ConfigEntryNotReady must not embed raw response body.
