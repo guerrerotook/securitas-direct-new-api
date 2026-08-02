@@ -6,9 +6,15 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from aiohttp import ClientConnectorDNSError
+from aiohttp import (
+    ClientConnectorDNSError,
+    ClientOSError,
+    ClientPayloadError,
+    ConnectionTimeoutError,
+)
 
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    APIConnectionError,
     VerisureOwaError,
     WAFBlockedError,
 )
@@ -125,6 +131,58 @@ class TestHttpTransport:
             pytest.raises(VerisureOwaError, match="Connection error"),
         ):
             await transport.execute(content={}, headers={})
+
+    async def test_connect_timeout_is_wrapped(self, transport, session):
+        """Connect timeout raises APIConnectionError immediately, with no retry."""
+        _mock_post(
+            session,
+            [ConnectionTimeoutError("Connection timeout to host https://x/graphql")],
+        )
+
+        with pytest.raises(APIConnectionError, match="Connection error"):
+            await transport.execute(content={}, headers={})
+
+        assert session.post.call_count == 1
+
+    async def test_http_error_status_is_not_a_connection_error(
+        self, transport, session
+    ):
+        """An answered-but-failed request stays a plain VerisureOwaError."""
+        _mock_post(session, [_make_response(status=500, text="server error")])
+
+        with pytest.raises(VerisureOwaError) as exc_info:
+            await transport.execute(content={}, headers={})
+
+        assert not isinstance(exc_info.value, APIConnectionError)
+        assert exc_info.value.http_status == 500
+
+    @pytest.mark.parametrize(
+        "err",
+        [
+            ConnectionTimeoutError("connect timed out"),
+            ClientOSError(104, "Connection reset by peer"),
+            ClientPayloadError("incomplete response body"),
+            TimeoutError("total request timeout"),
+        ],
+        ids=["connect_timeout", "connection_reset", "payload_error", "total_timeout"],
+    )
+    async def test_transient_network_errors_are_wrapped(self, transport, session, err):
+        """Every transient network failure surfaces as APIConnectionError."""
+        _mock_post(session, [err])
+
+        with pytest.raises(APIConnectionError):
+            await transport.execute(content={}, headers={})
+
+    async def test_non_connector_error_message_falls_back_to_class_name(
+        self, transport, session
+    ):
+        """Errors without os_error/strerror still produce a useful message."""
+        _mock_post(session, [ConnectionTimeoutError("connect timed out")])
+
+        with pytest.raises(APIConnectionError) as exc_info:
+            await transport.execute(content={}, headers={})
+
+        assert "ConnectionTimeoutError" in str(exc_info.value)
 
     async def test_rate_limit_retry_with_retry_after(self, transport, session):
         """403 with Retry-After header retries after the specified delay."""

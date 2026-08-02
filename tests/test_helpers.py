@@ -7,6 +7,7 @@ import jwt
 import pytest
 
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    APIConnectionError,
     VerisureOwaError,
 )
 
@@ -152,6 +153,20 @@ class TestPollOperation:
         check_fn = AsyncMock(
             side_effect=[
                 TimeoutError("connection timeout"),
+                {"res": "OK", "msg": "done"},
+            ]
+        )
+        api.poll_delay = 0
+
+        result = await api._poll_operation(check_fn)
+        assert result["res"] == "OK"
+        assert check_fn.call_count == 2
+
+    async def test_retries_on_api_connection_error(self, api):
+        """Should treat a connection failure as transient and keep polling."""
+        check_fn = AsyncMock(
+            side_effect=[
+                APIConnectionError("Connection error with URL https://x: timeout"),
                 {"res": "OK", "msg": "done"},
             ]
         )

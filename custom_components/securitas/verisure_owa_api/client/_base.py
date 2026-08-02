@@ -21,6 +21,7 @@ from aiohttp import ClientConnectorError
 from pydantic import BaseModel, ValidationError
 
 from ..exceptions import (
+    APIConnectionError,
     OperationTimeoutError,
     SessionExpiredError,
     VerisureOwaError,
@@ -691,7 +692,7 @@ class _ClientBase:
                 await asyncio.sleep(delay)
             try:
                 result = await check_fn()
-            except (TimeoutError, ClientConnectorError) as err:
+            except (TimeoutError, ClientConnectorError, APIConnectionError) as err:
                 _LOGGER.warning("Transient error during poll, retrying: %s", err)
                 first = False
                 continue

@@ -14,9 +14,9 @@ import json
 import logging
 from typing import Any
 
-from aiohttp import ClientConnectorDNSError, ClientConnectorError, ClientSession
+from aiohttp import ClientConnectorDNSError, ClientError, ClientSession
 
-from .exceptions import VerisureOwaError, WAFBlockedError
+from .exceptions import APIConnectionError, VerisureOwaError, WAFBlockedError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,7 +86,10 @@ class HttpTransport:
 
         Raises:
             WAFBlockedError: Incapsula WAF block detected (no retry).
-            VerisureOwaError: HTTP error, connection error, or JSON parse failure.
+            APIConnectionError: Network-level failure — the request never got
+                a usable response (DNS, TCP, TLS, connect/request timeout,
+                reset connection, truncated body).
+            VerisureOwaError: HTTP error status or JSON parse failure.
         """
         merged_headers = {**_DEFAULT_HEADERS, **headers}
 
@@ -99,13 +102,17 @@ class HttpTransport:
                     http_status: int = response.status
                     response_text = await response.text()
                     response_headers = response.headers
-            except ClientConnectorError as err:
-                os_err = err.os_error or err.strerror or "unknown"
+            except (ClientError, TimeoutError) as err:
                 if isinstance(err, ClientConnectorDNSError) and attempt == 0:
                     _LOGGER.debug("DNS timeout, retrying once: %s", err)
                     await asyncio.sleep(2)
                     continue
-                raise VerisureOwaError(
+                os_err = (
+                    getattr(err, "os_error", None)
+                    or getattr(err, "strerror", None)
+                    or type(err).__name__
+                )
+                raise APIConnectionError(
                     f"Connection error with URL {self._base_url}: {os_err}",
                 ) from err
 

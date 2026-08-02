@@ -14,6 +14,7 @@ from custom_components.securitas.const import (
 )
 from custom_components.securitas.hub import VerisureHub
 from custom_components.securitas.verisure_owa_api import (
+    APIConnectionError,
     AuthenticationError,
     VerisureOwaError,
 )
@@ -200,6 +201,87 @@ class TestLogin:
             await hub.login()
 
         hub.client.login.assert_not_awaited()
+
+    async def test_connection_error_does_not_masquerade_as_auth_failure(self):
+        """Connection failure propagates instead of raising AuthenticationError.
+
+        On a token-only account a swallowed refresh error hits the "no password
+        available" branch, which HA surfaces as a reauth prompt.
+        """
+        hub = make_hub()
+        hub.client.refresh_token_value = "healthy-refresh-token"
+        hub.client.password = ""
+        hub.client.refresh_token = AsyncMock(
+            side_effect=APIConnectionError(
+                "Connection error with URL https://x: ConnectionTimeoutError"
+            )
+        )
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(APIConnectionError):
+            await hub.login()
+
+        hub.client.login.assert_not_awaited()
+
+    async def test_transient_refresh_error_does_not_masquerade_as_auth_failure(self):
+        """A non-network transient refresh failure must not force reauth either.
+
+        On a token-only account a 5xx / server-busy / WAF error from refresh is
+        transient, not a rejected token, so it must propagate (→ setup retries)
+        rather than being swallowed into the "no password" branch that raises
+        AuthenticationError → a reauth prompt. Only a *genuine* auth failure
+        (per is_genuine_auth_failure) should take that path.
+        """
+        hub = make_hub()
+        hub.client.refresh_token_value = "healthy-refresh-token"
+        hub.client.password = ""
+        hub.client.refresh_token = AsyncMock(
+            side_effect=VerisureOwaError("HTTP 500 from backend", http_status=500)
+        )
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(VerisureOwaError) as exc_info:
+            await hub.login()
+
+        assert not isinstance(exc_info.value, AuthenticationError)
+        assert exc_info.value.http_status == 500
+        hub.client.login.assert_not_awaited()
+
+    async def test_genuine_raised_refresh_rejection_still_reauths_token_only(self):
+        """A genuinely dead refresh token (err 60067) that *raises* must still
+        reach reauth on a token-only account.
+
+        This exercises the classifier's genuine branch through login()'s
+        try/except gate — distinct from the return-False path above — so a
+        future refactor of the gate cannot silently drop genuine → reauth.
+        """
+        hub = make_hub()
+        hub.client.refresh_token_value = "dead-refresh-token"
+        hub.client.password = ""
+        genuine = VerisureOwaError("Invalid session")
+        genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        hub.client.refresh_token = AsyncMock(side_effect=genuine)
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(AuthenticationError):
+            await hub.login()
+
+        hub.client.login.assert_not_awaited()
+
+    async def test_genuine_raised_refresh_rejection_falls_back_to_password_login(self):
+        """With a password available, a genuine refresh rejection (err 60067)
+        falls through to a full password login instead of propagating."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "dead-refresh-token"
+        hub.client.password = "hunter2"
+        genuine = VerisureOwaError("Invalid session")
+        genuine.response_body = {"errors": [{"data": {"err": "60067"}}]}
+        hub.client.refresh_token = AsyncMock(side_effect=genuine)
+        hub.client.login = AsyncMock()
+
+        await hub.login()
+
+        hub.client.login.assert_awaited_once()
 
 
 # ── change_lock_mode tests ──────────────────────────────────────────────────

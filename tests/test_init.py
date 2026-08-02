@@ -58,6 +58,7 @@ from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    APIConnectionError,
     AuthenticationError,
     TwoFactorRequiredError,
     VerisureOwaError,
@@ -473,6 +474,25 @@ class TestAsyncSetupEntry:
     async def test_setup_securitas_error_during_login(self, hass, mock_hub):
         """VerisureOwaError during login should raise ConfigEntryNotReady."""
         mock_hub.login = AsyncMock(side_effect=VerisureOwaError("connection failed"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            pytest.raises(ConfigEntryNotReady),
+        ):
+            await async_setup_entry(hass, entry)
+
+    async def test_setup_connection_error_retries_rather_than_prompting_reauth(
+        self, hass, mock_hub
+    ):
+        """Connection failure during login raises ConfigEntryNotReady, not AuthFailed."""
+        mock_hub.login = AsyncMock(
+            side_effect=APIConnectionError(
+                "Connection error with URL https://x: ConnectionTimeoutError"
+            )
+        )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
