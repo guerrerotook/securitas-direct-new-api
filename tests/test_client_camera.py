@@ -598,6 +598,59 @@ class TestCaptureImage:
         assert result.id_signal == "sig-fresh"
         assert thumbnail_calls == 4
 
+    async def test_wait_for_fresh_pre_fetch_raises_still_polls_for_fresh(
+        self, client, transport
+    ):
+        """A raising pre-capture baseline fetch must not skip the wait.
+
+        When the baseline pre-fetch raises (e.g. the CDN 404s a thumbnail
+        it has stopped serving) rather than returning a null timestamp,
+        ``baseline_timestamp`` stays ``None`` just the same, so the freshness
+        loop must still engage and poll through the empty post-status
+        responses until the freshly captured frame arrives — instead of
+        aborting the whole capture on the pre-fetch error.
+        """
+        from custom_components.securitas.verisure_owa_api import VerisureOwaError
+
+        fresh_ts = "2026-08-02 09:57:06"
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                # Call 1 = pre-fetch: the baseline fetch itself fails.
+                if thumbnail_calls == 1:
+                    raise VerisureOwaError("thumbnail unavailable")
+                # Calls 2-3 = CDN still empty, 4 = fresh.
+                if thumbnail_calls <= 3:
+                    return thumbnail_response(id_signal=None, timestamp=None)
+                return thumbnail_response(id_signal="sig-fresh", timestamp=fresh_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        assert result.timestamp == fresh_ts
+        assert result.id_signal == "sig-fresh"
+        assert thumbnail_calls == 4
+
     async def test_wait_for_fresh_false_keeps_legacy_single_fetch(
         self, client, transport
     ):
