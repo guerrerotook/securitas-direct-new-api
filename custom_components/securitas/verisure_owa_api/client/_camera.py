@@ -7,7 +7,9 @@ import base64
 import logging
 from typing import Any
 
-from ..exceptions import OperationTimeoutError, VerisureOwaError
+from aiohttp import ClientConnectorError
+
+from ..exceptions import APIConnectionError, OperationTimeoutError, VerisureOwaError
 from ..graphql_queries import (
     DEVICE_LIST_QUERY,
     GET_PHOTO_IMAGES_QUERY,
@@ -250,7 +252,28 @@ class _CameraMixin(_ClientBase):
                 )
                 break
             await asyncio.sleep(min(freshness_poll_interval, remaining))
-            thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
+            try:
+                thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
+            except (TimeoutError, ClientConnectorError, APIConnectionError) as err:
+                # A transient network/CDN blip on one poll must not drop the
+                # whole capture — retry until the deadline, same as the status
+                # poll (_poll_operation).  `thumbnail` keeps its previous value
+                # so the loop still sees it as stale and re-polls.
+                _LOGGER.warning(
+                    "Transient error fetching thumbnail during freshness "
+                    "wait for %s, retrying: %s",
+                    zone_id,
+                    err,
+                )
+            except VerisureOwaError as err:
+                if err.http_status != 409:
+                    raise
+                _LOGGER.warning(
+                    "Transient error (409) fetching thumbnail during "
+                    "freshness wait for %s, retrying: %s",
+                    zone_id,
+                    err.log_detail(),
+                )
         return thumbnail
 
     async def get_thumbnail(
