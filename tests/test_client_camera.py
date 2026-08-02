@@ -508,11 +508,11 @@ class TestCaptureImage:
         assert result.timestamp == fresh_ts
         assert thumbnail_calls == 3
 
-    async def test_wait_for_fresh_unparseable_pre_fetch_falls_through(
+    async def test_wait_for_fresh_null_baseline_accepts_first_real_frame(
         self, client, transport
     ):
-        """If pre-fetch returns null/unparseable timestamp, skip the freshness
-        guarantee — we have no baseline to compare against."""
+        """If pre-fetch returns a null timestamp, any published frame counts
+        as fresh — the first post-fetch with a real timestamp is accepted."""
         thumbnail_calls = 0
 
         async def _side_effect(*args, **_kwargs):
@@ -546,9 +546,164 @@ class TestCaptureImage:
             freshness_poll_interval=0.0,
         )
 
-        # Pre-fetch + one post-fetch only (no baseline to keep polling against).
+        # Pre-fetch + one post-fetch — the first real timestamp is fresh.
         assert thumbnail_calls == 2
         assert result.id_signal == "sig"
+
+    async def test_wait_for_fresh_null_baseline_polls_through_empty_responses(
+        self, client, transport
+    ):
+        """A null baseline must not skip the freshness wait.
+
+        The CDN stops serving thumbnails for cameras idle for days: the
+        pre-fetch AND the first post-status fetches all return null
+        timestamps.  The freshness loop must keep polling through those
+        empty responses until the freshly captured frame is published,
+        instead of returning the empty response immediately (which left
+        HA without an image until the next scheduled coordinator poll).
+        """
+        fresh_ts = "2026-08-02 09:57:06"
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                # Calls: 1=pre-fetch (empty), 2-3=CDN still empty, 4=fresh
+                if thumbnail_calls <= 3:
+                    return thumbnail_response(id_signal=None, timestamp=None)
+                return thumbnail_response(id_signal="sig-fresh", timestamp=fresh_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        assert result.timestamp == fresh_ts
+        assert result.id_signal == "sig-fresh"
+        assert thumbnail_calls == 4
+
+    async def test_wait_for_fresh_pre_fetch_raises_still_polls_for_fresh(
+        self, client, transport
+    ):
+        """A raising pre-capture baseline fetch must not skip the wait.
+
+        When the baseline pre-fetch raises (e.g. the CDN 404s a thumbnail
+        it has stopped serving) rather than returning a null timestamp,
+        ``baseline_timestamp`` stays ``None`` just the same, so the freshness
+        loop must still engage and poll through the empty post-status
+        responses until the freshly captured frame arrives — instead of
+        aborting the whole capture on the pre-fetch error.
+        """
+        from custom_components.securitas.verisure_owa_api import VerisureOwaError
+
+        fresh_ts = "2026-08-02 09:57:06"
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                # Call 1 = pre-fetch: the baseline fetch itself fails.
+                if thumbnail_calls == 1:
+                    raise VerisureOwaError("thumbnail unavailable")
+                # Calls 2-3 = CDN still empty, 4 = fresh.
+                if thumbnail_calls <= 3:
+                    return thumbnail_response(id_signal=None, timestamp=None)
+                return thumbnail_response(id_signal="sig-fresh", timestamp=fresh_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        assert result.timestamp == fresh_ts
+        assert result.id_signal == "sig-fresh"
+        assert thumbnail_calls == 4
+
+    async def test_wait_for_fresh_transient_error_during_wait_keeps_polling(
+        self, client, transport
+    ):
+        """A transient error while polling for a fresh frame must not abort
+        the capture.
+
+        The freshness wait re-fetches the thumbnail every poll interval; a
+        transient network/CDN hiccup on one of those fetches (timeout, reset,
+        409) must be retried until the deadline — mirroring the status poll's
+        transient handling — instead of propagating out and dropping the whole
+        capture, which is the very "no image until the next poll" symptom this
+        path exists to avoid.
+        """
+        baseline_ts = "2026-08-02 09:50:00"
+        fresh_ts = "2026-08-02 09:57:06"
+        thumbnail_calls = 0
+
+        async def _side_effect(*args, **_kwargs):
+            nonlocal thumbnail_calls
+            content = args[0] if args else {}
+            op = content.get("operationName") if isinstance(content, dict) else None
+            if op == "RequestImages":
+                return request_images_response("ref-img-001")
+            if op == "RequestImagesStatus":
+                return request_images_status_response(res="OK", msg="completed")
+            if op == "mkGetThumbnail":
+                thumbnail_calls += 1
+                # 1=baseline, 2=stale (engages loop), 3=transient blip, 4=fresh
+                if thumbnail_calls <= 2:
+                    return thumbnail_response(
+                        id_signal="sig-stale", timestamp=baseline_ts
+                    )
+                if thumbnail_calls == 3:
+                    raise TimeoutError("CDN read timed out")
+                return thumbnail_response(id_signal="sig-fresh", timestamp=fresh_ts)
+            raise AssertionError(f"unexpected op: {op}")
+
+        transport.execute.side_effect = _side_effect
+
+        inst = _make_installation()
+        result = await client.capture_image(
+            inst,
+            1,
+            "QR",
+            "QR01",
+            wait_for_fresh=True,
+            freshness_timeout=5.0,
+            freshness_poll_interval=0.0,
+        )
+
+        assert result.timestamp == fresh_ts
+        assert result.id_signal == "sig-fresh"
+        assert thumbnail_calls == 4
 
     async def test_wait_for_fresh_false_keeps_legacy_single_fetch(
         self, client, transport
