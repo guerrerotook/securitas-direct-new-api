@@ -156,7 +156,7 @@ class _CameraMixin(_ClientBase):
             except VerisureOwaError as err:
                 _LOGGER.warning(
                     "Pre-capture baseline fetch failed for %s; "
-                    "proceeding without freshness guarantee: %s",
+                    "will accept the first published frame as fresh: %s",
                     zone_id,
                     err,
                 )
@@ -224,15 +224,20 @@ class _CameraMixin(_ClientBase):
         # Whether status finished or polling timed out, fetch the latest
         # thumbnail — the CDN may have caught up while we were polling.
         thumbnail = await self.get_thumbnail(installation, device_type, zone_id)
-        if baseline_timestamp is None:
+        if not wait_for_fresh:
             return thumbnail
 
         # Freshness poll: retry until timestamp is strictly newer than the
         # pre-capture baseline (lexicographic string compare on the server's
-        # ISO format).  Null timestamps are treated as stale.
+        # ISO format).  Null timestamps are treated as stale.  A null
+        # baseline (the CDN stops serving thumbnails for cameras idle for
+        # days, and the pre-capture fetch may fail outright) must NOT skip
+        # the wait — compare against "" so any real timestamp counts as
+        # strictly newer and we keep polling through the empty responses.
+        baseline = baseline_timestamp or ""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + freshness_timeout
-        while thumbnail.timestamp is None or thumbnail.timestamp <= baseline_timestamp:
+        while thumbnail.timestamp is None or thumbnail.timestamp <= baseline:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 _LOGGER.warning(
