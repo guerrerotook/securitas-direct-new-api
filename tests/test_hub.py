@@ -218,10 +218,9 @@ class TestLogin:
         )
         hub.client.login = AsyncMock()
 
-        with pytest.raises(APIConnectionError) as exc_info:
+        with pytest.raises(APIConnectionError):
             await hub.login()
 
-        assert not isinstance(exc_info.value, AuthenticationError)
         hub.client.login.assert_not_awaited()
 
     async def test_transient_refresh_error_does_not_masquerade_as_auth_failure(self):

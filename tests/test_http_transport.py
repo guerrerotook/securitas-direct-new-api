@@ -179,7 +179,7 @@ class TestHttpTransport:
         """Errors without os_error/strerror still produce a useful message."""
         _mock_post(session, [ConnectionTimeoutError("connect timed out")])
 
-        with pytest.raises(VerisureOwaError) as exc_info:
+        with pytest.raises(APIConnectionError) as exc_info:
             await transport.execute(content={}, headers={})
 
         assert "ConnectionTimeoutError" in str(exc_info.value)

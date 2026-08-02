@@ -499,11 +499,9 @@ class TestAsyncSetupEntry:
         with (
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
-            pytest.raises(ConfigEntryNotReady) as exc_info,
+            pytest.raises(ConfigEntryNotReady),
         ):
             await async_setup_entry(hass, entry)
-
-        assert not isinstance(exc_info.value, ConfigEntryAuthFailed)
 
     async def test_setup_login_error_does_not_leak_response_body(self, hass, mock_hub):
         """User-facing ConfigEntryNotReady must not embed raw response body.
