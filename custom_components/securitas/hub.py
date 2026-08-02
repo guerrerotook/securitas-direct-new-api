@@ -32,7 +32,6 @@ from .const import (
 from .log_filter import SensitiveDataFilter
 from .notification_translations import get_notification_strings
 from .verisure_owa_api import (
-    APIConnectionError,
     ApiDomains,
     AuthenticationError,
     CameraDevice,
@@ -46,6 +45,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
 )
 from .verisure_owa_api.client import VerisureOwaClient
+from .verisure_owa_api.exceptions import is_genuine_auth_failure
 from .verisure_owa_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
@@ -196,21 +196,31 @@ class VerisureHub:
     async def login(self) -> None:
         """Authenticate, preferring a stored refresh token over a password login.
 
-        With no password to fall back on, a rejected refresh token raises
-        AuthenticationError so the caller can map it to ConfigEntryAuthFailed —
-        sending an empty password to the API would just waste a round trip.
+        With no password to fall back on, a *genuinely* rejected refresh token
+        raises AuthenticationError so the caller can map it to
+        ConfigEntryAuthFailed — sending an empty password to the API would just
+        waste a round trip.
 
-        A network-level failure is *not* a rejected token and must not take that
-        path: it propagates so setup maps it to ConfigEntryNotReady and retries.
+        A transient failure (network, 5xx, 409, WAF block, the xSRefreshLogin
+        server crash) is *not* a rejected token and must not take that path: it
+        propagates so setup maps it to ConfigEntryNotReady and retries, instead
+        of forcing a needless reauth on a token-only account. This mirrors the
+        transient-vs-genuine split the client and coordinators already use via
+        is_genuine_auth_failure().
+
+        For an account that still has a stored password, this deliberately means
+        a transient refresh failure retries rather than immediately burning a
+        full password login — the same "don't spend a login on a passing backend
+        wobble" trade-off the steady-state client path (_base.py) makes.
         """
         if self.client.refresh_token_value:
             try:
                 if await self.client.refresh_token():
                     return
-            except APIConnectionError:
-                raise
             except VerisureOwaError as err:
-                _LOGGER.warning("Refresh failed: %s", err.log_detail())
+                if not is_genuine_auth_failure(err):
+                    raise
+                _LOGGER.warning("Refresh genuinely rejected: %s", err.log_detail())
             if not self.client.password:
                 raise AuthenticationError(
                     "Refresh token rejected and no password available; reauth required"
