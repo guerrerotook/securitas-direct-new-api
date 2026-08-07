@@ -12,7 +12,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_CODE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -28,7 +27,7 @@ from .const import (
     CONF_LOCK_CODE_REQUIRED,
 )
 from .coordinators import LockCoordinator
-from .entity import VerisureEntity
+from .entity import VerisureEntity, lock_device_info
 from .pin_crypto import verify_pin
 from .verisure_owa_api import (
     Installation,
@@ -191,21 +190,10 @@ class VerisureLock(  # type: ignore[override]
             f"v4_securitas_direct.{installation.number}_lock_{device_id}"
         )
 
-        # Override device_info: each lock gets its own device, linked to
-        # the installation device via via_device.
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (DOMAIN, f"v4_securitas_direct.{installation.number}_lock_{device_id}")
-            },
-            via_device=(DOMAIN, f"v4_securitas_direct.{installation.number}"),
-            name=name,
-            manufacturer="Verisure",
-            model=lock_config.family if lock_config and lock_config.family else None,
-            serial_number=(
-                lock_config.serial_number
-                if lock_config and lock_config.serial_number
-                else None
-            ),
+        # Override device_info: each lock gets its own device, linked to the
+        # installation device (via_device_id on HA >= 2026.8, else via_device).
+        self._attr_device_info = lock_device_info(
+            installation, device_id, name, lock_config, client.hass
         )
 
         # Reuse the alarm's local PIN to gate lock/unlock/open — opt-in via
@@ -251,18 +239,12 @@ class VerisureLock(  # type: ignore[override]
         self._lock_config = lock_config
         if lock_config.location:
             self._attr_name = lock_config.location
-        self._attr_device_info = DeviceInfo(
-            identifiers={
-                (
-                    DOMAIN,
-                    f"v4_securitas_direct.{self._installation.number}_lock_{self._device_id}",
-                )
-            },
-            via_device=(DOMAIN, f"v4_securitas_direct.{self._installation.number}"),
-            name=self._attr_name,
-            manufacturer="Verisure",
-            model=lock_config.family or None,
-            serial_number=lock_config.serial_number or None,
+        self._attr_device_info = lock_device_info(
+            self._installation,
+            self._device_id,
+            self._attr_name,
+            lock_config,
+            self._client.hass,
         )
         self.async_write_ha_state()
 

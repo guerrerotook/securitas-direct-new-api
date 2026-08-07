@@ -24,6 +24,7 @@ EXPECTED_INTEGRATION_FILES = frozenset(
         "test_camera_platform.py",
         "test_config_flow.py",
         "test_coordinators.py",
+        "test_entity.py",
         "test_ha_platforms.py",
         "test_hub.py",
         "test_init.py",
