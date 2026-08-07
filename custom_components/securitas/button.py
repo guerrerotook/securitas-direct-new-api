@@ -130,7 +130,9 @@ class VerisureCaptureButton(VerisureEntity, ButtonEntity):
         self._attr_unique_id = (
             f"v4_securitas_direct.{installation.number}_capture_{camera_device.zone_id}"
         )
-        self._attr_device_info = camera_device_info(installation, camera_device)
+        self._attr_device_info = camera_device_info(
+            installation, camera_device, client.hass
+        )
 
     async def async_press(self) -> None:
         """Delegate to the camera entity's async_manual_capture."""

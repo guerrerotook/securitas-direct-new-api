@@ -6,9 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN, _build_config_dict
+from custom_components.securitas import entity as entity_mod
 from custom_components.securitas.api_queue import ApiQueue
 from custom_components.securitas.const import (
     CONF_CODE_HASH,
@@ -115,6 +117,7 @@ def make_lock(
     code: str | None = None,
     code_required: bool = False,
     config: dict | None = None,
+    registry_hass=None,
 ):
     """Create a VerisureLock with mocked dependencies.
 
@@ -131,10 +134,15 @@ def make_lock(
         config: Full ``client.config`` override, bypassing ``code``/
             ``code_required``. Use to drive the entity from a config dict
             built by production code.
+        registry_hass: Real ``hass`` to expose as ``client.hass`` so
+            device-info construction can resolve ``via_device_id`` from the
+            registry (HA >= 2026.8). Defaults to ``None`` — the deterministic
+            ``via_device`` fallback used by the schema tests.
     """
     installation = make_installation()
     code_hash, code_is_numeric = encode_pin(code)
     client = MagicMock()
+    client.hass = registry_hass
     client.config = config or {
         "scan_interval": 120,
         CONF_CODE_HASH: code_hash,
@@ -968,6 +976,47 @@ class TestVerisureLockV5Schema:
         info = lk._attr_device_info
         assert (DOMAIN, "v4_securitas_direct.123456_lock_02") in info["identifiers"]
         assert info["via_device"] == (DOMAIN, "v4_securitas_direct.123456")
+
+    async def test_device_info_uses_via_device_id_when_supported(
+        self, hass, monkeypatch
+    ):
+        """On HA >= 2026.8 the lock links to the installation by registry id."""
+        monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        parent = dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "v4_securitas_direct.123456")},
+            manufacturer="Verisure",
+        )
+        lk = make_lock(device_id="01", registry_hass=hass)
+        # via_device_id isn't a defined DeviceInfo key before HA 2026.8; read
+        # the DeviceInfo as a plain dict so the assertion type-checks on any core.
+        info = dict(lk._attr_device_info or {})
+        assert info["via_device_id"] == parent.id
+        assert "via_device" not in info
+
+    async def test_update_lock_config_uses_via_device_id_when_supported(
+        self, hass, monkeypatch
+    ):
+        """update_lock_config takes the same via_device_id path on new HA."""
+        from custom_components.securitas.verisure_owa_api.models import SmartLock
+
+        monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        parent = dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, "v4_securitas_direct.123456")},
+            manufacturer="Verisure",
+        )
+        lk = make_lock(device_id="02", registry_hass=hass)
+        lk.update_lock_config(
+            SmartLock(location="Front", family="DANALOCK", serial_number="sn")
+        )
+        info = dict(lk._attr_device_info or {})
+        assert info["via_device_id"] == parent.id
+        assert "via_device" not in info
 
 
 class TestVerisureLockActions:
