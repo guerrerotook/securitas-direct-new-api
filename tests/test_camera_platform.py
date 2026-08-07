@@ -59,6 +59,9 @@ def camera_device():
 @pytest.fixture
 def mock_hub():
     hub = MagicMock()
+    # None keeps device-info construction on the deterministic via_device
+    # fallback (no registry lookup) regardless of the installed HA version.
+    hub.hass = None
     hub.camera_images = {}
     hub.get_camera_image = MagicMock(return_value=None)
     hub.is_capturing = MagicMock(return_value=False)
