@@ -26,6 +26,7 @@ from .alarm import (
 )
 from .auth import OtpPhone
 from .camera import CameraDevice, ThumbnailResponse
+from .device import PanelDevice
 from .installation import Installation
 from .lock import (
     LockAutolock,
@@ -56,6 +57,7 @@ __all__ = [
     "LockFeatures",
     "OperationStatus",
     "OtpPhone",
+    "PanelDevice",
     "PerimeterMode",
     "ProtoCode",
     "SStatus",

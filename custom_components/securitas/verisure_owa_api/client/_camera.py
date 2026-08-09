@@ -11,7 +11,6 @@ from aiohttp import ClientConnectorError
 
 from ..exceptions import APIConnectionError, OperationTimeoutError, VerisureOwaError
 from ..graphql_queries import (
-    DEVICE_LIST_QUERY,
     GET_PHOTO_IMAGES_QUERY,
     GET_THUMBNAIL_QUERY,
     REQUEST_IMAGES_MUTATION,
@@ -19,23 +18,23 @@ from ..graphql_queries import (
 )
 from ..models import CameraDevice, Installation, ThumbnailResponse
 from ..responses import (
-    DeviceListEnvelope,
     PhotoImagesEnvelope,
     RequestImagesEnvelope,
     RequestImagesStatusEnvelope,
     ThumbnailEnvelope,
 )
-from ._base import _ClientBase
+from ._device import CAMERA_DEVICE_TYPES, _DeviceMixin, filter_camera_devices
 
 _LOGGER = logging.getLogger(__name__)
 
-CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
+__all__ = ["CAMERA_DEVICE_TYPES", "_CameraMixin"]
+
 IMAGE_RESOLUTION = 0
 IMAGE_MEDIA_TYPE = 1
 IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
 
 
-class _CameraMixin(_ClientBase):
+class _CameraMixin(_DeviceMixin):
     """Camera discovery and image fetch."""
 
     async def get_camera_devices(
@@ -43,52 +42,13 @@ class _CameraMixin(_ClientBase):
     ) -> list[CameraDevice]:
         """Get list of camera devices (QR, YR, YP, QP) for an installation.
 
+        A thin filter over the whole-inventory ``get_devices`` fetch so camera
+        and zone discovery share one xSDeviceList round-trip.
+
         Returns:
             A list of CameraDevice instances for active camera devices.
         """
-        content = {
-            "operationName": "xSDeviceList",
-            "variables": {
-                "numinst": installation.number,
-                "panel": installation.panel,
-            },
-            "query": DEVICE_LIST_QUERY,
-        }
-        envelope = await self._execute_graphql(
-            content,
-            "xSDeviceList",
-            DeviceListEnvelope,
-            installation=installation,
-        )
-        devices = envelope.data.xSDeviceList.devices or []
-        # Annex installations can return the same physical camera twice in
-        # xSDeviceList (once per panel-view: main + annex sub-panel). The two
-        # rows share name + type + code; only the row index `id` differs.
-        # Without dedup HA's entity registry rejects the second row as a
-        # duplicate unique_id and silently drops the camera + capture button.
-        # See https://github.com/guerrerotook/securitas-direct-new-api/issues/441.
-        seen: set[tuple[str, str]] = set()
-        result: list[CameraDevice] = []
-        for d in devices:
-            if d.get("type") not in CAMERA_DEVICE_TYPES or d.get("isActive") is False:
-                continue
-            dedup_key = (d.get("type") or "", str(d.get("code") or ""))
-            if dedup_key in seen:
-                continue
-            seen.add(dedup_key)
-            code = int(d["code"]) if str(d.get("code", "")).isdigit() else None
-            result.append(
-                CameraDevice(
-                    id=d["id"],
-                    code=code or 0,
-                    zone_id=d["zoneId"]
-                    or (f"{d['type']}{code:02d}" if code is not None else d["id"]),
-                    name=d["name"],
-                    device_type=d["type"],
-                    serial_number=d.get("serialNumber"),
-                )
-            )
-        return result
+        return filter_camera_devices(await self.get_devices(installation))
 
     async def capture_image(
         self,

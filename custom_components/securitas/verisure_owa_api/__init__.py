@@ -38,6 +38,7 @@ from .models import (  # noqa: F401
     LockFeatures,
     OperationStatus,
     OtpPhone,
+    PanelDevice,
     PerimeterMode,
     ProtoCode,
     Sentinel,

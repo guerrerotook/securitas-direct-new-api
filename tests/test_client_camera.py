@@ -1069,3 +1069,156 @@ class TestCameraRequestContracts:
         assert content["variables"]["idSignal"] == "signal-123"
         assert content["variables"]["signalType"] == "ALARM"
         assert content["variables"]["panel"] == "SDVFAST"
+
+
+# ── get_devices / inventory filters ──────────────────────────────────────────
+
+
+def _real_capture_devices() -> list[dict]:
+    """The xSDeviceList rows from a real (scrubbed) installation capture."""
+    import json
+    from pathlib import Path
+
+    capture = json.loads(
+        Path("docs/graphql_locks/smartlock_customers.json").read_text(encoding="utf-8")
+    )
+    for entry in capture:
+        if entry.get("request", {}).get("operationName") == "xSDeviceList":
+            return entry["response"]["data"]["xSDeviceList"]["devices"]
+    raise AssertionError("no xSDeviceList capture found")
+
+
+class TestGetDevices:
+    """The whole-inventory fetch that camera and zone discovery share."""
+
+    async def test_parses_every_row_of_a_real_capture(self, client, transport):
+        rows = _real_capture_devices()
+        transport.execute.return_value = device_list_response(devices=rows)
+
+        result = await client.get_devices(_make_installation())
+
+        assert len(result) == len(rows) == 13
+        assert {d.device_type for d in result} == {"QR", "VV", "YP", "MG", "DR"}
+        assert all(d.zone_id for d in result), "zone_id must never be empty"
+
+    async def test_synthesises_zone_id_when_the_panel_omits_it(self, client, transport):
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {"id": "9", "code": "7", "zoneId": None, "name": "Hall", "type": "MG"}
+            ]
+        )
+
+        result = await client.get_devices(_make_installation())
+
+        assert result[0].zone_id == "MG07"
+
+    async def test_falls_back_to_row_id_for_a_non_numeric_code(self, client, transport):
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {"id": "9", "code": "x", "zoneId": None, "name": "Hall", "type": "MG"}
+            ]
+        )
+
+        result = await client.get_devices(_make_installation())
+
+        assert result[0].zone_id == "9"
+        assert result[0].code == 0
+
+    async def test_keeps_inactive_and_non_camera_rows(self, client, transport):
+        """get_devices is unfiltered — narrowing is the callers' job."""
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {"id": "1", "code": "1", "zoneId": "MG01", "name": "A", "type": "MG"},
+                {
+                    "id": "2",
+                    "code": "2",
+                    "zoneId": "MG02",
+                    "name": "B",
+                    "type": "MG",
+                    "isActive": False,
+                },
+            ]
+        )
+
+        assert len(await client.get_devices(_make_installation())) == 2
+
+
+class TestInventoryFilters:
+    """Pure narrowing helpers over a parsed inventory."""
+
+    async def _inventory(self, client, transport):
+        transport.execute.return_value = device_list_response(
+            devices=_real_capture_devices()
+        )
+        return await client.get_devices(_make_installation())
+
+    async def test_camera_filter_matches_the_public_method(self, client, transport):
+        """Regression guard: the refactor must not change camera discovery."""
+        from custom_components.securitas.verisure_owa_api.client import (
+            filter_camera_devices,
+        )
+
+        inventory = await self._inventory(client, transport)
+        transport.execute.return_value = device_list_response(
+            devices=_real_capture_devices()
+        )
+        via_method = await client.get_camera_devices(_make_installation())
+
+        assert filter_camera_devices(inventory) == via_method
+
+    async def test_zone_filter_returns_only_magnetic_contacts(self, client, transport):
+        from custom_components.securitas.verisure_owa_api.client import (
+            filter_zone_devices,
+        )
+
+        zones = filter_zone_devices(await self._inventory(client, transport))
+
+        assert len(zones) == 8
+        assert {z.device_type for z in zones} == {"MG"}
+        assert zones[0].name == "Ptaentrada"
+
+    async def test_zone_filter_drops_inactive_but_keeps_unreported(
+        self, client, transport
+    ):
+        from custom_components.securitas.verisure_owa_api.client import (
+            filter_zone_devices,
+        )
+
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {
+                    "id": "1",
+                    "code": "1",
+                    "zoneId": "MG01",
+                    "name": "Off",
+                    "type": "MG",
+                    "isActive": False,
+                },
+                {
+                    "id": "2",
+                    "code": "2",
+                    "zoneId": "MG02",
+                    "name": "Unreported",
+                    "type": "MG",
+                    "isActive": None,
+                },
+            ]
+        )
+        zones = filter_zone_devices(await client.get_devices(_make_installation()))
+
+        assert [z.name for z in zones] == ["Unreported"]
+
+    async def test_zone_filter_dedups_annex_duplicates(self, client, transport):
+        """Annex installations list the same contact once per panel view."""
+        from custom_components.securitas.verisure_owa_api.client import (
+            filter_zone_devices,
+        )
+
+        row = {"code": "4", "zoneId": "MG04", "name": "Ptaentrada", "type": "MG"}
+        transport.execute.return_value = device_list_response(
+            devices=[{"id": "5", **row}, {"id": "99", **row}]
+        )
+        zones = filter_zone_devices(await client.get_devices(_make_installation()))
+
+        assert len(zones) == 1
+        assert zones[0].id == "5"

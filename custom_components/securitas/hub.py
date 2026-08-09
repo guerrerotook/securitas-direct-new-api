@@ -38,13 +38,14 @@ from .verisure_owa_api import (
     Installation,
     OperationStatus,
     OtpPhone,
+    PanelDevice,
     Service,
     SmartLock,
     SmartLockMode,
     ThumbnailResponse,
     VerisureOwaError,
 )
-from .verisure_owa_api.client import VerisureOwaClient
+from .verisure_owa_api.client import VerisureOwaClient, filter_camera_devices
 from .verisure_owa_api.exceptions import is_genuine_auth_failure
 from .verisure_owa_api.http_transport import HttpTransport
 
@@ -187,7 +188,7 @@ class VerisureHub:
         )
         self.camera_images: dict[str, bytes] = {}
         self.camera_timestamps: dict[str, str] = {}
-        self._camera_devices_cache: dict[str, list[CameraDevice]] = {}
+        self._devices_cache: dict[str, list[PanelDevice]] = {}
         self._camera_capturing: set[str] = set()  # keys of cameras currently capturing
         # Coalesce concurrent full-image fetches for the same id_signal — two
         # dashboard cards on the same camera share one API call.
@@ -277,20 +278,28 @@ class VerisureHub:
         self._partitions_cache[key] = list(instalation.alarm_partitions)
         return services
 
-    async def get_camera_devices(
-        self, installation: Installation
-    ) -> list[CameraDevice]:
-        """Get camera devices for an installation (cached)."""
+    async def get_devices(self, installation: Installation) -> list[PanelDevice]:
+        """Get the whole peripheral inventory for an installation (cached).
+
+        Camera and zone discovery both narrow this one list, so the panel is
+        asked for its inventory exactly once per installation per HA run.
+        """
         key = installation.number
-        if key in self._camera_devices_cache:
-            return self._camera_devices_cache[key]
+        if key in self._devices_cache:
+            return self._devices_cache[key]
         devices = await self._api_queue.submit(
-            self.client.get_camera_devices,
+            self.client.get_devices,
             installation,
             priority=ApiQueue.BACKGROUND,
         )
-        self._camera_devices_cache[key] = devices
+        self._devices_cache[key] = devices
         return devices
+
+    async def get_camera_devices(
+        self, installation: Installation
+    ) -> list[CameraDevice]:
+        """Get camera devices for an installation (cached via get_devices)."""
+        return filter_camera_devices(await self.get_devices(installation))
 
     def is_capturing(self, installation_number: str, zone_id: str) -> bool:
         """Return True if a capture is in progress for this camera."""

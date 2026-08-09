@@ -9,6 +9,7 @@ private sibling modules:
 - ``_alarm`` — arm / disarm / check-alarm / status.
 - ``_activity`` — panel timeline.
 - ``_lock`` — smart-lock status / config / mode change.
+- ``_device`` — whole-inventory peripheral list (shared by camera + zone).
 - ``_camera`` — camera discovery / capture / thumbnail / full image.
 - ``_sentinel`` — comfort sensors and air-quality.
 - ``_installation`` — installation list + service catalog.
@@ -27,13 +28,22 @@ from ._activity import _ActivityMixin
 from ._alarm import _AlarmMixin
 from ._auth import _AuthMixin
 from ._camera import _CameraMixin
+from ._device import (
+    ZONE_DEVICE_TYPES,
+    _DeviceMixin,
+    filter_camera_devices,
+    filter_zone_devices,
+)
 from ._installation import _InstallationMixin
 from ._lock import SMARTLOCK_DEVICE_ID, _LockMixin
 from ._sentinel import _SentinelMixin
 
 __all__ = [
     "SMARTLOCK_DEVICE_ID",
+    "ZONE_DEVICE_TYPES",
     "VerisureOwaClient",
+    "filter_camera_devices",
+    "filter_zone_devices",
     "generate_device_id",
     "generate_uuid",
 ]
@@ -55,6 +65,10 @@ class VerisureOwaClient(  # pylint: disable=too-many-ancestors
     _ActivityMixin,
     _LockMixin,
     _CameraMixin,
+    # After _CameraMixin, which derives from it — camera discovery is a filter
+    # over the shared inventory fetch. Listed explicitly so the composition is
+    # visible rather than inherited by accident.
+    _DeviceMixin,
     _SentinelMixin,
     _InstallationMixin,
 ):
