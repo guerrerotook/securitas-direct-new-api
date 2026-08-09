@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..exceptions import UnexpectedStateError
 from ..pydantic_utils import NullSafeBase as _NullSafeBase
+from .activity import ActivityException
 
 
 class InteriorMode(StrEnum):
@@ -204,7 +205,19 @@ class OperationStatus(_NullSafeBase):
 
 
 class SStatus(BaseModel):
-    """Current status of the alarm system."""
+    """Current status of the alarm system.
+
+    ``exceptions`` is the panel's per-zone problem list — sparse, so only
+    zones that currently have a problem appear. It reuses ``ActivityException``
+    (the same ``{status, deviceType, alias}`` shape the activity timeline
+    carries) so the ``"0"`` → open / ``"2"`` → battery-low decoding lives in
+    exactly one place.
+
+    Being sparse, an absent zone means "no exception reported" — but that only
+    implies "closed and healthy" if the panel populates the list at all.
+    Consumers must not treat an empty list as proof every zone is fine without
+    independent evidence the feed works.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -213,4 +226,4 @@ class SStatus(BaseModel):
         default=None, validation_alias="timestampUpdate"
     )
     wifi_connected: bool | None = Field(default=None, validation_alias="wifiConnected")
-    exceptions: list[dict[str, Any]] | None = None
+    exceptions: list[ActivityException] | None = None

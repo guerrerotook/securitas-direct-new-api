@@ -1192,3 +1192,69 @@ class TestActivityException:
     def test_status_key_unknown_for_empty(self):
         exc = ActivityException()
         assert exc.status_key == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# SStatus.exceptions — the per-zone problem feed
+# ---------------------------------------------------------------------------
+
+
+class TestSStatusExceptions:
+    """xSStatus reuses ActivityException so status decoding lives in one place."""
+
+    def test_parses_rows_into_typed_exceptions(self):
+        from custom_components.securitas.verisure_owa_api.models import (
+            ActivityException,
+            SStatus,
+        )
+
+        status = SStatus.model_validate(
+            {
+                "status": "D",
+                "exceptions": [
+                    {"status": "0", "deviceType": "MG", "alias": "Porta1cucin"},
+                    {"status": "2", "deviceType": "MG", "alias": "Pfincameret"},
+                ],
+            }
+        )
+
+        assert status.exceptions is not None
+        assert all(isinstance(e, ActivityException) for e in status.exceptions)
+        assert [e.status_key for e in status.exceptions] == ["open", "battery_low"]
+        assert [e.alias for e in status.exceptions] == ["Porta1cucin", "Pfincameret"]
+
+    def test_unknown_status_code_is_not_guessed(self):
+        from custom_components.securitas.verisure_owa_api.models import SStatus
+
+        status = SStatus.model_validate(
+            {"exceptions": [{"status": "7", "deviceType": "MG", "alias": "X"}]}
+        )
+
+        assert status.exceptions is not None
+        assert status.exceptions[0].status_key == "unknown"
+
+    def test_null_and_empty_are_distinguished(self):
+        from custom_components.securitas.verisure_owa_api.models import SStatus
+
+        assert SStatus.model_validate({"exceptions": None}).exceptions is None
+        assert SStatus.model_validate({"exceptions": []}).exceptions == []
+        assert SStatus.model_validate({}).exceptions is None
+
+    def test_typename_and_unknown_keys_are_ignored(self):
+        from custom_components.securitas.verisure_owa_api.models import SStatus
+
+        status = SStatus.model_validate(
+            {
+                "exceptions": [
+                    {
+                        "status": "0",
+                        "deviceType": "MG",
+                        "alias": "Porta1cucin",
+                        "__typename": "XSExceptions",
+                    }
+                ]
+            }
+        )
+
+        assert status.exceptions is not None
+        assert status.exceptions[0].status_key == "open"

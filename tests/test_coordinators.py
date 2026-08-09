@@ -1953,3 +1953,131 @@ class TestActivityCoordinator:
         result = await coord._async_update_data()
 
         assert all(e.id_signal != "ha-abc" for e in result.new_events)
+
+
+# ---------------------------------------------------------------------------
+# AlarmCoordinator — parsed view of status.exceptions
+# ---------------------------------------------------------------------------
+
+
+class TestAlarmCoordinatorZoneExceptions:
+    """The sparse per-zone feed, decoded once per payload."""
+
+    @staticmethod
+    def _coordinator(exceptions=None):
+        from custom_components.securitas.coordinators import (
+            AlarmCoordinator,
+            AlarmStatusData,
+        )
+        from custom_components.securitas.verisure_owa_api.models import SStatus
+
+        coordinator = AlarmCoordinator.__new__(AlarmCoordinator)
+        coordinator._exc_cache_data = None
+        coordinator._exc_keys = {}
+        coordinator._exc_aliases = ()
+        coordinator._exceptions_observed = False
+        coordinator.data = AlarmStatusData(status=SStatus(exceptions=exceptions))
+        return coordinator
+
+    @staticmethod
+    def _payload(exceptions):
+        from custom_components.securitas.coordinators import AlarmStatusData
+        from custom_components.securitas.verisure_owa_api.models import SStatus
+
+        return AlarmStatusData(status=SStatus(exceptions=exceptions))
+
+    def test_maps_alias_to_status_kinds(self):
+        coordinator = self._coordinator(
+            [
+                {"status": "0", "deviceType": "MG", "alias": "Ventana"},
+                {"status": "2", "deviceType": "MG", "alias": "Pfincameret"},
+            ]
+        )
+
+        assert coordinator.zone_exception_keys == {
+            "Ventana": frozenset({"open"}),
+            "Pfincameret": frozenset({"battery_low"}),
+        }
+
+    def test_one_zone_can_report_several_problems(self):
+        coordinator = self._coordinator(
+            [
+                {"status": "0", "deviceType": "MG", "alias": "Ventana"},
+                {"status": "2", "deviceType": "MG", "alias": "Ventana"},
+            ]
+        )
+
+        assert coordinator.zone_exception_keys == {
+            "Ventana": frozenset({"open", "battery_low"})
+        }
+
+    def test_aliases_are_stripped(self):
+        coordinator = self._coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "  Ventana  "}]
+        )
+
+        assert "Ventana" in coordinator.zone_exception_keys
+        assert coordinator.zone_exception_aliases == ("Ventana",)
+
+    def test_blank_aliases_are_dropped(self):
+        coordinator = self._coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "   "}]
+        )
+
+        assert coordinator.zone_exception_keys == {}
+        assert coordinator.exceptions_observed is False
+
+    def test_aliases_preserve_panel_order_including_duplicates(self):
+        coordinator = self._coordinator(
+            [
+                {"status": "0", "deviceType": "MG", "alias": "B"},
+                {"status": "2", "deviceType": "MG", "alias": "A"},
+                {"status": "0", "deviceType": "MG", "alias": "B"},
+            ]
+        )
+
+        assert coordinator.zone_exception_aliases == ("B", "A", "B")
+
+    def test_reparses_only_when_the_payload_object_changes(self):
+        coordinator = self._coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
+        )
+        first = coordinator.zone_exception_keys
+
+        # Mutating in place must not be observed — the memo is keyed on the
+        # payload object, and the coordinator replaces it wholesale on refresh.
+        coordinator.data.status.exceptions.clear()
+        assert coordinator.zone_exception_keys is first
+
+        coordinator.data = self._payload([])
+        assert coordinator.zone_exception_keys == {}
+
+    def test_observed_latches_on_first_non_empty_payload(self):
+        coordinator = self._coordinator(None)
+        assert coordinator.exceptions_observed is False
+
+        coordinator.data = self._payload([])
+        assert coordinator.exceptions_observed is False
+
+        coordinator.data = self._payload(
+            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
+        )
+        assert coordinator.exceptions_observed is True
+
+    def test_observed_stays_latched_after_the_zones_clear(self):
+        """Proof the feed works does not expire when every zone closes."""
+        coordinator = self._coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
+        )
+        assert coordinator.exceptions_observed is True
+
+        coordinator.data = self._payload([])
+        assert coordinator.exceptions_observed is True
+
+    def test_tolerates_missing_data(self):
+        coordinator = self._coordinator()
+        coordinator.data = None
+
+        assert coordinator.zone_exception_keys == {}
+        assert coordinator.zone_exception_aliases == ()
+        assert coordinator.exceptions_observed is False
