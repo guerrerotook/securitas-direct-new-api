@@ -13,7 +13,7 @@ A Home Assistant integration for **Verisure** (formerly Securitas Direct in some
 
 Full alarm control: the mappings between HA's five buttons (Home/Away/Night/Vacation/Custom) and your Verisure modes are yours to set. Optional local PIN. If your install has multiple circuits, you can opt into a dedicated sub-panel for each (Interior, Perimeter, Annex).
 
-Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. A connectivity diagnostic for the panel itself.
+Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. Binary sensors for open zones and flat sensor batteries, plus panel-health sensors for intrusion, mains power, comms and tampering. A connectivity diagnostic for the panel itself.
 
 Bundled Lovelace cards: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, camera card, activity-log card.
 
@@ -79,7 +79,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
 | | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
 | | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
-| **Activity Log and Events** | Poll the activity log once per minute in the background | No | Off by default: the log refreshes on demand from the card, and remote events (someone arming at the panel, an intrusion, a power cut) don't fire on the `verisure_owa_activity` bus. Turn it on if you want every event to fire — see [How often it refreshes](#how-often-it-refreshes). |
+| **Activity Log and Events** | Poll the activity log once per minute in the background | No | Off by default: the log refreshes on demand from the card, and remote events (someone arming at the panel, an intrusion, a power cut) don't fire on the `verisure_owa_activity` bus. Turn it on if you want every event to fire, and to get the four [panel problem sensors](#panel-problem-sensors) — see [How often it refreshes](#how-often-it-refreshes). |
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 | | Operation poll timeout | 120s | How long to wait for the panel to confirm an arm/disarm action before treating it as accepted-but-unconfirmed (range 60–300s). Raise this if arm/disarm operations log `not confirmed within timeout` warnings. |
@@ -245,6 +245,33 @@ chips:
 ## Sentinel Sensors
 
 If your installation includes Sentinel devices, the integration automatically creates temperature, humidity, and air quality sensors for each one.
+
+## Zone Sensors
+
+Your door and window contacts become binary sensors: an **Open** sensor and a **Battery** sensor per zone, each on its own device under the installation. Two installation-wide roll-ups — **Zones Open** and **Zone Battery Low** — list every affected zone in their attributes, so you can put one card on a dashboard instead of twelve.
+
+These cost nothing extra: the panel already sends this data with every status poll, and the integration was previously discarding it.
+
+**Why they may say "Unknown".** The panel reports problems, not states — it sends a list of zones that are open or low on battery, and says nothing at all about the ones that are fine. That means an empty list is ambiguous: it could mean "everything is closed", or it could mean this panel never reports zone problems in the first place. Rather than guess, the sensors stay `Unknown` until your panel has reported at least one real zone exception. From then on they work normally, and an empty list correctly reads as "all clear".
+
+For the same reason the per-zone entities don't appear immediately after install. Open a door (or wait for a low battery) and the whole set appears at once — every zone, not just the one that reported. After that they persist across restarts.
+
+A zone whose panel label the integration can't match to a known device still gets an entity, named after the label the panel uses. Two zones sharing the same label can't be told apart, so they're reported only by the roll-up sensors.
+
+## Panel Problem Sensors
+
+Four sensors track the panel's own health, derived from the activity log:
+
+| Sensor | On when |
+|--------|---------|
+| **Alarm Triggered** | An intrusion alarm fired. Clears when the panel reports it resolved, or when you disarm. |
+| **Mains Power Cut** | The panel lost mains power. Clears when power is restored. |
+| **Communication Problem** | The panel lost contact with the monitoring centre. Clears when contact returns. |
+| **Tamper** | Someone physically interfered with the panel or a detector. The panel never reports tampering as "over", so this clears itself 24 hours after the last report. |
+
+**These only exist if you turn on Activity Log background polling.** They can only be as fresh as the activity log, and with polling off the log refreshes only when you open the card — a safety sensor that silently stops updating is worse than no sensor at all, so the integration doesn't create them.
+
+Turning the setting off later leaves them in the registry as unavailable; delete them if you don't want them. Turning it back on restores them with their history intact.
 
 ## Smart Locks
 

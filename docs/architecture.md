@@ -14,7 +14,7 @@ The integration has three layers:
 │  entity.py  (VerisureEntity base class)                              │
 │  coordinators.py  (DataUpdateCoordinators)                           │
 │  events.py  (Activity log → bus event injection + dedup)             │
-│  discovery.py  (Background camera + lock discovery)                  │
+│  discovery.py  (Background camera + lock + zone discovery)           │
 │  card_resources.py  (Lovelace static-path + resource registration)   │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Integration Hub Layer                                               │
@@ -35,7 +35,7 @@ The integration has three layers:
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client/`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). Operations are grouped into per-domain mixins (`_auth`, `_alarm`, `_lock`, `_camera`, `_sentinel`, `_installation`) that the public `VerisureOwaClient` class composes. The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Four `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, and cameras. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
+Every API call goes through `HttpTransport.execute()` (in `http_transport.py`), which sends POST requests over HTTP to Verisure's cloud. `VerisureOwaClient` (in `client/`) composes an `HttpTransport` instance and adds authentication lifecycle, typed GraphQL execution via Pydantic response envelopes, and all business-level operations (login, arm/disarm, status checks, etc.). Operations are grouped into per-domain mixins (`_auth`, `_alarm`, `_activity`, `_lock`, `_device`, `_camera`, `_sentinel`, `_installation`) that the public `VerisureOwaClient` class composes. The integration hub (`VerisureHub` in `hub.py`) wraps the API client and is shared by all entity platforms. Five `DataUpdateCoordinator` subclasses (in `coordinators.py`) handle periodic polling for alarm status, sentinel sensors, locks, cameras, and the activity timeline. All entity platforms use the `CoordinatorEntity` pattern. Each platform creates entities for the installations discovered at startup.
 
 ## API client layer
 
@@ -273,9 +273,11 @@ The central coordinator between the HA layer and the API client. It owns a `Veri
 
 ### Coordinators (`coordinators.py`)
 
-Four `DataUpdateCoordinator` subclasses replace per-entity independent polling. Each coordinator owns a reference to the `VerisureOwaClient` and `ApiQueue`, fetches data on its configured interval, and handles `SessionExpiredError` (re-login + retry), `WAFBlockedError`, and general `VerisureOwaError` by raising `UpdateFailed`.
+Five `DataUpdateCoordinator` subclasses replace per-entity independent polling. Each coordinator owns a reference to the `VerisureOwaClient` and `ApiQueue`, fetches data on its configured interval, and handles `SessionExpiredError` (re-login + retry), `WAFBlockedError`, and general `VerisureOwaError` by raising `UpdateFailed`.
 
 **`AlarmCoordinator`** — Polls alarm status via `get_general_status()` (lightweight `xSStatus`, no panel wake). Returns `AlarmStatusData` with `SStatus` and `protom_response`. Update interval is the user-configured `scan_interval`.
+
+It also exposes a parsed view of `SStatus.exceptions`, the panel's sparse per-zone problem list: `zone_exception_keys` (alias -> `{"open", "battery_low"}`), `zone_exception_aliases` (the raw list, in panel order), and `exceptions_observed`. The parse is memoised on the payload object, so the several entities reading it on each state write decode the list once. `exceptions_observed` latches True on the first non-empty payload and never resets — see "Binary sensors" for why that latch is load-bearing.
 
 **`SentinelCoordinator`** — Fetches sentinel data and air quality sequentially via `get_sentinel_data()` + `get_air_quality_data()`. Returns `SentinelData`. Fixed 30-minute interval (environmental data changes slowly).
 
@@ -333,8 +335,12 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
     └── Each platform stores its async_add_entities callback in entry_data
         and creates only entities it can build without API calls
 12. Launch background task (_async_discover_devices) to:
+    ├── Discover lock devices → add Lock entities
     ├── Discover camera devices → create CameraCoordinator → add Camera + CaptureButton entities
-    └── Discover lock devices → add Lock entities
+    └── Discover zones (reuses the cached inventory — no extra API call)
+        └── Arm the evidence gate; per-zone entities appear once the panel
+            reports its first exception (or immediately if the registry shows
+            they existed on a previous run)
 ```
 
 **What each platform does at setup (synchronous):**
@@ -342,7 +348,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 | Platform | Creates | API calls |
 |----------|---------|-----------|
 | alarm_control_panel | `CombinedVerisureOwaAlarmPanel` entities (CoordinatorEntity) | None (coordinator-driven) |
-| binary_sensor | WifiConnectedSensor entities (CoordinatorEntity) | None (coordinator-driven) |
+| binary_sensor | WifiConnectedSensor, zone aggregates, panel problem sensors (all CoordinatorEntity) | None (stores callback for per-zone entities) |
 | button | `VerisureRefreshButton` entities (deprecated wrappers around `async_manual_refresh`) | None (stores callback for capture buttons) |
 | camera | Nothing | None (stores callback) |
 | sensor | Sentinel sensors (CoordinatorEntity) | None (coordinator-driven) |
@@ -713,7 +719,67 @@ Sentinel sensors are discovered during setup by scanning services for ones whose
 
 ### Binary sensors (`binary_sensor.py`)
 
-- **WifiConnectedSensor** — Diagnostic binary sensor showing the panel's WiFi connection status from `SStatus.wifi_connected`. One per installation. Uses `CoordinatorEntity[AlarmCoordinator]` — updated whenever the alarm coordinator refreshes. Uses `BinarySensorDeviceClass.CONNECTIVITY` and `EntityCategory.DIAGNOSTIC`. `should_poll = False`.
+Three families, all `CoordinatorEntity` with `should_poll = False`, all costing **zero additional API calls** — each reads data the integration was already fetching.
+
+- **WifiConnectedSensor** — Diagnostic binary sensor showing the panel's WiFi connection status from `SStatus.wifi_connected`. One per installation. Uses `CoordinatorEntity[AlarmCoordinator]` — updated whenever the alarm coordinator refreshes. Uses `BinarySensorDeviceClass.CONNECTIVITY` and `EntityCategory.DIAGNOSTIC`.
+
+#### Zone exception sensors
+
+Source: `SStatus.exceptions`, requested by `GENERAL_STATUS_QUERY` and polled by `AlarmCoordinator` on every cycle. Each row is `{status, deviceType, alias}` and is decoded by the existing `ActivityException.status_key`: `"0"` → open, `"2"` → battery low, anything else → unknown (which counts towards neither sensor).
+
+**The list is sparse — and that is the central design constraint.** Only zones with a current problem appear, so an absent zone means "no exception reported". That implies "closed and healthy" *only if the panel populates the field at all*. If it never does, every zone would read `off` forever — a silent, confident lie about the state of a security system.
+
+The integration therefore refuses to infer anything until it has evidence:
+
+- `AlarmCoordinator.exceptions_observed` latches `True` on the first non-empty payload and never resets.
+- Until it flips, every zone-derived entity — aggregates included — reports `None` (`unknown`), never `off`.
+- Per-zone entities are not created at all before that point. On the first non-empty payload the **whole** inventory is materialised at once, so one open door brings every zone online rather than leaving a permanently-shut door without an entity.
+- The latch is per-coordinator and so resets on restart. The durable proof is the entity registry: `_zones_already_registered` looks for a `..._zone_` unique_id on the config entry and, finding one, creates the entities immediately. No extra `Store`, and deleting the entities simply lets them come back on the next real exception.
+
+**Joining aliases to devices.** The exceptions payload identifies a zone only by `alias`, a panel label that observed data truncates to ~11 characters; the inventory (`xSDeviceList`, shared with camera discovery) carries the full `name`. `alias_matches` accepts an exact match, or a prefix in either direction when both labels are at least 4 characters. `match_exception_keys` then requires the prefix match to be **unique**: if `Dorm` plausibly denotes both `Dorm1` and `Dorm2`, nothing is returned. Reporting the neighbouring door's state is far worse than reporting nothing. Case is preserved deliberately — casefolding would collapse short accented labels such as `Vbaño`.
+
+Two devices sharing a panel label are genuinely indistinguishable, so both are dropped from the per-device join (with a warning) and surface only through the aggregates and an alias-keyed entity.
+
+**Nothing is ever dropped.** Aggregates are computed from the panel's raw alias list, never from the inventory, so they work even when device discovery failed outright. Any alias no materialised zone accounts for gets its own alias-keyed entity — covering truncation mismatches, zones renamed after discovery, device types not yet in `ZONE_DEVICE_TYPES`, and a failed inventory fetch.
+
+| Entity | unique_id | device_class | Category |
+|--------|-----------|--------------|----------|
+| `Zones Open` (aggregate) | `..._zones_open` | `OPENING` | — (dashboard signal) |
+| `Zone Battery Low` (aggregate) | `..._zones_battery_low` | `BATTERY` | `DIAGNOSTIC` |
+| `Open` (per zone) | `..._zone_{zone_id}` | `OPENING` | — |
+| `Battery` (per zone) | `..._zone_battery_{zone_id}` | `BATTERY` | `DIAGNOSTIC` |
+| orphan variants | `..._zone_alias_{slug}` / `..._zone_battery_alias_{slug}` | as above | as above |
+
+Aggregates carry `{"zones": [...aliases...], "count": n}`; per-zone entities carry `{"zone_key", "panel_alias"}`. Each zone is its own child device via `zone_device_info()`, linked to the installation through the shared `_link_to_installation` (`via_device_id` on HA ≥ 2026.8, `via_device` below).
+
+Only `MG` (magnetic contact) is promoted to a per-zone device today — `ZONE_DEVICE_TYPES` in `client/_device.py` documents how to add more. Anything else still reaches the user through the orphan path.
+
+#### Panel problem sensors
+
+`SStatus` carries nothing about intrusion, mains power, panel-to-central comms, or tampering, so the activity timeline is the only source. It reports these as *edges*: "alarm fired" is an event, with nothing afterwards saying it is still firing.
+
+| Entity | unique_id | device_class | Category | ON | OFF |
+|--------|-----------|--------------|----------|----|-----|
+| `Alarm Triggered` | `..._alarm_triggered` | `SAFETY` | — | `ALARM` | `ALARM_RESOLVED`, `DISARMED` |
+| `Mains Power Cut` | `..._power_cut` | `PROBLEM` | `DIAGNOSTIC` | `POWER_CUT` | `POWER_RESTORED` |
+| `Communication Problem` | `..._communication_problem` | `PROBLEM` | `DIAGNOSTIC` | `COMMUNICATION_FAILED` | `COMMUNICATION_RESTORED` |
+| `Tamper` | `..._tamper` | `TAMPER` | — | `TAMPERING`, `SABOTAGE` | 24-hour expiry |
+
+**Created only when the timeline is actually polled.** `_build_panel_problem_sensors` returns nothing unless `activity_coordinator.update_interval` is set — i.e. unless the user enabled background activity polling. A safety sensor that silently stops updating is worse than an absent one. The gate reads the coordinator's interval rather than the config key because the interval is the single derived truth (`sensor.py` asks the same question the same way). Turning the setting off later leaves the entities in the registry as unavailable; turning it back on restores them with the same unique_id, preserving `entity_id` and recorder history.
+
+**State is a stateless window scan**, not transition tracking: on every read, walk `coordinator.data.events` (newest first, capped at 30) and take the first event decisive for that sensor. `new_events` is empty by construction on the first poll after every restart and reload, so a transition tracker would learn nothing at startup and would need this scan anyway as a cold-start pass. Scanning also resolves an ON and an OFF arriving in the same batch for free, and self-heals: if HA was down while an alarm fired *and* was resolved, the first poll sees both rows and lands `off`.
+
+Nothing decisive in the window means `off`, not `unknown` — a healthy panel emits 30 arm/disarm rows and no problem rows, and a tile stuck on `Unknown` forever is indistinguishable from a broken integration. `unknown` is reserved for genuinely unknown (no data fetched yet).
+
+**No `RestoreEntity`, deliberately.** A restored value is an unverifiable claim about the panel made by a process that was not running. Restoring `on` for an alarm resolved during the outage would fire a phantom "alarm resolved" transition ~60 s later. The only cost is a brief `unknown` at startup, and `unknown → on` fires `to: "on"` triggers just as well as `off → on`.
+
+**`DISARMED` also clears the alarm** because only one panel type code maps to `ALARM_RESOLVED` (331) against two for `ALARM` (13, 14); on a panel that never emits 331 the sensor would latch on forever. A panel cannot be in alarm while disarmed, and disarming is the user acknowledging the intrusion.
+
+**Tamper expires after 24 hours** because the panel never reports interference as ended. Clearing on a later `DISARMED` would be semantically false (disarming does not repair a prised-open cover) and would fire on the next routine morning disarm; never clearing makes the sensor useless after one lifetime event; clearing when the row leaves the 30-row window is unpredictable. An unparseable or future timestamp counts as recent — for a safety sensor a false alert beats a silent miss.
+
+**Injected rows are skipped; `duplicate_of` echoes are kept.** This is a stuck-sensor guard: `COMMUNICATION_FAILED` is injectable but there is no injectable `COMMUNICATION_RESTORED`, so an injected failure would latch the sensor on with no possible pairing clear. Injected rows also describe HA-to-cloud health (already covered by `WifiConnectedSensor`), whereas these sensors describe the panel. A `duplicate_of` row is the panel's own entry with authoritative type and native-language alias, and since the injected original is already filtered, each real event counts exactly once.
+
+`PROBLEM` rather than `POWER`/`CONNECTIVITY` keeps "on = bad" uniform: those classes mean "on = healthy", which would make `is_on == False` read as "mains cut" — backwards in every automation, and a second `CONNECTIVITY` sensor with inverted polarity next to `WifiConnectedSensor` would be a support-ticket generator.
 
 ### Smart lock (`lock.py`)
 
@@ -757,7 +823,7 @@ Two camera entity types per discovered camera, both using `CoordinatorEntity[Cam
 
 Both entities are grouped under a per-camera child device (via `camera_device_info()`), linked to the installation device as parent via `via_device`.
 
-**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `VerisureCamera` + `VerisureCameraFull` + `VerisureCaptureButton` are created using stored `async_add_entities` callbacks. The buttons are constructed with a `camera_entity=<thumbnail_entity>` reference so their deprecated `async_press` can delegate directly to `camera_entity.async_manual_capture()` instead of doing a runtime entity-id lookup. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
+**Discovery:** Cameras are discovered in the background task. `get_camera_devices()` is a filter over the shared whole-inventory `get_devices()` fetch (see `client/_device.py`), so camera and zone discovery cost one `xSDeviceList` round-trip between them. It returns devices of type `"QR"` (Italy and some regions), `"YR"` (PIR cameras, Spain), `"YP"` (perimetral exterior, deviceType 103), or `"QP"` (perimetral exterior, deviceType 107). For each device a `VerisureCamera` + `VerisureCameraFull` + `VerisureCaptureButton` are created using stored `async_add_entities` callbacks. The buttons are constructed with a `camera_entity=<thumbnail_entity>` reference so their deprecated `async_press` can delegate directly to `camera_entity.async_manual_capture()` instead of doing a runtime entity-id lookup. Devices with `isActive: null` are treated as active (only `isActive: False` is filtered out). YR devices have `zoneId: null` in the API; zone_id falls back to the device `id` field.
 
 **Image lifecycle:**
 1. On coordinator refresh (every 30 minutes), thumbnails are fetched for all cameras
@@ -990,7 +1056,7 @@ tests/
 ├── test_api_queue.py        ApiQueue priority, throttling, preemption
 ├── test_architecture.py     Structural tests (imports, file existence, module patterns)
 ├── test_auth.py             Login, refresh, 2FA, token lifecycle (HA-level)
-├── test_binary_sensor.py    WiFi connection binary sensor (coordinator-driven)
+├── test_binary_sensor.py    WiFi, zone exception + panel problem binary sensors
 ├── test_button.py           Refresh button entity, capture button, 403 WAF notification
 ├── test_camera_api.py       Camera API operations: discover, capture, thumbnails
 ├── test_camera_platform.py  Camera entity platform setup and image serving
@@ -1113,7 +1179,7 @@ Key design choices:
 | `coordinators.py` | 78% | Camera full-image fetch, thumbnail recency check |
 | `alarm_control_panel.py` | 97% | `async_setup_entry`, some HA callbacks |
 | `api_queue.py` | 100% | -- |
-| `binary_sensor.py` | 100% | -- |
+| `binary_sensor.py` | 99% | -- |
 | `button.py` | 100% | -- |
 | `camera.py` | 98% | Base64 decode error path |
 | `config_flow.py` | 89% | Some flow branches |
@@ -1154,12 +1220,14 @@ alongside it under `.github/workflows/`.
 |------|-------|---------|
 | `__init__.py` | 848 | Integration setup functions, session sharing, background discovery, coordinator creation, card resource registration |
 | `hub.py` | 576 | `VerisureHub` (central hub wrapping VerisureOwaClient), `VerisureDevice` (device registry wrapper) |
-| `entity.py` | 96 | `VerisureEntity` base class, `verisure_device_info()`, `camera_device_info()` |
+| `entity.py` | 170 | `VerisureEntity` base class, `securitas_device_info()`, `camera_device_info()`, `lock_device_info()`, `zone_device_info()` |
 | `coordinators.py` | 429 | `AlarmCoordinator`, `SentinelCoordinator`, `LockCoordinator`, `CameraCoordinator` |
 | `config_flow.py` | 791 | Config flow (setup + 2FA + reauth + installation picker) and options flow (settings + mappings) |
 | `alarm_control_panel.py` | 840 | Alarm entity (CoordinatorEntity) with state mapping, arm/disarm, force arm, PIN validation, WAF tracking |
 | `sensor.py` | 185 | Sentinel temperature, humidity, air quality sensors (CoordinatorEntity) |
-| `binary_sensor.py` | 63 | WiFi connection status diagnostic sensor (CoordinatorEntity, no polling) |
+| `binary_sensor.py` | 594 | WiFi diagnostic, zone exception sensors (evidence-gated), panel problem sensors (timeline-derived) |
+| `verisure_owa_api/client/_device.py` | 132 | Shared `xSDeviceList` fetch + camera/zone inventory filters |
+| `verisure_owa_api/models/device.py` | 29 | `PanelDevice` — one row of the panel's peripheral inventory |
 | `lock.py` | 345 | Multi-lock entity (CoordinatorEntity) with lock feature attributes |
 | `camera.py` | 166 | Camera entities: VerisureCamera (thumbnail), VerisureCameraFull (full image), both CoordinatorEntity |
 | `button.py` | 152 | Refresh button with WAF notification, capture button |
