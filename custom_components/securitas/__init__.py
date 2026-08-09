@@ -1203,8 +1203,11 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
     # Cancel any pending lock-config retry timers before tearing down platforms,
     # so a timer firing mid-unload can't schedule a follow-up retry against a
-    # half-disposed hub.
+    # half-disposed hub. Zone-discovery listeners go the same way: a coordinator
+    # update mid-unload must not try to add entities to a dead platform.
     for unsub in entry_data.get("lock_config_retry_unsubs", []):
+        unsub()
+    for unsub in entry_data.get("zone_gate_unsubs", []):
         unsub()
 
     unload_ok = await hass.config_entries.async_unload_platforms(

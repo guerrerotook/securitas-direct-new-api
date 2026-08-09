@@ -80,7 +80,10 @@
                     "activity": {
                         "name": "Activity Log and Events",
                         "data": {
-                            "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations)"
+                            "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations and panel problem sensors)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Also creates the Alarm Triggered, Mains Power Cut, Communication Problem and Tamper binary sensors. They can only be as fresh as the activity log, so they are not created while this is off."
                         }
                     },
                     "advanced": {
@@ -139,7 +142,10 @@
                     "activity": {
                         "name": "Activity Log and Events",
                         "data": {
-                            "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations)"
+                            "enable_activity_polling": "Poll the activity log once per minute in the background (for event automations and panel problem sensors)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Also creates the Alarm Triggered, Mains Power Cut, Communication Problem and Tamper binary sensors. They can only be as fresh as the activity log, so they are not created while this is off."
                         }
                     },
                     "advanced": {

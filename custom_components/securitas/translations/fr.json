@@ -58,6 +58,9 @@
                         "name": "Journal d'activité et événements",
                         "data": {
                             "enable_activity_polling": "Interroger le journal d'activité une fois par minute en arrière-plan (pour les automatisations par événements)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Crée également les capteurs binaires Alarme Déclenchée, Coupure de Courant, Problème de Communication et Sabotage. Ils ne peuvent être plus à jour que le journal d'activité, ils ne sont donc pas créés tant que cette option est désactivée."
                         }
                     },
                     "advanced": {
@@ -117,6 +120,9 @@
                         "name": "Journal d'activité et événements",
                         "data": {
                             "enable_activity_polling": "Interroger le journal d'activité une fois par minute en arrière-plan (pour les automatisations par événements)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Crée également les capteurs binaires Alarme Déclenchée, Coupure de Courant, Problème de Communication et Sabotage. Ils ne peuvent être plus à jour que le journal d'activité, ils ne sont donc pas créés tant que cette option est désactivée."
                         }
                     },
                     "advanced": {

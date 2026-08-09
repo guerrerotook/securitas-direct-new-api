@@ -58,6 +58,9 @@
                         "name": "Registre d'activitat i esdeveniments",
                         "data": {
                             "enable_activity_polling": "Consulta el registre d'activitat un cop per minut en segon pla (per a automatitzacions per esdeveniments)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "També crea els sensors binaris Alarma Disparada, Tall de Corrent, Problema de Comunicació i Sabotatge. Només poden estar tan actualitzats com el registre d'activitat, per això no es creen mentre això estigui desactivat."
                         }
                     },
                     "advanced": {
@@ -117,6 +120,9 @@
                         "name": "Registre d'activitat i esdeveniments",
                         "data": {
                             "enable_activity_polling": "Consulta el registre d'activitat un cop per minut en segon pla (per a automatitzacions per esdeveniments)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "També crea els sensors binaris Alarma Disparada, Tall de Corrent, Problema de Comunicació i Sabotatge. Només poden estar tan actualitzats com el registre d'activitat, per això no es creen mentre això estigui desactivat."
                         }
                     },
                     "advanced": {

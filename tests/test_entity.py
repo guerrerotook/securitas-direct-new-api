@@ -96,3 +96,75 @@ def test_camera_device_info_without_hass_uses_via_device(monkeypatch):
     info = camera_device_info(_make_installation(), _make_camera_device(), None)
     assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
     assert "via_device_id" not in info
+
+
+# ---------------------------------------------------------------------------
+# zone_device_info — per-zone child devices
+# ---------------------------------------------------------------------------
+
+
+def test_zone_device_info_uses_v5_schema():
+    from custom_components.securitas.entity import zone_device_info
+
+    info = zone_device_info(
+        _make_installation(), "MG04", "Ptaentrada", "Magnetic contact"
+    )
+    assert (DOMAIN, "v4_securitas_direct.100001_zone_MG04") in info["identifiers"]
+    assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
+    assert info["manufacturer"] == "Verisure"
+    assert info["name"] == "Ptaentrada"
+    assert info["model"] == "Magnetic contact"
+
+
+def test_zone_device_info_uses_via_device_when_id_unsupported(monkeypatch):
+    """On HA < 2026.8 (no via_device_id), the parent link stays via_device."""
+    from custom_components.securitas.entity import zone_device_info
+
+    monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", False)
+    info = zone_device_info(_make_installation(), "MG04", "Ptaentrada")
+    assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
+    assert "via_device_id" not in info
+
+
+async def test_zone_device_info_uses_via_device_id_when_supported(hass, monkeypatch):
+    """On HA >= 2026.8, link the child by the parent's registry id."""
+    from custom_components.securitas.entity import zone_device_info
+
+    monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
+    parent = _register_installation_device(hass)
+    info = dict(
+        zone_device_info(_make_installation(), "MG04", "Ptaentrada", None, hass)
+    )
+    assert info["via_device_id"] == parent.id
+    assert "via_device" not in info
+
+
+async def test_zone_device_info_falls_back_when_parent_missing(hass, monkeypatch):
+    """Parent not registered yet → keep via_device so the link still works."""
+    from custom_components.securitas.entity import zone_device_info
+
+    monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
+    info = zone_device_info(_make_installation(), "MG04", "Ptaentrada", None, hass)
+    assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
+    assert "via_device_id" not in info
+
+
+def test_zone_device_info_without_hass_uses_via_device(monkeypatch):
+    """No hass (can't resolve the registry) → keep via_device even on new HA."""
+    from custom_components.securitas.entity import zone_device_info
+
+    monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
+    info = zone_device_info(_make_installation(), "MG04", "Ptaentrada", None, None)
+    assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
+    assert "via_device_id" not in info
+
+
+def test_zone_device_info_orphan_alias_key():
+    """A zone known only by name gets an alias-namespaced identifier."""
+    from custom_components.securitas.entity import zone_device_info
+
+    info = zone_device_info(_make_installation(), "alias_porta1cucin", "Porta1cucin")
+    assert (
+        DOMAIN,
+        "v4_securitas_direct.100001_zone_alias_porta1cucin",
+    ) in info["identifiers"]

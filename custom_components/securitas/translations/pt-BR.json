@@ -58,6 +58,9 @@
                         "name": "Registro de atividade e eventos",
                         "data": {
                             "enable_activity_polling": "Consultar o registro de atividade uma vez por minuto em segundo plano (para automações por eventos)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Também cria os sensores binários Alarme Disparado, Queda de Energia, Problema de Comunicação e Violação. Só podem estar tão atualizados quanto o registro de atividades, portanto não são criados enquanto isto estiver desativado."
                         }
                     },
                     "advanced": {
@@ -117,6 +120,9 @@
                         "name": "Registro de atividade e eventos",
                         "data": {
                             "enable_activity_polling": "Consultar o registro de atividade uma vez por minuto em segundo plano (para automações por eventos)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Também cria os sensores binários Alarme Disparado, Queda de Energia, Problema de Comunicação e Violação. Só podem estar tão atualizados quanto o registro de atividades, portanto não são criados enquanto isto estiver desativado."
                         }
                     },
                     "advanced": {

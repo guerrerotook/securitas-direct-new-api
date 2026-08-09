@@ -2526,3 +2526,399 @@ class TestServiceDescriptionTargets:
                         f"of strings so it survives async_set_service_schema's "
                         f"unvalidated copy; got {domain!r}"
                     )
+
+
+# ===========================================================================
+# _discover_zones tests — evidence-gated per-zone entity creation
+# ===========================================================================
+
+
+def _zone_coordinator(exceptions=None):
+    """A real AlarmCoordinator with only its exception-parsing state wired."""
+    from custom_components.securitas.coordinators import (
+        AlarmCoordinator,
+        AlarmStatusData,
+    )
+    from custom_components.securitas.verisure_owa_api.models import SStatus
+
+    coordinator = AlarmCoordinator.__new__(AlarmCoordinator)
+    coordinator._exc_cache_data = None
+    coordinator._exc_keys = {}
+    coordinator._exc_aliases = ()
+    coordinator._exceptions_observed = False
+    coordinator.data = AlarmStatusData(status=SStatus(exceptions=exceptions))
+    coordinator.async_add_listener = MagicMock(return_value=MagicMock())
+    return coordinator
+
+
+def _panel_device(zone_id: str, name: str, device_type: str = "MG"):
+    """Build an inventory row, deriving `code` from the zone id.
+
+    The code must be distinct per device: filter_zone_devices deduplicates on
+    (type, code) to collapse the duplicate rows annex installations return.
+    """
+    from custom_components.securitas.verisure_owa_api.models import PanelDevice
+
+    digits = "".join(c for c in zone_id if c.isdigit())
+    return PanelDevice(
+        id=zone_id,
+        code=int(digits or 0),
+        zone_id=zone_id,
+        name=name,
+        device_type=device_type,
+    )
+
+
+def _zone_entry_data(coordinator, add_entities):
+    return {
+        "binary_sensor_add_entities": add_entities,
+        "alarm_coordinator": coordinator,
+    }
+
+
+def _zone_hub(devices):
+    hub = MagicMock()
+    hub.hass = None
+    hub.get_devices = AsyncMock(return_value=devices)
+    return hub
+
+
+def _added_unique_ids(add_entities) -> list[str]:
+    ids: list[str] = []
+    for call in add_entities.call_args_list:
+        ids.extend(e._attr_unique_id for e in call.args[0])
+    return ids
+
+
+class TestDiscoverZones:
+    """Per-zone binary sensors appear only once the panel proves its feed."""
+
+    @pytest.mark.asyncio
+    async def test_no_entities_without_evidence(self):
+        """An empty exceptions list is not proof the panel populates it."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator([])
+        hub = _zone_hub([_panel_device("MG04", "Ptaentrada")])
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        add_entities.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_whole_inventory_materialises_on_first_evidence(self):
+        """One open door brings every zone online, including the shut ones."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Ptaentrada"}]
+        )
+        hub = _zone_hub(
+            [_panel_device("MG04", "Ptaentrada"), _panel_device("MG05", "Ventana")]
+        )
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        ids = _added_unique_ids(add_entities)
+        assert "v4_securitas_direct.123456_zone_MG04" in ids
+        assert "v4_securitas_direct.123456_zone_MG05" in ids
+        assert "v4_securitas_direct.123456_zone_battery_MG05" in ids
+
+    @pytest.mark.asyncio
+    async def test_registry_rows_restore_entities_without_fresh_evidence(self):
+        """After a restart the latch resets; the registry is the durable proof."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator([])
+        hub = _zone_hub([_panel_device("MG04", "Ptaentrada")])
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=True,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        assert "v4_securitas_direct.123456_zone_MG04" in _added_unique_ids(add_entities)
+
+    @pytest.mark.asyncio
+    async def test_alias_absent_from_inventory_gets_its_own_entity(self):
+        """A zone the panel names but the inventory lacks must not be dropped."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator(
+            [{"status": "0", "deviceType": "ZZ", "alias": "Neverseen"}]
+        )
+        hub = _zone_hub([])
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        assert "v4_securitas_direct.123456_zone_alias_neverseen" in _added_unique_ids(
+            add_entities
+        )
+
+    @pytest.mark.asyncio
+    async def test_truncated_alias_does_not_duplicate_a_known_zone(self):
+        """The panel's short label and the inventory name are the same zone."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Pfincameret"}]
+        )
+        hub = _zone_hub([_panel_device("MG11", "Pfincameretta")])
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        ids = _added_unique_ids(add_entities)
+        assert "v4_securitas_direct.123456_zone_MG11" in ids
+        assert not any("alias_" in i for i in ids)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_panel_labels_are_excluded(self):
+        """Two contacts sharing a label cannot be told apart — report neither."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
+        )
+        hub = _zone_hub(
+            [
+                _panel_device("MG05", "Ventana"),
+                _panel_device("MG06", "Ventana"),
+                _panel_device("MG07", "Ptacocina"),
+            ]
+        )
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        ids = _added_unique_ids(add_entities)
+        assert "v4_securitas_direct.123456_zone_MG05" not in ids
+        assert "v4_securitas_direct.123456_zone_MG06" not in ids
+        assert "v4_securitas_direct.123456_zone_MG07" in ids
+        # Still surfaced, just not as a per-device entity.
+        assert "v4_securitas_direct.123456_zone_alias_ventana" in ids
+
+    @pytest.mark.asyncio
+    async def test_inventory_failure_is_survivable(self):
+        """Aggregates keep working; orphans still materialise from the feed."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
+        )
+        hub = MagicMock()
+        hub.hass = None
+        hub.get_devices = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        assert "v4_securitas_direct.123456_zone_alias_ventana" in _added_unique_ids(
+            add_entities
+        )
+
+    @pytest.mark.asyncio
+    async def test_listener_unsub_is_tracked_for_unload(self):
+        from custom_components.securitas.discovery import _discover_zones
+
+        coordinator = _zone_coordinator([])
+        entry_data = _zone_entry_data(coordinator, MagicMock())
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                _zone_hub([]),
+                make_installation(),
+                entry_data,
+                MagicMock(),
+            )
+
+        assert len(entry_data["zone_gate_unsubs"]) == 1
+        coordinator.async_add_listener.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_platform_callback_is_a_no_op(self):
+        """binary_sensor setup hasn't run yet — do nothing rather than crash."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        hub = _zone_hub([_panel_device("MG04", "Ptaentrada")])
+
+        await _discover_zones(MagicMock(), hub, make_installation(), {}, MagicMock())
+
+        hub.get_devices.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_blank_inventory_names_are_skipped(self):
+        """A nameless row cannot be joined to any alias — ignore it."""
+        from custom_components.securitas.discovery import _discover_zones
+
+        add_entities = MagicMock()
+        coordinator = _zone_coordinator(
+            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
+        )
+        hub = _zone_hub([_panel_device("MG04", "  "), _panel_device("MG05", "Ventana")])
+
+        with patch(
+            "custom_components.securitas.discovery._zones_already_registered",
+            return_value=False,
+        ):
+            await _discover_zones(
+                MagicMock(),
+                hub,
+                make_installation(),
+                _zone_entry_data(coordinator, add_entities),
+                MagicMock(),
+            )
+
+        ids = _added_unique_ids(add_entities)
+        assert "v4_securitas_direct.123456_zone_MG04" not in ids
+        assert "v4_securitas_direct.123456_zone_MG05" in ids
+
+
+class TestZonesAlreadyRegistered:
+    """The registry probe that survives the per-coordinator evidence latch."""
+
+    @staticmethod
+    def _entry(hass):
+        from custom_components.securitas.const import DOMAIN
+
+        entry = MockConfigEntry(domain=DOMAIN, data={})
+        entry.add_to_hass(hass)
+        return entry
+
+    @pytest.mark.asyncio
+    async def test_false_when_nothing_registered(self, hass):
+        from custom_components.securitas.discovery import _zones_already_registered
+
+        assert (
+            _zones_already_registered(hass, self._entry(hass), make_installation())
+            is False
+        )
+
+    @pytest.mark.asyncio
+    async def test_true_when_a_zone_entity_exists(self, hass):
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.discovery import _zones_already_registered
+
+        entry = self._entry(hass)
+        er.async_get(hass).async_get_or_create(
+            "binary_sensor",
+            DOMAIN,
+            "v4_securitas_direct.123456_zone_MG04",
+            config_entry=entry,
+        )
+
+        assert _zones_already_registered(hass, entry, make_installation()) is True
+
+    @pytest.mark.asyncio
+    async def test_aggregates_alone_do_not_count(self, hass):
+        """`_zones_` is the aggregate namespace; only `_zone_` rows are per-zone."""
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.discovery import _zones_already_registered
+
+        entry = self._entry(hass)
+        for unique_id in (
+            "v4_securitas_direct.123456_zones_open",
+            "v4_securitas_direct.123456_zones_battery_low",
+            "v4_securitas_direct.123456_wifi_connected",
+        ):
+            er.async_get(hass).async_get_or_create(
+                "binary_sensor", DOMAIN, unique_id, config_entry=entry
+            )
+
+        assert _zones_already_registered(hass, entry, make_installation()) is False
+
+    @pytest.mark.asyncio
+    async def test_other_installations_do_not_count(self, hass):
+        from homeassistant.helpers import entity_registry as er
+
+        from custom_components.securitas.const import DOMAIN
+        from custom_components.securitas.discovery import _zones_already_registered
+
+        entry = self._entry(hass)
+        er.async_get(hass).async_get_or_create(
+            "binary_sensor",
+            DOMAIN,
+            "v4_securitas_direct.999999_zone_MG04",
+            config_entry=entry,
+        )
+
+        assert _zones_already_registered(hass, entry, make_installation()) is False

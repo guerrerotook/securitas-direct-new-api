@@ -110,6 +110,31 @@ def lock_device_info(
     return info
 
 
+def zone_device_info(
+    installation: Installation,
+    zone_key: str,
+    name: str | None,
+    model: str | None = None,
+    hass: HomeAssistant | None = None,
+) -> DeviceInfo:
+    """Build DeviceInfo for a per-zone child device (door/window contact).
+
+    ``zone_key`` is the panel's zone id (e.g. ``MG04``) for a device found in
+    the inventory, or ``alias_<slug>`` for a zone the panel reported by name
+    only. Both the open and the battery entity for a zone share this device.
+    """
+    info = DeviceInfo(
+        identifiers={
+            (DOMAIN, f"v4_securitas_direct.{installation.number}_zone_{zone_key}")
+        },
+        name=name,
+        manufacturer="Verisure",
+        model=model,
+    )
+    _link_to_installation(info, installation, hass)
+    return info
+
+
 class VerisureEntity(Entity):
     """Base class for Verisure OWA entities."""
 

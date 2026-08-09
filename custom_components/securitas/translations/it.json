@@ -58,6 +58,9 @@
                         "name": "Registro attività ed eventi",
                         "data": {
                             "enable_activity_polling": "Interroga il registro attività una volta al minuto in background (per le automazioni basate su eventi)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Crea anche i sensori binari Allarme Scattato, Interruzione di Corrente, Problema di Comunicazione e Manomissione. Possono essere aggiornati solo quanto il registro attività, quindi non vengono creati finché questa opzione è disattivata."
                         }
                     },
                     "advanced": {
@@ -117,6 +120,9 @@
                         "name": "Registro attività ed eventi",
                         "data": {
                             "enable_activity_polling": "Interroga il registro attività una volta al minuto in background (per le automazioni basate su eventi)"
+                        },
+                        "data_description": {
+                            "enable_activity_polling": "Crea anche i sensori binari Allarme Scattato, Interruzione di Corrente, Problema di Comunicazione e Manomissione. Possono essere aggiornati solo quanto il registro attività, quindi non vengono creati finché questa opzione è disattivata."
                         }
                     },
                     "advanced": {
