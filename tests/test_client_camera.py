@@ -1177,6 +1177,60 @@ class TestInventoryFilters:
         assert {z.device_type for z in zones} == {"MG"}
         assert zones[0].name == "Ptaentrada"
 
+    async def test_zone_filter_accepts_mr_contacts(self, client, transport):
+        """A live Spanish panel reports its whole contact set as MR, no MG."""
+        from custom_components.securitas.verisure_owa_api.client import (
+            filter_zone_devices,
+        )
+
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {
+                    "id": "1",
+                    "code": "3",
+                    "zoneId": "MR03",
+                    "name": "Puerta",
+                    "type": "MR",
+                    "isActive": True,
+                },
+                {
+                    "id": "2",
+                    "code": "4",
+                    "zoneId": "MR04",
+                    "name": "V1",
+                    "type": "MR",
+                    "isActive": True,
+                },
+                {
+                    "id": "3",
+                    "code": "11",
+                    "zoneId": "MR11",
+                    "name": "V8",
+                    "type": "MR",
+                    "isActive": False,
+                },
+                {
+                    "id": "4",
+                    "code": "1",
+                    "zoneId": "QR01",
+                    "name": "Salon",
+                    "type": "QR",
+                    "isActive": True,
+                },
+                {
+                    "id": "5",
+                    "code": "1",
+                    "zoneId": "VV01",
+                    "name": "Recibidor",
+                    "type": "VV",
+                    "isActive": True,
+                },
+            ]
+        )
+        zones = filter_zone_devices(await client.get_devices(_make_installation()))
+
+        assert [z.zone_id for z in zones] == ["MR03", "MR04"]
+
     async def test_zone_filter_drops_inactive_but_keeps_unreported(
         self, client, transport
     ):

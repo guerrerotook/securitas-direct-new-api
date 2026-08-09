@@ -12,12 +12,12 @@ from homeassistant.const import EntityCategory
 
 from custom_components.securitas.binary_sensor import (
     PANEL_PROBLEM_SPECS,
+    ArmingExceptionsSensor,
     PanelProblemSensor,
     WifiConnectedSensor,
+    ZoneArmingExceptionSensor,
     ZoneBatteryLowSensor,
-    ZoneOpenSensor,
     ZonesBatteryLowSensor,
-    ZonesOpenSensor,
     ZoneTarget,
     _build_panel_problem_sensors,
     alias_matches,
@@ -515,15 +515,14 @@ def make_alarm_data(exceptions: list[dict] | None = None) -> AlarmStatusData:
 def make_zone_coordinator(exceptions: list[dict] | None = None) -> AlarmCoordinator:
     """Build a real AlarmCoordinator without running its HA-bound __init__.
 
-    Real rather than mocked: the exception parsing, the memo and the
-    observed-latch are the contract these sensors are built on, so the tests
-    should exercise them rather than a hand-rolled stand-in.
+    Real rather than mocked: the exception parsing and its memo are the
+    contract these sensors are built on, so the tests should exercise them
+    rather than a hand-rolled stand-in.
     """
     coordinator = AlarmCoordinator.__new__(AlarmCoordinator)
     coordinator._exc_cache_data = None
     coordinator._exc_keys = {}
     coordinator._exc_aliases = ()
-    coordinator._exceptions_observed = False
     coordinator.data = make_alarm_data(exceptions)
     return coordinator
 
@@ -603,7 +602,7 @@ class TestZoneAggregates:
         coordinator = make_zone_coordinator()
 
         assert (
-            ZonesOpenSensor(coordinator, installation)._attr_unique_id
+            ArmingExceptionsSensor(coordinator, installation)._attr_unique_id
             == "v4_securitas_direct.123456_zones_open"
         )
         assert (
@@ -615,11 +614,13 @@ class TestZoneAggregates:
         installation = make_installation(alias="Office")
         coordinator = make_zone_coordinator()
 
-        open_sensor = ZonesOpenSensor(coordinator, installation)
+        open_sensor = ArmingExceptionsSensor(coordinator, installation)
         battery_sensor = ZonesBatteryLowSensor(coordinator, installation)
 
-        assert open_sensor._attr_device_class == BinarySensorDeviceClass.OPENING
-        # Not diagnostic: an open door is a security signal for the dashboard.
+        # PROBLEM, not OPENING: the panel reports these only while armed, so
+        # this is "armed with a zone bypassed", not "a door is open".
+        assert open_sensor._attr_device_class == BinarySensorDeviceClass.PROBLEM
+        # Not diagnostic: arming over an open door belongs on a dashboard.
         # Read the public property — HA only materialises the _attr_ backing
         # field when a subclass assigns it.
         assert open_sensor.entity_category is None
@@ -634,29 +635,34 @@ class TestZoneAggregates:
         coordinator = make_zone_coordinator()
         coordinator.data = None
 
-        assert ZonesOpenSensor(coordinator, make_installation()).is_on is None
+        assert ArmingExceptionsSensor(coordinator, make_installation()).is_on is None
 
-    def test_unknown_while_feed_unproven(self):
-        """An empty list is not proof every zone is closed — only that the
-        panel reported nothing, which may mean it never reports anything."""
+    def test_off_when_the_panel_flags_nothing(self):
+        """The panel sends null both while disarmed and while armed-and-clear.
+
+        Under "arming exception" semantics off is honest in both cases: there
+        genuinely is no exception. Only a missing payload is unknown.
+        """
         for payload in (None, []):
             coordinator = make_zone_coordinator(payload)
 
-            assert ZonesOpenSensor(coordinator, make_installation()).is_on is None
+            assert (
+                ArmingExceptionsSensor(coordinator, make_installation()).is_on is False
+            )
 
-    def test_off_once_the_feed_is_proven(self):
+    def test_clears_when_the_exception_goes_away(self):
         coordinator = make_zone_coordinator([zone_exception("Ventana", "0")])
-        sensor = ZonesOpenSensor(coordinator, make_installation())
+        sensor = ArmingExceptionsSensor(coordinator, make_installation())
         assert sensor.is_on is True
 
-        coordinator.data = make_alarm_data([])
+        coordinator.data = make_alarm_data(None)
         assert sensor.is_on is False
 
     def test_open_and_battery_do_not_cross_talk(self):
         coordinator = make_zone_coordinator([zone_exception("Ventana", "0")])
         installation = make_installation()
 
-        assert ZonesOpenSensor(coordinator, installation).is_on is True
+        assert ArmingExceptionsSensor(coordinator, installation).is_on is True
         assert ZonesBatteryLowSensor(coordinator, installation).is_on is False
 
     def test_attributes_list_affected_zones(self):
@@ -669,7 +675,9 @@ class TestZoneAggregates:
         )
         installation = make_installation()
 
-        assert ZonesOpenSensor(coordinator, installation).extra_state_attributes == {
+        assert ArmingExceptionsSensor(
+            coordinator, installation
+        ).extra_state_attributes == {
             "zones": ["Ventana", "Ptacocina"],
             "count": 2,
         }
@@ -681,13 +689,15 @@ class TestZoneAggregates:
         """Aggregates read the panel's raw list, so nothing is ever dropped."""
         coordinator = make_zone_coordinator([zone_exception("Neverseen", "0", "ZZ")])
 
-        attrs = ZonesOpenSensor(coordinator, make_installation()).extra_state_attributes
+        attrs = ArmingExceptionsSensor(
+            coordinator, make_installation()
+        ).extra_state_attributes
 
         assert attrs["zones"] == ["Neverseen"]
 
     def test_attributes_are_memoised_per_payload(self):
         coordinator = make_zone_coordinator([zone_exception("Ventana", "0")])
-        sensor = ZonesOpenSensor(coordinator, make_installation())
+        sensor = ArmingExceptionsSensor(coordinator, make_installation())
 
         first = sensor.extra_state_attributes
         assert sensor.extra_state_attributes is first
@@ -709,7 +719,7 @@ class TestZoneSensors:
         installation = make_installation()
 
         assert (
-            ZoneOpenSensor(coordinator, installation, target)._attr_unique_id
+            ZoneArmingExceptionSensor(coordinator, installation, target)._attr_unique_id
             == "v4_securitas_direct.123456_zone_MG04"
         )
         assert (
@@ -723,7 +733,7 @@ class TestZoneSensors:
         installation = make_installation()
 
         assert (
-            ZoneOpenSensor(coordinator, installation, target)._attr_unique_id
+            ZoneArmingExceptionSensor(coordinator, installation, target)._attr_unique_id
             == "v4_securitas_direct.123456_zone_alias_porta1cucin"
         )
         assert (
@@ -735,7 +745,9 @@ class TestZoneSensors:
         target = ZoneTarget.from_device(
             PanelDevice(zone_id="MG04", name="Ptaentrada", device_type="MG")
         )
-        sensor = ZoneOpenSensor(make_zone_coordinator(), make_installation(), target)
+        sensor = ZoneArmingExceptionSensor(
+            make_zone_coordinator(), make_installation(), target
+        )
 
         info = sensor._attr_device_info
         assert info is not None
@@ -746,24 +758,49 @@ class TestZoneSensors:
         assert info["via_device"] == ("securitas", "v4_securitas_direct.123456")
         assert info["model"] == "Magnetic contact"
 
-    def test_unknown_while_feed_unproven(self):
+    def test_off_when_the_panel_flags_nothing(self):
+        """Disarmed, or armed and clear, the panel sends null — that is "off"."""
         target = ZoneTarget.from_alias("Ventana")
-        coordinator = make_zone_coordinator([])
 
-        assert ZoneOpenSensor(coordinator, make_installation(), target).is_on is None
+        assert (
+            ZoneArmingExceptionSensor(
+                make_zone_coordinator(None), make_installation(), target
+            ).is_on
+            is False
+        )
+
+    def test_unknown_before_any_data(self):
+        coordinator = make_zone_coordinator()
+        coordinator.data = None
+        target = ZoneTarget.from_alias("Ventana")
+
+        assert (
+            ZoneArmingExceptionSensor(coordinator, make_installation(), target).is_on
+            is None
+        )
+
+    def test_device_class_and_category(self):
+        """The aggregate is the dashboard tile; per-zone detail is diagnostic."""
+        target = ZoneTarget.from_alias("Ventana")
+        sensor = ZoneArmingExceptionSensor(
+            make_zone_coordinator(), make_installation(), target
+        )
+
+        assert sensor._attr_device_class == BinarySensorDeviceClass.PROBLEM
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
 
     def test_reports_its_own_zone_only(self):
         coordinator = make_zone_coordinator([zone_exception("Ventana", "0")])
         installation = make_installation()
 
         assert (
-            ZoneOpenSensor(
+            ZoneArmingExceptionSensor(
                 coordinator, installation, ZoneTarget.from_alias("Ventana")
             ).is_on
             is True
         )
         assert (
-            ZoneOpenSensor(
+            ZoneArmingExceptionSensor(
                 coordinator, installation, ZoneTarget.from_alias("Ptacocina")
             ).is_on
             is False
@@ -776,7 +813,9 @@ class TestZoneSensors:
         target = ZoneTarget.from_alias("Ventana")
         installation = make_installation()
 
-        assert ZoneOpenSensor(coordinator, installation, target).is_on is True
+        assert (
+            ZoneArmingExceptionSensor(coordinator, installation, target).is_on is True
+        )
         assert ZoneBatteryLowSensor(coordinator, installation, target).is_on is True
 
     def test_truncated_panel_alias_still_matches_the_inventory_name(self):
@@ -785,21 +824,28 @@ class TestZoneSensors:
             PanelDevice(zone_id="MG11", name="Pfincameretta", device_type="MG")
         )
 
-        assert ZoneOpenSensor(coordinator, make_installation(), target).is_on is True
+        assert (
+            ZoneArmingExceptionSensor(coordinator, make_installation(), target).is_on
+            is True
+        )
 
     def test_unknown_status_code_counts_as_neither(self):
         coordinator = make_zone_coordinator([zone_exception("Ventana", "9")])
         target = ZoneTarget.from_alias("Ventana")
         installation = make_installation()
 
-        assert ZoneOpenSensor(coordinator, installation, target).is_on is False
+        assert (
+            ZoneArmingExceptionSensor(coordinator, installation, target).is_on is False
+        )
         assert ZoneBatteryLowSensor(coordinator, installation, target).is_on is False
 
     def test_attributes_expose_panel_identifiers(self):
         target = ZoneTarget.from_device(
             PanelDevice(zone_id="MG04", name="Ptaentrada", device_type="MG")
         )
-        sensor = ZoneOpenSensor(make_zone_coordinator(), make_installation(), target)
+        sensor = ZoneArmingExceptionSensor(
+            make_zone_coordinator(), make_installation(), target
+        )
 
         assert sensor.extra_state_attributes == {
             "zone_key": "MG04",
@@ -814,5 +860,5 @@ class TestZoneSensors:
         )
 
         assert len(entities) == 4
-        assert sum(isinstance(e, ZoneOpenSensor) for e in entities) == 2
+        assert sum(isinstance(e, ZoneArmingExceptionSensor) for e in entities) == 2
         assert sum(isinstance(e, ZoneBatteryLowSensor) for e in entities) == 2

@@ -248,7 +248,6 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._exc_cache_data: AlarmStatusData | None = None
         self._exc_keys: dict[str, frozenset[str]] = {}
         self._exc_aliases: tuple[str, ...] = ()
-        self._exceptions_observed: bool = False
 
     def _refresh_exception_cache(self) -> None:
         """Reparse status.exceptions if the coordinator payload changed.
@@ -272,23 +271,22 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
                 continue
             aliases.append(alias)
             keys[alias] = keys.get(alias, frozenset()) | {exc.status_key}
-        if keys:
-            # Latched for the coordinator's lifetime: proof the panel does
-            # populate this feed. Zone entities stay "unknown" until it flips,
-            # because on a panel that never reports exceptions an empty list
-            # would otherwise read as "every zone closed and healthy".
-            self._exceptions_observed = True
         self._exc_cache_data = data
         self._exc_keys = keys
         self._exc_aliases = tuple(aliases)
 
     @property
     def zone_exception_keys(self) -> dict[str, frozenset[str]]:
-        """Map zone alias to the exception kinds it currently reports.
+        """Map zone alias to the exception kinds the panel currently flags.
 
         Kinds are ``ActivityException.status_key`` values — ``"open"``,
         ``"battery_low"``, or ``"unknown"``. A set rather than a single value
-        because one zone can report more than one problem in a payload.
+        because one zone can be flagged for more than one reason at once.
+
+        Empty means the panel flags nothing, which a live capture shows is what
+        it reports both while disarmed and while armed with every zone healthy
+        (it sends ``null`` in each case, never an empty list). Absence is
+        therefore "not flagged", not "closed" — see SStatus.exceptions.
         """
         self._refresh_exception_cache()
         return self._exc_keys
@@ -303,17 +301,6 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         """
         self._refresh_exception_cache()
         return self._exc_aliases
-
-    @property
-    def exceptions_observed(self) -> bool:
-        """Return True once the panel has reported at least one zone exception.
-
-        Until then the sparse exceptions list carries no information: an empty
-        list is indistinguishable from a panel that never populates the field
-        at all, so zone-derived state is unknown rather than "all clear".
-        """
-        self._refresh_exception_cache()
-        return self._exceptions_observed
 
     @property
     def has_peri(self) -> bool:

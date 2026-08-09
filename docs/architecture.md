@@ -723,36 +723,42 @@ Three families, all `CoordinatorEntity` with `should_poll = False`, all costing 
 
 - **WifiConnectedSensor** — Diagnostic binary sensor showing the panel's WiFi connection status from `SStatus.wifi_connected`. One per installation. Uses `CoordinatorEntity[AlarmCoordinator]` — updated whenever the alarm coordinator refreshes. Uses `BinarySensorDeviceClass.CONNECTIVITY` and `EntityCategory.DIAGNOSTIC`.
 
-#### Zone exception sensors
+#### Zone arming-exception sensors
 
 Source: `SStatus.exceptions`, requested by `GENERAL_STATUS_QUERY` and polled by `AlarmCoordinator` on every cycle. Each row is `{status, deviceType, alias}` and is decoded by the existing `ActivityException.status_key`: `"0"` → open, `"2"` → battery low, anything else → unknown (which counts towards neither sensor).
 
-**The list is sparse — and that is the central design constraint.** Only zones with a current problem appear, so an absent zone means "no exception reported". That implies "closed and healthy" *only if the panel populates the field at all*. If it never does, every zone would read `off` forever — a silent, confident lie about the state of a security system.
+**What the field means, confirmed against a live panel** rather than inferred:
 
-The integration therefore refuses to infer anything until it has evidence:
+| Panel state | `exceptions` |
+|---|---|
+| Disarmed, door standing open | `null` |
+| Disarmed, all closed | `null` |
+| Armed, all closed | `null` |
+| Armed over an open door | `[{"status": "0", "deviceType": "MR", "alias": "Puerta"}]` |
 
-- `AlarmCoordinator.exceptions_observed` latches `True` on the first non-empty payload and never resets.
-- Until it flips, every zone-derived entity — aggregates included — reports `None` (`unknown`), never `off`.
-- Per-zone entities are not created at all before that point. On the first non-empty payload the **whole** inventory is materialised at once, so one open door brings every zone online rather than leaving a permanently-shut door without an entity.
-- The latch is per-coordinator and so resets on restart. The durable proof is the entity registry: `_zones_already_registered` looks for a `..._zone_` unique_id on the config entry and, finding one, creates the entities immediately. No extra `Store`, and deleting the entities simply lets them come back on the next real exception.
+So this is **not** live zone state: it lists the zones flagged as exceptional *for the current armed session*. A door standing open while the alarm is off is reported by nothing at all, and the panel sends `null` rather than `[]` when it has nothing to flag — there is no way to distinguish "nothing wrong" from "not reporting".
 
-**Joining aliases to devices.** The exceptions payload identifies a zone only by `alias`, a panel label that observed data truncates to ~11 characters; the inventory (`xSDeviceList`, shared with camera discovery) carries the full `name`. `alias_matches` accepts an exact match, or a prefix in either direction when both labels are at least 4 characters. `match_exception_keys` then requires the prefix match to be **unique**: if `Dorm` plausibly denotes both `Dorm1` and `Dorm2`, nothing is returned. Reporting the neighbouring door's state is far worse than reporting nothing. Case is preserved deliberately — casefolding would collapse short accented labels such as `Vbaño`.
+That is why the entities are named after arming exceptions rather than open doors. Under that framing `off` is honest in every panel state: while disarmed there genuinely is no arming exception. An earlier design gated the entities behind an "have we ever seen a non-empty payload" latch to avoid claiming a door was closed on no evidence; the correct framing removes the need for it entirely, so entities are created eagerly and the latch is gone.
+
+**Joining aliases to devices.** The exceptions payload identifies a zone only by `alias`; the inventory (`xSDeviceList`, shared with camera discovery) carries the full `name`. On the captured panel these match exactly (`Puerta` / `Puerta`). `alias_matches` also accepts a prefix in either direction when both labels are at least 4 characters, for panels that truncate. `match_exception_keys` then requires the prefix match to be **unique**: if `Dorm` plausibly denotes both `Dorm1` and `Dorm2`, nothing is returned — reporting the neighbouring door's state is far worse than reporting nothing. Case is preserved deliberately; casefolding would collapse short accented labels such as `Vbaño`. The 4-character floor matters in practice: the captured installation names its windows `V1`..`V9`, which would otherwise all prefix-match each other.
 
 Two devices sharing a panel label are genuinely indistinguishable, so both are dropped from the per-device join (with a warning) and surface only through the aggregates and an alias-keyed entity.
 
-**Nothing is ever dropped.** Aggregates are computed from the panel's raw alias list, never from the inventory, so they work even when device discovery failed outright. Any alias no materialised zone accounts for gets its own alias-keyed entity — covering truncation mismatches, zones renamed after discovery, device types not yet in `ZONE_DEVICE_TYPES`, and a failed inventory fetch.
+**Nothing is ever dropped.** Aggregates are computed from the panel's raw alias list, never from the inventory, so they work even when device discovery failed outright. Any alias no materialised zone accounts for gets its own alias-keyed entity — covering truncation mismatches, zones renamed after discovery, device types not yet in `ZONE_DEVICE_TYPES`, and a failed inventory fetch. This is not theoretical: the captured installation reports contacts as `MR`, and before that type was added the alias path is what kept its door visible.
 
 | Entity | unique_id | device_class | Category |
 |--------|-----------|--------------|----------|
-| `Zones Open` (aggregate) | `..._zones_open` | `OPENING` | — (dashboard signal) |
+| `Arming Exceptions` (aggregate) | `..._zones_open` | `PROBLEM` | — (dashboard signal) |
 | `Zone Battery Low` (aggregate) | `..._zones_battery_low` | `BATTERY` | `DIAGNOSTIC` |
-| `Open` (per zone) | `..._zone_{zone_id}` | `OPENING` | — |
+| `Arming Exception` (per zone) | `..._zone_{zone_id}` | `PROBLEM` | `DIAGNOSTIC` |
 | `Battery` (per zone) | `..._zone_battery_{zone_id}` | `BATTERY` | `DIAGNOSTIC` |
 | orphan variants | `..._zone_alias_{slug}` / `..._zone_battery_alias_{slug}` | as above | as above |
 
+`PROBLEM` rather than `OPENING`: the condition being reported is "armed with a zone bypassed", not "a door is open". The unique_ids keep the panel's own vocabulary for the status kind (`"0"` = open); renaming them would orphan entities for no user-visible gain.
+
 Aggregates carry `{"zones": [...aliases...], "count": n}`; per-zone entities carry `{"zone_key", "panel_alias"}`. Each zone is its own child device via `zone_device_info()`, linked to the installation through the shared `_link_to_installation` (`via_device_id` on HA ≥ 2026.8, `via_device` below).
 
-Only `MG` (magnetic contact) is promoted to a per-zone device today — `ZONE_DEVICE_TYPES` in `client/_device.py` documents how to add more. Anything else still reaches the user through the orphan path.
+`ZONE_DEVICE_TYPES` in `client/_device.py` holds `MG` and `MR`, both observed as door/window contacts in real captures; the constant documents how to add more. Anything else still reaches the user through the alias path.
 
 #### Panel problem sensors
 

@@ -13,7 +13,7 @@ A Home Assistant integration for **Verisure** (formerly Securitas Direct in some
 
 Full alarm control: the mappings between HA's five buttons (Home/Away/Night/Vacation/Custom) and your Verisure modes are yours to set. Optional local PIN. If your install has multiple circuits, you can opt into a dedicated sub-panel for each (Interior, Perimeter, Annex).
 
-Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. Binary sensors for open zones and flat sensor batteries, plus panel-health sensors for intrusion, mains power, comms and tampering. A connectivity diagnostic for the panel itself.
+Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. Binary sensors for arming exceptions and flat sensor batteries, plus panel-health sensors for intrusion, mains power, comms and tampering. A connectivity diagnostic for the panel itself.
 
 Bundled Lovelace cards: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, camera card, activity-log card.
 
@@ -246,17 +246,26 @@ chips:
 
 If your installation includes Sentinel devices, the integration automatically creates temperature, humidity, and air quality sensors for each one.
 
-## Zone Sensors
+## Zone Arming-Exception Sensors
 
-Your door and window contacts become binary sensors: an **Open** sensor and a **Battery** sensor per zone, each on its own device under the installation. Two installation-wide roll-ups — **Zones Open** and **Zone Battery Low** — list every affected zone in their attributes, so you can put one card on a dashboard instead of twelve.
+Each door and window contact gets an **Arming Exception** and a **Battery** binary sensor, on its own device under the installation. Two installation-wide roll-ups — **Arming Exceptions** and **Zone Battery Low** — list every affected zone in their attributes, so one dashboard card covers the lot.
 
 These cost nothing extra: the panel already sends this data with every status poll, and the integration was previously discarding it.
 
-**Why they may say "Unknown".** The panel reports problems, not states — it sends a list of zones that are open or low on battery, and says nothing at all about the ones that are fine. That means an empty list is ambiguous: it could mean "everything is closed", or it could mean this panel never reports zone problems in the first place. Rather than guess, the sensors stay `Unknown` until your panel has reported at least one real zone exception. From then on they work normally, and an empty list correctly reads as "all clear".
+**They are not door sensors, and the distinction matters.** The panel reports zones that are *exceptional for the current armed session*, not live open/closed state. Measured on a real installation:
 
-For the same reason the per-zone entities don't appear immediately after install. Open a door (or wait for a low battery) and the whole set appears at once — every zone, not just the one that reported. After that they persist across restarts.
+| Alarm state | What the panel reports |
+|---|---|
+| Disarmed, door standing wide open | nothing |
+| Disarmed, everything closed | nothing |
+| Armed, everything closed | nothing |
+| Armed over an open door | that door |
 
-A zone whose panel label the integration can't match to a known device still gets an entity, named after the label the panel uses. Two zones sharing the same label can't be told apart, so they're reported only by the roll-up sensors.
+So **Arming Exception** turns on when you arm the alarm with that zone open (or its battery flat), and off the rest of the time — including while the door is open but the alarm is off. If you want to know whether a door is physically open right now, this cannot tell you, and no part of the Verisure API can.
+
+What it is genuinely good for: catching that you armed the alarm with a window bypassed, and noticing flat sensor batteries the next time you arm.
+
+A zone whose panel label can't be matched to a known device still gets an entity, named after the label the panel uses. Two zones sharing the same label can't be told apart, so they're reported by the roll-up sensors only.
 
 ## Panel Problem Sensors
 

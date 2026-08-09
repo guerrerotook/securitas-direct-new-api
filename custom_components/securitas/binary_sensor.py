@@ -46,7 +46,7 @@ async def async_setup_entry(
     for device in securitas_devices:
         installation = device.installation
         entities.append(WifiConnectedSensor(coordinator, installation))
-        entities.append(ZonesOpenSensor(coordinator, installation))
+        entities.append(ArmingExceptionsSensor(coordinator, installation))
         entities.append(ZonesBatteryLowSensor(coordinator, installation))
     entities.extend(_build_panel_problem_sensors(entry_data))
     async_add_entities(entities, False)
@@ -335,18 +335,24 @@ class PanelProblemSensor(  # type: ignore[override]
 # Source: xSStatus.exceptions, already fetched by AlarmCoordinator on every
 # poll and previously discarded — so these cost no extra API calls.
 #
-# The list is SPARSE: only zones with a current problem appear. A zone that is
-# absent therefore means "no exception reported", which implies "closed and
-# healthy" ONLY if the panel populates the field at all. Until the coordinator
-# has seen one non-empty payload (`exceptions_observed`), every zone-derived
-# sensor reports unknown rather than asserting all-clear — see
-# AlarmCoordinator._refresh_exception_cache.
+# What the field actually means (confirmed against a live panel, not guessed):
+# it lists the zones flagged as exceptional *for the current armed session*.
+# Disarmed with a door standing open it is null; armed with everything closed
+# it is null; only arming over an open zone puts that zone in the list.
+#
+# So these entities are arming exceptions, not door/window state. That framing
+# is what makes "off" honest in every panel state — when the alarm is disarmed
+# there genuinely is no arming exception — and it is why no evidence gate is
+# needed to avoid lying about a door nobody has told us anything about.
 
 _STATUS_OPEN = "open"
 _STATUS_BATTERY_LOW = "battery_low"
 
 # Human-readable model per inventory device type, for the child device entry.
-_ZONE_DEVICE_MODELS: dict[str, str] = {"MG": "Magnetic contact"}
+_ZONE_DEVICE_MODELS: dict[str, str] = {
+    "MG": "Magnetic contact",
+    "MR": "Magnetic contact",
+}
 
 # Below this length a prefix match is too weak to trust — a 2-3 character
 # label would collide with half the installation.
@@ -438,17 +444,11 @@ class _ZoneExceptionSensorBase(  # type: ignore[override]
     CoordinatorEntity[AlarmCoordinator],
     BinarySensorEntity,
 ):
-    """Shared evidence gate for everything derived from status.exceptions."""
+    """Shared behaviour for everything derived from status.exceptions."""
 
     _attr_has_entity_name = True
     _attr_should_poll = False
     _status_key: str = ""
-
-    def _gate_open(self) -> bool:
-        """Return True when the exceptions feed is known to carry information."""
-        return (
-            self.coordinator.data is not None and self.coordinator.exceptions_observed
-        )
 
 
 class _ZoneAggregateSensor(_ZoneExceptionSensorBase):
@@ -485,32 +485,38 @@ class _ZoneAggregateSensor(_ZoneExceptionSensorBase):
 
     @property
     def is_on(self) -> bool | None:  # type: ignore[override]
-        """Return True if any zone currently reports this exception kind."""
-        if not self._gate_open():
+        """Return True while the panel flags any zone for this reason."""
+        if self.coordinator.data is None:
             return None
         return bool(self._affected_zones())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[override]
-        """List the affected zones by their panel alias."""
+        """List the flagged zones by their panel alias."""
         data = self.coordinator.data
         if self._attrs_cache is not None and self._attrs_cache[0] is data:
             return self._attrs_cache[1]
-        zones = self._affected_zones() if self._gate_open() else []
+        zones = self._affected_zones() if data is not None else []
         attrs: dict[str, Any] = {"zones": zones, "count": len(zones)}
         if data is not None:
             self._attrs_cache = (data, attrs)
         return attrs
 
 
-class ZonesOpenSensor(_ZoneAggregateSensor):
-    """True while any zone reports itself open."""
+class ArmingExceptionsSensor(_ZoneAggregateSensor):
+    """True while the panel is armed over one or more open zones.
 
-    # No entity_category: this is a security signal a user puts on a dashboard,
-    # and DIAGNOSTIC would hide it from auto-generated views.
-    _attr_device_class = BinarySensorDeviceClass.OPENING
-    _attr_name = "Zones Open"
+    PROBLEM rather than OPENING: the panel only reports these while armed, so
+    this is "armed with a zone bypassed", not "a door is open". No
+    entity_category — arming over an open door is a security fact worth a
+    dashboard tile, and DIAGNOSTIC would hide it from auto-generated views.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_name = "Arming Exceptions"
     _status_key = _STATUS_OPEN
+    # unique_id keeps the panel's own vocabulary for the status kind ("0" =
+    # open); renaming it would orphan entities for no user-visible gain.
     _unique_id_suffix = "zones_open"
 
 
@@ -549,8 +555,8 @@ class _ZoneSensor(_ZoneExceptionSensorBase):
 
     @property
     def is_on(self) -> bool | None:  # type: ignore[override]
-        """Return True while this zone reports this exception kind."""
-        if not self._gate_open():
+        """Return True while the panel flags this zone for this reason."""
+        if self.coordinator.data is None:
             return None
         return self._status_key in match_exception_keys(
             self.coordinator.zone_exception_keys, self._target.match_name
@@ -562,11 +568,12 @@ class _ZoneSensor(_ZoneExceptionSensorBase):
         return {"zone_key": self._target.key, "panel_alias": self._target.match_name}
 
 
-class ZoneOpenSensor(_ZoneSensor):
-    """Open/closed state for a single zone."""
+class ZoneArmingExceptionSensor(_ZoneSensor):
+    """True while this zone is the reason the panel armed with an exception."""
 
-    _attr_device_class = BinarySensorDeviceClass.OPENING
-    _attr_name = "Open"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Arming Exception"
     _status_key = _STATUS_OPEN
 
 
@@ -586,9 +593,11 @@ def build_zone_entities(
     targets: list[ZoneTarget],
     hass: HomeAssistant | None = None,
 ) -> list[BinarySensorEntity]:
-    """Create the open + battery entity pair for each zone target."""
+    """Create the arming-exception + battery entity pair for each zone target."""
     entities: list[BinarySensorEntity] = []
     for target in targets:
-        entities.append(ZoneOpenSensor(coordinator, installation, target, hass))
+        entities.append(
+            ZoneArmingExceptionSensor(coordinator, installation, target, hass)
+        )
         entities.append(ZoneBatteryLowSensor(coordinator, installation, target, hass))
     return entities

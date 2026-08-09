@@ -259,34 +259,6 @@ async def _discover_locks(
                 _schedule_lock_config_retry(hass, hub, installation, lk)
 
 
-def _zone_unique_id_prefix(installation: Installation) -> str:
-    """Return the unique_id prefix shared by every per-zone entity."""
-    return f"v4_securitas_direct.{installation.number}_zone_"
-
-
-def _zones_already_registered(
-    hass: HomeAssistant, entry: ConfigEntry, installation: Installation
-) -> bool:
-    """Return True if per-zone entities were created on an earlier run.
-
-    The evidence that the panel populates its exceptions feed is latched per
-    coordinator, so it resets on every restart. Without this probe a household
-    whose doors happen to be shut at startup would never re-materialise the
-    entities it already had, and they would sit in the registry as
-    unavailable. The registry already persists exactly the fact we need, so no
-    extra Store is required — and if the user deletes the entities they simply
-    come back on the next real exception.
-    """
-    from homeassistant.helpers import entity_registry as er
-
-    prefix = _zone_unique_id_prefix(installation)
-    registry = er.async_get(hass)
-    return any(
-        rle.domain == "binary_sensor" and rle.unique_id.startswith(prefix)
-        for rle in er.async_entries_for_config_entry(registry, entry.entry_id)
-    )
-
-
 async def _discover_zones(
     hass: HomeAssistant,
     hub: VerisureHub,
@@ -294,18 +266,15 @@ async def _discover_zones(
     entry_data: dict[str, Any],
     entry: ConfigEntry,
 ) -> None:
-    """Set up per-zone binary sensors for an installation.
+    """Set up per-zone arming-exception sensors for an installation.
 
     Runs after camera discovery so the shared inventory fetch is already
     cached — this adds no API calls at all.
 
-    Entities are not created eagerly. The exceptions feed is sparse, so an
-    empty list is indistinguishable from a panel that never populates it; a
-    zone entity created on that basis would report "closed" forever. Creation
-    therefore waits until the panel has actually reported an exception (or
-    until the registry shows it did so on a previous run), at which point the
-    whole inventory is materialised at once — one open door brings every zone
-    online, so a door that stays shut still gets its entity.
+    Entities are created eagerly from the inventory. They report whether the
+    panel currently flags a zone as an arming exception, and a panel that never
+    flags anything simply leaves them off, which is true — so there is nothing
+    to wait for before creating them.
     """
     from .binary_sensor import ZoneTarget, alias_matches, build_zone_entities
     from .verisure_owa_api.client import filter_zone_devices
@@ -327,7 +296,7 @@ async def _discover_zones(
 
     # Duplicate panel labels make an alias genuinely ambiguous: there is no way
     # to tell which physical contact an exception refers to. Drop both rather
-    # than inventing per-device state — they still surface through the orphan
+    # than inventing per-device state — they still surface through the alias
     # path and the aggregates.
     by_name: dict[str, PanelDevice] = {}
     ambiguous: set[str] = set()
@@ -368,36 +337,34 @@ async def _discover_zones(
         )
         materialised.update(t.match_name for t in new_targets)
 
-    def _sync_zones() -> None:
-        """Materialise zone entities once the panel proves the feed works."""
-        if not coordinator.exceptions_observed:
-            return
-        if not materialised and targets:
-            _add(targets)
-        # Any alias the inventory could not account for still gets an entity:
-        # a truncated label, a zone renamed after discovery, a device type not
-        # yet promoted, or a failed inventory fetch.
+    if targets:
+        _add(targets)
+
+    def _sync_unknown_aliases() -> None:
+        """Give an entity to any zone the panel names but the inventory lacks.
+
+        Covers a truncated label, a zone renamed after discovery, a device type
+        not yet in ZONE_DEVICE_TYPES, and an inventory fetch that failed.
+        """
         unknown = [
             ZoneTarget.from_alias(alias)
             for alias in coordinator.zone_exception_aliases
             if not any(alias_matches(alias, known) for known in materialised)
         ]
-        if unknown:
-            _LOGGER.info(
-                "[zone_discovery] Installation %s: adding %d zone(s) reported by "
-                "the panel but absent from the inventory: %s",
-                installation.number,
-                len(unknown),
-                [t.name for t in unknown],
-            )
-            _add(unknown)
+        if not unknown:
+            return
+        _LOGGER.info(
+            "[zone_discovery] Installation %s: adding %d zone(s) reported by "
+            "the panel but absent from the inventory: %s",
+            installation.number,
+            len(unknown),
+            [t.name for t in unknown],
+        )
+        _add(unknown)
 
-    if targets and _zones_already_registered(hass, entry, installation):
-        _add(targets)
-
-    _sync_zones()
-    unsub = coordinator.async_add_listener(_sync_zones)
-    entry_data.setdefault("zone_gate_unsubs", []).append(unsub)
+    _sync_unknown_aliases()
+    unsub = coordinator.async_add_listener(_sync_unknown_aliases)
+    entry_data.setdefault("zone_alias_unsubs", []).append(unsub)
 
 
 async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:

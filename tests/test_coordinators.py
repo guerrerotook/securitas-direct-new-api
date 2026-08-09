@@ -1975,7 +1975,6 @@ class TestAlarmCoordinatorZoneExceptions:
         coordinator._exc_cache_data = None
         coordinator._exc_keys = {}
         coordinator._exc_aliases = ()
-        coordinator._exceptions_observed = False
         coordinator.data = AlarmStatusData(status=SStatus(exceptions=exceptions))
         return coordinator
 
@@ -2025,7 +2024,6 @@ class TestAlarmCoordinatorZoneExceptions:
         )
 
         assert coordinator.zone_exception_keys == {}
-        assert coordinator.exceptions_observed is False
 
     def test_aliases_preserve_panel_order_including_duplicates(self):
         coordinator = self._coordinator(
@@ -2052,32 +2050,9 @@ class TestAlarmCoordinatorZoneExceptions:
         coordinator.data = self._payload([])
         assert coordinator.zone_exception_keys == {}
 
-    def test_observed_latches_on_first_non_empty_payload(self):
-        coordinator = self._coordinator(None)
-        assert coordinator.exceptions_observed is False
-
-        coordinator.data = self._payload([])
-        assert coordinator.exceptions_observed is False
-
-        coordinator.data = self._payload(
-            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
-        )
-        assert coordinator.exceptions_observed is True
-
-    def test_observed_stays_latched_after_the_zones_clear(self):
-        """Proof the feed works does not expire when every zone closes."""
-        coordinator = self._coordinator(
-            [{"status": "0", "deviceType": "MG", "alias": "Ventana"}]
-        )
-        assert coordinator.exceptions_observed is True
-
-        coordinator.data = self._payload([])
-        assert coordinator.exceptions_observed is True
-
     def test_tolerates_missing_data(self):
         coordinator = self._coordinator()
         coordinator.data = None
 
         assert coordinator.zone_exception_keys == {}
         assert coordinator.zone_exception_aliases == ()
-        assert coordinator.exceptions_observed is False

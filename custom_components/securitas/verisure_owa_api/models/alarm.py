@@ -207,16 +207,26 @@ class OperationStatus(_NullSafeBase):
 class SStatus(BaseModel):
     """Current status of the alarm system.
 
-    ``exceptions`` is the panel's per-zone problem list — sparse, so only
-    zones that currently have a problem appear. It reuses ``ActivityException``
-    (the same ``{status, deviceType, alias}`` shape the activity timeline
-    carries) so the ``"0"`` → open / ``"2"`` → battery-low decoding lives in
-    exactly one place.
+    ``exceptions`` lists the zones the panel flags as exceptional **for the
+    current armed session** — not live zone state. It reuses
+    ``ActivityException`` (the same ``{status, deviceType, alias}`` shape the
+    activity timeline carries) so the ``"0"`` → open / ``"2"`` → battery-low
+    decoding lives in exactly one place.
 
-    Being sparse, an absent zone means "no exception reported" — but that only
-    implies "closed and healthy" if the panel populates the list at all.
-    Consumers must not treat an empty list as proof every zone is fine without
-    independent evidence the feed works.
+    Observed on a live panel (v5.5.0 capture):
+
+    ==========================  ==========================================
+    Panel state                 ``exceptions``
+    ==========================  ==========================================
+    Disarmed, door open         ``null``
+    Disarmed, all closed        ``null``
+    Armed, all closed           ``null``
+    Armed over an open door     ``[{status: "0", deviceType: "MR", ...}]``
+    ==========================  ==========================================
+
+    So an absent zone means "not flagged", never "closed": a door standing open
+    while the panel is disarmed is reported by nothing at all. Consumers must
+    present this as an arming exception, not as a door/window state.
     """
 
     model_config = ConfigDict(populate_by_name=True)

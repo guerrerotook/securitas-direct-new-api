@@ -19,16 +19,22 @@ CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
 
 # Peripheral types eligible to become per-zone binary sensors.
 #
-# Only MG (magnetic door/window contact) for now: it is the only type ever
-# observed in an xSStatus/xSGetExceptions payload, and the only type in a real
-# xSDeviceList capture that isn't already an entity (DR is a lock, QR/YP are
-# cameras, VV is an unidentified keypad-like device).
+# Door/window contacts appear under two type codes across real installations:
+#   MG — seen in an Italian panel's exceptions payload and in a Spanish
+#        xSDeviceList capture (docs/graphql_locks/smartlock_customers.json).
+#   MR — seen in a live Spanish installation whose whole contact set is MR
+#        (MR03 "Puerta", MR04-MR12 "V1".."V9"), with no MG device at all.
+# Restricting this to MG would leave that installation with no zone entities.
 #
-# To promote another type: capture a real exceptions payload containing it
-# (docs/new_operations.md), confirm the alias matches this inventory's `name`,
-# then add it here. Until then such a device still reaches the user through the
-# orphan-alias path, so nothing is silently lost.
-ZONE_DEVICE_TYPES = frozenset({"MG"})
+# Everything else in an observed inventory is already an entity or is not a
+# contact: DR is a lock, QR/YR/YP/QP are cameras, VV is a keypad-like device.
+#
+# To promote another type: capture a real xSDeviceList containing it
+# (docs/new_operations.md) and confirm it is a contact. Until then such a
+# device still reaches the user through the orphan-alias path, so nothing is
+# silently lost — it just lands on a name-keyed entity rather than a
+# zone-id-keyed one.
+ZONE_DEVICE_TYPES = frozenset({"MG", "MR"})
 
 
 def _parse_device(raw: dict[str, Any]) -> PanelDevice:
