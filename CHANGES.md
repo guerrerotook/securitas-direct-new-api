@@ -4,7 +4,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.5.0
 
-The local alarm PIN can now guard your smart locks as well as the alarm panel — and it is stored hashed rather than in plain text.  Three fixes besides: a long-standing bug that silently discarded your PIN and alarm mappings shortly after a fresh install, an integration left permanently down by a network blip during Home Assistant startup, and camera capture delivering nothing for long-idle cameras.
+The local alarm PIN can now guard your smart locks as well as the alarm panel — and it is stored hashed rather than in plain text.  Four fixes besides: a long-standing bug that silently discarded your PIN and alarm mappings shortly after a fresh install, an integration left permanently down by a network blip during Home Assistant startup, camera capture delivering nothing for long-idle cameras, and forward compatibility with Home Assistant 2026.8's device-registry change.
 
 ### Added
 
@@ -22,6 +22,8 @@ The local alarm PIN can now guard your smart locks as well as the alarm panel �
 **A fresh install silently lost its PIN and alarm mappings minutes after setup ([#537](https://github.com/guerrerotook/securitas-direct-new-api/pull/537)).**  If you enabled any of the optional sub-panels (Interior, Perimeter, Annex) while first setting the integration up, your PIN, all five alarm-state mappings, the scan interval and the notify settings were quietly discarded on the first successful login — within minutes of finishing setup.  The visible symptoms were an alarm panel that had stopped asking for the PIN and accepted *any* code, and mapped buttons reverting to defaults.  Only installs that turned a sub-panel on during the initial wizard were affected; enabling one later, from the options dialog, was always safe.  The cause was that setup stores the sub-panel toggles separately from everything else, and the routine that keeps options and stored settings in step mistook that partial state for "the user has saved every setting", so it discarded the ones it could not see.  This bug predates the PIN work above — it is only now that its consequence was a disabled PIN rather than lost mappings.
 
 If you were affected, the settings are gone and cannot be recovered: open the integration options once, re-enter your PIN and mappings, and save.  From then on this cannot recur on that installation.
+
+**Forward compatibility with Home Assistant 2026.8's device-registry change ([#542](https://github.com/guerrerotook/securitas-direct-new-api/pull/542)).**  Home Assistant 2026.8 deprecates the `via_device` link this integration uses to nest each camera and smart lock under its alarm panel — removing it in 2027.8 — in favour of `via_device_id`.  The integration now feature-detects which one the running Home Assistant expects and uses it: `via_device_id` on 2026.8 and later, the original `via_device` on the cores it still supports back to 2025.2.  Child devices keep nesting under the panel exactly as before, with no deprecation warning on new Home Assistant and no break when the old link is removed.
 
 ### Security
 
