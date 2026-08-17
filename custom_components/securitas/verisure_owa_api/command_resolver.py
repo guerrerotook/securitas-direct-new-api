@@ -181,6 +181,32 @@ class CommandResolver:
             return [CommandStep(commands=["ARMANNEX1"])]
         return [CommandStep(commands=["DARMANNEX1"])]
 
+    def resolve_disarm_only(
+        self, *, interior: bool, perimeter: bool, annex: bool
+    ) -> list[CommandStep]:
+        """Return disarm-only command steps for the requested axes.
+
+        Used when the panel's current state is unknown (never polled, or an
+        unmodeled proto code like 'N' after a central-station reset, #550).
+        A disarm command is unconditional — ``DARM1`` / ``DARM1DARMPERI`` /
+        ``DARMANNEX1`` clear their axis regardless of the current state — so
+        we can safely disarm the requested axes without knowing it. Only
+        ``DARM*`` commands are emitted; axes that weren't requested are left
+        untouched (no arm, no re-arm).
+        """
+        steps: list[CommandStep] = []
+        if interior or perimeter:
+            # Synthesize a "these axes are armed" current so _resolve_disarm
+            # picks the right DARM command(s) for this panel's capabilities.
+            synthetic = AlarmState(
+                interior=InteriorMode.TOTAL if interior else InteriorMode.OFF,
+                perimeter=PerimeterMode.ON if perimeter else PerimeterMode.OFF,
+            )
+            steps.extend(self._resolve_disarm(synthetic))
+        if annex:
+            steps.extend(self._resolve_annex(AnnexMode.ON, AnnexMode.OFF))
+        return steps
+
     def resolve(self, current: AlarmState, target: AlarmState) -> list[CommandStep]:
         """Return ordered command steps to transition from current to target state."""
         if current == target:

@@ -138,6 +138,73 @@ class TestCommandResolverDisarm:
         assert steps[0].commands == ["DARM1"]
 
 
+class TestCommandResolverDisarmOnly:
+    """Test resolve_disarm_only() — unconditional disarm of chosen axes.
+
+    Used when the panel's current state is unknown (never polled, or an
+    unmodeled proto code like 'N' after a central-station reset, #550): a
+    disarm command is unconditional, so we can clear the requested axes
+    without knowing the current state. Only ever emits DARM* commands;
+    never arms, never touches an axis that wasn't requested.
+    """
+
+    def test_interior_only(self):
+        resolver = CommandResolver(has_peri=False)
+        steps = resolver.resolve_disarm_only(
+            interior=True, perimeter=False, annex=False
+        )
+        assert len(steps) == 1
+        assert steps[0].commands == ["DARM1"]
+
+    def test_perimeter_only(self):
+        resolver = CommandResolver(has_peri=True)
+        steps = resolver.resolve_disarm_only(
+            interior=False, perimeter=True, annex=False
+        )
+        assert len(steps) == 1
+        assert steps[0].commands == ["DARMPERI", "DARM1"]
+
+    def test_interior_and_perimeter(self):
+        resolver = CommandResolver(has_peri=True)
+        steps = resolver.resolve_disarm_only(interior=True, perimeter=True, annex=False)
+        assert len(steps) == 1
+        assert steps[0].commands == ["DARM1DARMPERI", "DARM1"]
+
+    def test_interior_and_perimeter_no_peri_config(self):
+        """Without peri capability, disarm collapses to a plain DARM1."""
+        resolver = CommandResolver(has_peri=False)
+        steps = resolver.resolve_disarm_only(interior=True, perimeter=True, annex=False)
+        assert len(steps) == 1
+        assert steps[0].commands == ["DARM1"]
+
+    def test_annex_only(self):
+        resolver = CommandResolver(has_peri=False)
+        steps = resolver.resolve_disarm_only(
+            interior=False, perimeter=False, annex=True
+        )
+        assert len(steps) == 1
+        assert steps[0].commands == ["DARMANNEX1"]
+
+    def test_interior_and_annex_are_separate_steps(self):
+        resolver = CommandResolver(has_peri=False)
+        steps = resolver.resolve_disarm_only(interior=True, perimeter=False, annex=True)
+        assert [s.commands for s in steps] == [["DARM1"], ["DARMANNEX1"]]
+
+    def test_nothing_requested_is_empty(self):
+        resolver = CommandResolver(has_peri=True)
+        steps = resolver.resolve_disarm_only(
+            interior=False, perimeter=False, annex=False
+        )
+        assert steps == []
+
+    def test_skips_unsupported_compound_disarm(self):
+        resolver = CommandResolver(has_peri=True)
+        resolver.mark_unsupported("DARM1DARMPERI")
+        steps = resolver.resolve_disarm_only(interior=True, perimeter=True, annex=False)
+        assert len(steps) == 1
+        assert steps[0].commands == ["DARM1"]
+
+
 class TestCommandResolverCapabilityRefresh:
     """Test that the resolver picks up late capability population.
 

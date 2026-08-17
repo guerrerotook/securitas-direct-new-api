@@ -106,6 +106,31 @@ class TestAlarmCoordinator:
             update_interval=timedelta(seconds=30),
         )
 
+    def test_alarm_state_known_true_for_modelled_code(self):
+        """A modelled proto code (e.g. 'T') reports the state as known."""
+        coord = self._make_coordinator(
+            _make_hass(), _make_client(), _make_queue(), _make_installation()
+        )
+        coord.data = AlarmStatusData(status=SStatus(status="T"), protom_response="T")
+        assert coord.alarm_state_known is True
+
+    def test_alarm_state_known_false_for_unmodelled_code(self):
+        """An unmodelled proto code (e.g. 'N' after a central-station reset)
+        reports the state as unknown so callers can disarm unconditionally."""
+        coord = self._make_coordinator(
+            _make_hass(), _make_client(), _make_queue(), _make_installation()
+        )
+        coord.data = AlarmStatusData(status=SStatus(status="N"), protom_response="N")
+        assert coord.alarm_state_known is False
+
+    def test_alarm_state_known_false_when_no_data(self):
+        """No poll yet → state is not known."""
+        coord = self._make_coordinator(
+            _make_hass(), _make_client(), _make_queue(), _make_installation()
+        )
+        coord.data = None
+        assert coord.alarm_state_known is False
+
     @pytest.mark.asyncio
     async def test_successful_update(self):
         """Successful update returns AlarmStatusData with status and protom_response."""

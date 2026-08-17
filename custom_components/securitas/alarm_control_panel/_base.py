@@ -98,6 +98,11 @@ HA_STATE_TO_CONF_KEY: dict[str, str] = {
 
 _LOGGER = logging.getLogger(__name__)
 
+# The all-axes-off target. A transition to this state is a full disarm, which
+# is unconditional (DARM* commands clear their axis regardless of the current
+# state) and therefore safe to issue even when the current state is unknown.
+_FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
+
 
 def _read_unsupported_for_installation(
     config: dict[str, Any], installation_number: str
@@ -487,17 +492,25 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         ``_last_proto_code`` was stale), updates the proto code from the
         real response and retries with the corrected current state.
 
-        Refuses to act when the panel's current state is unknown (no poll
-        seen yet, or a proto code we don't model).  Acting on an unknown
-        current state would silently no-op the disarm path (issue #441) or
-        send incorrect transitions on the arm path.
+        When the panel's current state is unknown (no poll seen yet, or a
+        proto code we don't model like 'N' after a central-station reset), a
+        *full disarm* is still issued unconditionally — DARM1/DARM1DARMPERI
+        clear any armed state, so we don't need to read the current one
+        (#550).  This is not the #441 silent no-op: we send the disarm rather
+        than letting the resolver compute nothing off a state it can't read.
+        Any other transition needs a known current state to plan, so it is
+        refused with the actual code surfaced for reporting.
         """
-        if self._last_proto_code is None:
-            raise VerisureOwaError(
-                "Alarm state not yet known. "
-                "Please wait for the first status poll and try again."
-            )
-        if self._last_proto_code not in PROTO_TO_ALARM_STATE:
+        if not self._current_proto_modeled():
+            if target == _FULLY_DISARMED:
+                return await self._disarm_circuits_unconditional(
+                    self._full_disarm_circuits(), **force_params
+                )
+            if self._last_proto_code is None:
+                raise VerisureOwaError(
+                    "Alarm state not yet known. "
+                    "Please wait for the first status poll and try again."
+                )
             raise VerisureOwaError(
                 f"Alarm is in unknown state '{self._last_proto_code}'. "
                 f"Please open an issue at {PROJECT_URL}/issues "
@@ -507,12 +520,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         result: OperationStatus | None = None
 
         for attempt in range(2):
-            current = PROTO_TO_ALARM_STATE[self._last_proto_code]
+            # Guarded above: past the refusal block the code is modelled, so
+            # it is non-None and in PROTO_TO_ALARM_STATE. Re-read each pass —
+            # the retry below may have corrected it.
+            proto_code = self._last_proto_code
+            assert proto_code is not None
+            current = PROTO_TO_ALARM_STATE[proto_code]
             steps = self._resolver.resolve(current, target)
 
             if not steps:
                 # Resolver says we're already in the target state.
-                return OperationStatus(protom_response=self._last_proto_code)
+                return OperationStatus(protom_response=proto_code)
 
             for step in steps:
                 result = await self._execute_step(step, **force_params)
@@ -541,6 +559,57 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return result
 
         assert result is not None
+        return result
+
+    def _current_proto_modeled(self) -> bool:
+        """Return True if the last polled proto code maps to a known AlarmState.
+
+        False both when nothing has been polled (``None``) and when the panel
+        reports a proto code we don't model (e.g. 'N'), so callers can treat
+        the current state as unreadable in either case.
+        """
+        return (
+            self._last_proto_code is not None
+            and self._last_proto_code in PROTO_TO_ALARM_STATE
+        )
+
+    def _full_disarm_circuits(self) -> set[str]:
+        """Circuits to clear for a full disarm when the current state is unreadable.
+
+        The combined Main panel owns every axis the installation supports, so
+        it disarms all of them.  Axis sub-panels override this to touch only
+        their own axis — the other axes' real state is unknown, so it must be
+        left alone rather than blindly cleared (#550).
+        """
+        circuits = {CIRCUIT_INTERIOR}
+        if self._has_peri:
+            circuits.add(CIRCUIT_PERIMETER)
+        if self._has_annex:
+            circuits.add(CIRCUIT_ANNEX)
+        return circuits
+
+    async def _disarm_circuits_unconditional(
+        self, circuits: set[str], **force_params: str
+    ) -> OperationStatus:
+        """Disarm the requested circuits without a known current state (#550).
+
+        Disarm commands are unconditional, so this clears the requested
+        circuits regardless of what state the panel is actually in.  Reuses
+        ``_execute_step`` for the same unsupported-command fallback the normal
+        path gets.  Returns the last command's OperationStatus, or a synthetic
+        disarmed status if nothing needed sending.
+        """
+        steps = self._resolver.resolve_disarm_only(
+            interior=CIRCUIT_INTERIOR in circuits,
+            perimeter=CIRCUIT_PERIMETER in circuits,
+            annex=CIRCUIT_ANNEX in circuits,
+        )
+        result: OperationStatus | None = None
+        for step in steps:
+            result = await self._execute_step(step, **force_params)
+        if result is None:
+            # No axis needed disarming — report the disarmed state.
+            return OperationStatus(protom_response=PROTO_DISARMED)
         return result
 
     async def _execute_step(
