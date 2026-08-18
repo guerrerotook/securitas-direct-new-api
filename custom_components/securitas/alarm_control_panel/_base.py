@@ -580,11 +580,18 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         it disarms all of them.  Axis sub-panels override this to touch only
         their own axis — the other axes' real state is unknown, so it must be
         left alone rather than blindly cleared (#550).
+
+        Reads the *live* coordinator capabilities rather than the entity's
+        ``self._has_peri`` / ``self._has_annex``, which are frozen at __init__:
+        capability detection can lag (a transient error at startup leaves them
+        False until a later refresh), and a stale ``has_annex`` here would drop
+        ``DARMANNEX1`` and silently leave the annex armed.  The known-state path
+        avoids this by reading the live joint state; this mirrors it.
         """
         circuits = {CIRCUIT_INTERIOR}
-        if self._has_peri:
+        if self.coordinator.has_peri:
             circuits.add(CIRCUIT_PERIMETER)
-        if self._has_annex:
+        if self.coordinator.has_annex:
             circuits.add(CIRCUIT_ANNEX)
         return circuits
 

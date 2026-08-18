@@ -4740,6 +4740,28 @@ class TestExecuteTransitionDisarmsFromUnknownState:
 
         alarm.client.arm_alarm.assert_not_called()
 
+    async def test_full_disarm_uses_live_annex_capability_not_frozen(self):
+        """The entity's _has_peri/_has_annex are frozen at __init__, but
+        capability detection can lag (a transient get_services failure at
+        startup leaves them False until a later coordinator refresh). A full
+        disarm from an unknown state must clear the annex axis using the LIVE
+        coordinator capability — otherwise DARMANNEX1 is skipped and the annex
+        stays armed while the disarm reports success (#550)."""
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "N"
+        # Frozen-stale: annex not detected when the entity was constructed…
+        alarm._has_annex = False
+        # …but a later refresh flipped the live coordinator flag True.
+        alarm.coordinator.has_annex = True
+        self._disarm_ok(alarm)
+
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
+
+        sent = [call.args[1] for call in alarm.client.disarm_alarm.call_args_list]
+        assert "DARMANNEX1" in sent
+
     async def test_disarm_via_public_api_from_unknown_succeeds(self):
         """async_alarm_disarm from an unmodelled state disarms instead of
         firing the disarm_failed notification (the #550 bug)."""
