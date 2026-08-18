@@ -286,6 +286,20 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
             return _default
         return PROTO_TO_ALARM_STATE.get(proto_code, _default)
 
+    @property
+    def alarm_state_known(self) -> bool:
+        """Return True if the latest polled proto code maps to a modelled state.
+
+        ``alarm_state`` falls back to all-OFF both when nothing has been
+        polled and when the panel reports an unmodelled proto code (e.g. 'N'
+        after a central-station reset, #550) — the two are indistinguishable
+        from the AlarmState alone. Consumers that must not mistake "unknown"
+        for "disarmed" (the lock's auto-disarm, partial disarm) gate on this.
+        """
+        if self.data is None or self.data.status is None:
+            return False
+        return self.data.status.status in PROTO_TO_ALARM_STATE
+
     def populate_capabilities_from_data(
         self,
         services: list,

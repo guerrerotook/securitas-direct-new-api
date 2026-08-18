@@ -2731,6 +2731,26 @@ class TestVerisureLockUnlockDisarm:
         lock._combined_alarm_panel.execute_partial_disarm.assert_not_awaited()
         lock._client.change_lock_mode.assert_awaited_once()
 
+    async def test_unknown_alarm_state_targets_all_configured_circuits(self):
+        """When the alarm state is unreadable (all-OFF fallback for an
+        unmodelled 'N' code), the lock can't tell what's armed — so it must
+        disarm every configured circuit rather than skip disarm entirely,
+        which would leave the door open over an armed alarm (#550)."""
+        lock = make_lock(initial_status="2", poll_status="1")
+        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+        lock._unlock_disarms_circuits = ["interior", "perimeter"]
+        lock._combined_alarm_panel = self._make_alarm_panel(success=True)
+        coord = self._make_alarm_coord(self._state())  # reads as all-OFF
+        coord.alarm_state_known = False  # but the real state is unknown ('N')
+        lock._alarm_coordinator = coord
+
+        await lock.async_unlock()
+
+        lock._combined_alarm_panel.execute_partial_disarm.assert_awaited_once_with(
+            ["interior", "perimeter"]
+        )
+        lock._client.change_lock_mode.assert_awaited_once()
+
     async def test_async_open_follows_same_disarm_first_flow(self):
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())

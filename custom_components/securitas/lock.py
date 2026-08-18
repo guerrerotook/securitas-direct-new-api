@@ -699,8 +699,16 @@ class VerisureLock(  # type: ignore[override]
             return None
         if self._combined_alarm_panel is None or self._alarm_coordinator is None:
             return None
-        currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
-        targets = [c for c in self._unlock_disarms_circuits if c in currently_armed]
+        if self._alarm_coordinator.alarm_state_known:
+            currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
+            targets = [c for c in self._unlock_disarms_circuits if c in currently_armed]
+        else:
+            # State unreadable (e.g. 'N' after a central-station reset):
+            # alarm_state falls back to all-OFF, so _armed_circuits would find
+            # nothing and skip disarm, leaving the door open over an armed
+            # alarm. Disarm every configured circuit instead — disarm is
+            # unconditional, so this is safe regardless of the real state (#550).
+            targets = list(self._unlock_disarms_circuits)
         if not targets:
             return None
         ok = await self._combined_alarm_panel.execute_partial_disarm(targets)

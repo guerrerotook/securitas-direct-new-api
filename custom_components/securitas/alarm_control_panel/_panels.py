@@ -15,6 +15,7 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntityFeature,  # type: ignore[attr-defined]
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
+from homeassistant.exceptions import HomeAssistantError
 
 from ..const import (
     CIRCUIT_ANNEX,
@@ -94,13 +95,23 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         post-result state on success, rollback on failure. Concludes with a
         coordinator refresh so other observers don't have to wait for the
         next poll to see the change.
+
+        When the coordinator can't read the current state (never polled, or an
+        unmodelled proto code like 'N' after a central-station reset), the
+        requested circuits are disarmed unconditionally rather than skipped —
+        otherwise ``alarm_state`` reads as all-OFF and the disarm silently
+        no-ops, leaving the door unlocked over an armed alarm (#550).
         """
         if not circuits:
             return True
-        current = self.coordinator.alarm_state
-        target = build_partial_disarm_target(current, circuits)
-        if target == current:
-            return True
+        # target is set only when the current state is readable; None means the
+        # state is unknown ('N' etc.) and we disarm the circuits unconditionally.
+        target: AlarmState | None = None
+        if self.coordinator.alarm_state_known:
+            current = self.coordinator.alarm_state
+            target = build_partial_disarm_target(current, circuits)
+            if target == current:
+                return True
 
         affected = [self, *self._affected_axis_subpanels(circuits)]
         for entity in affected:
@@ -108,25 +119,30 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             entity._operation_epoch += 1  # pylint: disable=protected-access
             entity._force_state(AlarmControlPanelState.DISARMING)  # pylint: disable=protected-access
         try:
-            result = await self._execute_transition(target)
-        except VerisureOwaError as err:
-            # NOTE (#508 follow-up): an OperationTimeoutError (command accepted
-            # but the confirmation poll didn't resolve) is a VerisureOwaError,
-            # so it is rolled back here — unlike the user-facing arm/disarm
-            # paths, which now treat that as accepted-but-provisional. The
-            # rollback shows the circuits as still-armed (the fail-safe
-            # direction) but reports failure to the lock automation. Applying
-            # provisional semantics to this multi-entity path is a tracked
-            # follow-up, not handled in this change.
+            if target is not None:
+                result = await self._execute_transition(target)
+            else:
+                result = await self._disarm_circuits_unconditional(set(circuits))
+        except (VerisureOwaError, HomeAssistantError) as err:
+            # VerisureOwaError includes OperationTimeoutError (command accepted
+            # but the confirmation poll didn't resolve): it is rolled back here
+            # — unlike the user-facing arm/disarm paths, which treat that as
+            # accepted-but-provisional. The rollback shows the circuits as
+            # still-armed (the fail-safe direction) but reports failure to the
+            # lock automation. (Provisional semantics for this multi-entity
+            # path are a tracked #508 follow-up.) HomeAssistantError means every
+            # disarm alternative was rejected by the panel — roll back too
+            # rather than leave the entities stuck in DISARMING.
             for entity in affected:
                 entity._state = entity._last_state  # pylint: disable=protected-access
                 entity._operation_in_progress = False  # pylint: disable=protected-access
                 entity.async_write_ha_state()
+            detail = err.log_detail() if isinstance(err, VerisureOwaError) else err
             _LOGGER.error(
                 "Partial disarm failed for %s circuits %s: %s",
                 self._installation.number,
                 circuits,
-                err.log_detail(),
+                detail,
             )
             return False
         for entity in affected:
@@ -175,6 +191,15 @@ class _AxisSubPanelMixin:
     # disabled. The Main panel keeps the default (True) and points users
     # at the mappings UI instead.
     _is_mappable: bool = False
+
+    # Set by each concrete sub-panel to the circuit it drives.
+    _AXIS: str
+
+    def _full_disarm_circuits(self) -> set[str]:
+        """A sub-panel only ever clears its own axis, even from an unknown
+        state — the other axes' real state is unreadable, so they must be
+        left untouched instead of blindly disarmed (#550)."""
+        return {self._AXIS}
 
     @property
     def suggested_object_id(self) -> str:

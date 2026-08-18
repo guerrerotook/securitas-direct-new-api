@@ -2,6 +2,14 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.6.0
+
+One fix, for anyone whose alarm has been reset remotely by Securitas' monitoring centre: disarming from Home Assistant no longer fails afterwards with an "unknown state" error.
+
+### Fixed
+
+**Disarm failed with "unknown state 'N'" after a central-station reset ([#551](https://github.com/guerrerotook/securitas-direct-new-api/pull/551)).**  When the monitoring centre cancels a false alarm and re-arms your system remotely, Verisure can leave the alarm in a state code this integration doesn't recognise (`N`).  Disarming from Home Assistant then failed outright: the alarm panel refused with *"Alarm is in unknown state 'N'"*, and unlocking a smart lock set to disarm-on-unlock silently skipped the disarm — opening the door over a still-armed alarm.  A disarm command is unconditional (it clears the alarm whatever state it is in), so disarming now goes ahead from any unrecognised state instead of refusing, while *arming* — which needs to know the current state to choose the right command — still declines and reports the code so it can be added.  Axis sub-panels disarm only their own circuit, and a smart-lock auto-disarm now clears every configured circuit when the state can't be read rather than skipping.  Thanks to [@danielmugica-beep](https://github.com/danielmugica-beep) for the detailed report.
+
 ## v5.5.0
 
 The local alarm PIN can now guard your smart locks as well as the alarm panel — and it is stored hashed rather than in plain text.  Four fixes besides: a long-standing bug that silently discarded your PIN and alarm mappings shortly after a fresh install, an integration left permanently down by a network blip during Home Assistant startup, camera capture delivering nothing for long-idle cameras, and forward compatibility with Home Assistant 2026.8's device-registry change.

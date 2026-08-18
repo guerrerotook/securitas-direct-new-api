@@ -4671,31 +4671,129 @@ class TestExecuteTransition:
 
 
 # ===========================================================================
-# Refuse arm/disarm when current state is unknown
+# Disarm from an unknown current state (#550)
+# ===========================================================================
+
+
+class TestExecuteTransitionDisarmsFromUnknownState:
+    """A full disarm is unconditional, so it must proceed even when the
+    current state is unknown — never polled, or an unmodelled proto code like
+    'N' that Verisure reports after a central-station reset (#550).
+
+    This is *not* the #441 silent no-op: we send DARM1 (or DARM1DARMPERI)
+    unconditionally rather than letting the resolver compute a no-op off a
+    state we can't read.  Arming still refuses (it needs the current state).
+    """
+
+    @staticmethod
+    def _disarm_ok(alarm):
+        alarm.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(protom_response="D")
+        )
+
+    async def test_unknown_letter_sends_plain_darm1_no_peri(self):
+        alarm = make_alarm(has_peri=False)
+        alarm._last_proto_code = "N"  # unmodelled — central-station reset
+        self._disarm_ok(alarm)
+
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
+
+        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+
+    async def test_unknown_letter_sends_compound_disarm_with_peri(self):
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "N"
+        self._disarm_ok(alarm)
+
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
+
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1DARMPERI"
+        )
+
+    async def test_none_proto_code_sends_disarm(self):
+        """Never polled yet → a disarm is still safe and must go through."""
+        alarm = make_alarm(has_peri=False)
+        alarm._last_proto_code = None
+        self._disarm_ok(alarm)
+
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
+
+        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+
+    async def test_unknown_state_never_arms(self):
+        """The disarm-from-unknown path must never emit an arm command."""
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "N"
+        self._disarm_ok(alarm)
+        alarm.client.arm_alarm = AsyncMock()
+
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
+
+        alarm.client.arm_alarm.assert_not_called()
+
+    async def test_full_disarm_uses_live_annex_capability_not_frozen(self):
+        """The entity's _has_peri/_has_annex are frozen at __init__, but
+        capability detection can lag (a transient get_services failure at
+        startup leaves them False until a later coordinator refresh). A full
+        disarm from an unknown state must clear the annex axis using the LIVE
+        coordinator capability — otherwise DARMANNEX1 is skipped and the annex
+        stays armed while the disarm reports success (#550)."""
+        alarm = make_alarm(has_peri=True)
+        alarm._last_proto_code = "N"
+        # Frozen-stale: annex not detected when the entity was constructed…
+        alarm._has_annex = False
+        # …but a later refresh flipped the live coordinator flag True.
+        alarm.coordinator.has_annex = True
+        self._disarm_ok(alarm)
+
+        await alarm._execute_transition(
+            AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+        )
+
+        sent = [call.args[1] for call in alarm.client.disarm_alarm.call_args_list]
+        assert "DARMANNEX1" in sent
+
+    async def test_disarm_via_public_api_from_unknown_succeeds(self):
+        """async_alarm_disarm from an unmodelled state disarms instead of
+        firing the disarm_failed notification (the #550 bug)."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        alarm._last_proto_code = "N"
+        self._disarm_ok(alarm)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel._base._notify"
+        ) as mock_notify:
+            await alarm.async_alarm_disarm()
+
+        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        mock_notify.assert_not_called()
+        assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+# ===========================================================================
+# Refuse arm (but not disarm) when current state is unknown
 # ===========================================================================
 
 
 class TestExecuteTransitionRefusesUnknownState:
-    """When _last_proto_code is None or an unrecognised proto, refuse to act.
+    """When _last_proto_code is None or an unrecognised proto, refuse to *arm*.
 
-    Acting on a stale or unknown current state is the v5.0.0 disarm-fails-when-
-    annex-armed bug (#441): the resolver computed a no-op transition off a stale
-    'D' and silently skipped DARM1.  We now refuse outright and surface the
-    actual code so the user can report it.
+    Arming needs a known current state to plan the transition — acting on a
+    stale or unknown one is the v5.0.0 arm-goes-wrong side of #441 — so it is
+    refused with the actual code surfaced for reporting.  A *full disarm* from
+    an unknown state is not refused (it is unconditional); that behaviour lives
+    in TestExecuteTransitionDisarmsFromUnknownState (#550).
     """
-
-    async def test_disarm_refused_when_last_proto_code_none(self):
-        """No status poll yet → refuse, do not call disarm_alarm."""
-        alarm = make_alarm()
-        alarm._last_proto_code = None
-        alarm.client.disarm_alarm = AsyncMock()
-
-        with pytest.raises(VerisureOwaError):
-            await alarm._execute_transition(
-                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
-            )
-
-        alarm.client.disarm_alarm.assert_not_called()
 
     async def test_arm_refused_when_last_proto_code_none(self):
         """No status poll yet → refuse, do not call arm_alarm."""
@@ -4709,19 +4807,6 @@ class TestExecuteTransitionRefusesUnknownState:
             )
 
         alarm.client.arm_alarm.assert_not_called()
-
-    async def test_disarm_refused_when_last_proto_code_unknown_letter(self):
-        """Unknown letter (e.g. 'O' on v5.0.0) → refuse rather than silent no-op."""
-        alarm = make_alarm()
-        alarm._last_proto_code = "Z"  # unrecognised
-        alarm.client.disarm_alarm = AsyncMock()
-
-        with pytest.raises(VerisureOwaError):
-            await alarm._execute_transition(
-                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
-            )
-
-        alarm.client.disarm_alarm.assert_not_called()
 
     async def test_arm_refused_when_last_proto_code_unknown_letter(self):
         """Unknown letter → refuse arm too, even though resolver could compute a delta."""
@@ -4737,50 +4822,31 @@ class TestExecuteTransitionRefusesUnknownState:
         alarm.client.arm_alarm.assert_not_called()
 
     async def test_unknown_state_error_contains_code(self):
-        """Refusal message names the unrecognised code so users can report it."""
+        """The arm refusal message names the unrecognised code for reporting."""
         alarm = make_alarm()
         alarm._last_proto_code = "Z"
 
         with pytest.raises(VerisureOwaError) as excinfo:
             await alarm._execute_transition(
-                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+                AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)
             )
 
         assert "'Z'" in excinfo.value.message
 
     async def test_unknown_state_error_points_to_issue_tracker(self):
-        """Refusal message points users to the upstream issue tracker."""
+        """The arm refusal message points users to the upstream issue tracker."""
         alarm = make_alarm()
         alarm._last_proto_code = "Z"
 
         with pytest.raises(VerisureOwaError) as excinfo:
             await alarm._execute_transition(
-                AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
+                AlarmState(interior=InteriorMode.TOTAL, perimeter=PerimeterMode.OFF)
             )
 
         assert (
             "github.com/guerrerotook/securitas-direct-new-api/issues"
             in excinfo.value.message
         )
-
-    async def test_disarm_via_public_api_fires_disarm_failed_notification(self):
-        """async_alarm_disarm with unknown current state surfaces translated notification."""
-        alarm = make_alarm()
-        alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
-        alarm._last_proto_code = "Z"
-        alarm.client.disarm_alarm = AsyncMock()
-
-        with patch(
-            "custom_components.securitas.alarm_control_panel._base._notify"
-        ) as mock_notify:
-            await alarm.async_alarm_disarm()
-
-        alarm.client.disarm_alarm.assert_not_called()
-        mock_notify.assert_called_once()
-        args, _ = mock_notify.call_args
-        # _notify(hass, notification_id, translation_key, params)
-        assert args[2] == "disarm_failed"
-        assert "'Z'" in args[3]["error"]
 
     async def test_arm_via_public_api_fires_arm_failed_notification(self):
         """set_arm_state with unknown current state surfaces translated notification."""
@@ -5617,6 +5683,51 @@ def _make_perimeter_panel(
         ),
     ):
         return PerimeterVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+
+
+class TestSubPanelDisarmFromUnknownState:
+    """An axis sub-panel disarm from an unknown state must clear ONLY its own
+    axis, not every axis (#550).
+
+    From an unmodelled state ('N') the sub-panel's disarm target collapses to
+    all-OFF (the other axes read all-OFF via the coordinator fallback), which
+    matches the combined panel's full-disarm target. Without axis scoping,
+    the shared unconditional-disarm path would clear perimeter/annex too —
+    but the other axes' real state is unknown, so a sub-panel must leave them
+    untouched.
+    """
+
+    async def test_interior_subpanel_disarms_only_interior(self):
+        panel = _make_interior_panel(
+            capabilities=frozenset(
+                ["ARM", "ARMDAY", "ARMNIGHT", "PERI", "ARMANNEX", "DARMANNEX"]
+            )
+        )
+        panel._last_proto_code = "N"  # unmodelled — central-station reset
+        panel.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(protom_response="D")
+        )
+
+        target = panel._resolve_target_state(AlarmControlPanelState.DISARMED)
+        await panel._execute_transition(target)
+
+        panel.client.disarm_alarm.assert_called_once_with(panel.installation, "DARM1")
+
+    async def test_perimeter_subpanel_disarms_only_perimeter(self):
+        panel = _make_perimeter_panel(
+            capabilities=frozenset(["PERI", "ARMANNEX", "DARMANNEX"])
+        )
+        panel._last_proto_code = "N"
+        panel.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(protom_response="D")
+        )
+
+        target = panel._resolve_target_state(AlarmControlPanelState.DISARMED)
+        await panel._execute_transition(target)
+
+        panel.client.disarm_alarm.assert_called_once_with(
+            panel.installation, "DARMPERI"
+        )
 
 
 class TestSubPanelSuggestedObjectId:
@@ -7074,6 +7185,49 @@ class TestExecutePartialDisarm:
         ok = await panel.execute_partial_disarm([])
         assert ok is True
         panel._execute_transition.assert_not_awaited()
+
+    async def test_unknown_state_disarms_requested_circuit_unconditionally(self):
+        """When the coordinator can't read the current state (e.g. 'N' after a
+        central-station reset), partial disarm must still send an unconditional
+        disarm for the requested circuit instead of silently no-op'ing (#550)."""
+        panel = make_alarm(has_peri=True)
+        panel.coordinator.alarm_state_known = False
+        panel.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(protom_response="D")
+        )
+
+        ok = await panel.execute_partial_disarm(["interior"])
+
+        assert ok is True
+        panel.client.disarm_alarm.assert_called_once_with(panel.installation, "DARM1")
+
+    async def test_unknown_state_disarm_never_arms(self):
+        """The unknown-state partial-disarm path must never emit an arm command."""
+        panel = make_alarm(has_peri=True)
+        panel.coordinator.alarm_state_known = False
+        panel.client.disarm_alarm = AsyncMock(
+            return_value=OperationStatus(protom_response="D")
+        )
+        panel.client.arm_alarm = AsyncMock()
+
+        await panel.execute_partial_disarm(["interior", "perimeter"])
+
+        panel.client.arm_alarm.assert_not_called()
+
+    async def test_rejected_disarm_command_rolls_back_not_stuck(self):
+        """If every disarm alternative is rejected (HomeAssistantError, not a
+        VerisureOwaError), roll the entities out of DISARMING and report
+        failure — never leave _operation_in_progress stuck True."""
+        panel = make_alarm(has_peri=True)
+        panel.coordinator.alarm_state_known = False
+        panel._disarm_circuits_unconditional = AsyncMock(
+            side_effect=HomeAssistantError("no supported disarm command")
+        )
+
+        ok = await panel.execute_partial_disarm(["interior"])
+
+        assert ok is False
+        assert panel._operation_in_progress is False
 
     async def test_combined_panel_shows_disarming_during_transition(self):
         """Combined panel should briefly enter DISARMING before the API call resolves
