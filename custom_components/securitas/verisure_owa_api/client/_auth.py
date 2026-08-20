@@ -19,7 +19,7 @@ from ..graphql_queries import (
     VALIDATE_DEVICE_MUTATION,
 )
 from ..models import OtpPhone
-from ._base import API_CALLBY, _ClientBase
+from ._base import API_CALLBY, _ClientBase, _token_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,6 +122,25 @@ class _AuthMixin(_ClientBase):
 
     async def refresh_token(self) -> bool:
         """Refresh the authentication token. Returns True on success."""
+        # Diagnostic for issue #557: emit *before* the request so it survives a
+        # server-side crash. token_fp fingerprints the refresh token actually
+        # presented (a stale/consumed token loaded from disk after a reboot
+        # would carry a different fingerprint than the last one rotated);
+        # had_prior_auth=False localises the call to startup rather than a
+        # steady-state renewal; the *_len fields flag an empty device field
+        # (a String! the server might dereference by language) without logging
+        # the identifiers themselves.
+        _LOGGER.debug(
+            "[refresh] RefreshLogin attempt: token_fp=%s had_prior_auth=%s "
+            "country=%s lang=%s idDevice_len=%d uuid_len=%d indigitall_len=%d",
+            _token_fingerprint(self.refresh_token_value),
+            self.authentication_token is not None,
+            self.country,
+            self.language,
+            len(self.device_id or ""),
+            len(self.uuid or ""),
+            len(self.id_device_indigitall or ""),
+        )
         content = {
             "operationName": "RefreshLogin",
             "variables": {

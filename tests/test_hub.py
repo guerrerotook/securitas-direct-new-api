@@ -1,6 +1,7 @@
 """Tests for VerisureHub orchestration methods."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,12 +19,17 @@ from custom_components.securitas.verisure_owa_api import (
     AuthenticationError,
     VerisureOwaError,
 )
+from custom_components.securitas.verisure_owa_api.client._base import (
+    _token_fingerprint,
+)
 from custom_components.securitas.verisure_owa_api.models import (
     CameraDevice,
     ThumbnailResponse,
 )
 
 from .conftest import make_installation
+
+_HUB_LOGGER = "custom_components.securitas.hub"
 
 
 def make_hub(*, mock_client: bool = True, **config_overrides) -> VerisureHub:
@@ -151,6 +157,55 @@ class TestRefreshTokenPersistence:
         hub = make_hub()  # config_entry=None
         hub._persist_refresh_token("anything")
         hub.hass.config_entries.async_update_entry.assert_not_called()
+
+    def test_diagnostic_logs_persisted_outcome(self, caplog):
+        """Issue #557: an actual write logs the fingerprint + outcome=persisted.
+
+        This closes the memory->disk seam: rotated_fp proves an in-memory
+        rotation, but only this line proves we asked HA to persist that value.
+        """
+        hub, _ = self._hub_with_entry(
+            {"username": "test@example.com", CONF_REFRESH_TOKEN: "old-token"}
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_HUB_LOGGER):
+            hub._persist_refresh_token("rotated-token")
+
+        assert f"persist_fp={_token_fingerprint('rotated-token')}" in caplog.text
+        assert "outcome=persisted" in caplog.text
+
+    def test_diagnostic_logs_already_current_outcome(self, caplog):
+        """A no-op rotation logs outcome=already-current, not a false 'persisted'."""
+        hub, _ = self._hub_with_entry(
+            {"username": "test@example.com", CONF_REFRESH_TOKEN: "same-token"}
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_HUB_LOGGER):
+            hub._persist_refresh_token("same-token")
+
+        assert f"persist_fp={_token_fingerprint('same-token')}" in caplog.text
+        assert "outcome=already-current" in caplog.text
+
+    def test_diagnostic_logs_no_config_entry_outcome(self, caplog):
+        """The detached (config-flow) path logs outcome=no-config-entry."""
+        hub = make_hub()  # config_entry=None
+
+        with caplog.at_level(logging.DEBUG, logger=_HUB_LOGGER):
+            hub._persist_refresh_token("anything")
+
+        assert "outcome=no-config-entry" in caplog.text
+
+    def test_diagnostic_does_not_leak_token(self, caplog):
+        """The persist diagnostic must never contain the raw token."""
+        secret = "super-secret-rotated-token"
+        hub, _ = self._hub_with_entry(
+            {"username": "test@example.com", CONF_REFRESH_TOKEN: "old-token"}
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_HUB_LOGGER):
+            hub._persist_refresh_token(secret)
+
+        assert secret not in caplog.text
 
 
 class TestLogin:
