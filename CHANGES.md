@@ -4,7 +4,11 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.7.0
 
-One fix: a partial-arming entry in the activity log that showed up as an unknown event now reads as an arm.
+One fix, plus opt-in diagnostics: a partial-arming entry in the activity log that showed up as an unknown event now reads as an arm, and DEBUG logging was added to help pin down a refresh-login crash some accounts hit on every restart.
+
+### Added
+
+**Opt-in diagnostics for the refresh-login crash on restart ([#557](https://github.com/guerrerotook/securitas-direct-new-api/issues/557)).**  Some accounts hit a server-side `xSRefreshLogin` error on every Home Assistant restart that leaves the integration stuck until it is deleted and re-added.  This release adds DEBUG-level logging — off by default and with no behaviour change — that fingerprints the refresh token across a restart so the two likely causes (a stale token loaded from disk versus a genuinely broken refresh for the account) can be told apart.  If you are affected, enable debug logging for `custom_components.securitas` — a `logs:` entry under `logger:` in `configuration.yaml` — then delete and re-add the integration, leave Home Assistant running for half an hour, then restart it and share the log on the issue.  Thanks to [@NatsuOnFire](https://github.com/NatsuOnFire) for the report.
 
 ### Fixed
 
