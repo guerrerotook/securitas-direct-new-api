@@ -1057,7 +1057,7 @@ class TestActivityEventCategory:
     def test_armed_codes(self):
         # Includes panel-emitted arm signals (802, 821, 823, 824) — the
         # "Connection ..." aliases are alarm-armed events, not network state.
-        for code in (2, 37, 40, 46, 701, 721, 802, 821, 823, 824):
+        for code in (2, 37, 40, 46, 701, 702, 721, 802, 821, 823, 824):
             assert self._ev(code).category == ActivityCategory.ARMED, code
 
     def test_disarmed_codes(self):
@@ -1146,6 +1146,13 @@ class TestActivityEventCategory:
         Routines are user-scheduled automations that can arm/disarm the alarm.
         Seen as "Routine exécutée". GitHub #513."""
         assert self._ev(70).category == ActivityCategory.ROUTINE_EXECUTED
+
+    def test_partial_mode_activation(self):
+        """702 is a partial-mode activation — the panel arming a partial mode.
+
+        Reported as an "Unknown event" until mapped; it belongs with the other
+        arm signals in the 70x series (701 armed / 700 disarmed). GitHub #555."""
+        assert self._ev(702).category == ActivityCategory.ARMED
 
     def test_unknown_codes(self):
         """Codes we haven't seen fall through to UNKNOWN — future-proofing."""

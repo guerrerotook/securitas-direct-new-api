@@ -2,6 +2,14 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.7.0
+
+One fix: a partial-arming entry in the activity log that showed up as an unknown event now reads as an arm.
+
+### Fixed
+
+**A partial arm showed as "Unknown event" in the activity log ([#555](https://github.com/guerrerotook/securitas-direct-new-api/issues/555)).**  When the panel armed a partial mode it emitted event code `702`, which the integration did not recognise, so the activity log listed it as an *Unknown event* instead of an arm.  Code `702` is now mapped alongside the other arm signals, so a partial activation appears as an armed event — correctly grouped, iconed and coloured — like any other arm.  Thanks to [@philippemezzadri](https://github.com/philippemezzadri) for reporting it with the event details.
+
 ## v5.6.0
 
 One fix, for anyone whose alarm has been reset remotely by Securitas' monitoring centre: disarming from Home Assistant no longer fails afterwards with an "unknown state" error.

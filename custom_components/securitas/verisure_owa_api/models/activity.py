@@ -93,6 +93,7 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     40: ActivityCategory.ARMED,  # Spanish panel: armed exterior ("Conexión modo exterior")
     46: ActivityCategory.ARMED,
     701: ActivityCategory.ARMED,
+    702: ActivityCategory.ARMED,  # partial-mode activation (70x arm series). GitHub #555
     721: ActivityCategory.ARMED,
     801: ActivityCategory.ARMED,  # "Attivazione modalità totale" — Italian interior total arm
     802: ActivityCategory.ARMED,  # "Attivazione modalità parziale" / "Connection Main partial"
