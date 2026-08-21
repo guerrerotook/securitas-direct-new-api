@@ -152,6 +152,22 @@ class TestRefreshTokenPersistence:
         hub._persist_refresh_token("anything")
         hub.hass.config_entries.async_update_entry.assert_not_called()
 
+    def test_persist_current_writes_the_in_memory_token(self):
+        """persist_current_refresh_token writes the client's live token to the entry.
+
+        Used on persistence-target handoff (owner entry unloaded, co-tenant
+        survives) so the new entry's stored token is current immediately.
+        """
+        hub, _ = self._hub_with_entry(
+            {"username": "test@example.com", CONF_REFRESH_TOKEN: "old-token"}
+        )
+        hub.client.refresh_token_value = "current-token"
+
+        hub.persist_current_refresh_token()
+
+        new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert new_data[CONF_REFRESH_TOKEN] == "current-token"
+
 
 class TestLogin:
     """Tests for hub.login()."""

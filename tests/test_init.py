@@ -1475,6 +1475,75 @@ class TestAsyncUnloadEntry:
         # DOMAIN should still be in hass.data because entry2 remains
         assert DOMAIN in hass.data
 
+    async def test_unload_owner_entry_hands_off_persistence_to_survivor(self, hass):
+        """Regression test for issue #557 — hand off the persistence target.
+
+        Two entries for one username share a hub, and the hub persists rotated
+        refresh tokens to whichever entry it is attached to. If that owning
+        entry is removed while a co-tenant survives, the hub must re-attach to
+        the survivor and persist the current token to it — otherwise rotations
+        target the removed entry, the survivor's on-disk token goes stale, and
+        the xSRefreshLogin 'fr' crash recurs on the survivor's next restart.
+        """
+        hub = make_securitas_hub_mock()
+        hub.get_refresh_token = MagicMock(return_value="current-refresh-token")
+
+        owner = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        owner.add_to_hass(hass)
+        survivor = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        survivor.add_to_hass(hass)
+        username = owner.data[CONF_USERNAME]
+
+        # The hub currently persists rotated tokens to `owner`.
+        hub.config_entry = owner
+        hass.data[DOMAIN] = {
+            owner.entry_id: {"hub": hub, "devices": []},
+            survivor.entry_id: {"hub": hub, "devices": []},
+            "sessions": {username: {"hub": hub, "ref_count": 2}},
+        }
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await async_unload_entry(hass, owner)
+
+        # Persistence must move to the surviving co-tenant, and the current
+        # in-memory token must be written there immediately (not left stale).
+        assert hub.config_entry is survivor
+        hub.persist_current_refresh_token.assert_called_once_with()
+        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
+
+    async def test_unload_non_owner_entry_leaves_persistence_target(self, hass):
+        """Unloading a co-tenant that does NOT own persistence must not reattach."""
+        hub = make_securitas_hub_mock()
+        owner = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        owner.add_to_hass(hass)
+        other = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        other.add_to_hass(hass)
+        username = owner.data[CONF_USERNAME]
+
+        hub.config_entry = owner
+        hass.data[DOMAIN] = {
+            owner.entry_id: {"hub": hub, "devices": []},
+            other.entry_id: {"hub": hub, "devices": []},
+            "sessions": {username: {"hub": hub, "ref_count": 2}},
+        }
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await async_unload_entry(hass, other)
+
+        # `owner` is still loaded and still owns persistence — no handoff.
+        assert hub.config_entry is owner
+        hub.persist_current_refresh_token.assert_not_called()
+
     async def test_unload_cancels_pending_lock_config_retries(self, hass):
         """async_unload_entry cancels any pending lock-config retry timers."""
         hub = make_securitas_hub_mock()

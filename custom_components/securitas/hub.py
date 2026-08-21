@@ -535,6 +535,15 @@ class VerisureHub:
         new_data.pop(CONF_PASSWORD, None)
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
 
+    def persist_current_refresh_token(self) -> None:
+        """Write the current in-memory refresh token to the config entry now.
+
+        Used when the persistence target is reassigned (e.g. the owning entry
+        is unloaded while a co-tenant survives) so the new entry's stored token
+        is current immediately, not left stale until the next rotation.
+        """
+        self._persist_refresh_token(self.get_refresh_token())
+
     async def get_lock_modes(
         self, installation: Installation, *, priority: int | None = None
     ) -> list[SmartLockMode]:
