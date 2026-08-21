@@ -1,35 +1,24 @@
-"""Diagnostics for issue #557 (xSRefreshLogin 'fr' crash on restart).
+"""Client behaviour around the issue #557 xSRefreshLogin 'fr' crash.
 
-These tests cover the strategic logging added to tell apart the competing
-explanations for the reboot-only failure: a stale/consumed refresh token
-loaded from disk vs. a genuinely broken refresh for the account. The signal
-is a stable content *fingerprint* of the refresh token (the raw value is
-redacted by SensitiveDataFilter, so every generation would otherwise look
-identical in logs) plus the request context at the failing call.
+The root cause of #557 — a rotated refresh token that was never persisted to
+the config entry, so a restart reloaded a stale token — is fixed in the setup
+path (``_get_or_create_session`` now attaches the entry to a reused config-flow
+hub). These tests characterise the *client-side* handling of the server crash
+itself, which is independent of that fix: the crash is classified transient
+(retryable), not a genuine auth failure, and it leaves the stored refresh token
+untouched. They guard against a future change silently turning the crash into a
+reauth trigger or corrupting the stored token.
 """
 
 from __future__ import annotations
 
-import hashlib
-import logging
-import re
-
 import pytest
 
 from custom_components.securitas.verisure_owa_api.client import VerisureOwaClient
-from custom_components.securitas.verisure_owa_api.client._base import (
-    _token_fingerprint,
-)
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     is_genuine_auth_failure,
 )
-
-from .conftest import refresh_response
-
-_AUTH_LOGGER = "custom_components.securitas.verisure_owa_api.client._auth"
-_BASE_LOGGER = "custom_components.securitas.verisure_owa_api.client._base"
-
 
 # The exact server crash from issue #557: xSRefreshLogin resolver throws a
 # JS TypeError and returns a null field.
@@ -66,172 +55,14 @@ def _make_client(mock_transport, *, refresh_token: str) -> VerisureOwaClient:
     )
 
 
-class TestTokenFingerprint:
-    def test_is_stable_content_hash(self) -> None:
-        """Same token -> same fingerprint, computed as a sha256 prefix.
+class TestRefreshCrashHandling:
+    """The client treats the FR server crash as a transient, non-destructive error.
 
-        Stability as a pure content hash is the whole point: the fingerprint
-        persisted before a restart must equal the one computed after it, so we
-        can tell whether the token loaded from disk is the last one rotated.
-        """
-        token = "some-refresh-token-value"
-        expected = hashlib.sha256(token.encode()).hexdigest()[:12]
-
-        assert _token_fingerprint(token) == expected
-
-    def test_distinguishes_different_tokens(self) -> None:
-        """Different tokens -> different fingerprints (so generations differ)."""
-        assert _token_fingerprint("token-a") != _token_fingerprint("token-b")
-
-    def test_does_not_leak_the_raw_token(self) -> None:
-        """The fingerprint must not contain the raw token (safe to log)."""
-        token = "super-secret-refresh-token"
-        fp = _token_fingerprint(token)
-
-        assert token not in fp
-        assert len(fp) < len(token)
-
-    def test_empty_and_none_use_a_sentinel(self) -> None:
-        """Falsy tokens fingerprint to a sentinel instead of crashing."""
-        assert _token_fingerprint("") == "<none>"
-        assert _token_fingerprint(None) == "<none>"
-
-
-class TestRefreshAttemptDiagnostics:
-    async def test_logs_fingerprint_and_startup_context_on_the_crash(
-        self, mock_transport, caplog
-    ) -> None:
-        """The #557 crash still emits a diagnostic pinning fingerprint + context.
-
-        The diagnostic must be logged *before* the request, so it survives the
-        server crash — that is the only line that ties the failing generation
-        to the reboot (no prior auth token) rather than a steady-state renewal.
-        """
-        mock_transport.execute.return_value = FR_CRASH_RESPONSE
-        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
-        # Fresh process after a reboot: no in-memory auth token yet.
-        assert client.authentication_token is None
-
-        with (
-            caplog.at_level(logging.DEBUG, logger=_AUTH_LOGGER),
-            pytest.raises(VerisureOwaError),
-        ):
-            await client.refresh_token()
-
-        fp = _token_fingerprint("on-disk-refresh-token")
-        assert f"token_fp={fp}" in caplog.text
-        assert "had_prior_auth=False" in caplog.text
-
-    async def test_does_not_leak_the_raw_refresh_token(
-        self, mock_transport, caplog
-    ) -> None:
-        """The raw refresh token must never reach the diagnostic log line."""
-        mock_transport.execute.return_value = FR_CRASH_RESPONSE
-        secret = "super-secret-on-disk-refresh-token"
-        client = _make_client(mock_transport, refresh_token=secret)
-
-        with (
-            caplog.at_level(logging.DEBUG, logger=_AUTH_LOGGER),
-            pytest.raises(VerisureOwaError),
-        ):
-            await client.refresh_token()
-
-        assert secret not in caplog.text
-
-    async def test_distinguishes_steady_state_renewal_from_startup(
-        self, mock_transport, caplog
-    ) -> None:
-        """A renewal with a live auth token logs had_prior_auth=True.
-
-        This flag is the startup-vs-steady discriminator: only the reboot path
-        reaches refresh with no prior auth token, so a crash tagged
-        had_prior_auth=False localises the failure to startup.
-        """
-        mock_transport.execute.return_value = FR_CRASH_RESPONSE
-        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
-        client.authentication_token = "a-live-though-near-expiry-token"
-
-        with (
-            caplog.at_level(logging.DEBUG, logger=_AUTH_LOGGER),
-            pytest.raises(VerisureOwaError),
-        ):
-            await client.refresh_token()
-
-        assert "had_prior_auth=True" in caplog.text
-
-
-class TestRotationDiagnostics:
-    async def test_logs_new_token_fingerprint_on_rotation(
-        self, mock_transport, caplog
-    ) -> None:
-        """A rotated refresh token logs its fingerprint.
-
-        This is the other half of the cross-restart timeline: the last
-        ``rotated_fp`` persisted before a shutdown is what the next boot's
-        ``token_fp`` should match — a mismatch proves a stale token was loaded.
-        """
-        new_refresh = "rotated-refresh-token"
-        mock_transport.execute.return_value = refresh_response(
-            refresh_token=new_refresh
-        )
-        client = _make_client(mock_transport, refresh_token="old-refresh-token")
-
-        with caplog.at_level(logging.DEBUG, logger=_BASE_LOGGER):
-            ok = await client.refresh_token()
-
-        assert ok is True
-        assert f"rotated_fp={_token_fingerprint(new_refresh)}" in caplog.text
-
-    async def test_rotation_log_does_not_leak_new_token(
-        self, mock_transport, caplog
-    ) -> None:
-        """The raw rotated token must never reach the log line."""
-        new_refresh = "super-secret-rotated-token"
-        mock_transport.execute.return_value = refresh_response(
-            refresh_token=new_refresh
-        )
-        client = _make_client(mock_transport, refresh_token="old-refresh-token")
-
-        with caplog.at_level(logging.DEBUG, logger=_BASE_LOGGER):
-            await client.refresh_token()
-
-        assert new_refresh not in caplog.text
-
-
-class TestAuthTokenLifetimeDiagnostics:
-    async def test_logs_measured_auth_token_ttl_on_success(
-        self, mock_transport, caplog
-    ) -> None:
-        """A minted auth token logs its real remaining lifetime.
-
-        We have only *inferred* the ~15-minute JWT life from test fixtures; this
-        line measures it on the reporter's own account. If the real value were
-        hours, the "reboot only forces the refresh we'd otherwise rarely hit"
-        reasoning would need revisiting — so it is worth confirming, not assuming.
-        """
-        mock_transport.execute.return_value = refresh_response(
-            refresh_token="rotated-refresh-token"
-        )
-        client = _make_client(mock_transport, refresh_token="old-refresh-token")
-
-        with caplog.at_level(logging.DEBUG, logger=_BASE_LOGGER):
-            ok = await client.refresh_token()
-
-        assert ok is True
-        match = re.search(r"auth_token_ttl_s=(\d+)", caplog.text)
-        assert match is not None
-        ttl = int(match.group(1))
-        # refresh_response defaults its hash to a 15-minute JWT (~900s), with
-        # clock-skew slack for the test's own runtime.
-        assert 840 <= ttl <= 905
-
-
-class TestRefreshCrashIsAnUnrecoverableTrap:
-    """Characterisation of *existing* behaviour (these pass as-is).
-
-    They pin down why the reporter must delete the entry: the #557 crash is
-    classified transient AND leaves the on-disk token untouched, so every retry
-    re-presents the exact same token and hits the exact same crash forever.
+    The #557 *trap* — the entry stuck until deleted — arose from the setup path
+    feeding a stale refresh token, now fixed. Independently, the client's
+    handling of the crash response itself must stay safe: it is classified
+    transient (so the coordinator retries rather than forcing reauth) and it
+    leaves the stored refresh token untouched (so nothing is corrupted).
     """
 
     async def test_crash_leaves_the_on_disk_token_unchanged(
