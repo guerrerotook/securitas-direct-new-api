@@ -473,6 +473,15 @@ async def _get_or_create_session(
         if username in sessions:
             # Reuse existing session
             client: VerisureHub = sessions[username]["hub"]
+            # The config-flow hub is built before the ConfigEntry exists, so it
+            # starts detached (config_entry=None) and is registered in
+            # ``sessions`` by the flow. When HA then sets up the freshly-created
+            # entry we land here and must attach it, otherwise rotated refresh
+            # tokens can never be persisted (issue #557): _persist_refresh_token
+            # reports ``no-config-entry`` and the stale on-disk token triggers
+            # the xSRefreshLogin 'fr' crash on the next restart.
+            if client.config_entry is None:
+                client.config_entry = entry
             sessions[username]["ref_count"] += 1
         else:
             # Create new session and log in
@@ -1194,6 +1203,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
 
+def _release_shared_session(
+    hass: HomeAssistant,
+    sessions: dict[str, Any],
+    username: str,
+    leaving: ConfigEntry,
+) -> None:
+    """Drop one reference to a shared session, popping it when the last leaves.
+
+    When the session survives but the entry being unloaded is the one the hub
+    persists rotated refresh tokens to, hand that persistence off to a surviving
+    co-tenant entry and write the current token there immediately. Otherwise
+    rotations would keep targeting the removed entry, the survivor's on-disk
+    token would go stale, and the xSRefreshLogin 'fr' crash (issue #557) would
+    recur on the survivor's next restart.
+    """
+    session = sessions[username]
+    session["ref_count"] -= 1
+    if session["ref_count"] <= 0:
+        sessions.pop(username)
+        return
+
+    hub: VerisureHub = session["hub"]
+    if hub.config_entry is not leaving:
+        return
+
+    # Re-attach persistence to a co-tenant entry that shares this hub.
+    domain_data = hass.data.get(DOMAIN, {})
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.entry_id == leaving.entry_id:
+            continue
+        if domain_data.get(entry.entry_id, {}).get("hub") is hub:
+            hub.config_entry = entry
+            hub.persist_current_refresh_token()
+            return
+
+
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
@@ -1219,13 +1264,9 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         lock = setup_locks.get(username)
         if lock:
             async with lock:
-                sessions[username]["ref_count"] -= 1
-                if sessions[username]["ref_count"] <= 0:
-                    sessions.pop(username)
+                _release_shared_session(hass, sessions, username, config_entry)
         else:
-            sessions[username]["ref_count"] -= 1
-            if sessions[username]["ref_count"] <= 0:
-                sessions.pop(username)
+            _release_shared_session(hass, sessions, username, config_entry)
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)

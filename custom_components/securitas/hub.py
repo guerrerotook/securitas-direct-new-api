@@ -45,7 +45,6 @@ from .verisure_owa_api import (
     VerisureOwaError,
 )
 from .verisure_owa_api.client import VerisureOwaClient
-from .verisure_owa_api.client._base import _token_fingerprint
 from .verisure_owa_api.exceptions import is_genuine_auth_failure
 from .verisure_owa_api.http_transport import HttpTransport
 
@@ -526,33 +525,24 @@ class VerisureHub:
 
         Also scrubs any legacy CONF_PASSWORD on the first capture. No-op when
         the hub is detached from a config entry (config-flow construction).
-
-        Emits a DEBUG diagnostic for issue #557 recording which branch ran:
-        ``persisted`` (write issued), ``already-current`` (disk already holds
-        this token), or ``no-config-entry`` (detached hub). This proves the
-        in-memory rotation reached the config entry — the memory->disk half
-        that the client-side ``rotated_fp`` line cannot by itself confirm.
         """
-        fp = _token_fingerprint(value)
         if self.config_entry is None:
-            outcome = "no-config-entry"
-        else:
-            existing = self.config_entry.data
-            if (
-                existing.get(CONF_REFRESH_TOKEN) == value
-                and CONF_PASSWORD not in existing
-            ):
-                outcome = "already-current"
-            else:
-                new_data = {**existing, CONF_REFRESH_TOKEN: value}
-                new_data.pop(CONF_PASSWORD, None)
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry, data=new_data
-                )
-                outcome = "persisted"
-        _LOGGER.debug(
-            "[refresh] persist refresh token: persist_fp=%s outcome=%s", fp, outcome
-        )
+            return
+        existing = self.config_entry.data
+        if existing.get(CONF_REFRESH_TOKEN) == value and CONF_PASSWORD not in existing:
+            return
+        new_data = {**existing, CONF_REFRESH_TOKEN: value}
+        new_data.pop(CONF_PASSWORD, None)
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+
+    def persist_current_refresh_token(self) -> None:
+        """Write the current in-memory refresh token to the config entry now.
+
+        Used when the persistence target is reassigned (e.g. the owning entry
+        is unloaded while a co-tenant survives) so the new entry's stored token
+        is current immediately, not left stale until the next rotation.
+        """
+        self._persist_refresh_token(self.get_refresh_token())
 
     async def get_lock_modes(
         self, installation: Installation, *, priority: int | None = None

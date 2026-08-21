@@ -308,6 +308,10 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     # device-info construction on the deterministic via_device fallback (no
     # registry lookup) regardless of the installed HA version.
     hub.hass = None
+    # spec=VerisureHub likewise omits the instance attribute `config_entry`;
+    # default it so the setup/unload paths that read hub.config_entry don't hit
+    # AttributeError. Tests that exercise the persistence target set it.
+    hub.config_entry = None
     hub.client = AsyncMock()
     hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
