@@ -246,6 +246,28 @@ chips:
 
 If your installation includes Sentinel devices, the integration automatically creates temperature, humidity, and air quality sensors for each one.
 
+## Door & Window Sensors
+
+**This integration can't expose your individual door and window contacts as `binary_sensor` entities, and the reason is the API, not the integration.** It's the single most-requested feature ([#440](https://github.com/guerrerotook/securitas-direct-new-api/issues/440), [#545](https://github.com/guerrerotook/securitas-direct-new-api/issues/545)), so here is the full picture.
+
+The Verisure OWA cloud API this integration talks to has no operation that returns each contact's open/closed state. The only place magnetic contacts show up at all is a list of **open or low-battery zones**, and the panel produces that list only when you **try to arm and a zone is in the way**. There is no "read all sensors" endpoint to poll, so there is nothing to build persistent contact entities from.
+
+Two community pull requests tried anyway ([#532](https://github.com/guerrerotook/securitas-direct-new-api/pull/532), [#544](https://github.com/guerrerotook/securitas-direct-new-api/pull/544)) and both had to be closed. The contacts could sometimes be _discovered_, but every request for their state was rejected by the server with _"Unauthorized request for current capabilities"_, and where entities did appear their state never changed. On every system tested so far, the **Verisure app itself doesn't show live contact state** either — which is the giveaway that the data isn't available to the web/API layer at all.
+
+### What you can see instead
+
+When arming is blocked by an open door or window, the open zones _are_ reported to you — as a notification, on the alarm card, and in the `zones` field of the [`verisure_owa_arming_exception` event](#the-verisure_owa_arming_exception-event) (see [Force Arming](#force-arming-advanced)). But that is a **snapshot taken at the moment you arm**, not a live state you can automate on (e.g. "warn me if a window has been open for 10 minutes").
+
+> [!NOTE]
+> The `door_opened` / `door_closed` events in the [activity log](#activity-log) are a **smart lock's** door opening and auto-locking again — not a door/window contact sensor.
+
+> [!NOTE]
+> Home Assistant's built-in **Verisure** integration _does_ show contact sensors, but it talks to a different Verisure backend (MyPages), not the OWA GraphQL API used here. Which backend your account can use depends on your country, so the two integrations aren't interchangeable — having contact sensors in one doesn't mean they can appear in the other.
+
+### If your app _does_ show live sensor state
+
+Then the request we'd need exists for your account, and a capture would be genuinely useful. Open and close a sensor while recording a [HAR file](#har-file-for-tricky-bugs) and attach it to [#545](https://github.com/guerrerotook/securitas-direct-new-api/issues/545) so the operation can be identified. One constraint any fix has to respect: continuous full-status polling was removed deliberately because it drains the sensors' batteries and trips Verisure's firewall — so a real solution can't rely on frequent refreshes.
+
 ## Smart Locks
 
 Smart door locks become lock entities you can operate from HA — multiple locks per installation, each with its own entity. If your lock supports latch hold-back, the entity also gets an **Open** action that unlatches the door without unlocking it.
