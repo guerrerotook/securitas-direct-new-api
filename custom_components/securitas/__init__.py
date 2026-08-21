@@ -473,6 +473,15 @@ async def _get_or_create_session(
         if username in sessions:
             # Reuse existing session
             client: VerisureHub = sessions[username]["hub"]
+            # The config-flow hub is built before the ConfigEntry exists, so it
+            # starts detached (config_entry=None) and is registered in
+            # ``sessions`` by the flow. When HA then sets up the freshly-created
+            # entry we land here and must attach it, otherwise rotated refresh
+            # tokens can never be persisted (issue #557): _persist_refresh_token
+            # reports ``no-config-entry`` and the stale on-disk token triggers
+            # the xSRefreshLogin 'fr' crash on the next restart.
+            if client.config_entry is None:
+                client.config_entry = entry
             sessions[username]["ref_count"] += 1
         else:
             # Create new session and log in

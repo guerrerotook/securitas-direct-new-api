@@ -78,9 +78,20 @@ def _patch_hub(mock_hub):
     """Patch VerisureHub constructor to return mock_hub while preserving __name__.
 
     MagicMock does not have a proper __name__ attribute, so we set it
-    to make the mock behave like a real class.
+    to make the mock behave like a real class. The real __init__ records its
+    second positional arg (the ConfigEntry, or None during the config flow) as
+    ``self.config_entry``; mirror that here so the session-reuse path in
+    ``_get_or_create_session`` can read ``hub.config_entry`` (spec=VerisureHub
+    otherwise omits the instance attribute).
     """
-    mock_cls = MagicMock(return_value=mock_hub)
+
+    def _construct(*args, **_kwargs):
+        # VerisureHub(config, config_entry, session, hass)
+        if len(args) >= 2:
+            mock_hub.config_entry = args[1]
+        return mock_hub
+
+    mock_cls = MagicMock(side_effect=_construct)
     mock_cls.__name__ = "VerisureHub"
     return patch("custom_components.securitas.VerisureHub", mock_cls)
 
@@ -1601,6 +1612,53 @@ class TestSharedSession:
         username = data1[CONF_USERNAME]
         sessions = hass.data[DOMAIN]["sessions"]
         assert sessions[username]["ref_count"] == 2
+
+    async def test_reused_config_flow_hub_gets_config_entry_attached(
+        self, hass, mock_hub
+    ):
+        """Regression test for issue #557 — attach the entry to a reused hub.
+
+        The config flow builds a VerisureHub with ``config_entry=None`` (the
+        entry does not exist yet) and registers it in ``sessions`` with
+        ref_count=0.  When HA then sets up the freshly-created entry,
+        ``_get_or_create_session`` reuses that detached hub.  It MUST attach
+        the entry, otherwise ``_persist_refresh_token`` reports
+        ``no-config-entry``, rotated refresh tokens are never written to the
+        entry, and the stale original token triggers the ``xSRefreshLogin``
+        'fr' crash on the next restart.
+        """
+        data = make_config_entry_data()
+        data[CONF_INSTALLATION] = "111"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+
+        # Simulate the config flow having stored a detached hub in sessions.
+        mock_hub.config_entry = None
+        username = data[CONF_USERNAME]
+        hass.data.setdefault(DOMAIN, {})
+        hass.data[DOMAIN].setdefault("sessions", {})[username] = {
+            "hub": mock_hub,
+            "ref_count": 0,
+        }
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+        # The reused config-flow hub must now own the config entry so that
+        # rotated refresh tokens are persisted rather than dropped.
+        assert mock_hub.config_entry is entry
+        # Reuse path: no fresh login, ref_count bumped from 0 to 1.
+        mock_hub.login.assert_not_awaited()
+        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
 
     async def test_per_entry_data_stored(self, hass, mock_hub):
         """Each entry should have its own per-entry data with hub and devices."""
