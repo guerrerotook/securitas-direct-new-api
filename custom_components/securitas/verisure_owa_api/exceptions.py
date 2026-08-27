@@ -170,3 +170,31 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
     if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
         return True
     return _error_code(err) in _GENUINE_AUTH_ERROR_CODES
+
+
+def is_refresh_token_crash(err: VerisureOwaError) -> bool:
+    """True for the xSRefreshLogin server crash that signals a dead refresh token.
+
+    The OWA backend's ``xSRefreshLogin`` resolver throws a JS ``TypeError`` and
+    returns a null field when handed a stale/invalidated refresh token (issue
+    #557 / #568 -- e.g. "Cannot read properties of undefined (reading 'fr')").
+    The locale word in the message varies by account, so this matches on the
+    operation *path*, not the text.
+
+    This is deliberately narrower than ``is_genuine_auth_failure`` returning
+    False: it isolates *this specific* crash (an uncoded null-data error on the
+    RefreshLogin resolver) from generic transient errors (5xx, WAF, network) so
+    a *persistent* occurrence on the setup path can be escalated to a reauth
+    prompt, while everything else keeps retrying. It excludes coded rejections
+    (err 60052 / 60067), which ``is_genuine_auth_failure`` already handles.
+    """
+    body = err.response_body
+    if not isinstance(body, dict):
+        return False
+    if _error_code_from_body(body) is not None:
+        return False
+    errors = body.get("errors")
+    if not (isinstance(errors, list) and errors and isinstance(errors[0], dict)):
+        return False
+    path = errors[0].get("path")
+    return isinstance(path, list) and "xSRefreshLogin" in path

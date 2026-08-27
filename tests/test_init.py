@@ -17,6 +17,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
     _OPTIONS_MANAGED_FIELDS,
+    _REFRESH_CRASH_REAUTH_MIN_COUNT,
+    _REFRESH_CRASH_REAUTH_MIN_DURATION,
     CONF_CODE_ARM_REQUIRED,
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
@@ -41,6 +43,8 @@ from custom_components.securitas import (
     VerisureDevice,
     VerisureHub,
     _build_config_dict,
+    _clear_refresh_token_crash,
+    _note_refresh_token_crash,
     _options_are_authoritative,
     _synced_entry_data,
     add_device_information,
@@ -2653,3 +2657,149 @@ class TestServiceDescriptionTargets:
                         f"of strings so it survives async_set_service_schema's "
                         f"unvalidated copy; got {domain!r}"
                     )
+
+
+# ===========================================================================
+# N. Setup-path escalation of a persistent dead-token xSRefreshLogin crash
+# ===========================================================================
+
+
+_DURATION_S = int(_REFRESH_CRASH_REAUTH_MIN_DURATION.total_seconds())
+
+
+def _fr_crash_error() -> VerisureOwaError:
+    """The exact issue #557 xSRefreshLogin dead-token crash, as raised on setup."""
+    err = VerisureOwaError(
+        "xSRefreshLogin failed: Cannot read properties of undefined (reading 'fr')"
+    )
+    err.response_body = {
+        "errors": [
+            {
+                "message": "Cannot read properties of undefined (reading 'fr')",
+                "path": ["xSRefreshLogin"],
+                "extensions": {},
+                "data": {},
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+    return err
+
+
+class TestSetupRefreshTokenCrashEscalation:
+    """A stale on-disk refresh token crashes xSRefreshLogin on every setup.
+
+    The crash is classified transient, so setup retries forever and the user is
+    never prompted to reauthenticate -- issue #557/#568, where the only escape
+    was deleting and re-adding the integration. Once the crash has *persisted*
+    (both a minimum count AND a minimum elapsed time, so a brief server wobble is
+    ridden out) setup escalates to ConfigEntryAuthFailed, which drives HA's
+    Reauthenticate flow (a fresh password login mints a working token).
+    """
+
+    @pytest.fixture
+    def crashing_hub(self):
+        hub = make_securitas_hub_mock()
+        hub.login = AsyncMock(side_effect=_fr_crash_error())
+        return hub
+
+    async def _attempt(self, hass, entry, hub, mono, at):
+        """Run one async_setup_entry at monotonic time *at*; return what it raised."""
+        mono.return_value = at
+        with (
+            _patch_hub(hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            try:
+                return await async_setup_entry(hass, entry)
+            except (ConfigEntryNotReady, ConfigEntryAuthFailed) as err:
+                return err
+
+    async def test_sustained_crash_escalates_to_reauth(self, hass, crashing_hub):
+        """After the count and duration thresholds are both crossed -> reauth."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with patch("custom_components.securitas.time.monotonic") as mono:
+            for _ in range(_REFRESH_CRASH_REAUTH_MIN_COUNT - 1):
+                early = await self._attempt(hass, entry, crashing_hub, mono, 0)
+                assert isinstance(early, ConfigEntryNotReady)
+            escalated = await self._attempt(
+                hass, entry, crashing_hub, mono, _DURATION_S + 1
+            )
+        assert isinstance(escalated, ConfigEntryAuthFailed)
+
+    async def test_count_reached_but_too_brief_keeps_retrying(self, hass, crashing_hub):
+        """A burst of crashes with no time elapsed must not force reauth."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with patch("custom_components.securitas.time.monotonic") as mono:
+            results = [
+                await self._attempt(hass, entry, crashing_hub, mono, 0)
+                for _ in range(_REFRESH_CRASH_REAUTH_MIN_COUNT + 2)
+            ]
+        assert all(isinstance(r, ConfigEntryNotReady) for r in results)
+
+    async def test_duration_passed_but_too_few_keeps_retrying(self, hass, crashing_hub):
+        """One crash, even long after the first, is too few to force reauth."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with patch("custom_components.securitas.time.monotonic") as mono:
+            first = await self._attempt(hass, entry, crashing_hub, mono, 0)
+            second = await self._attempt(
+                hass, entry, crashing_hub, mono, _DURATION_S + 1
+            )
+        assert isinstance(first, ConfigEntryNotReady)
+        assert isinstance(second, ConfigEntryNotReady)
+
+    async def test_generic_transient_error_never_escalates(self, hass, crashing_hub):
+        """A non-crash transient error (5xx/WAF/network) keeps retrying forever.
+
+        Only the specific dead-token crash fingerprint may escalate; a plain
+        VerisureOwaError with no crash body must stay ConfigEntryNotReady no
+        matter how long it persists.
+        """
+        crashing_hub.login = AsyncMock(
+            side_effect=VerisureOwaError("connection failed")
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with patch("custom_components.securitas.time.monotonic") as mono:
+            results = [
+                await self._attempt(
+                    hass, entry, crashing_hub, mono, i * (_DURATION_S + 1)
+                )
+                for i in range(_REFRESH_CRASH_REAUTH_MIN_COUNT + 1)
+            ]
+        assert all(isinstance(r, ConfigEntryNotReady) for r in results)
+
+
+class TestRefreshCrashTracker:
+    """The per-username crash streak that gates setup-path reauth escalation."""
+
+    def _hass(self):
+        h = MagicMock()
+        h.data = {DOMAIN: {}}
+        return h
+
+    def test_streak_clears_so_a_later_crash_gets_a_fresh_grace_window(self):
+        """A successful setup clears the streak: a later lone crash is not enough.
+
+        Clearing must reset both the count and the first-seen timestamp, so a
+        single new crash long afterwards does not immediately re-escalate.
+        """
+        hass = self._hass()
+        with patch("custom_components.securitas.time.monotonic", return_value=0):
+            for _ in range(_REFRESH_CRASH_REAUTH_MIN_COUNT):
+                _note_refresh_token_crash(hass, "user@example.com")
+        _clear_refresh_token_crash(hass, "user@example.com")
+        with patch(
+            "custom_components.securitas.time.monotonic",
+            return_value=_DURATION_S * 10,
+        ):
+            escalate = _note_refresh_token_crash(hass, "user@example.com")
+        assert escalate is False

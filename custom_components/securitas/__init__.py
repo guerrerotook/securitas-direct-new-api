@@ -136,8 +136,21 @@ from .verisure_owa_api import (
     generate_device_id,
     generate_uuid,
 )
+from .verisure_owa_api.exceptions import is_refresh_token_crash
 
 _LOGGER = logging.getLogger(__name__)
+
+# A stale on-disk refresh token makes xSRefreshLogin crash on every setup
+# attempt (issue #557/#568). The crash is transient-by-classification, so setup
+# retries forever and never prompts reauth -- historically the user had to
+# delete and re-add the integration. After a sustained, unbroken run of this
+# *specific* crash we escalate to ConfigEntryAuthFailed so HA offers its
+# Reauthenticate flow (a password login mints a fresh, working token). Both a
+# count and a duration must be crossed so a brief server-side wobble -- which
+# clears well within them -- is ridden out rather than forcing a needless
+# reauth; only a genuinely dead token persists past both.
+_REFRESH_CRASH_REAUTH_MIN_COUNT = 3
+_REFRESH_CRASH_REAUTH_MIN_DURATION = timedelta(minutes=30)
 
 # Inert: this integration is config-entry only and ``async_setup`` ignores the
 # YAML config entirely. The schema exists so a legacy ``securitas:`` block from
@@ -453,6 +466,41 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     return config, need_sign_in
 
 
+def _note_refresh_token_crash(hass: HomeAssistant, username: str) -> bool:
+    """Record a setup-path xSRefreshLogin crash; return True once it's sustained.
+
+    Tracks consecutive crashes per username across ``ConfigEntryNotReady``
+    setup retries (the state lives in ``hass.data[DOMAIN]``, which survives
+    those retries within an HA run). Returns True only when the streak has
+    crossed BOTH ``_REFRESH_CRASH_REAUTH_MIN_COUNT`` and
+    ``_REFRESH_CRASH_REAUTH_MIN_DURATION`` -- the signal that the on-disk
+    refresh token is genuinely dead and a reauth prompt is warranted.
+    """
+    tracker = hass.data[DOMAIN].setdefault("refresh_crash_tracker", {})
+    now = time.monotonic()
+    record = tracker.get(username)
+    if record is None:
+        record = {"count": 0, "first_seen": now}
+        tracker[username] = record
+    record["count"] += 1
+    return (
+        record["count"] >= _REFRESH_CRASH_REAUTH_MIN_COUNT
+        and now - record["first_seen"]
+        >= _REFRESH_CRASH_REAUTH_MIN_DURATION.total_seconds()
+    )
+
+
+def _clear_refresh_token_crash(hass: HomeAssistant, username: str) -> None:
+    """Forget any recorded crash streak -- the token authenticated successfully.
+
+    Resets both the count and the first-seen timestamp so a later, unrelated
+    crash starts a fresh grace window instead of escalating immediately.
+    """
+    tracker = hass.data.get(DOMAIN, {}).get("refresh_crash_tracker")
+    if tracker:
+        tracker.pop(username, None)
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -507,11 +555,34 @@ async def _get_or_create_session(
                     "Unable to connect to Verisure: %s",
                     err.log_detail(),
                 )
+                # A stale on-disk refresh token makes xSRefreshLogin crash on
+                # every setup; the crash is transient-by-classification, so
+                # retrying forever never recovers (issue #557/#568). Once the
+                # crash has persisted long enough to rule out a server wobble,
+                # escalate to a reauth prompt so a password login can mint a
+                # fresh token, instead of looping until the user deletes and
+                # re-adds the integration.
+                if is_refresh_token_crash(err) and _note_refresh_token_crash(
+                    hass, username
+                ):
+                    _LOGGER.error(
+                        "Verisure refresh token appears permanently rejected "
+                        "(xSRefreshLogin keeps crashing); prompting for "
+                        "re-authentication."
+                    )
+                    raise ConfigEntryAuthFailed(
+                        "The stored refresh token is no longer valid — "
+                        "please reauthenticate."
+                    ) from None
                 raise ConfigEntryNotReady(
                     f"Unable to connect to Verisure: {err.message}"
                 ) from None
             sessions[username] = {"hub": client, "ref_count": 1}
 
+    # Reaching here means authentication succeeded (a reused healthy session or
+    # a fresh login), so any recorded dead-token crash streak is stale — clear
+    # it to restore a full grace window before the next possible escalation.
+    _clear_refresh_token_crash(hass, username)
     return client
 
 
