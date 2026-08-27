@@ -95,6 +95,36 @@ class TestHttpTransport:
         assert kwargs["headers"]["content-type"] == "application/json; charset=utf-8"
         assert kwargs["headers"]["X-Custom"] == "value"
 
+    async def test_debug_log_labels_response_with_operation_and_status(
+        self, transport, session, caplog
+    ):
+        """The raw-response DEBUG line is tagged with operation name + HTTP status.
+
+        So a diagnostic log (issue #568) can pick the RefreshLogin response out
+        of the request stream and see the exact status/structure it came back
+        with, instead of an anonymous ``response=...`` line.
+        """
+        import logging
+
+        body = {
+            "errors": [{"path": ["xSRefreshLogin"]}],
+            "data": {"xSRefreshLogin": None},
+        }
+        _mock_post(session, [_make_response(status=200, text=json.dumps(body))])
+
+        with caplog.at_level(
+            logging.DEBUG,
+            logger="custom_components.securitas.verisure_owa_api.http_transport",
+        ):
+            await transport.execute(
+                content={"operationName": "RefreshLogin", "query": "..."},
+                headers={},
+            )
+
+        assert "op=RefreshLogin" in caplog.text
+        assert "status=200" in caplog.text
+        assert '"xSRefreshLogin": null' in caplog.text
+
     async def test_dns_retry_succeeds_on_second_attempt(self, transport, session):
         """DNS error on first attempt is retried; success on second attempt."""
         dns_err = ClientConnectorDNSError(

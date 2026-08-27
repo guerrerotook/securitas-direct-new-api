@@ -9,6 +9,7 @@ each extend ``_ClientBase`` so they have access to ``self._execute_graphql``,
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import secrets
@@ -59,6 +60,22 @@ def _format_graphql_error(
         if message:
             return f"{field_name} failed: {message}"
     return fallback
+
+
+def _token_fingerprint(token: str | None) -> str:
+    """Return a short, stable, non-reversible fingerprint of a token.
+
+    The refresh/auth tokens are redacted wholesale by ``SensitiveDataFilter``
+    (raw value -> ``[REFRESH_TOKEN]``), so logging them directly makes every
+    generation look identical. A truncated *unsalted* sha256 gives each token
+    a distinct id that survives the redaction filter, never leaks the value,
+    and — crucially for issue #557 — is stable across process restarts, so the
+    fingerprint persisted before a reboot can be compared with the one loaded
+    from disk afterwards. Falsy tokens map to ``<none>``.
+    """
+    if not token:
+        return "<none>"
+    return hashlib.sha256(token.encode()).hexdigest()[:12]
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -196,6 +213,19 @@ class _ClientBase:
         """
         self.refresh_token_value = value
         self._register_secret("refresh_token", value)
+        # Diagnostic for issue #557: the fingerprint of the newly-rotated token.
+        # This fires at the *in-memory* rotation, BEFORE the persist callback
+        # below — so rotated_fp marks a rotation, not a completed disk write
+        # (hub._persist_refresh_token's persist_fp/outcome line confirms the
+        # write reached the config entry). Comparing the next boot's
+        # RefreshLogin token_fp against the last rotated_fp/persist_fp reveals a
+        # stale on-disk token (mismatch, e.g. a rotation that never reached
+        # storage before an ungraceful stop) vs a genuinely broken refresh
+        # (match — the token loaded is the last valid one and still crashes).
+        _LOGGER.debug(
+            "[refresh] refresh token rotated: rotated_fp=%s",
+            _token_fingerprint(value),
+        )
         if self._on_refresh_token_changed is not None:
             try:
                 self._on_refresh_token_changed(value)
@@ -316,6 +346,14 @@ class _ClientBase:
             return None
         if "exp" in decoded:
             self._authentication_token_exp = datetime.fromtimestamp(decoded["exp"])
+            # Diagnostic for issue #557: measure the real auth-token lifetime on
+            # the account rather than relying on the ~15-minute value inferred
+            # from fixtures — it underpins the "reboot forces a refresh we'd
+            # otherwise rarely hit" reasoning.
+            ttl_s = int(
+                (self._authentication_token_exp - datetime.now()).total_seconds()
+            )
+            _LOGGER.debug("[auth] auth token accepted: auth_token_ttl_s=%d", ttl_s)
         return decoded
 
     # ── Response extraction ──────────────────────────────────────────────
