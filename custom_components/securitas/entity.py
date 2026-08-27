@@ -50,7 +50,7 @@ def _link_to_installation(
         if device is not None:
             info["via_device_id"] = device.id  # type: ignore[typeddict-unknown-key]
             return
-    info["via_device"] = parent
+    info["via_device"] = parent  # type: ignore[typeddict-unknown-key]
 
 
 def securitas_device_info(installation: Installation) -> DeviceInfo:
