@@ -173,3 +173,25 @@ class TestIsRefreshTokenCrash:
             "data": {"xSSomethingElse": None},
         }
         assert is_refresh_token_crash(self._err(body)) is False
+
+    def test_ignores_an_uncoded_error_with_a_non_null_result(self) -> None:
+        """Only the *null-result* resolver crash counts, not any uncoded error.
+
+        An uncoded GraphQL error that still returned a real xSRefreshLogin
+        payload is not the dead-token crash and must not trigger reauth.
+        """
+        body = {
+            "errors": [{"message": "partial", "path": ["xSRefreshLogin"], "data": {}}],
+            "data": {"xSRefreshLogin": {"res": "OK"}},
+        }
+        assert is_refresh_token_crash(self._err(body)) is False
+
+    def test_ignores_an_error_not_rooted_at_the_operation(self) -> None:
+        """The errored path must be rooted at xSRefreshLogin, not merely mention it."""
+        body = {
+            "errors": [
+                {"message": "boom", "path": ["other", "xSRefreshLogin"], "data": {}}
+            ],
+            "data": {"other": None},
+        }
+        assert is_refresh_token_crash(self._err(body)) is False

@@ -573,7 +573,7 @@ async def _get_or_create_session(
                     raise ConfigEntryAuthFailed(
                         "The stored refresh token is no longer valid — "
                         "please reauthenticate."
-                    ) from None
+                    ) from err
                 raise ConfigEntryNotReady(
                     f"Unable to connect to Verisure: {err.message}"
                 ) from None

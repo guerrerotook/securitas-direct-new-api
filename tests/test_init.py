@@ -2732,6 +2732,8 @@ class TestSetupRefreshTokenCrashEscalation:
                 hass, entry, crashing_hub, mono, _DURATION_S + 1
             )
         assert isinstance(escalated, ConfigEntryAuthFailed)
+        # The originating crash is preserved as the cause, for diagnostics.
+        assert isinstance(escalated.__cause__, VerisureOwaError)
 
     async def test_count_reached_but_too_brief_keeps_retrying(self, hass, crashing_hub):
         """A burst of crashes with no time elapsed must not force reauth."""

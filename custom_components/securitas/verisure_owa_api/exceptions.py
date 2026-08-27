@@ -182,11 +182,12 @@ def is_refresh_token_crash(err: VerisureOwaError) -> bool:
     operation *path*, not the text.
 
     This is deliberately narrower than ``is_genuine_auth_failure`` returning
-    False: it isolates *this specific* crash (an uncoded null-data error on the
-    RefreshLogin resolver) from generic transient errors (5xx, WAF, network) so
-    a *persistent* occurrence on the setup path can be escalated to a reauth
-    prompt, while everything else keeps retrying. It excludes coded rejections
-    (err 60052 / 60067), which ``is_genuine_auth_failure`` already handles.
+    False: it isolates *this specific* crash (an uncoded error rooted at the
+    RefreshLogin resolver that returned a null result) from generic transient
+    errors (5xx, WAF, network) so a *persistent* occurrence on the setup path
+    can be escalated to a reauth prompt, while everything else keeps retrying.
+    It excludes coded rejections (err 60052 / 60067), which
+    ``is_genuine_auth_failure`` already handles.
     """
     body = err.response_body
     if not isinstance(body, dict):
@@ -196,5 +197,13 @@ def is_refresh_token_crash(err: VerisureOwaError) -> bool:
     errors = body.get("errors")
     if not (isinstance(errors, list) and errors and isinstance(errors[0], dict)):
         return False
+    # The errored path must be *rooted* at the operation, not merely mention it.
     path = errors[0].get("path")
-    return isinstance(path, list) and "xSRefreshLogin" in path
+    if not (isinstance(path, list) and path and path[0] == "xSRefreshLogin"):
+        return False
+    # ...and the resolver crashed, i.e. it returned a null result for that field
+    # (top-level ``data`` is either null or carries ``xSRefreshLogin: None``).
+    data = body.get("data")
+    if data is None:
+        return True
+    return isinstance(data, dict) and data.get("xSRefreshLogin", True) is None
