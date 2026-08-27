@@ -380,6 +380,14 @@ async def async_setup_entry(
         {},
         "async_force_arm_cancel",
     )
+    # Frontend-only: the auto-force card fires this just before an arm it
+    # intends to force through, so the transient "force-arm required?" prompt
+    # is suppressed and the "force-armed" confirmation is sent instead.
+    platform.async_register_entity_service(
+        "suppress_arm_exception_prompt",
+        {},
+        "suppress_arm_exception_prompt",
+    )
     # verisure_owa.refresh_alarm (the v5+ supersession of the deprecated
     # VerisureRefreshButton) is registered globally in __init__.py via
     # register_v5_entity_services — it dispatches to this platform's

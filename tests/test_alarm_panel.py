@@ -144,6 +144,20 @@ def test_unconfirmed_notification_strings_exist_all_locales():
             assert "{installation}" in msg and "{timeout}" in msg, f"{locale}/{key}"
 
 
+def test_armed_with_exceptions_strings_exist_all_locales():
+    """Every locale defines the force-armed confirmation with the sensor token."""
+    from custom_components.securitas.notification_translations import (
+        NOTIFICATION_TRANSLATIONS,
+    )
+
+    for locale, entries in NOTIFICATION_TRANSLATIONS.items():
+        entry = entries.get("armed_with_exceptions")
+        assert entry is not None, f"{locale} missing armed_with_exceptions"
+        assert entry.get("title"), f"{locale}/armed_with_exceptions missing title"
+        assert "{sensor_list}" in entry["message"], f"{locale} message token"
+        assert "{sensor_list}" in entry["mobile_message"], f"{locale} mobile token"
+
+
 class TestForceArmExpiredMobileMessageTranslation:
     """force_arm_expired entry must carry a mobile_message string per locale
     for the button-less informational mobile notification on expiry."""
@@ -413,6 +427,97 @@ class TestForceArmNotificationsConfig:
 
         # No notification dismissal calls
         alarm.hass.async_create_task.assert_not_called()
+
+    async def test_arm_prompt_suppression_skips_prompt(self):
+        """A set suppress flag stops the arming-exception prompt from firing.
+
+        The auto-force card sets this flag before dispatching an arm it intends
+        to force through, so the human never sees the transient "force-arm
+        required?" prompt (which the auto-force would immediately dismiss).
+        """
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        event = MagicMock()
+        event.data = {"entity_id": alarm.entity_id, "zones": ["Kitchen Door"]}
+
+        # Baseline: no suppression → the prompt notification is dispatched.
+        alarm._notify_arm_exceptions_from_event(event)
+        assert alarm.hass.async_create_task.call_count == 1
+        alarm.hass.async_create_task.reset_mock()
+
+        # Flag active → the prompt is suppressed (no task dispatched).
+        alarm.suppress_arm_exception_prompt()
+        alarm._notify_arm_exceptions_from_event(event)
+        alarm.hass.async_create_task.assert_not_called()
+
+    @staticmethod
+    def _force_context_alarm():
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-1",
+            "suid": "suid-1",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Window"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_date="",
+            )
+        )
+        return alarm
+
+    async def test_force_arm_auto_fires_confirmation(self):
+        """An auto-forced arm (suppress flag set) sends a force-armed confirmation
+        listing the bypassed sensors."""
+        alarm = self._force_context_alarm()
+        alarm._notify_force_armed = MagicMock()
+
+        alarm.suppress_arm_exception_prompt()
+        await alarm.async_force_arm()
+
+        alarm._notify_force_armed.assert_called_once()
+        assert alarm._notify_force_armed.call_args[0][0] == [{"alias": "Window"}]
+
+    async def test_force_arm_manual_sends_no_confirmation(self):
+        """A manual Force Arm tap (no suppress flag) sends no confirmation —
+        the user made the choice explicitly."""
+        alarm = self._force_context_alarm()
+        alarm._notify_force_armed = MagicMock()
+
+        await alarm.async_force_arm()
+
+        alarm._notify_force_armed.assert_not_called()
+
+    async def test_force_armed_confirmation_content(self):
+        """The confirmation lists the bypassed sensors (persistent + mobile) under
+        a dedicated notification id."""
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        alarm.hass.services.async_call = AsyncMock()
+
+        await alarm._async_notify_force_armed(
+            [{"alias": "Front Door"}, {"alias": "Kitchen Window"}]
+        )
+
+        calls = alarm.hass.services.async_call.call_args_list
+        persistent = next(c for c in calls if c.kwargs["service"] == "create")
+        pdata = persistent.kwargs["service_data"]
+        assert "Front Door" in pdata["message"]
+        assert "Kitchen Window" in pdata["message"]
+        assert pdata["notification_id"].endswith("force_armed_123456")
+
+        mobile = next(c for c in calls if c.kwargs["service"] == "mobile_app_phone")
+        assert "Front Door" in mobile.kwargs["service_data"]["message"]
 
 
 # ---------------------------------------------------------------------------
