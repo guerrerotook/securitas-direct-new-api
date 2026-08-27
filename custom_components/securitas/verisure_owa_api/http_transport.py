@@ -116,8 +116,16 @@ class HttpTransport:
                     f"Connection error with URL {self._base_url}: {os_err}",
                 ) from err
 
+            # Tag the raw response with the operation and HTTP status so a
+            # diagnostic log can pick, say, the RefreshLogin response out of the
+            # request stream and see the exact structure/status it returned
+            # (issue #557/#568). Secrets are scrubbed by the handler-level
+            # SensitiveDataFilter; _sanitize_response_for_log only trims bulky
+            # non-secret fields (images, schedules).
             _LOGGER.debug(
-                "response=%s",
+                "[http] op=%s status=%s response=%s",
+                content.get("operationName", "?"),
+                http_status,
                 _sanitize_response_for_log(response_text),
             )
 
