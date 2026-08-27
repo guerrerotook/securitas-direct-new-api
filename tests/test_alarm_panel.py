@@ -229,8 +229,8 @@ class TestForceArmNotificationsConfig:
         assert CONF_AUTO_FORCE_ARM == "auto_force_arm"
         assert DEFAULT_AUTO_FORCE_ARM is False
 
-    def test_auto_force_arm_attribute_absent_by_default(self):
-        """The card capability gate is off by default: attribute is False."""
+    def test_auto_force_arm_attribute_false_by_default(self):
+        """The card capability gate is off by default: attribute is present and False."""
         alarm = make_alarm()
         assert alarm._attr_extra_state_attributes["auto_force_arm_enabled"] is False
 

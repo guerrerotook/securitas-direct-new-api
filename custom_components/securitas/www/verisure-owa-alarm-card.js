@@ -120,6 +120,15 @@ class VerisureOwaAlarmCard extends HTMLElement {
     }
   }
 
+  // Auto-force only ever acts when BOTH the integration capability gate is on
+  // AND this device's tick box is ticked. The gate is authoritative: a
+  // remembered localStorage tick from when the gate was enabled must not keep
+  // auto-forcing after an admin turns the option off.
+  _autoForceActive() {
+    const st = this._hass?.states?.[this._config?.entity];
+    return this._autoForceArm && st?.attributes?.auto_force_arm_enabled === true;
+  }
+
   // Drop the auto-force intent if the arm never reaches the panel — the
   // service call rejects (invalid PIN raises ServiceValidationError, a network
   // error rejects) before any state transition, so nothing else would clear it
@@ -514,7 +523,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
       } else {
         // Arm the auto-force intent as this card dispatches the arm, so a
         // resulting forceable exception is handled without the user.
-        this._pendingAutoForce = this._autoForceArm;
+        this._pendingAutoForce = this._autoForceActive();
         this._autoForceArming = false;
         this._clearAutoForceOnReject(
           this._hass.callService("alarm_control_panel", armDef.service, { entity_id: entity }),
@@ -528,7 +537,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Only arm the auto-force intent for arm commands, never for disarm.
     const isArm = this._pendingAction.service.startsWith("alarm_arm_");
     if (isArm) {
-      this._pendingAutoForce = this._autoForceArm;
+      this._pendingAutoForce = this._autoForceActive();
       this._autoForceArming = false;
     }
     const result = this._hass.callService("alarm_control_panel", this._pendingAction.service, {

@@ -125,6 +125,33 @@ describe("auto-force behaviour", () => {
     });
   });
 
+  it("does NOT auto-force when the capability gate is off, even if the box was remembered on", () => {
+    // Gate previously on, box ticked (persisted), then the gate is disabled.
+    localStorage.setItem(LS_KEY, "true");
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed", autoForceArmEnabled: false }) },
+    });
+    const card = mountAlarmCard({ hass });
+
+    // Arm buttons still render (only the tick box is gated).
+    card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+    card.hass = makeHass({
+      callService: hass.callService,
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          autoForceArmEnabled: false,
+          forceArmAvailable: true,
+          armExceptions: ["Kitchen Door"],
+        }),
+      },
+    });
+
+    expect(hass.callService).not.toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
+  });
+
   it("does NOT auto-force a stale exception present on load (no card arm)", () => {
     localStorage.setItem(LS_KEY, "true");
     const hass = makeHass({
