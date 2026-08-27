@@ -70,8 +70,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Per-device auto-force-arm tick box (loaded from localStorage in
     // setConfig). `_pendingAutoForce` is armed only by a card-initiated arm,
     // so a stale/foreign force-arm context never triggers an auto-force.
+    // `_autoForceArming` tracks that the arm reached the panel (state went to
+    // arming/pending) so the intent is dropped once it resolves.
     this._autoForceArm = false;
     this._pendingAutoForce = false;
+    this._autoForceArming = false;
   }
 
   disconnectedCallback() {
@@ -93,6 +96,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Drop any armed auto-force intent — the card that initiated the arm is
     // going away, so it must not act on a force context after re-mount.
     this._pendingAutoForce = false;
+    this._autoForceArming = false;
   }
 
   // ── Auto-force-arm (per-device) ──────────────────────────────────────────────
@@ -122,16 +126,26 @@ class VerisureOwaAlarmCard extends HTMLElement {
     if (!this._pendingAutoForce || !stateObj) return;
     if (stateObj.attributes.force_arm_available === true) {
       this._pendingAutoForce = false;
+      this._autoForceArming = false;
       this._hass.callService("verisure_owa", "force_arm", {
         entity_id: this._config.entity,
       });
       return;
     }
-    // Arm committed to an armed/triggered state without exceptions — nothing to
-    // force; drop the intent so a later, unrelated exception can't trigger it.
     const s = stateObj.state;
-    if (s !== "disarmed" && s !== "arming" && s !== "pending") {
+    if (s === "arming" || s === "pending") {
+      // The arm reached the panel and is in flight — wait for it to resolve.
+      this._autoForceArming = true;
+      return;
+    }
+    // Any settled state with no forceable exception means the arm resolved:
+    // armed OK, or a non-forceable rejection that bounced back to disarmed.
+    // Drop the intent so a later, unrelated force context can't trigger it.
+    // The `disarmed` guard covers the first tick after the click, before the
+    // panel has moved to `arming` — keep waiting until we've seen it in flight.
+    if (s !== "disarmed" || this._autoForceArming) {
       this._pendingAutoForce = false;
+      this._autoForceArming = false;
     }
   }
 
@@ -161,7 +175,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // freshly-appeared force-arm context is handled even on the same tick.
     this._maybeAutoForceArm(stateObj);
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|states:${this._statesFP || "*"}`
+      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;

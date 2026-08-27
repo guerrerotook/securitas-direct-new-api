@@ -84,7 +84,7 @@
                         "data": {
                             "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
                             "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
-                            "auto_force_arm": "Mostra una casella d'armat forçat automàtic a la targeta d'alarma"
+                            "auto_force_arm": "Mostra a la targeta d'alarma una casella d'armat forçat automàtic"
                         },
                         "data_description": {
                             "auto_force_arm": "Quan està activat, la targeta d'alarma mostra una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
@@ -147,7 +147,7 @@
                         "data": {
                             "notify_group": "Servei de notificació per a excepcions en armar (p. ex. mobile_app_phone)",
                             "force_arm_notifications": "Notificacions integrades d'armat forçat (desactiveu-les per usar les vostres automatitzacions)",
-                            "auto_force_arm": "Mostra una casella d'armat forçat automàtic a la targeta d'alarma"
+                            "auto_force_arm": "Mostra a la targeta d'alarma una casella d'armat forçat automàtic"
                         },
                         "data_description": {
                             "auto_force_arm": "Quan està activat, la targeta d'alarma mostra una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."

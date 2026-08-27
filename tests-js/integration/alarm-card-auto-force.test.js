@@ -44,6 +44,21 @@ describe("auto-force tick box visibility (capability gate)", () => {
     expect(card.shadowRoot.querySelector(".auto-force-toggle")).toBeNull();
   });
 
+  it("re-renders to show the tick box when the capability gate turns on", () => {
+    const card = mountAlarmCard({
+      hass: makeHass({
+        states: { [ENTITY]: makeAlarmEntity({ state: "disarmed", autoForceArmEnabled: false }) },
+      }),
+    });
+    expect(card.shadowRoot.querySelector(".auto-force-toggle")).toBeNull();
+
+    // User enables the option; HA updates only the attribute.
+    card.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed", autoForceArmEnabled: true }) },
+    });
+    expect(card.shadowRoot.querySelector(".auto-force-toggle")).not.toBeNull();
+  });
+
   it("hides the tick box when the alarm is already armed", () => {
     const card = mountAlarmCard({
       hass: makeHass({
@@ -141,6 +156,38 @@ describe("auto-force behaviour", () => {
     });
     // Manual force section is still offered.
     expect(card.shadowRoot.querySelector('[data-action="force_arm"]')).not.toBeNull();
+  });
+
+  it("drops the intent after a non-forceable rejection bounces back to disarmed", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const hass = makeHass({ states: { [ENTITY]: disarmed() } });
+    const card = mountAlarmCard({ hass });
+
+    card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+
+    // Arm goes in-flight, then bounces back to disarmed with NO forceable
+    // exception (a non-forceable panel rejection / other arm error).
+    card.hass = makeHass({
+      callService: hass.callService,
+      states: { [ENTITY]: makeAlarmEntity({ state: "arming", autoForceArmEnabled: true }) },
+    });
+    card.hass = makeHass({
+      callService: hass.callService,
+      states: { [ENTITY]: disarmed() },
+    });
+
+    // A later, unrelated exception on this entity (not from this card) must
+    // not auto-force.
+    card.hass = makeHass({
+      callService: hass.callService,
+      states: {
+        [ENTITY]: disarmed({ forceArmAvailable: true, armExceptions: ["Kitchen Door"] }),
+      },
+    });
+
+    expect(hass.callService).not.toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
   });
 
   it("clears the pending intent once the arm commits without exceptions", () => {
