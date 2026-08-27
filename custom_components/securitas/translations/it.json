@@ -83,7 +83,11 @@
                         "name": "Notifiche di attivazione forzata",
                         "data": {
                             "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
-                            "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
+                            "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)",
+                            "auto_force_arm": "Mostra una casella di attivazione forzata automatica sulla scheda dell'allarme"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Quando abilitata, la scheda dell'allarme mostra una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
                         }
                     },
                     "subpanels": {
@@ -142,7 +146,11 @@
                         "name": "Notifiche di attivazione forzata",
                         "data": {
                             "notify_group": "Servizio di notifica per eccezioni di attivazione (es. mobile_app_phone)",
-                            "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)"
+                            "force_arm_notifications": "Notifiche integrate di attivazione forzata (disattivare per usare le proprie automazioni)",
+                            "auto_force_arm": "Mostra una casella di attivazione forzata automatica sulla scheda dell'allarme"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Quando abilitata, la scheda dell'allarme mostra una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
                         }
                     },
                     "subpanels": {

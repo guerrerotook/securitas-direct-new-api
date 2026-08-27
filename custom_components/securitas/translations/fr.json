@@ -83,7 +83,11 @@
                         "name": "Notifications d'armement forcé",
                         "data": {
                             "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
-                            "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
+                            "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
+                            "auto_force_arm": "Afficher une case de forçage d'armement automatique sur la carte d'alarme"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Lorsque cette option est activée, la carte d'alarme affiche une case qui force automatiquement l'armement malgré les portes/fenêtres ouvertes, au lieu d'attendre votre confirmation. Le choix est mémorisé par appareil dans le navigateur. Laissez désactivé si votre centrale ne prend pas en charge le forçage d'armement."
                         }
                     },
                     "subpanels": {
@@ -142,7 +146,11 @@
                         "name": "Notifications d'armement forcé",
                         "data": {
                             "notify_group": "Service de notification pour les exceptions d'armement (ex. mobile_app_phone)",
-                            "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)"
+                            "force_arm_notifications": "Notifications intégrées de forçage d'armement (désactiver pour utiliser vos propres automatisations)",
+                            "auto_force_arm": "Afficher une case de forçage d'armement automatique sur la carte d'alarme"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Lorsque cette option est activée, la carte d'alarme affiche une case qui force automatiquement l'armement malgré les portes/fenêtres ouvertes, au lieu d'attendre votre confirmation. Le choix est mémorisé par appareil dans le navigateur. Laissez désactivé si votre centrale ne prend pas en charge le forçage d'armement."
                         }
                     },
                     "subpanels": {

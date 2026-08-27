@@ -83,7 +83,11 @@
                         "name": "Notificaciones de armado forzado",
                         "data": {
                             "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
-                            "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
+                            "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)",
+                            "auto_force_arm": "Mostrar una casilla de armado forzado automático en la tarjeta de alarma"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Cuando está activado, la tarjeta de alarma muestra una casilla que fuerza el armado automáticamente ignorando puertas/ventanas abiertas, en lugar de esperar su confirmación. La elección se recuerda por dispositivo en el navegador. Déjelo desactivado si su panel no admite el armado forzado."
                         }
                     },
                     "subpanels": {
@@ -142,7 +146,11 @@
                         "name": "Notificaciones de armado forzado",
                         "data": {
                             "notify_group": "Servicio de notificación para excepciones de armado (p. ej. mobile_app_phone)",
-                            "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)"
+                            "force_arm_notifications": "Notificaciones integradas de forzar armado (desactivar para usar sus propias automatizaciones)",
+                            "auto_force_arm": "Mostrar una casilla de armado forzado automático en la tarjeta de alarma"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Cuando está activado, la tarjeta de alarma muestra una casilla que fuerza el armado automáticamente ignorando puertas/ventanas abiertas, en lugar de esperar su confirmación. La elección se recuerda por dispositivo en el navegador. Déjelo desactivado si su panel no admite el armado forzado."
                         }
                     },
                     "subpanels": {
