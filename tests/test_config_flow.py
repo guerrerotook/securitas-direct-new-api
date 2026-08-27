@@ -1250,6 +1250,42 @@ async def test_options_mappings_invalid_mapping_falls_back(hass):
     assert result["type"] == FlowResultType.CREATE_ENTRY
 
 
+async def test_options_mappings_cleared_field_stays_cleared_on_reopen(hass):
+    """A mapping the user explicitly cleared must not be repopulated on reopen.
+
+    Regression: clearing a mapping records it as "" in options, but
+    _suggested_map treated that empty string as "unset" and fell back to the
+    per-mode default — so e.g. a cleared map_custom on a perimeter install
+    came back as peri_only every time the Options dialog was reopened, and
+    re-saving would silently un-clear it.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(has_peri=True),
+        options={CONF_MAP_CUSTOM: ""},  # user explicitly cleared map_custom
+    )
+    entry.add_to_hass(hass)
+    coord = MagicMock()
+    coord.has_peri = True
+    coord.has_annex = False
+    coord.capabilities_populated = True
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"alarm_coordinator": coord}
+
+    result = await _show_mappings(hass, entry)
+    assert result["step_id"] == "mappings"
+
+    marker = next(
+        m
+        for m in result["data_schema"].schema
+        if getattr(m, "schema", m) == CONF_MAP_CUSTOM
+    )
+    suggested = (getattr(marker, "description", None) or {}).get("suggested_value")
+    assert suggested in (None, ""), (
+        f"Cleared map_custom must stay blank on reopen, got {suggested!r} — "
+        "_suggested_map resurrected the default from the cleared empty string."
+    )
+
+
 async def test_options_mappings_submitting_creates_entry(hass):
     """Submitting mappings form should create the options entry."""
     entry = MockConfigEntry(
