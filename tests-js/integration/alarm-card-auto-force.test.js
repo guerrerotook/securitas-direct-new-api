@@ -80,7 +80,7 @@ describe("auto-force tick box persistence (localStorage)", () => {
     expect(localStorage.getItem(LS_KEY)).toBe("true");
   });
 
-  it("unchecking the box clears the stored choice", () => {
+  it("unchecking the box records the off choice", () => {
     localStorage.setItem(LS_KEY, "true");
     const card = mountAlarmCard({
       hass: makeHass({ states: { [ENTITY]: disarmed() } }),
@@ -135,6 +135,31 @@ describe("auto-force behaviour", () => {
 
     // Arm buttons still render (only the tick box is gated).
     card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+    card.hass = makeHass({
+      callService: hass.callService,
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          autoForceArmEnabled: false,
+          forceArmAvailable: true,
+          armExceptions: ["Kitchen Door"],
+        }),
+      },
+    });
+
+    expect(hass.callService).not.toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("does NOT auto-force if the gate is turned off between arm and exception", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const hass = makeHass({ states: { [ENTITY]: disarmed() } }); // gate on at dispatch
+    const card = mountAlarmCard({ hass });
+
+    card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+
+    // Admin disables the gate, then the forceable exception arrives.
     card.hass = makeHass({
       callService: hass.callService,
       states: {

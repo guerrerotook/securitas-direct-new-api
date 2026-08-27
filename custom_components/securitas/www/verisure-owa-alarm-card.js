@@ -147,9 +147,13 @@ class VerisureOwaAlarmCard extends HTMLElement {
     if (stateObj.attributes.force_arm_available === true) {
       this._pendingAutoForce = false;
       this._autoForceArming = false;
-      this._hass.callService("verisure_owa", "force_arm", {
-        entity_id: this._config.entity,
-      });
+      // Re-check the authoritative gate at fire time: if the option was turned
+      // off (or the tick cleared) after the arm was dispatched, don't force.
+      if (this._autoForceActive()) {
+        this._hass.callService("verisure_owa", "force_arm", {
+          entity_id: this._config.entity,
+        });
+      }
       return;
     }
     const s = stateObj.state;
