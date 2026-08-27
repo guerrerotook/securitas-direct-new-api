@@ -67,6 +67,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._pendingAction = null; // { service, label }
     this._pin = "";
     this._gestureCleanup = null;
+    // Per-device auto-force-arm tick box (loaded from localStorage in
+    // setConfig). `_pendingAutoForce` is armed only by a card-initiated arm,
+    // so a stale/foreign force-arm context never triggers an auto-force.
+    this._autoForceArm = false;
+    this._pendingAutoForce = false;
   }
 
   disconnectedCallback() {
@@ -85,11 +90,55 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._pin = "";
     this._uiState = "normal";
     this._pendingAction = null;
+    // Drop any armed auto-force intent — the card that initiated the arm is
+    // going away, so it must not act on a force context after re-mount.
+    this._pendingAutoForce = false;
+  }
+
+  // ── Auto-force-arm (per-device) ──────────────────────────────────────────────
+  _autoForceKey() {
+    return `verisure-owa:auto-force-arm:${this._config?.entity}`;
+  }
+
+  _readAutoForce() {
+    try {
+      return globalThis.localStorage?.getItem(this._autoForceKey()) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  _writeAutoForce(on) {
+    try {
+      globalThis.localStorage?.setItem(this._autoForceKey(), on ? "true" : "false");
+    } catch {
+      /* private mode / storage disabled — the tick box just won't persist */
+    }
+  }
+
+  // Called on every hass update. When this card's own arm hit a forceable
+  // exception, force-arm automatically instead of waiting for the user.
+  _maybeAutoForceArm(stateObj) {
+    if (!this._pendingAutoForce || !stateObj) return;
+    if (stateObj.attributes.force_arm_available === true) {
+      this._pendingAutoForce = false;
+      this._hass.callService("verisure_owa", "force_arm", {
+        entity_id: this._config.entity,
+      });
+      return;
+    }
+    // Arm committed to an armed/triggered state without exceptions — nothing to
+    // force; drop the intent so a later, unrelated exception can't trigger it.
+    const s = stateObj.state;
+    if (s !== "disarmed" && s !== "arming" && s !== "pending") {
+      this._pendingAutoForce = false;
+    }
   }
 
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = config;
+    this._autoForceArm = this._readAutoForce();
     this._lastKey = null; // force re-render so color changes apply immediately
     // Memoize the `states` fingerprint so the per-tick `set hass` doesn't
     // re-allocate it for every unrelated entity update.
@@ -108,6 +157,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._hass = hass;
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
+    // Act on a pending auto-force intent before the render short-circuit, so a
+    // freshly-appeared force-arm context is handled even on the same tick.
+    this._maybeAutoForceArm(stateObj);
     const newKey = stateObj
       ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|states:${this._statesFP || "*"}`
       : "missing";
@@ -164,6 +216,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
     const openSensors       = attrs.arm_exceptions || [];
     const wafBlocked        = attrs.waf_blocked === true;
     const refreshFailed     = attrs.refresh_failed === true;
+    // Capability gate set by the integration options; only then is the
+    // per-device auto-force-arm tick box offered.
+    const autoForceEnabled  = attrs.auto_force_arm_enabled === true;
 
     const codeFormat      = attrs.code_format || null;        // "number" | "text" | null
     const codeArmRequired = attrs.code_arm_required === true; // need code to arm?
@@ -231,7 +286,12 @@ class VerisureOwaAlarmCard extends HTMLElement {
                     ).join("")
                   : ""
               }
-            </div>` : ""}
+            </div>
+            ${canArm && autoForceEnabled ? `
+              <label class="auto-force-toggle">
+                <input type="checkbox" class="auto-force-checkbox" ${this._autoForceArm ? "checked" : ""}>
+                <span>${_t(lang, "auto_force_arm")}</span>
+              </label>` : ""}` : ""}
 
         </div>
       </ha-card>`;
@@ -334,6 +394,15 @@ class VerisureOwaAlarmCard extends HTMLElement {
       });
     });
 
+    // Auto-force-arm tick box — remembered per device, never re-renders here.
+    const autoForceCb = this.shadowRoot.querySelector(".auto-force-checkbox");
+    if (autoForceCb) {
+      autoForceCb.addEventListener("change", () => {
+        this._autoForceArm = autoForceCb.checked;
+        this._writeAutoForce(this._autoForceArm);
+      });
+    }
+
     // Numeric keypad + visible input
     const pinInput = this.shadowRoot.getElementById("pin-keyboard-input");
     const syncInput = () => {
@@ -418,6 +487,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
       if (hasCode && codeArmRequired) {
         this._startPinEntry({ service: armDef.service, labelKey: armDef.labelKey });
       } else {
+        // Arm the auto-force intent as this card dispatches the arm, so a
+        // resulting forceable exception is handled without the user.
+        this._pendingAutoForce = this._autoForceArm;
         this._hass.callService("alarm_control_panel", armDef.service, { entity_id: entity });
       }
     }
@@ -425,6 +497,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
   _submitPin(entity) {
     if (!this._pendingAction || !this._pin) return;
+    // Only arm the auto-force intent for arm commands, never for disarm.
+    if (this._pendingAction.service.startsWith("alarm_arm_")) {
+      this._pendingAutoForce = this._autoForceArm;
+    }
     this._hass.callService("alarm_control_panel", this._pendingAction.service, {
       entity_id: entity,
       code: this._pin,
@@ -589,6 +665,25 @@ class VerisureOwaAlarmCard extends HTMLElement {
         grid-column: 1 / -1;
       }
       .btn-disarm:hover { filter: brightness(1.1); }
+
+      /* ── Auto-force-arm tick box ── */
+      .auto-force-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 0.8em;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        user-select: none;
+      }
+      .auto-force-checkbox {
+        flex-shrink: 0;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--primary-color);
+        cursor: pointer;
+      }
 
       /* ── Force arm section ── */
       .force-section {

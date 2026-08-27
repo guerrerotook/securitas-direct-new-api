@@ -2,6 +2,12 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.8.0
+
+### Added
+
+**Auto-force-arm past open sensors, straight from the card ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  When you arm with a door or window left open, the alarm blocks and waits for you to tap **Force Arm** — easy to miss, and until you do the alarm never arms.  A new opt-in setting, **"Offer an auto-force-arm tick box on the alarm card"**, adds a *force-arm past open sensors* tick box below the arm buttons on the alarm card; with it ticked, arming from that card and hitting an open sensor force-arms past the open zones automatically instead of waiting for you to confirm.  The bypassed zones are still recorded in the activity log as *Armed with exceptions*.  It is off by default — force-arming silently bypasses open doors and windows, and some panels (Spain has been observed) don't support it at all — and the tick box is remembered per device in the browser, so it only ever affects arming from that card and never changes how automations or the stock alarm card behave.  Thanks to [@WSorban](https://github.com/WSorban) for the request.
+
 ## v5.7.0
 
 Two fixes: a partial-arming entry in the activity log that showed up as an unknown event now reads as an arm, and the refresh-login crash that left some accounts stuck on every restart is fixed at its root.

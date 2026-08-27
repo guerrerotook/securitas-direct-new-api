@@ -28,6 +28,7 @@ from homeassistant.helpers.selector import (
 
 from . import (
     CONF_ADVANCED,
+    CONF_AUTO_FORCE_ARM,
     CONF_CODE_ARM_REQUIRED,
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
@@ -46,6 +47,7 @@ from . import (
     CONF_NOTIFY_GROUP,
     CONF_OPERATION_POLL_TIMEOUT,
     COUNTRY_CODES,
+    DEFAULT_AUTO_FORCE_ARM,
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
@@ -403,6 +405,10 @@ def _build_settings_schema(
                     default=defaults.get(
                         CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
                     ),
+                ): bool,
+                vol.Optional(
+                    CONF_AUTO_FORCE_ARM,
+                    default=defaults.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM),
                 ): bool,
             }
         ),

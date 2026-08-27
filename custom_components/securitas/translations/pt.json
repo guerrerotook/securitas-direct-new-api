@@ -83,7 +83,11 @@
                         "name": "Notificações de armar forçado",
                         "data": {
                             "notify_group": "Serviço de notificação para exceções de armar (ex. mobile_app_phone)",
-                            "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar as suas próprias automatizações)"
+                            "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar as suas próprias automatizações)",
+                            "auto_force_arm": "Mostrar uma caixa de armar forçado automático no cartão de alarme"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Quando ativado, o cartão de alarme mostra uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
                         }
                     },
                     "subpanels": {
@@ -142,7 +146,11 @@
                         "name": "Notificações de armar forçado",
                         "data": {
                             "notify_group": "Serviço de notificação para exceções de armar (ex. mobile_app_phone)",
-                            "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar as suas próprias automatizações)"
+                            "force_arm_notifications": "Notificações integradas de armar forçado (desativar para usar as suas próprias automatizações)",
+                            "auto_force_arm": "Mostrar uma caixa de armar forçado automático no cartão de alarme"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "Quando ativado, o cartão de alarme mostra uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
                         }
                     },
                     "subpanels": {

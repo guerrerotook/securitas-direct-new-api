@@ -40,10 +40,12 @@ from ..const import (
     CIRCUIT_ANNEX,
     CIRCUIT_INTERIOR,
     CIRCUIT_PERIMETER,
+    CONF_AUTO_FORCE_ARM,
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
     CONF_OPERATION_POLL_TIMEOUT,
     CONF_UNSUPPORTED_COMMANDS,
+    DEFAULT_AUTO_FORCE_ARM,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     PROJECT_URL,
 )
@@ -175,6 +177,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}
+        # Advertise the auto-force-arm capability gate to the Lovelace card.
+        # Static per config (an options change reloads the entry), so it's set
+        # once here. The card only offers its per-device tick box when True.
+        self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
+            self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
+        )
         self.hass: HomeAssistant = hass
         self._has_peri = coordinator.has_peri
         self._has_annex = coordinator.has_annex

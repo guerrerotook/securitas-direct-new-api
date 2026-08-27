@@ -23,7 +23,9 @@ from custom_components.securitas.alarm_control_panel import (
     CombinedVerisureOwaAlarmPanel,
 )
 from custom_components.securitas.const import (
+    CONF_AUTO_FORCE_ARM,
     CONF_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_AUTO_FORCE_ARM,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
 )
 from custom_components.securitas.coordinators import (
@@ -221,6 +223,28 @@ class TestForceArmNotificationsConfig:
             }
         )
         assert alarm.client.config.get("force_arm_notifications") is False
+
+    def test_auto_force_arm_constants_exist(self):
+        """Config constants for auto_force_arm are defined."""
+        assert CONF_AUTO_FORCE_ARM == "auto_force_arm"
+        assert DEFAULT_AUTO_FORCE_ARM is False
+
+    def test_auto_force_arm_attribute_absent_by_default(self):
+        """The card capability gate is off by default: attribute is False."""
+        alarm = make_alarm()
+        assert alarm._attr_extra_state_attributes["auto_force_arm_enabled"] is False
+
+    def test_auto_force_arm_attribute_reflects_config(self):
+        """auto_force_arm=True in config surfaces as the entity attribute."""
+        config = {
+            "map_home": STD_DEFAULTS["map_home"],
+            "map_away": STD_DEFAULTS["map_away"],
+            "map_night": STD_DEFAULTS["map_night"],
+            "scan_interval": 120,
+            "auto_force_arm": True,
+        }
+        alarm = make_alarm(config=config)
+        assert alarm._attr_extra_state_attributes["auto_force_arm_enabled"] is True
 
     async def test_arming_exception_fires_event(self):
         """ArmingExceptionError fires both verisure_owa_arming_exception and

@@ -1022,6 +1022,60 @@ async def test_options_enabling_activity_polling_persists(hass):
     assert result["data"]["enable_activity_polling"] is True
 
 
+async def test_options_init_form_includes_auto_force_arm_toggle(hass):
+    """The notifications section exposes the auto-force-arm capability gate."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert "auto_force_arm" in _section_inner_keys(
+        result["data_schema"], "notifications"
+    )
+
+
+async def test_options_enabling_auto_force_arm_persists(hass):
+    """Enabling the toggle writes auto_force_arm=True to options."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    user_input = _fill_optional_sections(
+        result,
+        {
+            "pin": {CONF_CODE: "1234", CONF_CODE_ARM_REQUIRED: False},
+            "notifications": {"auto_force_arm": True},
+            CONF_ADVANCED: {
+                CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
+                CONF_DELAY_CHECK_OPERATION: float(DEFAULT_DELAY_CHECK_OPERATION),
+            },
+        },
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+    assert result["step_id"] == "mappings"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MAP_HOME: STD_DEFAULTS[CONF_MAP_HOME],
+            CONF_MAP_AWAY: STD_DEFAULTS[CONF_MAP_AWAY],
+            CONF_MAP_NIGHT: STD_DEFAULTS[CONF_MAP_NIGHT],
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["auto_force_arm"] is True
+
+
 # ===================================================================
 # TestSubpanelsNote
 # ===================================================================

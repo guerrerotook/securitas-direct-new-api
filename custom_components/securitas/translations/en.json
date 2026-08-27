@@ -66,7 +66,11 @@
                         "name": "Force-arm notifications",
                         "data": {
                             "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
-                            "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
+                            "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)",
+                            "auto_force_arm": "Offer an auto-force-arm tick box on the alarm card"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "When enabled, the alarm card shows a tick box that automatically force-arms past open doors/windows instead of waiting for you to confirm. The choice is remembered per device in the browser. Leave off where your panel does not support force-arming."
                         }
                     },
                     "subpanels": {
@@ -125,7 +129,11 @@
                         "name": "Force-arm notifications",
                         "data": {
                             "notify_group": "Notify service for arming exceptions (e.g. mobile_app_phone)",
-                            "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)"
+                            "force_arm_notifications": "Built-in force-arm notifications (disable to use your own automations)",
+                            "auto_force_arm": "Offer an auto-force-arm tick box on the alarm card"
+                        },
+                        "data_description": {
+                            "auto_force_arm": "When enabled, the alarm card shows a tick box that automatically force-arms past open doors/windows instead of waiting for you to confirm. The choice is remembered per device in the browser. Leave off where your panel does not support force-arming."
                         }
                     },
                     "subpanels": {

@@ -9,6 +9,7 @@ export function makeAlarmEntity({
   armExceptions = [],
   wafBlocked = false,
   refreshFailed = false,
+  autoForceArmEnabled = false,
   friendlyName = "Test Alarm",
 } = {}) {
   return {
@@ -22,6 +23,7 @@ export function makeAlarmEntity({
       arm_exceptions: armExceptions,
       waf_blocked: wafBlocked,
       refresh_failed: refreshFailed,
+      auto_force_arm_enabled: autoForceArmEnabled,
     },
   };
 }

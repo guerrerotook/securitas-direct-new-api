@@ -61,6 +61,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CHIP_CARD_BASE_URL,
     CHIP_CARD_URL,
     CONF_ADVANCED,
+    CONF_AUTO_FORCE_ARM,
     CONF_CODE_ARM_REQUIRED,
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
@@ -86,6 +87,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_REFRESH_TOKEN,
     CONF_UNSUPPORTED_COMMANDS,
     COUNTRY_CODES,
+    DEFAULT_AUTO_FORCE_ARM,
     DEFAULT_CODE,
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_COUNTRY,
@@ -243,6 +245,7 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
     CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_AUTO_FORCE_ARM,
     *PANEL_OPTION_KEYS,
     CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
@@ -409,6 +412,7 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_FORCE_ARM_NOTIFICATIONS] = _opt(
         CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
     )
+    config[CONF_AUTO_FORCE_ARM] = _opt(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
     config[CONF_ENABLE_ACTIVITY_POLLING] = _opt(
         CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING
     )

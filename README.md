@@ -76,6 +76,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | | Require PIN for lock operations | No | When enabled, the same local PIN must be supplied on every lock, unlock, or open call for any smart lock on this installation — **including from your own automations and scripts, which will fail until they pass a `code`**. No effect if no PIN is set. The integration's own [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are unaffected. See [Requiring a PIN for lock operations](#requiring-a-pin-for-lock-operations). |
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 | | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming (advanced)](#force-arming-advanced). |
+| | Offer an auto-force-arm tick box on the alarm card | No | Off by default. When enabled, the alarm card shows a **"force-arm past open sensors"** tick box; with it ticked, arming from that card auto-forces past open doors/windows instead of waiting for you to confirm. The tick is remembered per device in the browser. Leave off where your panel doesn't support force-arming (Spain has been observed). See [Auto-force-arm from the card](#auto-force-arm-from-the-card). |
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
 | | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
 | | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
@@ -175,6 +176,7 @@ The custom alarm card (`verisure-owa-alarm-card`) is the default way to interact
 - **Dynamic arm buttons** — only the modes you've mapped are shown.
 - **PIN keypad** — appears automatically when you've configured a PIN. Numeric codes get a numeric keypad; alphanumeric codes get a text input. The keypad on arm only appears if you've enabled "Require PIN to arm".
 - **Force-arm UI** — when arming is blocked, the card shows the affected sensors with inline **Force Arm** / **Cancel** buttons.
+- **Auto-force-arm tick box** _(opt-in)_ — when [enabled in the settings](#settings), the card shows a tick box to force-arm past open sensors automatically. See [Auto-force-arm from the card](#auto-force-arm-from-the-card).
 - **Theme-aware** — works correctly in both light and dark mode.
 
 To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick your alarm panel entity.
@@ -475,6 +477,14 @@ The arm command reverts, the entity gains `force_arm_available` and `arm_excepti
 You then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
 
 Some panels refuse force-arming altogether (Spain has been observed). In that case you'll get an "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
+
+### Auto-force-arm from the card
+
+If reacting to the "window left open" prompt every time is a chore, you can have the alarm card do it for you. Turn on **"Offer an auto-force-arm tick box on the alarm card"** in the [settings](#settings) (off by default — force-arming silently bypasses open doors/windows, and some panels don't support it at all). The card then shows a **force-arm past open sensors** tick box below the arm buttons.
+
+With the tick box ticked, arming from that card and hitting an open sensor force-arms automatically instead of waiting for you to confirm — the bypassed zones are still recorded in the [activity log](#activity-log) as "Armed with exceptions". The tick box is remembered per device in the browser (not synced across devices, and it doesn't change how automations or the stock alarm card arm). It only acts on an exception raised by _that card's own_ arm, so opening a dashboard that already shows a pending force-arm context never arms on its own.
+
+Because the choice lives in the browser, the built-in notification still fires briefly before the card force-arms and clears it; if that push bothers you, disable **Built-in force-arm notifications** in the settings.
 
 ### The `verisure_owa_arming_exception` event
 
