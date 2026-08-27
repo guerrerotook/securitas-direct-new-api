@@ -120,6 +120,17 @@ class VerisureOwaAlarmCard extends HTMLElement {
     }
   }
 
+  // Drop the auto-force intent if the arm never reaches the panel — the
+  // service call rejects (invalid PIN raises ServiceValidationError, a network
+  // error rejects) before any state transition, so nothing else would clear it
+  // and a later, unrelated force-arm context could otherwise auto-force.
+  _clearAutoForceOnReject(promise) {
+    Promise.resolve(promise).catch(() => {
+      this._pendingAutoForce = false;
+      this._autoForceArming = false;
+    });
+  }
+
   // Called on every hass update. When this card's own arm hit a forceable
   // exception, force-arm automatically instead of waiting for the user.
   _maybeAutoForceArm(stateObj) {
@@ -504,7 +515,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
         // Arm the auto-force intent as this card dispatches the arm, so a
         // resulting forceable exception is handled without the user.
         this._pendingAutoForce = this._autoForceArm;
-        this._hass.callService("alarm_control_panel", armDef.service, { entity_id: entity });
+        this._autoForceArming = false;
+        this._clearAutoForceOnReject(
+          this._hass.callService("alarm_control_panel", armDef.service, { entity_id: entity }),
+        );
       }
     }
   }
@@ -512,13 +526,16 @@ class VerisureOwaAlarmCard extends HTMLElement {
   _submitPin(entity) {
     if (!this._pendingAction || !this._pin) return;
     // Only arm the auto-force intent for arm commands, never for disarm.
-    if (this._pendingAction.service.startsWith("alarm_arm_")) {
+    const isArm = this._pendingAction.service.startsWith("alarm_arm_");
+    if (isArm) {
       this._pendingAutoForce = this._autoForceArm;
+      this._autoForceArming = false;
     }
-    this._hass.callService("alarm_control_panel", this._pendingAction.service, {
+    const result = this._hass.callService("alarm_control_panel", this._pendingAction.service, {
       entity_id: entity,
       code: this._pin,
     });
+    if (isArm) this._clearAutoForceOnReject(result);
     this._resetUI();
     this._render();
   }

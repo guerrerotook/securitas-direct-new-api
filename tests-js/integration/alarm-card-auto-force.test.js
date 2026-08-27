@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "../../custom_components/securitas/www/verisure-owa-alarm-card.js";
 import { makeHass } from "../fixtures/hass.js";
 import { makeAlarmEntity } from "../fixtures/entities.js";
@@ -186,6 +186,34 @@ describe("auto-force behaviour", () => {
     });
 
     expect(hass.callService).not.toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("drops the intent when the arm service call is rejected (e.g. invalid PIN)", async () => {
+    localStorage.setItem(LS_KEY, "true");
+    const callService = vi.fn((_domain, service) =>
+      service.startsWith("alarm_arm_")
+        ? Promise.reject(new Error("invalid PIN"))
+        : Promise.resolve(),
+    );
+    const hass = makeHass({ callService, states: { [ENTITY]: disarmed() } });
+    const card = mountAlarmCard({ hass });
+
+    // Arm dispatch is rejected before the panel ever moves to `arming`.
+    card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A later, unrelated exception on this entity must not auto-force.
+    card.hass = makeHass({
+      callService,
+      states: {
+        [ENTITY]: disarmed({ forceArmAvailable: true, armExceptions: ["Kitchen Door"] }),
+      },
+    });
+
+    expect(callService).not.toHaveBeenCalledWith("verisure_owa", "force_arm", {
       entity_id: ENTITY,
     });
   });
