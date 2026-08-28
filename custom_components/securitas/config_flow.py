@@ -1174,13 +1174,21 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
         def _suggested_map(key: str) -> str | None:
             """Return the value to pre-fill in the form, or None for blank.
 
-            Saved value wins when it's still in the current option set;
-            otherwise falls back to the default. Pre-v5 saved values of
-            ``"not_used"`` (or anything else outside the dropdown) collapse
-            to blank, so the user sees a cleared field instead of a stale
-            unselectable choice.
+            An explicit empty string is a mapping the user deliberately
+            cleared (``_normalize_mapping_input`` records the cleared state as
+            ``""``): honour it as blank rather than resurrecting the per-mode
+            default, which would repopulate the field on every reopen and let
+            a subsequent save silently un-clear it.
+
+            Otherwise the saved value wins when it's still in the current
+            option set; failing that we fall back to the default. Pre-v5 saved
+            values of ``"not_used"`` (or anything else outside the dropdown)
+            collapse to the default, so the user sees a usable choice instead
+            of a stale unselectable one.
             """
             val = self._get(key)
+            if val == "":
+                return None
             if val and val in valid_values:
                 return val
             return defaults.get(key)
