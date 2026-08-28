@@ -13,14 +13,13 @@ private sibling modules:
 - ``_sentinel`` — comfort sensors and air-quality.
 - ``_installation`` — installation list + service catalog.
 
-Module-level helpers (``generate_uuid``, ``generate_device_id``) and the
-public lock-device constants stay re-exported here so existing imports
-from ``verisure_owa_api.client`` keep working unchanged.
+Module-level helper (``generate_uuid``) and the public lock-device
+constants stay re-exported here so existing imports from
+``verisure_owa_api.client`` keep working unchanged.
 """
 
 from __future__ import annotations
 
-import secrets
 from uuid import uuid4
 
 from ._activity import _ActivityMixin
@@ -34,7 +33,6 @@ from ._sentinel import _SentinelMixin
 __all__ = [
     "SMARTLOCK_DEVICE_ID",
     "VerisureOwaClient",
-    "generate_device_id",
     "generate_uuid",
 ]
 
@@ -42,11 +40,6 @@ __all__ = [
 def generate_uuid() -> str:
     """Create a device id."""
     return str(uuid4()).replace("-", "")[0:16]
-
-
-def generate_device_id() -> str:
-    """Create a device identifier for the API."""
-    return secrets.token_urlsafe(16) + ":APA91b" + secrets.token_urlsafe(130)[0:134]
 
 
 class VerisureOwaClient(  # pylint: disable=too-many-ancestors

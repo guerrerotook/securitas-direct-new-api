@@ -2,7 +2,7 @@
 
 import logging
 
-from .client import VerisureOwaClient, generate_device_id, generate_uuid  # noqa: F401
+from .client import VerisureOwaClient, generate_uuid  # noqa: F401
 from .const import (  # noqa: F401
     PERI_DEFAULTS,
     PERI_OPTIONS,

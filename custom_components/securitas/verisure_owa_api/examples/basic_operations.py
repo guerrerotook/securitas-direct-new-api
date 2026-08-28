@@ -11,7 +11,6 @@ from verisure_owa_api import (
     HttpTransport,
     VerisureOwaClient,
     VerisureOwaError,
-    generate_device_id,
     generate_uuid,
 )
 
@@ -43,7 +42,8 @@ async def main():
     country = "ES"
     async with aiohttp.ClientSession() as aiohttp_session:
         uuid = generate_uuid()
-        device_id = generate_device_id()
+        # Mirror the config flow's known-working path: idDevice == uuid.
+        device_id = uuid
         id_device_indigitall = str(uuid4())
         api_domains = ApiDomains()
         transport = HttpTransport(
