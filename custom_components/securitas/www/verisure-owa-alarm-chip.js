@@ -13,7 +13,7 @@ import {
   defaultArmState,
   attachGesture,
   _makeLegacyShim,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.1";
+} from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
 
 class VerisureOwaAlarmBadge extends HTMLElement {
   constructor() {
