@@ -1076,6 +1076,46 @@ async def test_options_enabling_auto_force_arm_persists(hass):
     assert result["data"]["auto_force_arm"] is True
 
 
+async def test_options_init_prefills_saved_auto_force_arm(hass):
+    """Reopening Options must pre-fill a previously saved auto_force_arm.
+
+    Regression for the bug where CONF_AUTO_FORCE_ARM was missing from the
+    defaults dict passed to _build_settings_schema in async_step_init, so the
+    tick box always showed the schema default (False) instead of the saved
+    value — the option came up unchecked even after being enabled.
+    """
+    from custom_components.securitas.const import (
+        CONF_AUTO_FORCE_ARM,
+        DEFAULT_AUTO_FORCE_ARM,
+    )
+
+    saved_value = True
+    assert saved_value != DEFAULT_AUTO_FORCE_ARM, (
+        "test value must differ from the schema default to be meaningful"
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={CONF_AUTO_FORCE_ARM: saved_value},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+
+    marker = _section_inner_marker(
+        result["data_schema"], "notifications", CONF_AUTO_FORCE_ARM
+    )
+    assert marker is not None, "auto_force_arm field not found in notifications section"
+    assert marker.default() == saved_value, (
+        f"Expected pre-filled default {saved_value!r}, got {marker.default()!r}. "
+        "CONF_AUTO_FORCE_ARM is missing from the async_step_init defaults dict."
+    )
+
+
 # ===================================================================
 # TestSubpanelsNote
 # ===================================================================

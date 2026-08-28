@@ -1128,6 +1128,9 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_FORCE_ARM_NOTIFICATIONS: self._get(
                     CONF_FORCE_ARM_NOTIFICATIONS, DEFAULT_FORCE_ARM_NOTIFICATIONS
                 ),
+                CONF_AUTO_FORCE_ARM: self._get(
+                    CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM
+                ),
                 CONF_SCAN_INTERVAL: self._get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                 ),
