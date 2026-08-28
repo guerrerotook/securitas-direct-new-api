@@ -34,6 +34,18 @@ force_arm_cancel:
       integration: securitas
       domain: alarm_control_panel
 
+suppress_arm_exception_prompt:
+  description: |
+    Use `verisure_owa.suppress_arm_exception_prompt` instead.
+
+    Suppress the next "force-arm required" prompt for this panel and send a
+    "force-armed" confirmation instead. Fired by the alarm card's
+    auto-force-arm option just before it arms; not intended for manual use.
+  target:
+    entity:
+      integration: securitas
+      domain: alarm_control_panel
+
 ## refresh_activity_log, fetch_activity_image, refresh_alarm and
 ## capture_image are v5+ services available ONLY under verisure_owa.*
 ## (registered programmatically in __init__.py via _register_verisure_owa_entity_service).

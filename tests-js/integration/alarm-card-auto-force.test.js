@@ -125,6 +125,35 @@ describe("auto-force behaviour", () => {
     });
   });
 
+  it("suppresses the arm-exception prompt when auto-forcing a card-initiated arm", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const hass = makeHass({ states: { [ENTITY]: disarmed() } });
+    const card = mountAlarmCard({ hass });
+
+    card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+
+    // The card asks the backend to skip the transient "force-arm required?"
+    // prompt for this arm it is about to force through, so the user sees only
+    // the "force-armed" confirmation.
+    expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "suppress_arm_exception_prompt", {
+      entity_id: ENTITY,
+    });
+  });
+
+  it("does NOT suppress the prompt when the box is off", () => {
+    // No localStorage tick → auto-force inactive.
+    const hass = makeHass({ states: { [ENTITY]: disarmed() } });
+    const card = mountAlarmCard({ hass });
+
+    card.shadowRoot.querySelector('[data-action="arm_away"]').click();
+
+    expect(hass.callService).not.toHaveBeenCalledWith(
+      "verisure_owa",
+      "suppress_arm_exception_prompt",
+      { entity_id: ENTITY },
+    );
+  });
+
   it("does NOT auto-force when the capability gate is off, even if the box was remembered on", () => {
     // Gate previously on, box ticked (persisted), then the gate is disabled.
     localStorage.setItem(LS_KEY, "true");

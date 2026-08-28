@@ -88,6 +88,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Force Arm",
             "cancel_action": "Cancel",
         },
+        "armed_with_exceptions": {
+            "title": "Verisure: Alarm force-armed",
+            "message": (
+                "The alarm was armed, bypassing these open sensor(s):\n{sensor_list}"
+            ),
+            "mobile_message": ("Force-armed, bypassing open sensor(s): {sensor_list}."),
+        },
         "migration_complete": {
             "title": "Verisure OWA upgrade complete",
             "message": (
@@ -177,6 +184,16 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             ),
             "force_arm_action": "Armar de todos modos",
             "cancel_action": "Cancelar",
+        },
+        "armed_with_exceptions": {
+            "title": "Verisure: Alarma armada a la fuerza",
+            "message": (
+                "La alarma se armó, ignorando estos sensor(es) abierto(s):\n"
+                "{sensor_list}"
+            ),
+            "mobile_message": (
+                "Armada a la fuerza, ignorando sensor(es) abierto(s): {sensor_list}."
+            ),
         },
         "migration_complete": {
             "title": "Actualización a Verisure OWA completa",
@@ -271,6 +288,16 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Armer quand même",
             "cancel_action": "Annuler",
         },
+        "armed_with_exceptions": {
+            "title": "Verisure : Alarme armée de force",
+            "message": (
+                "L'alarme a été armée en ignorant ces capteur(s) ouvert(s) :\n"
+                "{sensor_list}"
+            ),
+            "mobile_message": (
+                "Armée de force, en ignorant les capteur(s) ouvert(s) : {sensor_list}."
+            ),
+        },
         "migration_complete": {
             "title": "Mise à niveau vers Verisure OWA terminée",
             "message": (
@@ -363,6 +390,16 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Attiva comunque",
             "cancel_action": "Annulla",
         },
+        "armed_with_exceptions": {
+            "title": "Verisure: Allarme attivato forzatamente",
+            "message": (
+                "L'allarme è stato attivato, escludendo questi sensore(i) "
+                "aperto(i):\n{sensor_list}"
+            ),
+            "mobile_message": (
+                "Attivato forzatamente, escludendo sensore(i) aperto(i): {sensor_list}."
+            ),
+        },
         "migration_complete": {
             "title": "Aggiornamento a Verisure OWA completato",
             "message": (
@@ -451,6 +488,16 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             ),
             "force_arm_action": "Armar na mesma",
             "cancel_action": "Cancelar",
+        },
+        "armed_with_exceptions": {
+            "title": "Verisure: Alarme armado à força",
+            "message": (
+                "O alarme foi armado, ignorando estes sensor(es) aberto(s):\n"
+                "{sensor_list}"
+            ),
+            "mobile_message": (
+                "Armado à força, ignorando sensor(es) aberto(s): {sensor_list}."
+            ),
         },
         "migration_complete": {
             "title": "Atualização para Verisure OWA concluída",
@@ -542,6 +589,16 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Forçar armado",
             "cancel_action": "Cancelar",
         },
+        "armed_with_exceptions": {
+            "title": "Verisure: Alarme armado à força",
+            "message": (
+                "O alarme foi armado, desconsiderando os sensor(es) aberto(s):\n"
+                "{sensor_list}"
+            ),
+            "mobile_message": (
+                "Armado à força, desconsiderando sensor(es) aberto(s): {sensor_list}."
+            ),
+        },
         "migration_complete": {
             "title": "Atualização para Verisure OWA concluída",
             "message": (
@@ -630,6 +687,16 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             ),
             "force_arm_action": "Forçar armat",
             "cancel_action": "Cancel·lar",
+        },
+        "armed_with_exceptions": {
+            "title": "Verisure: Alarma armada a la força",
+            "message": (
+                "L'alarma s'ha armat, ignorant aquests sensor(s) obert(s):\n"
+                "{sensor_list}"
+            ),
+            "mobile_message": (
+                "Armada a la força, ignorant sensor(s) obert(s): {sensor_list}."
+            ),
         },
         "migration_complete": {
             "title": "Actualització a Verisure OWA completa",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from datetime import timedelta
@@ -104,6 +105,11 @@ _LOGGER = logging.getLogger(__name__)
 # is unconditional (DARM* commands clear their axis regardless of the current
 # state) and therefore safe to issue even when the current state is unknown.
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
+
+# How long a card's "suppress the next arm-exception prompt" request stays
+# armed. Long enough to cover the arm round-trip that follows it, short enough
+# that a stray request can't silently swallow an unrelated prompt later on.
+_ARM_PROMPT_SUPPRESS_WINDOW = 120.0
 
 
 def _read_unsupported_for_installation(
@@ -254,6 +260,28 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_arm_expired_event_unsub = None
         self._arming_exception_dismissed_event_unsub = None
         self._last_handled_event_id: str | None = None
+        # Monotonic deadline until which the next arming-exception prompt is
+        # suppressed. The auto-force card sets this (via the
+        # suppress_arm_exception_prompt service) right before dispatching an
+        # arm it intends to force through, so the user sees the "force-armed"
+        # confirmation instead of a prompt that would be dismissed a beat
+        # later. Self-expires so a stray request can't swallow a later,
+        # unrelated prompt.
+        self._suppress_arm_prompt_until: float = 0.0
+
+    def suppress_arm_exception_prompt(self) -> None:
+        """Suppress the next arming-exception prompt for this panel.
+
+        Target of the verisure_owa.suppress_arm_exception_prompt service. The
+        window also gates the follow-up "force-armed" confirmation, so only an
+        auto-forced arm (card set this flag) confirms; a manual Force Arm tap
+        does not.
+        """
+        self._suppress_arm_prompt_until = time.monotonic() + _ARM_PROMPT_SUPPRESS_WINDOW
+
+    def _arm_prompt_suppressed(self) -> bool:
+        """True while a card-requested prompt suppression is still in effect."""
+        return time.monotonic() < self._suppress_arm_prompt_until
 
     async def async_added_to_hass(self) -> None:
         """Register event listeners when added to HA."""
@@ -1072,8 +1100,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         force_arming_remote_id: str | None = None,
         suid: str | None = None,
         bypassed_exceptions: list[dict[str, Any]] | None = None,
+        notify_forced: bool = False,
     ) -> None:
-        """Set the arm state using the command resolver."""
+        """Set the arm state using the command resolver.
+
+        ``notify_forced`` (set only by async_force_arm for an auto-forced arm)
+        requests the "force-armed" confirmation notification on success — the
+        counterpart to the arm-exception prompt that auto-force suppressed.
+        """
         if self._operation_in_progress:
             _LOGGER.debug(
                 "Arm ignored for %s: an operation is already in progress",
@@ -1125,6 +1159,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 context=user_context,
                 exceptions=forced_excs,
             )
+            # Confirm a successful auto-forced arm — this is the notification
+            # that replaces the suppressed prompt. Gated by the same
+            # force-arm-notifications toggle, and by notify_forced so only the
+            # auto path confirms (a manual Force Arm tap does not).
+            if armed_with_exceptions and notify_forced and self._notifications_enabled:
+                self._notify_force_armed(bypassed_exceptions or [])
+            elif not armed_with_exceptions:
+                # A plain arm succeeded with no exception to force past — any
+                # pending auto-force suppression is spent, so drop it before it
+                # can swallow a later prompt.
+                self._suppress_arm_prompt_until = 0.0
         except OperationTimeoutError as err:
             assert target is not None  # set before the transition that raised
             await self._handle_operation_timeout(err, verb="arm", target=target)
@@ -1313,6 +1358,69 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
+        # The suppress window is spent once the context resolves (force_arm,
+        # cancel, sibling dismissal, expiry) — clear it so it can't swallow a
+        # later, unrelated prompt.
+        self._suppress_arm_prompt_until = 0.0
+
+    def _notify_force_armed(self, bypassed: list[dict[str, Any]]) -> None:
+        """Schedule the "force-armed" confirmation (sync-callable)."""
+        self.hass.async_create_task(self._async_notify_force_armed(bypassed))
+
+    async def _async_notify_force_armed(self, bypassed: list[dict[str, Any]]) -> None:
+        """Send the persistent + mobile "force-armed" confirmation.
+
+        The counterpart to the arm-exception prompt: an auto-forced arm
+        suppresses the prompt and, on success, sends this instead so the user
+        learns their alarm armed past the listed open sensors.
+        """
+        zones = [e.get("alias", "unknown") for e in bypassed]
+        if zones:
+            sensor_list = "\n".join(f"- {z}" for z in zones)
+            short_details = ", ".join(zones)
+        else:
+            sensor_list = "- (unknown sensor)"
+            short_details = "open sensor"
+
+        entry = get_notification_strings(self.hass, "armed_with_exceptions")
+        title = entry.get("title", "")
+        persistent_message = entry.get("message", "").replace(
+            "{sensor_list}", sensor_list
+        )
+        mobile_message = entry.get("mobile_message", "").replace(
+            "{sensor_list}", short_details
+        )
+
+        await self.hass.services.async_call(
+            domain="persistent_notification",
+            service="create",
+            service_data={
+                "title": title,
+                "message": persistent_message,
+                "notification_id": self._force_armed_notification_id,
+            },
+        )
+
+        notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
+        if notify_group:
+            await self.hass.services.async_call(
+                domain="notify",
+                service=notify_group,
+                service_data={
+                    "title": title,
+                    "message": mobile_message,
+                    "data": {"tag": self._force_armed_notification_id},
+                },
+            )
+
+    @property
+    def _force_armed_notification_id(self) -> str:
+        """Per-installation id for the force-armed confirmation.
+
+        Distinct from the arm-exception prompt id, and fixed so a later
+        force-arm replaces this card rather than stacking a new one.
+        """
+        return f"{DOMAIN}.force_armed_{self.installation.number}"
 
     def _notify_force_arm_expired(self) -> None:
         """Update the persistent notification to indicate force-arm expired."""
@@ -1475,6 +1583,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
         """Send notifications about arming exceptions from event data."""
+        # The auto-force card asks us to skip this prompt for an arm it is
+        # about to force through — the follow-up "force-armed" confirmation
+        # tells the user what happened instead. The suppression window still
+        # gates that confirmation (see set_arm_state), so it fires only for
+        # this auto path, never for a manual Force Arm tap.
+        if self._arm_prompt_suppressed():
+            return
         self.hass.async_create_task(self._async_notify_arm_exceptions(event))
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
@@ -1656,12 +1771,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # set_arm_state's success path uses these to populate the injected
         # `armed_with_exceptions` event with the bypassed-zone list.
         bypassed = list(self._force_context.get("exceptions", []))
+        # An auto-force (card set the suppress flag) took the prompt's place;
+        # capture it before _clear_force_context resets the window so the
+        # success path can send the "force-armed" confirmation instead, and so
+        # we skip dismissing a prompt that was never shown.
+        auto_forced = self._arm_prompt_suppressed()
         _LOGGER.info(
             "Force-arming: overriding previous exceptions %s",
             [e.get("alias") for e in bypassed],
         )
         self._clear_force_context()
-        if self._notifications_enabled:
+        if self._notifications_enabled and not auto_forced:
             self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(
@@ -1669,6 +1789,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             force_arming_remote_id=ref_id,
             suid=suid,
             bypassed_exceptions=bypassed,
+            notify_forced=auto_forced,
         )
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:

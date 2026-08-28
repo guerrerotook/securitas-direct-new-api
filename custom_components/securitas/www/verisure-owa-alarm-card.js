@@ -129,6 +129,17 @@ class VerisureOwaAlarmCard extends HTMLElement {
     return this._autoForceArm && st?.attributes?.auto_force_arm_enabled === true;
   }
 
+  // When this dispatch will auto-force, ask the backend to skip the transient
+  // "force-arm required?" prompt for the arm we are about to send — the
+  // follow-up "force-armed" confirmation tells the user what happened instead.
+  // Fired before the arm so the backend sees it when the exception lands.
+  _suppressArmPrompt(entity) {
+    if (!this._pendingAutoForce) return;
+    this._hass.callService("verisure_owa", "suppress_arm_exception_prompt", {
+      entity_id: entity,
+    });
+  }
+
   // Drop the auto-force intent if the arm never reaches the panel — the
   // service call rejects (invalid PIN raises ServiceValidationError, a network
   // error rejects) before any state transition, so nothing else would clear it
@@ -529,6 +540,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
         // resulting forceable exception is handled without the user.
         this._pendingAutoForce = this._autoForceActive();
         this._autoForceArming = false;
+        this._suppressArmPrompt(entity);
         this._clearAutoForceOnReject(
           this._hass.callService("alarm_control_panel", armDef.service, { entity_id: entity }),
         );
@@ -543,6 +555,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     if (isArm) {
       this._pendingAutoForce = this._autoForceActive();
       this._autoForceArming = false;
+      this._suppressArmPrompt(entity);
     }
     const result = this._hass.callService("alarm_control_panel", this._pendingAction.service, {
       entity_id: entity,

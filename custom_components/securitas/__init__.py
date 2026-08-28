@@ -695,6 +695,21 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             "target": _entity_target("alarm_control_panel"),
         },
     ),
+    (
+        "suppress_arm_exception_prompt",
+        SupportsResponse.NONE,
+        {
+            "name": "Suppress arm-exception prompt",
+            "description": (
+                "Suppress the next 'force-arm required' prompt for this panel "
+                "and send a 'force-armed' confirmation instead. Fired by the "
+                "alarm card's auto-force-arm option just before it arms; not "
+                "intended for manual use."
+            ),
+            "fields": {},
+            "target": _entity_target("alarm_control_panel"),
+        },
+    ),
 )
 
 
