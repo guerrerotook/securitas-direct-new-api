@@ -1,9 +1,6 @@
-"""Tests for generate_uuid and generate_device_id utility functions."""
+"""Tests for the generate_uuid utility function."""
 
-from custom_components.securitas.verisure_owa_api.client import (
-    generate_device_id,
-    generate_uuid,
-)
+from custom_components.securitas.verisure_owa_api.client import generate_uuid
 
 # ── generate_uuid tests ──────────────────────────────────────────────────────
 
@@ -25,27 +22,4 @@ class TestGenerateUuid:
         """Two calls return different UUIDs."""
         a = generate_uuid()
         b = generate_uuid()
-        assert a != b
-
-
-# ── generate_device_id tests ────────────────────────────────────────────────
-
-
-class TestGenerateDeviceId:
-    """Tests for the generate_device_id module-level function."""
-
-    def test_contains_apa91b_marker(self):
-        """Device ID contains the ':APA91b' marker."""
-        result = generate_device_id()
-        assert ":APA91b" in result
-
-    def test_returns_expected_length(self):
-        """Device ID is 163 chars: 22 (token_urlsafe(16)) + 7 (':APA91b') + 134."""
-        result = generate_device_id()
-        assert len(result) == 22 + 7 + 134
-
-    def test_two_calls_return_different_values(self):
-        """Two calls return different device IDs."""
-        a = generate_device_id()
-        b = generate_device_id()
         assert a != b

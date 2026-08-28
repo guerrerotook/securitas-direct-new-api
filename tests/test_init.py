@@ -112,6 +112,19 @@ class TestAddDeviceInformation:
         assert isinstance(result[CONF_DEVICE_ID], str)
         assert len(result[CONF_DEVICE_ID]) > 0
 
+    def test_generated_device_id_uses_16_char_uuid_form(self):
+        """Generated device_id uses the 16-char uuid form, not the legacy FCM form.
+
+        The API distinguishes idDevice from uuid, but the FCM-token idDevice
+        was an accidental orphan (ed4a1e6): every UI install has minted a
+        16-char idDevice since Jan 2024 and Verisure accepts it. Both mint
+        paths now converge on generate_uuid().
+        """
+        config = OrderedDict({CONF_COUNTRY: "ES"})
+        result = add_device_information(config)
+        assert len(result[CONF_DEVICE_ID]) == 16
+        assert "-" not in result[CONF_DEVICE_ID]
+
     def test_generates_unique_id_when_missing(self):
         """Should generate a unique_id when not present in config."""
         config = OrderedDict({CONF_COUNTRY: "ES"})
