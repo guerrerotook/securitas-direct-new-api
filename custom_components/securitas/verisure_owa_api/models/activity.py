@@ -77,6 +77,10 @@ class ActivityCategory(StrEnum):
     # A Verisure-app "routine" fired — a user-scheduled automation that can
     # arm/disarm the alarm on a schedule.
     ROUTINE_EXECUTED = "routine_executed"
+    # An RFID tag/badge or remote control was activated (enabled) from the
+    # Verisure app. Administrative device-management event, not an alarm-state
+    # change — users keep unused tags deactivated and enable them on demand.
+    TAG_OR_REMOTE_ACTIVATED = "tag_or_remote_activated"
     UNKNOWN = "unknown"
 
 
@@ -158,6 +162,10 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # automation that can arm/disarm the alarm. Seen as "Routine exécutée".
     # GitHub #513.
     70: ActivityCategory.ROUTINE_EXECUTED,
+    # An RFID tag/badge or remote control was activated (enabled) from the app.
+    # Seen on a French panel as "Activation du badge ou de la télécommande",
+    # with the tag's colour name in `device`. GitHub #579.
+    41: ActivityCategory.TAG_OR_REMOTE_ACTIVATED,
 }
 
 

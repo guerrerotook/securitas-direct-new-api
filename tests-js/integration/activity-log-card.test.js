@@ -551,6 +551,7 @@ describe("verisure-owa-activity-log-card extra branches", () => {
     ["door_opened", "mdi:door-open", "Door opened"],
     ["door_closed", "mdi:door-closed", "Door closed"],
     ["routine_executed", "mdi:robot", "Routine executed"],
+    ["tag_or_remote_activated", "mdi:key-wireless", "Tag or remote activated"],
   ])(
     "renders the %s category with its own icon, label, and no unknown prompt",
     (category, icon, label) => {
