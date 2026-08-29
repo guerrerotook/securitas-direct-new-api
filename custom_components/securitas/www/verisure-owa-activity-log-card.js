@@ -42,6 +42,7 @@ export const TRANSLATIONS = {
       door_opened: "Door opened",
       door_closed: "Door closed",
       routine_executed: "Routine executed",
+      tag_or_remote_activated: "Tag or remote activated",
       unknown: "Unknown event",
     },
     exception_status: {
@@ -85,6 +86,7 @@ export const TRANSLATIONS = {
       door_opened: "Puerta abierta",
       door_closed: "Puerta cerrada",
       routine_executed: "Rutina ejecutada",
+      tag_or_remote_activated: "Tag o mando activado",
       unknown: "Evento desconocido",
     },
     exception_status: {
@@ -128,6 +130,7 @@ export const TRANSLATIONS = {
       door_opened: "Porta aperta",
       door_closed: "Porta chiusa",
       routine_executed: "Routine eseguita",
+      tag_or_remote_activated: "Tag o telecomando attivato",
       unknown: "Evento sconosciuto",
     },
     exception_status: {
@@ -171,6 +174,7 @@ export const TRANSLATIONS = {
       door_opened: "Porte ouverte",
       door_closed: "Porte fermée",
       routine_executed: "Routine exécutée",
+      tag_or_remote_activated: "Badge ou télécommande activé",
       unknown: "Événement inconnu",
     },
     exception_status: {
@@ -214,6 +218,7 @@ export const TRANSLATIONS = {
       door_opened: "Porta aberta",
       door_closed: "Porta fechada",
       routine_executed: "Rotina executada",
+      tag_or_remote_activated: "Tag ou comando ativado",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -257,6 +262,7 @@ export const TRANSLATIONS = {
       door_opened: "Porta aberta",
       door_closed: "Porta fechada",
       routine_executed: "Rotina executada",
+      tag_or_remote_activated: "Tag ou controle ativado",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -300,6 +306,7 @@ export const TRANSLATIONS = {
       door_opened: "Porta oberta",
       door_closed: "Porta tancada",
       routine_executed: "Rutina executada",
+      tag_or_remote_activated: "Tag o comandament activat",
       unknown: "Esdeveniment desconegut",
     },
     exception_status: {
@@ -348,6 +355,7 @@ const CATEGORY_ICONS = {
   door_opened: "mdi:door-open",
   door_closed: "mdi:door-closed",
   routine_executed: "mdi:robot",
+  tag_or_remote_activated: "mdi:key-wireless",
   unknown: "mdi:help-circle",
 };
 
@@ -372,6 +380,8 @@ const CATEGORY_COLORS = {
   door_closed: "var(--success-color, #43a047)",
   // Routine fired — informational, neutral like status_check.
   routine_executed: "var(--secondary-text-color)",
+  // Tag/remote enabled from the app — administrative, neutral.
+  tag_or_remote_activated: "var(--secondary-text-color)",
   unknown: "var(--secondary-text-color)",
 };
 

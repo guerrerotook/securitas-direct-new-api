@@ -1154,6 +1154,15 @@ class TestActivityEventCategory:
         arm signals in the 70x series (701 armed / 700 disarmed). GitHub #555."""
         assert self._ev(702).category == ActivityCategory.ARMED
 
+    def test_tag_or_remote_activated(self):
+        """41 fires when an RFID tag/badge or remote control is activated
+        (enabled) from the Verisure app.
+
+        Seen on a French panel as "Activation du badge ou de la télécommande",
+        with the tag's colour name in `device`. An administrative event, not
+        an alarm-state change. GitHub #579."""
+        assert self._ev(41).category == ActivityCategory.TAG_OR_REMOTE_ACTIVATED
+
     def test_unknown_codes(self):
         """Codes we haven't seen fall through to UNKNOWN — future-proofing."""
         assert self._ev(99999).category == ActivityCategory.UNKNOWN
