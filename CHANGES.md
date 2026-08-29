@@ -4,7 +4,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.8.0
 
-A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnostics to help pin down a refresh-login crash that a few accounts still hit on every restart after the v5.7.0 fix — plus a fix for cleared alarm-state mappings reappearing on their own.
+A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnostics to help pin down a refresh-login crash that a few accounts still hit on every restart after the v5.7.0 fix — plus fixes for cleared alarm-state mappings reappearing on their own and a badge or remote-control activation that showed as an unknown event in the activity log.
 
 ### Added
 
@@ -15,6 +15,8 @@ A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnost
 ### Fixed
 
 **A cleared alarm-state mapping came back on its own ([#575](https://github.com/guerrerotook/securitas-direct-new-api/pull/575)).**  Clearing one of the alarm-state mappings in the integration's options — setting a button to *not used* — didn't stick: reopen the options dialog and the field had reverted to its default, and saving again silently restored it.  It was most visible on perimeter-capable installations, where a cleared *custom* mapping reappeared as *perimeter only* every time.  The cleared state (recorded internally as an explicit empty value) is now honoured on redisplay, so cleared mappings stay cleared.
+
+**A badge or remote-control activation showed as "Unknown event" in the activity log ([#579](https://github.com/guerrerotook/securitas-direct-new-api/issues/579)).**  When you activate an RFID tag or remote control from the Verisure app — turning on one you normally keep deactivated — the panel emits event code `41`, which the integration did not recognise, so the activity log listed it as an *Unknown event*.  Code `41` is now catalogued under its own **tag or remote activated** category, so the entry appears with its own icon, colour and label — localised in all seven languages — instead of an unknown row.  Thanks to [@philippemezzadri](https://github.com/philippemezzadri) for reporting it with the event details.
 
 ## v5.7.0
 
