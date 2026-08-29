@@ -14,7 +14,7 @@
  *   name: Front Door   # optional — overrides the device name
  */
 
-import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import { escHtml, formatTranslation } from "./verisure-owa-card-utils.js?v=5.8.0-beta.3";
 
 // ── Translations ──────────────────────────────────────────────────────────────
 
