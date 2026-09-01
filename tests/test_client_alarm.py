@@ -328,6 +328,75 @@ class TestArm:
         assert len(exc_info.value.exceptions) == 1
         assert exc_info.value.exceptions[0]["alias"] == "Kitchen Window"
 
+    async def test_arm_zone_open_arming_exception_error(self, client, transport):
+        """ZONE error with allowForcing raises ArmingExceptionError (FR panels).
+
+        French SDVFAST panels report open-zone rejections as ``type: "ZONE"``
+        (not ``NON_BLOCKING``) while still setting ``allowForcing: True``. This
+        must still raise ArmingExceptionError so the force-arm flow triggers.
+        See issue #583.
+        """
+        transport.execute.side_effect = [
+            # 1. submit
+            arm_submit_response("ref-arm-zone-001"),
+            # 2. poll: returns ERROR with ZONE type
+            arm_status_response(
+                res="ERROR",
+                error={
+                    "code": "ERR_ZONE_OPEN",
+                    "type": "ZONE",
+                    "allowForcing": True,
+                    "exceptionsNumber": 1,
+                    "referenceId": "exc-ref-zone",
+                    "suid": "suid-zone",
+                },
+            ),
+            # 3. _get_exceptions poll: first returns WAIT
+            exceptions_response(res="WAIT"),
+            # 4. _get_exceptions poll: returns OK with exceptions
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {
+                        "status": "OPEN",
+                        "deviceType": "DOOR",
+                        "alias": "Main door",
+                    }
+                ],
+            ),
+        ]
+
+        inst = _make_installation()
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(inst, "ARM1")
+
+        assert exc_info.value.reference_id == "exc-ref-zone"
+        assert exc_info.value.suid == "suid-zone"
+        assert len(exc_info.value.exceptions) == 1
+        assert exc_info.value.exceptions[0]["alias"] == "Main door"
+
+    async def test_arm_zone_not_forceable_blocking_error(self, client, transport):
+        """ZONE error without allowForcing is a genuine blocking failure.
+
+        An open zone that cannot be force-armed must still raise
+        VerisureOwaError rather than being silently swallowed.
+        """
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-zone-002"),
+            arm_status_response(
+                res="ERROR",
+                error={
+                    "code": "ERR_ZONE_OPEN",
+                    "type": "ZONE",
+                    "allowForcing": False,
+                },
+            ),
+        ]
+
+        inst = _make_installation()
+        with pytest.raises(VerisureOwaError, match="Arm command failed"):
+            await client.arm(inst, "ARM1")
+
     async def test_arm_with_force_id(self, client, transport):
         """force_id is passed as forceArmingRemoteId in submit variables."""
         transport.execute.side_effect = [
