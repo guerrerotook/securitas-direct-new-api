@@ -44,6 +44,13 @@ _ERROR_TYPE_LABELS: dict[str, str] = {
 
 _ALARM_MANAGER_PREFIX = "alarm-manager."
 
+# Panel ``error.type`` values that, when paired with ``allowForcing``, represent
+# an arm rejected because of open zones that can still be force-armed. Different
+# countries report this differently: ES panels use ``NON_BLOCKING`` while FR
+# (SDVFAST) panels use ``ZONE``. Both must raise ArmingExceptionError so the
+# force-arm flow triggers. See issue #583.
+_FORCEABLE_ERROR_TYPES: frozenset[str] = frozenset({"NON_BLOCKING", "ZONE"})
+
 # Surfaced when the panel rejects an arm/disarm because the user's
 # state mapping asks for a mode the panel isn't configured to support.
 # Exported so tests can build the same expected message without
@@ -190,7 +197,7 @@ class _AlarmMixin(_ClientBase):
         if raw.get("res") == "ERROR":
             if (
                 error
-                and error.get("type") == "NON_BLOCKING"
+                and error.get("type") in _FORCEABLE_ERROR_TYPES
                 and error.get("allowForcing")
             ):
                 error_ref = error.get("referenceId", "")
