@@ -20,7 +20,7 @@ from tests.conftest import (
 # ---------------------------------------------------------------------------
 
 
-def make_button(entry_id: str = "test-entry-id") -> VerisureRefreshButton:
+def make_button() -> VerisureRefreshButton:
     """Create a VerisureRefreshButton with mocked dependencies."""
     installation = make_installation()
     client = make_securitas_hub_mock()
@@ -30,7 +30,9 @@ def make_button(entry_id: str = "test-entry-id") -> VerisureRefreshButton:
         return_value=["alarm_control_panel.securitas_123"]
     )
     hass.services = AsyncMock()
-    return VerisureRefreshButton(installation, client, hass, entry_id)
+    button = VerisureRefreshButton(installation, client)
+    button.hass = hass
+    return button
 
 
 # ===========================================================================
@@ -74,11 +76,6 @@ class TestVerisureRefreshButtonInit:
         button = make_button()
         assert button.client is not None
         assert hasattr(button.client, "client")
-
-    def test_stores_entry_id(self):
-        """Button stores the entry_id for coordinator lookup."""
-        button = make_button(entry_id="my-entry")
-        assert button._entry_id == "my-entry"
 
 
 # ===========================================================================
@@ -209,8 +206,8 @@ class TestAsyncSetupEntry:
         assert buttons[0]._attr_name == "Refresh"
         assert buttons[0]._attr_unique_id == "v4_securitas_direct.333_refresh_button"
 
-    async def test_update_flag_passed_to_async_add_entities(self):
-        """async_add_entities is called with update_before_add=True."""
+    async def test_uses_default_update_flag(self):
+        """Static buttons do not need an update before being added."""
         from custom_components.securitas import VerisureDevice
 
         hass = MagicMock()
@@ -225,8 +222,7 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(hass, entry, async_add_entities)
 
-        # Second positional arg or keyword arg should be True
-        assert async_add_entities.call_args[0][1] is True
+        assert len(async_add_entities.call_args.args) == 1
 
 
 # ===========================================================================

@@ -97,8 +97,14 @@ class VerisureCamera(CoordinatorEntity[CameraCoordinator], Camera):
         )
         if self._mode == "full":
             self._attr_name = "Full Image"
+        config_entry = coordinator.config_entry
         self._attr_device_info = camera_device_info(
-            installation, camera_device, hub.hass
+            installation,
+            camera_device,
+            hub.hass,
+            config_entry_id=(
+                config_entry.entry_id if config_entry is not None else None
+            ),
         )
 
     async def async_camera_image(

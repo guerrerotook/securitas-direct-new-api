@@ -73,6 +73,7 @@ def mock_coordinator():
     """Create a mock CameraCoordinator with sensible defaults."""
     coord = MagicMock(spec=CameraCoordinator)
     coord.data = CameraData(thumbnails={}, full_images={})
+    coord.config_entry = None
     # CoordinatorEntity expects these
     coord.async_request_refresh = AsyncMock()
     coord.async_add_listener = MagicMock(return_value=MagicMock())
@@ -106,6 +107,24 @@ class TestVerisureCamera:
 
         cam = VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
         assert cam.unique_id == "v4_securitas_direct.2654190_camera_QR10"
+
+    def test_device_info_uses_coordinator_config_entry(
+        self, mock_coordinator, mock_hub, installation, camera_device
+    ):
+        from custom_components.securitas.camera import VerisureCamera
+
+        mock_coordinator.config_entry = MagicMock(entry_id="entry-1")
+        with patch(
+            "custom_components.securitas.camera.camera_device_info", return_value={}
+        ) as build_device_info:
+            VerisureCamera(mock_coordinator, mock_hub, installation, camera_device)
+
+        build_device_info.assert_called_once_with(
+            installation,
+            camera_device,
+            mock_hub.hass,
+            config_entry_id="entry-1",
+        )
 
     def test_has_entity_name(
         self, mock_coordinator, mock_hub, installation, camera_device
@@ -519,6 +538,30 @@ class TestVerisureCaptureButton:
             "identifiers"
         ]
         assert info.get("via_device") == (DOMAIN, "v4_securitas_direct.2654190")
+
+    def test_device_info_uses_camera_coordinator_config_entry(
+        self, mock_hub, installation, camera_device
+    ):
+        from custom_components.securitas.button import VerisureCaptureButton
+
+        camera_entity = MagicMock()
+        camera_entity.coordinator.config_entry.entry_id = "entry-1"
+        with patch(
+            "custom_components.securitas.button.camera_device_info", return_value={}
+        ) as build_device_info:
+            VerisureCaptureButton(
+                mock_hub,
+                installation,
+                camera_device,
+                camera_entity=camera_entity,
+            )
+
+        build_device_info.assert_called_once_with(
+            installation,
+            camera_device,
+            mock_hub.hass,
+            config_entry_id="entry-1",
+        )
 
 
 class TestVerisureCameraFull:

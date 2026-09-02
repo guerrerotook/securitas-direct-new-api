@@ -33,23 +33,29 @@ _SUPPORTS_VIA_DEVICE_ID: bool = (
 
 
 def _link_to_installation(
-    info: DeviceInfo, installation: Installation, hass: HomeAssistant | None
+    info: DeviceInfo,
+    installation: Installation,
+    hass: HomeAssistant | None,
+    config_entry_id: str | None,
 ) -> None:
     """Point a child DeviceInfo at its installation parent, version-safely.
 
     On HA >= 2026.8 the deprecated `via_device` identifier tuple is replaced
     by `via_device_id`, resolved from the registry.  When the parent isn't
     registered yet (e.g. first setup, before the installation device exists)
-    or no `hass` is available, we fall back to `via_device` so HA links the
-    child exactly as before — no behaviour change.  On older cores
+    or its config-entry context is unavailable, we fall back to `via_device`
+    so HA links the child exactly as before — no behaviour change. On older cores
     `via_device_id` isn't accepted, so `via_device` is always used.
     """
     parent = (DOMAIN, f"v4_securitas_direct.{installation.number}")
-    if _SUPPORTS_VIA_DEVICE_ID and hass is not None:
-        device = dr.async_get(hass).async_get_device(identifiers={parent})
-        if device is not None:
-            info["via_device_id"] = device.id  # type: ignore[typeddict-unknown-key]
-            return
+    if _SUPPORTS_VIA_DEVICE_ID and hass is not None and config_entry_id is not None:
+        registry = dr.async_get(hass)
+        get_device = getattr(registry, "async_get_device_by_identifier", None)
+        if get_device is not None:
+            device = get_device(parent, config_entry_id)
+            if device is not None:
+                info["via_device_id"] = device.id  # type: ignore[typeddict-unknown-key]
+                return
     info["via_device"] = parent  # type: ignore[typeddict-unknown-key]
 
 
@@ -68,6 +74,8 @@ def camera_device_info(
     installation: Installation,
     camera_device: CameraDevice,
     hass: HomeAssistant | None = None,
+    *,
+    config_entry_id: str | None = None,
 ) -> DeviceInfo:
     """Build DeviceInfo for a per-camera child device."""
     info = DeviceInfo(
@@ -81,7 +89,7 @@ def camera_device_info(
         manufacturer="Verisure",
         model="Camera",
     )
-    _link_to_installation(info, installation, hass)
+    _link_to_installation(info, installation, hass, config_entry_id)
     return info
 
 
@@ -91,6 +99,8 @@ def lock_device_info(
     name: str | None,
     lock_config: SmartLock | None,
     hass: HomeAssistant | None = None,
+    *,
+    config_entry_id: str | None = None,
 ) -> DeviceInfo:
     """Build DeviceInfo for a per-lock child device linked to the installation."""
     info = DeviceInfo(
@@ -106,7 +116,7 @@ def lock_device_info(
             else None
         ),
     )
-    _link_to_installation(info, installation, hass)
+    _link_to_installation(info, installation, hass, config_entry_id)
     return info
 
 

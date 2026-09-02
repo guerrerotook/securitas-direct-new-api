@@ -2609,6 +2609,47 @@ class TestStaticPathAliases:
 
 
 # ===========================================================================
+# TestServiceTargetCompatibility
+# ===========================================================================
+
+
+class TestServiceTargetCompatibility:
+    """Service target extraction supports both ends of the HA version range."""
+
+    async def test_legacy_helper_receives_hass(self):
+        import custom_components.securitas as integration
+
+        hass = MagicMock()
+        call = MagicMock()
+        call.hass = hass
+        extract = AsyncMock(return_value={"alarm_control_panel.home"})
+
+        with (
+            patch.object(integration, "_EXTRACT_ENTITY_IDS_REQUIRES_HASS", True),
+            patch.object(integration, "async_extract_entity_ids", extract),
+        ):
+            result = await integration._async_extract_service_entity_ids(call)
+
+        assert result == {"alarm_control_panel.home"}
+        extract.assert_awaited_once_with(hass, call)
+
+    async def test_current_helper_receives_only_service_call(self):
+        import custom_components.securitas as integration
+
+        call = MagicMock()
+        extract = AsyncMock(return_value={"alarm_control_panel.home"})
+
+        with (
+            patch.object(integration, "_EXTRACT_ENTITY_IDS_REQUIRES_HASS", False),
+            patch.object(integration, "async_extract_entity_ids", extract),
+        ):
+            result = await integration._async_extract_service_entity_ids(call)
+
+        assert result == {"alarm_control_panel.home"}
+        extract.assert_awaited_once_with(call)
+
+
+# ===========================================================================
 # TestServiceDescriptionTargets
 # ===========================================================================
 

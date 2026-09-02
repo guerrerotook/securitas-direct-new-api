@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections import OrderedDict
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import voluptuous as vol
@@ -142,6 +143,19 @@ from .verisure_owa_api import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# HA 2026.10 removes the old leading ``hass`` argument. Keep the integration's
+# HA 2025.2 minimum working while calling only the modern form on current Core.
+_EXTRACT_ENTITY_IDS_REQUIRES_HASS = (
+    next(iter(inspect.signature(async_extract_entity_ids).parameters)) == "hass"
+)
+
+
+async def _async_extract_service_entity_ids(call: ServiceCall) -> set[str]:
+    """Extract service targets across the supported Home Assistant versions."""
+    args = (call.hass, call) if _EXTRACT_ENTITY_IDS_REQUIRES_HASS else (call,)
+    return await cast(Any, async_extract_entity_ids)(*args)
+
 
 # Inert: this integration is config-entry only and ``async_setup`` ignores the
 # YAML config entirely. The schema exists so a legacy ``securitas:`` block from
@@ -748,7 +762,7 @@ def _register_verisure_owa_entity_service(
                 f"Platform '{component_domain}' is not loaded; cannot "
                 f"dispatch verisure_owa.{service_name}"
             )
-        entity_ids = await async_extract_entity_ids(call)
+        entity_ids = await _async_extract_service_entity_ids(call)
         method_kwargs = {k: v for k, v in call.data.items() if k != "entity_id"}
         responses: dict[str, Any] = {}
         for eid in entity_ids:
@@ -902,6 +916,7 @@ def register_service_aliases(hass: HomeAssistant) -> None:
                 _name,
                 dict(call.data),
                 blocking=True,
+                context=call.context,
                 return_response=_supports_response == SupportsResponse.ONLY,
             )
 

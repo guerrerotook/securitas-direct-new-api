@@ -178,6 +178,8 @@ class VerisureLock(  # type: ignore[override]
         self._device: str = installation.address
         self._device_id: str = device_id
         self._lock_config: SmartLock | None = lock_config
+        config_entry = coordinator.config_entry
+        self._entry_id = config_entry.entry_id if config_entry is not None else None
 
         # Name: prefer lock_config.location if non-empty, else fallback
         name = (
@@ -193,7 +195,12 @@ class VerisureLock(  # type: ignore[override]
         # Override device_info: each lock gets its own device, linked to the
         # installation device (via_device_id on HA >= 2026.8, else via_device).
         self._attr_device_info = lock_device_info(
-            installation, device_id, name, lock_config, client.hass
+            installation,
+            device_id,
+            name,
+            lock_config,
+            client.hass,
+            config_entry_id=self._entry_id,
         )
 
         # Reuse the alarm's local PIN to gate lock/unlock/open — opt-in via
@@ -214,7 +221,6 @@ class VerisureLock(  # type: ignore[override]
         self._verify_delay: float = LOCK_VERIFY_DELAY
 
         # Auto-lock state — populated when added to hass.
-        self._entry_id: str | None = None  # set externally before async_added_to_hass
         self._alarm_coordinator = None  # set by async_added_to_hass
         self._combined_alarm_panel = None  # set by async_added_to_hass
         self._alarm_listener_unsub: Callable[[], None] | None = None
@@ -245,6 +251,7 @@ class VerisureLock(  # type: ignore[override]
             self._attr_name,
             lock_config,
             self._client.hass,
+            config_entry_id=self._entry_id,
         )
         self.async_write_ha_state()
 

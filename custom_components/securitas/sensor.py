@@ -56,7 +56,7 @@ async def async_setup_entry(
         # async_manual_refresh / async_fetch_image methods.
 
     if sensors:
-        async_add_entities(sensors, False)
+        async_add_entities(sensors)
 
 
 AIR_QUALITY_LABELS: dict[str, str] = {

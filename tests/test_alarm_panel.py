@@ -616,9 +616,9 @@ def make_alarm(
         alarm = panel_cls(
             installation=installation,
             client=client,
-            hass=hass,
             coordinator=coordinator,
         )
+        alarm.hass = hass
     # Apply the initial status to set default state (e.g. DISARMED)
     alarm.update_status_alarm(initial_status)
     # Keep the patches alive on the instance for later calls in tests
@@ -5836,7 +5836,8 @@ def _make_interior_panel(
             InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        panel = InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel.hass = hass
     panel.async_schedule_update_ha_state = MagicMock()
     panel.async_write_ha_state = MagicMock()
     return panel
@@ -5889,7 +5890,9 @@ def _make_perimeter_panel(
             PerimeterVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        return PerimeterVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = PerimeterVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel.hass = hass
+        return panel
 
 
 class TestSubPanelDisarmFromUnknownState:
@@ -6148,9 +6151,9 @@ class TestInteriorSubPanel:
                 InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
             ),
         ):
-            return InteriorVerisureOwaAlarmPanel(
-                installation, client, hass, coordinator
-            )
+            panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+            panel.hass = hass
+            return panel
 
     def test_hydrates_unsupported_from_legacy_flat_list(self):
         """Resolver starts pre-loaded with the persisted unsupported list so
@@ -6223,9 +6226,8 @@ class TestInteriorSubPanel:
                 InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
             ),
         ):
-            panel = InteriorVerisureOwaAlarmPanel(
-                installation, client, hass, coordinator
-            )
+            panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+            panel.hass = hass
         assert panel._resolver.unsupported == frozenset()
 
     async def test_subpanel_raises_subpanel_error_when_command_unsupported(self):
@@ -6521,7 +6523,9 @@ def _make_annex_panel(
         ),
         patch.object(AnnexVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()),
     ):
-        return AnnexVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = AnnexVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel.hass = hass
+        return panel
 
 
 class TestAnnexSubPanel:
@@ -7202,9 +7206,10 @@ async def test_verisure_owa_force_arm_alias_forwards_to_securitas(hass):
     from custom_components.securitas import register_service_aliases
 
     canonical_called = []
+    context = MagicMock()
 
     async def fake_handler(call):
-        canonical_called.append(dict(call.data))
+        canonical_called.append((dict(call.data), call.context))
 
     hass.services.async_register("securitas", "force_arm", fake_handler)
     register_service_aliases(hass)
@@ -7213,8 +7218,9 @@ async def test_verisure_owa_force_arm_alias_forwards_to_securitas(hass):
         "force_arm",
         {"entity_id": "alarm_control_panel.x"},
         blocking=True,
+        context=context,
     )
-    assert canonical_called == [{"entity_id": "alarm_control_panel.x"}]
+    assert canonical_called == [({"entity_id": "alarm_control_panel.x"}, context)]
 
 
 async def test_arming_exception_fires_both_legacy_and_new_events(hass):

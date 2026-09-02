@@ -105,6 +105,7 @@ def _make_lock_coordinator(data: LockData | None = None):
     """Create a mock LockCoordinator for lock tests."""
     coordinator = MagicMock()
     coordinator.data = data
+    coordinator.config_entry = None
     coordinator.async_request_refresh = AsyncMock()
     return coordinator
 
@@ -118,6 +119,7 @@ def make_lock(
     code_required: bool = False,
     config: dict | None = None,
     registry_hass=None,
+    config_entry_id: str | None = None,
 ):
     """Create a VerisureLock with mocked dependencies.
 
@@ -138,6 +140,7 @@ def make_lock(
             device-info construction can resolve ``via_device_id`` from the
             registry (HA >= 2026.8). Defaults to ``None`` — the deterministic
             ``via_device`` fallback used by the schema tests.
+        config_entry_id: Config entry that owns the device in the registry.
     """
     installation = make_installation()
     code_hash, code_is_numeric = encode_pin(code)
@@ -162,6 +165,9 @@ def make_lock(
     hass.services = MagicMock()
 
     coordinator = _make_lock_coordinator()
+    coordinator.config_entry = (
+        MagicMock(entry_id=config_entry_id) if config_entry_id is not None else None
+    )
 
     lock_entity = VerisureLock(
         coordinator=coordinator,
@@ -989,7 +995,23 @@ class TestVerisureLockV5Schema:
             identifiers={(DOMAIN, "v4_securitas_direct.123456")},
             manufacturer="Verisure",
         )
-        lk = make_lock(device_id="01", registry_hass=hass)
+        registry = dr.async_get(hass)
+        monkeypatch.setattr(
+            type(registry),
+            "async_get_device_by_identifier",
+            lambda _registry, identifier, owner_entry_id: (
+                parent
+                if identifier == (DOMAIN, "v4_securitas_direct.123456")
+                and owner_entry_id == entry.entry_id
+                else None
+            ),
+            raising=False,
+        )
+        lk = make_lock(
+            device_id="01",
+            registry_hass=hass,
+            config_entry_id=entry.entry_id,
+        )
         # via_device_id isn't a defined DeviceInfo key before HA 2026.8; read
         # the DeviceInfo as a plain dict so the assertion type-checks on any core.
         info = dict(lk._attr_device_info or {})
@@ -1010,7 +1032,23 @@ class TestVerisureLockV5Schema:
             identifiers={(DOMAIN, "v4_securitas_direct.123456")},
             manufacturer="Verisure",
         )
-        lk = make_lock(device_id="02", registry_hass=hass)
+        registry = dr.async_get(hass)
+        monkeypatch.setattr(
+            type(registry),
+            "async_get_device_by_identifier",
+            lambda _registry, identifier, owner_entry_id: (
+                parent
+                if identifier == (DOMAIN, "v4_securitas_direct.123456")
+                and owner_entry_id == entry.entry_id
+                else None
+            ),
+            raising=False,
+        )
+        lk = make_lock(
+            device_id="02",
+            registry_hass=hass,
+            config_entry_id=entry.entry_id,
+        )
         lk.update_lock_config(
             SmartLock(location="Front", family="DANALOCK", serial_number="sn")
         )

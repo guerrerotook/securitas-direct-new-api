@@ -33,15 +33,16 @@ def _make_camera_device():
     )
 
 
-def _register_installation_device(hass) -> dr.DeviceEntry:
+def _register_installation_device(hass) -> tuple[dr.DeviceEntry, str]:
     """Register the installation parent device in the real registry."""
     entry = MockConfigEntry(domain=DOMAIN, data={})
     entry.add_to_hass(hass)
-    return dr.async_get(hass).async_get_or_create(
+    device = dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, "v4_securitas_direct.100001")},
         manufacturer="Verisure",
     )
+    return device, entry.entry_id
 
 
 def test_securitas_device_info_uses_v5_schema():
@@ -73,10 +74,29 @@ def test_camera_device_info_uses_via_device_when_id_unsupported(monkeypatch):
 async def test_camera_device_info_uses_via_device_id_when_supported(hass, monkeypatch):
     """On HA >= 2026.8, link the child by the parent's registry id."""
     monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
-    parent = _register_installation_device(hass)
+    parent, entry_id = _register_installation_device(hass)
+    registry = dr.async_get(hass)
+    monkeypatch.setattr(
+        type(registry),
+        "async_get_device_by_identifier",
+        lambda _registry, identifier, owner_entry_id: (
+            parent
+            if identifier == (DOMAIN, "v4_securitas_direct.100001")
+            and owner_entry_id == entry_id
+            else None
+        ),
+        raising=False,
+    )
     # via_device_id isn't a defined DeviceInfo key before HA 2026.8; read the
     # DeviceInfo as a plain dict so the assertion type-checks on any core.
-    info = dict(camera_device_info(_make_installation(), _make_camera_device(), hass))
+    info = dict(
+        camera_device_info(
+            _make_installation(),
+            _make_camera_device(),
+            hass,
+            config_entry_id=entry_id,
+        )
+    )
     assert info["via_device_id"] == parent.id
     assert "via_device" not in info
 
@@ -85,7 +105,19 @@ async def test_camera_device_info_falls_back_when_parent_missing(hass, monkeypat
     """via_device_id supported but the parent isn't registered yet → keep
     via_device so HA links it exactly as before (no first-setup regression)."""
     monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
-    info = camera_device_info(_make_installation(), _make_camera_device(), hass)
+    registry = dr.async_get(hass)
+    monkeypatch.setattr(
+        type(registry),
+        "async_get_device_by_identifier",
+        lambda _registry, _identifier, _entry_id: None,
+        raising=False,
+    )
+    info = camera_device_info(
+        _make_installation(),
+        _make_camera_device(),
+        hass,
+        config_entry_id="missing-entry",
+    )
     assert info["via_device"] == (DOMAIN, "v4_securitas_direct.100001")
     assert "via_device_id" not in info
 

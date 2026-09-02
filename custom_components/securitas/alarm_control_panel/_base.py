@@ -22,7 +22,7 @@ from homeassistant.components.alarm_control_panel import (
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.const import CONF_SCAN_INTERVAL
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import Event, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -172,7 +172,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self,
         installation: Installation,
         client: VerisureHub,
-        hass: HomeAssistant,
         coordinator: AlarmCoordinator,
     ) -> None:
         """Initialize the Verisure alarm panel."""
@@ -194,7 +193,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
             self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
         )
-        self.hass: HomeAssistant = hass
         self._has_peri = coordinator.has_peri
         self._has_annex = coordinator.has_annex
         self._last_proto_code: str | None = None
