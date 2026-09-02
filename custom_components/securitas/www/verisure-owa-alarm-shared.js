@@ -59,8 +59,6 @@ export const TRANSLATIONS = {
     editor_perform_action: "Action (e.g. light.turn_on)",
     editor_perform_data: "Data (JSON, optional)",
     editor_arm_state: "Arm state",
-    editor_alarm_behavior: "Alarm behavior",
-    editor_hold_to_arm_or_disarm: "Hold to arm or disarm",
     editor_tap_action: "Tap action",
     editor_hold_action: "Hold action",
     editor_double_tap_action: "Double-tap action",
@@ -104,8 +102,6 @@ export const TRANSLATIONS = {
     editor_perform_action: "Acción (p. ej. light.turn_on)",
     editor_perform_data: "Datos (JSON, opcional)",
     editor_arm_state: "Modo de armado",
-    editor_alarm_behavior: "Comportamiento de la alarma",
-    editor_hold_to_arm_or_disarm: "Mantener pulsado para armar o desarmar",
     editor_tap_action: "Acción al tocar",
     editor_hold_action: "Acción al mantener pulsado",
     editor_double_tap_action: "Acción al tocar dos veces",
@@ -149,8 +145,6 @@ export const TRANSLATIONS = {
     editor_perform_action: "Action (p. ex. light.turn_on)",
     editor_perform_data: "Donn\u00e9es (JSON, facultatif)",
     editor_arm_state: "\u00c9tat d\u2019armement",
-    editor_alarm_behavior: "Comportement de l\u2019alarme",
-    editor_hold_to_arm_or_disarm: "Maintenir pour armer ou d\u00e9sarmer",
     editor_tap_action: "Action sur appui",
     editor_hold_action: "Action sur appui long",
     editor_double_tap_action: "Action sur double appui",
@@ -194,8 +188,6 @@ export const TRANSLATIONS = {
     editor_perform_action: "Azione (es. light.turn_on)",
     editor_perform_data: "Dati (JSON, opzionale)",
     editor_arm_state: "Stato di armamento",
-    editor_alarm_behavior: "Comportamento dell\u2019allarme",
-    editor_hold_to_arm_or_disarm: "Tieni premuto per armare o disarmare",
     editor_tap_action: "Azione al tocco",
     editor_hold_action: "Azione alla pressione prolungata",
     editor_double_tap_action: "Azione al doppio tocco",
@@ -239,8 +231,6 @@ export const TRANSLATIONS = {
     editor_perform_action: "A\u00e7\u00e3o (ex.: light.turn_on)",
     editor_perform_data: "Dados (JSON, opcional)",
     editor_arm_state: "Modo de armar",
-    editor_alarm_behavior: "Comportamento do alarme",
-    editor_hold_to_arm_or_disarm: "Manter premido para armar ou desarmar",
     editor_tap_action: "A\u00e7\u00e3o ao tocar",
     editor_hold_action: "A\u00e7\u00e3o ao manter premido",
     editor_double_tap_action: "A\u00e7\u00e3o ao tocar duas vezes",
@@ -253,6 +243,48 @@ export const TRANSLATIONS = {
 TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
 
 export const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
+
+function notifyActionFailure(hass, srcEl, error) {
+  if (!srcEl) return;
+  const lang = hass?.language || hass?.locale?.language || "en";
+  const message =
+    error instanceof Error && error.message
+      ? _t(lang, "action_failed_detail", { error: error.message })
+      : _t(lang, "action_failed");
+  srcEl.dispatchEvent(
+    new CustomEvent("hass-notification", {
+      detail: { message },
+      bubbles: true,
+      composed: true,
+    }),
+  );
+}
+
+/**
+ * Run a Home Assistant service without leaving rejected service promises
+ * unhandled. The notification event is Home Assistant's established custom-UI
+ * contract and lets the frontend own the actual toast presentation.
+ */
+export function callServiceWithErrorNotification(
+  hass,
+  domain,
+  service,
+  data,
+  target,
+  srcEl,
+) {
+  try {
+    const result =
+      target === undefined
+        ? hass.callService(domain, service, data)
+        : hass.callService(domain, service, data, target);
+    Promise.resolve(result).catch((error) => {
+      notifyActionFailure(hass, srcEl, error);
+    });
+  } catch (error) {
+    notifyActionFailure(hass, srcEl, error);
+  }
+}
 
 // ── Per-state visual config ───────────────────────────────────────────────────
 export const STATE_CFG = {
@@ -506,11 +538,19 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
       break;
     }
 
-    case "perform-action": {
-      const call = action.perform_action || "";
+    case "perform-action":
+    case "call-service": {
+      const call = action.perform_action || action.service || "";
       const dot  = call.indexOf(".");
       if (dot > 0) {
-        hass.callService(call.slice(0, dot), call.slice(dot + 1), action.data || {});
+        callServiceWithErrorNotification(
+          hass,
+          call.slice(0, dot),
+          call.slice(dot + 1),
+          action.data ?? action.service_data ?? {},
+          action.target,
+          srcEl,
+        );
       }
       break;
     }
@@ -530,7 +570,14 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
         if (hasCode && callbacks.startPinEntry) {
           callbacks.startPinEntry(svcAction);
         } else {
-          hass.callService("alarm_control_panel", "alarm_disarm", { entity_id: entityId });
+          callServiceWithErrorNotification(
+            hass,
+            "alarm_control_panel",
+            "alarm_disarm",
+            { entity_id: entityId },
+            undefined,
+            srcEl,
+          );
         }
       } else if (state === "disarmed") {
         // Arm
@@ -541,7 +588,14 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
         if (hasCode && codeArmReq && callbacks.startPinEntry) {
           callbacks.startPinEntry(svcAction);
         } else {
-          hass.callService("alarm_control_panel", armDef.service, { entity_id: entityId });
+          callServiceWithErrorNotification(
+            hass,
+            "alarm_control_panel",
+            armDef.service,
+            { entity_id: entityId },
+            undefined,
+            srcEl,
+          );
         }
       }
       break;

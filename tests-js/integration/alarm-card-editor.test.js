@@ -153,9 +153,35 @@ describe("verisure-owa-alarm-badge-editor", () => {
         }),
         expect.objectContaining({
           name: "tap_action",
-          selector: { ui_action: { default_action: "more-info" } },
+          selector: {
+            ui_action: {
+              default_action: "more-info",
+              actions: ["more-info", "navigate", "perform-action", "none"],
+            },
+          },
+        }),
+        expect.objectContaining({
+          name: "hold_action",
+          selector: {
+            ui_action: {
+              default_action: "none",
+              actions: ["more-info", "navigate", "perform-action", "none"],
+            },
+          },
+        }),
+        expect.objectContaining({
+          name: "double_tap_action",
+          selector: {
+            ui_action: {
+              default_action: "none",
+              actions: ["more-info", "navigate", "perform-action", "none"],
+            },
+          },
         }),
       ]),
+    );
+    expect(schema).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "alarm_behavior" })]),
     );
   });
 
@@ -245,11 +271,13 @@ describe("verisure-owa-alarm-badge-editor", () => {
     );
   });
 
-  it("preserves legacy state options and custom arm_or_disarm actions", () => {
+  it("migrates Badge arm_or_disarm actions to native More Info", () => {
     const editor = mountBadgeEditor({
       colors: { disarmed: "#123456" },
       states: ["arm_home"],
+      tap_action: { action: "arm_or_disarm", arm_state: "arm_home" },
       hold_action: { action: "arm_or_disarm", arm_state: "arm_home" },
+      double_tap_action: { action: "arm_or_disarm", arm_state: "arm_night" },
     });
     let captured = null;
     editor.addEventListener("config-changed", (event) => {
@@ -258,7 +286,10 @@ describe("verisure-owa-alarm-badge-editor", () => {
 
     const form = editor.shadowRoot.getElementById("badge-form");
     expect(form.data).not.toHaveProperty("colors");
-    expect(form.data).not.toHaveProperty("hold_action");
+    expect(form.data).not.toHaveProperty("states");
+    expect(form.data.tap_action).toEqual({ action: "more-info" });
+    expect(form.data.hold_action).toEqual({ action: "more-info" });
+    expect(form.data.double_tap_action).toEqual({ action: "more-info" });
     form.dispatchEvent(
       new CustomEvent("value-changed", {
         detail: {
@@ -273,20 +304,29 @@ describe("verisure-owa-alarm-badge-editor", () => {
     );
 
     expect(captured.colors).toEqual({ disarmed: "#123456" });
-    expect(captured.states).toEqual(["arm_home"]);
-    expect(captured.hold_action).toEqual({
-      action: "arm_or_disarm",
-      arm_state: "arm_home",
-    });
+    expect(captured).not.toHaveProperty("states");
+    expect(captured.tap_action).toEqual({ action: "more-info" });
+    expect(captured.hold_action).toEqual({ action: "more-info" });
+    expect(captured.double_tap_action).toEqual({ action: "more-info" });
   });
 
-  it("represents the Badge hold-to-arm default and can switch to native actions", () => {
+  it("uses only native HA actions and has no implicit hold action", () => {
     const editor = mountBadgeEditor();
     const form = editor.shadowRoot.getElementById("badge-form");
-    expect(form.data.hold_to_arm_or_disarm).toBe(true);
-    expect(form.data.arm_state).toBe("arm_away");
-    expect(flattenSchema(form.schema)).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "hold_action" })]),
+    expect(form.data).not.toHaveProperty("hold_action");
+    expect(form.data).not.toHaveProperty("arm_state");
+    expect(flattenSchema(form.schema)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "hold_action",
+          selector: {
+            ui_action: {
+              default_action: "none",
+              actions: ["more-info", "navigate", "perform-action", "none"],
+            },
+          },
+        }),
+      ]),
     );
 
     let captured = null;
@@ -299,7 +339,11 @@ describe("verisure-owa-alarm-badge-editor", () => {
           value: {
             entity: "alarm_control_panel.x",
             displayed_elements: ["state", "icon"],
-            hold_to_arm_or_disarm: false,
+            hold_action: {
+              action: "perform-action",
+              perform_action: "alarm_control_panel.alarm_arm_home",
+              target: { entity_id: "alarm_control_panel.x" },
+            },
           },
         },
         bubbles: true,
@@ -307,15 +351,11 @@ describe("verisure-owa-alarm-badge-editor", () => {
       }),
     );
 
-    expect(captured.hold_action).toEqual({ action: "none" });
-    expect(flattenSchema(form.schema)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "hold_action",
-          selector: { ui_action: { default_action: "none" } },
-        }),
-      ]),
-    );
+    expect(captured.hold_action).toEqual({
+      action: "perform-action",
+      perform_action: "alarm_control_panel.alarm_arm_home",
+      target: { entity_id: "alarm_control_panel.x" },
+    });
   });
 
   it("provides native labels/helpers and handles an empty form update", () => {

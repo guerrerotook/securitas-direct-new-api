@@ -194,9 +194,9 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 
 ### Badge
 
-A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog; hold and double-tap can be configured to arm/disarm directly — see [Gesture Actions](#gesture-actions) below.
+A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog, where Home Assistant owns the alarm modes and PIN entry. Hold and double-tap can use the supported dashboard actions described under [Gesture Actions](#gesture-actions).
 
-Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; and choose the time format for timestamp content. A small **Alarm behavior** section represents the Badge's default hold-to-arm/disarm action and arm mode.
+Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; choose the time format for timestamp content; and configure tap, hold and double-tap actions.
 
 ### Mushroom Chip
 
@@ -211,17 +211,82 @@ chips:
 
 ### Gesture Actions
 
-All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card has its integration-specific action editor. The Badge uses Home Assistant's native action selectors plus its **Alarm behavior** section; existing advanced `arm_or_disarm` YAML actions remain supported. The chip is YAML-only.
+All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card has its integration-specific action editor. The Badge uses Home Assistant's native action selectors, and the chip is YAML-only. Older Badge YAML containing `arm_or_disarm` still runs for compatibility; opening and saving it in the visual editor migrates that gesture to native More Info.
 
 ![Gesture Actions](./docs/images/card-gestures.png)
 
-| Action     | Badge default | Chip default    | Card default |
-| ---------- | ------------- | --------------- | ------------ |
-| Tap        | Open More Info | Open More Info | _(none)_   |
-| Hold       | Arm / Disarm  | _(none)_        | _(none)_     |
-| Double-tap | _(none)_      | _(none)_        | _(none)_     |
+| Action     | Badge default  | Chip default   | Card default |
+| ---------- | -------------- | -------------- | ------------ |
+| Tap        | Open More Info | Open More Info | _(none)_     |
+| Hold       | _(none)_       | _(none)_       | _(none)_     |
+| Double-tap | _(none)_       | _(none)_       | _(none)_     |
 
-Each action can be:
+The Badge offers the Home Assistant **More Info**, **Navigate**, **Perform action** and **None** actions. It intentionally does not offer **Toggle**: alarm panels do not have `turn_on` / `turn_off` actions and require a specific arm mode. Use **More Info** for the native alarm controls, supported modes and PIN entry.
+
+#### Using the Badge with native alarm controls
+
+No YAML is required for the recommended setup:
+
+1. Add **Verisure OWA Alarm Badge** and select the alarm entity.
+2. Leave **Tap action** at its default, **More Info**.
+3. Tap the Badge and choose an available arm mode, or **Disarm**, in Home Assistant's native dialog.
+4. If an arm attempt is blocked, the same dialog adds the affected sensor names and, when allowed by the panel, **Force Arm**.
+
+This route is recommended when the alarm requires a PIN. Home Assistant selects the supported modes and owns the code prompt; the Badge does not need to duplicate that security UI.
+
+#### Using a fixed direct action
+
+For an explicit shortcut, open **Interactions**, set **Hold action** or **Double tap action** to **Perform action**, choose the alarm action, and select the alarm entity as its target. For example, this configuration holds to arm Away and double-taps to disarm:
+
+```yaml
+type: custom:verisure-owa-alarm-badge
+entity: alarm_control_panel.my_alarm
+tap_action:
+  action: more-info
+hold_action:
+  action: perform-action
+  perform_action: alarm_control_panel.alarm_arm_away
+  target:
+    entity_id: alarm_control_panel.my_alarm
+double_tap_action:
+  action: perform-action
+  perform_action: alarm_control_panel.alarm_disarm
+  target:
+    entity_id: alarm_control_panel.my_alarm
+```
+
+Other fixed arm actions are `alarm_control_panel.alarm_arm_home`, `alarm_control_panel.alarm_arm_night`, `alarm_control_panel.alarm_arm_vacation` and `alarm_control_panel.alarm_arm_custom_bypass`, when advertised by the entity. A direct **Perform action** is fixed; it does not automatically switch between arm and disarm. If a code is required, use More Info instead of storing the code in dashboard YAML.
+
+Older Badge YAML containing the custom `arm_or_disarm` action remains executable for compatibility. Opening and saving that Badge in the visual editor replaces the legacy action with **More Info**.
+
+#### Migrating a Badge from `arm_or_disarm`
+
+The legacy action selected an arm or disarm service from the current alarm state:
+
+```yaml
+type: custom:verisure-owa-alarm-badge
+entity: alarm_control_panel.my_alarm
+hold_action:
+  action: arm_or_disarm
+  arm_state: arm_away
+```
+
+There is no equivalent conditional action in Home Assistant's native dashboard actions. The recommended migration is to let More Info select the appropriate mode and handle PIN entry:
+
+```yaml
+type: custom:verisure-owa-alarm-badge
+entity: alarm_control_panel.my_alarm
+tap_action:
+  action: more-info
+hold_action:
+  action: none
+```
+
+You can perform this migration without editing YAML: open the existing Badge in the visual editor and save it. Any Badge gesture using `arm_or_disarm` is converted to **More Info**. You can then leave that gesture as More Info or change it to None.
+
+If direct shortcuts are still preferred, replace the conditional action with the two explicit `perform-action` gestures shown in [Using a fixed direct action](#using-a-fixed-direct-action). That variant does not open Home Assistant's PIN dialog, so use the More Info migration when the panel requires a code.
+
+The standalone Alarm Card and YAML-only Chip additionally retain their existing integration-specific actions:
 
 | Option   | Description                                                                                         |
 | -------- | --------------------------------------------------------------------------------------------------- |
@@ -229,8 +294,6 @@ Each action can be:
 | Navigate | Navigate to a dashboard path. A path selector appears to choose the destination.                    |
 | Arm      | Arm the alarm to a chosen state (Home, Away, Night, Custom, or Vacation). Only fires when disarmed. |
 | Disarm   | Disarm the alarm. Only fires when armed.                                                            |
-
-Example: set **Hold** to **Disarm** on the badge to disarm with a long press without opening More Info.
 
 #### Chip YAML
 
@@ -253,7 +316,7 @@ chips:
 | None             | `action: none`                                                       |
 | Open More Info   | `action: more-info`                                                  |
 | Navigate         | `action: navigate` + `navigation_path: /path`                       |
-| Arm or Disarm    | `action: arm_or_disarm` (optionally + `arm_state: armed_away` etc.) |
+| Arm or Disarm    | `action: arm_or_disarm` (optionally + `arm_state: arm_away` etc.)   |
 
 ### Tile Card
 

@@ -329,6 +329,87 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(document.body.querySelector("securitas-alarm-card")).toBeNull();
   });
 
+  it("does nothing on hold by default", () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const badge = mountBadge({ hass });
+    const moreInfoCalls = vi.fn();
+    badge.addEventListener("hass-more-info", moreInfoCalls);
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    vi.advanceTimersByTime(501);
+    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    vi.advanceTimersByTime(301);
+
+    expect(moreInfoCalls).not.toHaveBeenCalled();
+    expect(hass.callService).not.toHaveBeenCalled();
+    expect(document.querySelector("#badge-pin-input")).toBeNull();
+  });
+
+  it("passes native Perform action data and target through Home Assistant", () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const badge = mountBadge({
+      hass,
+      config: {
+        hold_action: {
+          action: "perform-action",
+          perform_action: "alarm_control_panel.alarm_arm_home",
+          data: { code: "1234" },
+          target: { entity_id: ENTITY },
+        },
+      },
+    });
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    vi.advanceTimersByTime(501);
+
+    expect(hass.callService).toHaveBeenCalledWith(
+      "alarm_control_panel",
+      "alarm_arm_home",
+      { code: "1234" },
+      { entity_id: ENTITY },
+    );
+  });
+
+  it("reports a rejected native Perform action through Home Assistant", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    hass.callService.mockRejectedValueOnce(new Error("panel offline"));
+    const badge = mountBadge({
+      hass,
+      config: {
+        hold_action: {
+          action: "perform-action",
+          perform_action: "alarm_control_panel.alarm_arm_away",
+          target: { entity_id: ENTITY },
+        },
+      },
+    });
+    const notification = vi.fn();
+    badge.addEventListener("hass-notification", notification);
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    vi.advanceTimersByTime(501);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(notification).toHaveBeenCalledOnce();
+    expect(notification.mock.calls[0][0].detail.message).toContain("panel offline");
+  });
+
   it("a tap on the badge stops the native click event from bubbling to parents", () => {
     // When the badge sits inside a parent (e.g. an HA tile-card wrapper or a
     // dashboard view that has its own tap_action default of `more-info`), the
@@ -379,6 +460,30 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     // The badge PIN overlay is attached to document.body with #badge-pin-input.
     const overlayInput = document.querySelector("#badge-pin-input");
     expect(overlayInput).not.toBeNull();
+  });
+
+  it("uses hass.locale.language in the PIN overlay", () => {
+    const badge = mountBadge({
+      hass: makeHass({
+        language: undefined,
+        locale: { language: "es" },
+        states: {
+          [ENTITY]: makeAlarmEntity({
+            state: "armed_away",
+            codeArmRequired: true,
+            codeFormat: "number",
+          }),
+        },
+      }),
+      config: { hold_action: { action: "arm_or_disarm" } },
+    });
+    const badgeEl = badge.shadowRoot.getElementById("badge");
+    badgeEl.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
+    );
+    vi.advanceTimersByTime(501);
+
+    expect(document.body.textContent).toContain("Introduzca PIN para Desarmar");
   });
 
   it("the PIN overlay submits alarm_disarm when Confirm is clicked", () => {

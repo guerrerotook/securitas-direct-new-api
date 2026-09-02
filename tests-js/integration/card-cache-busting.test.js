@@ -12,6 +12,8 @@ import { dirname, join } from "node:path";
 // source. This test fails the build if any relative import is missing the
 // stamp or is out of sync with the integration version — so bumping the
 // version can't silently leave a stale-serving import behind.
+// The lazy Badge editor is the exception: it inherits the registered chip
+// entry point's stronger content-hash query at runtime, asserted below.
 //
 // On a version bump, re-stamp with:
 //   sed -i '' -E 's#(("|/)[A-Za-z0-9._-]+\.js)\?v=[^"]*"#\1?v=<new-version>"#g' \
@@ -52,4 +54,11 @@ describe("card module bare imports are cache-busted to the manifest version", ()
       });
     });
   }
+
+  it("the lazy Badge editor inherits the hashed entry-point cache key", () => {
+    const src = readFileSync(join(wwwDir, "verisure-owa-alarm-chip.js"), "utf8");
+
+    expect(src).toContain("editorUrl.search = sourceUrl.search");
+    expect(src).toContain("import(editorUrl.href)");
+  });
 });
