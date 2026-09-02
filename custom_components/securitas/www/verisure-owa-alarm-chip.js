@@ -1,10 +1,11 @@
-// Verisure OWA alarm chip + badge — the compact, always-on-dashboard elements.
+// Verisure OWA alarm chip, badge + Tile feature — compact dashboard elements.
 //
 // Kept in their own lightweight module (separate from the heavy
 // verisure-owa-alarm-card.js) so they render immediately on a cold dashboard
 // load without first downloading the full card + editor. The full card is
 // created lazily (document.createElement) only when the chip/badge popup
-// opens, by which time the card module has loaded.
+// opens, by which time the card module has loaded. The Tile feature remains
+// self-contained in this lightweight module.
 
 import {
   _t,
@@ -14,6 +15,184 @@ import {
   attachGesture,
   _makeLegacyShim,
 } from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
+import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+
+// Tile Card feature that surfaces the open-zone snapshot inline. Home
+// Assistant forwards `hass`, the Tile's entity context and (for backwards
+// compatibility with older custom features) `stateObj` to custom features.
+// Keep this component framework-free so it stays in the lightweight
+// chip/badge bundle and is available as soon as a dashboard loads.
+class VerisureOwaArmExceptionFeature extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+    this._context = {};
+    this._stateObj = null;
+    this._lastKey = null;
+  }
+
+  connectedCallback() {
+    this._render();
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._lastKey = null;
+    this._render();
+  }
+
+  static getStubConfig() {
+    return { type: "custom:verisure-owa-arm-exception" };
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  set context(context) {
+    this._context = context || {};
+    this._render();
+  }
+
+  // HA still forwards this property for compatibility with the original
+  // custom Tile feature API. It also makes the feature usable in third-party
+  // cards that provide a state object but not a Lovelace context.
+  set stateObj(stateObj) {
+    this._stateObj = stateObj;
+    this._render();
+  }
+
+  _entityId() {
+    return this._context?.entity_id || this._stateObj?.entity_id || null;
+  }
+
+  _entity() {
+    const entityId = this._entityId();
+    return (entityId && this._hass?.states?.[entityId]) || this._stateObj;
+  }
+
+  _setVisible(visible) {
+    this.hidden = !visible;
+
+    // Remove the HA feature wrapper from its grid while there is no warning;
+    // hiding only the child would leave an empty feature row in the Tile.
+    const root = this.getRootNode();
+    if (root instanceof ShadowRoot && root.host?.localName === "hui-card-feature") {
+      root.host.hidden = !visible;
+    }
+  }
+
+  _render() {
+    const stateObj = this._entity();
+    const attrs = stateObj?.attributes || {};
+    const forceArmAvailable = attrs.force_arm_available === true;
+    const active = attrs.arm_exception_active === true || forceArmAvailable;
+    const sensors = Array.isArray(attrs.arm_exceptions)
+      ? attrs.arm_exceptions.map(sensor => String(sensor))
+      : [];
+    const lang = this._hass?.language || this._hass?.locale?.language || "en";
+    const key = `${active}|${forceArmAvailable}|${lang}|${sensors.join("\u0000")}`;
+
+    this._setVisible(active);
+    if (!active || key === this._lastKey) return;
+    this._lastKey = key;
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          min-width: 0;
+        }
+        :host([hidden]) { display: none; }
+        .warning {
+          box-sizing: border-box;
+          min-height: var(--feature-height, 42px);
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 8px;
+          padding: 7px 8px;
+          border: 1px solid color-mix(in srgb, var(--warning-color, #ff9800) 45%, transparent);
+          border-radius: var(--feature-border-radius, 12px);
+          background: color-mix(in srgb, var(--warning-color, #ff9800) 14%, transparent);
+          color: var(--primary-text-color);
+        }
+        ha-icon {
+          --mdc-icon-size: 20px;
+          align-self: start;
+          margin-top: 1px;
+          color: var(--warning-color, #ff9800);
+        }
+        .copy { min-width: 0; }
+        .title {
+          font-size: 12px;
+          font-weight: 600;
+          line-height: 16px;
+        }
+        .sensors {
+          margin-top: 1px;
+          font-size: 12px;
+          line-height: 16px;
+          color: var(--secondary-text-color);
+          overflow-wrap: anywhere;
+        }
+        .actions {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        button {
+          min-height: 30px;
+          border: none;
+          border-radius: 15px;
+          cursor: pointer;
+          font: inherit;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .force {
+          padding: 0 10px;
+          background: var(--warning-color, #ff9800);
+          color: var(--text-primary-color, #fff);
+        }
+        .dismiss {
+          width: 30px;
+          padding: 0;
+          background: transparent;
+          color: var(--secondary-text-color);
+          font-size: 16px;
+        }
+      </style>
+      <div class="warning" role="alert">
+        <ha-icon icon="mdi:alert"></ha-icon>
+        <div class="copy">
+          <div class="title">${_t(lang, forceArmAvailable ? "open_sensors" : "open_sensors_no_force")}</div>
+          ${sensors.length ? `<div class="sensors">${sensors.map(escHtml).join(", ")}</div>` : ""}
+        </div>
+        <div class="actions">
+          ${forceArmAvailable ? `<button class="force" type="button">${_t(lang, "force_arm")}</button>` : ""}
+          <button class="dismiss" type="button" title="${_t(lang, "cancel")}" aria-label="${_t(lang, "cancel")}">✕</button>
+        </div>
+      </div>`;
+
+    this.shadowRoot.querySelector(".force")?.addEventListener("click", e => {
+      e.stopPropagation();
+      const entityId = this._entityId();
+      if (entityId) {
+        this._hass?.callService("verisure_owa", "force_arm", { entity_id: entityId });
+      }
+    });
+    this.shadowRoot.querySelector(".dismiss")?.addEventListener("click", e => {
+      e.stopPropagation();
+      const entityId = this._entityId();
+      if (entityId) {
+        this._hass?.callService("verisure_owa", "force_arm_cancel", { entity_id: entityId });
+      }
+    });
+  }
+}
 
 class VerisureOwaAlarmBadge extends HTMLElement {
   constructor() {
@@ -474,6 +653,9 @@ if (!customElements.get("verisure-owa-alarm-chip")) {
 if (!customElements.get("mushroom-verisure-owa-alarm-chip")) {
   customElements.define("mushroom-verisure-owa-alarm-chip", class extends VerisureOwaAlarmChip {});
 }
+if (!customElements.get("verisure-owa-arm-exception")) {
+  customElements.define("verisure-owa-arm-exception", VerisureOwaArmExceptionFeature);
+}
 if (!customElements.get("securitas-alarm-badge")) {
   customElements.define("securitas-alarm-badge",
     _makeLegacyShim(VerisureOwaAlarmBadge, "securitas-alarm-badge", "verisure-owa-alarm-badge"));
@@ -505,6 +687,23 @@ if (!window.customBadges.find(b => b.type === "verisure-owa-alarm-badge")) {
     preview:     false,
   });
 }
+window.customCardFeatures = window.customCardFeatures || [];
+if (!window.customCardFeatures.find(f => f.type === "verisure-owa-arm-exception")) {
+  window.customCardFeatures.push({
+    type: "verisure-owa-arm-exception",
+    name: "Verisure OWA Open Sensors",
+    isSupported: (hass, context) => {
+      const entityId = context?.entity_id || "";
+      if (!entityId.startsWith("alarm_control_panel.")) return false;
+      const registryEntry = hass?.entities?.[entityId];
+      return !registryEntry || registryEntry.platform === "securitas";
+    },
+    // HA before the context-based custom-feature API calls `supported` with
+    // the state object instead. Current HA prefers isSupported above.
+    supported: stateObj => stateObj?.entity_id?.startsWith("alarm_control_panel.") === true,
+    configurable: false,
+  });
+}
 /* v8 ignore stop */
 
-export { VerisureOwaAlarmBadge, VerisureOwaAlarmChip };
+export { VerisureOwaAlarmBadge, VerisureOwaAlarmChip, VerisureOwaArmExceptionFeature };
