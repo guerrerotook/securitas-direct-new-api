@@ -17,6 +17,12 @@ import {
 } from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
 import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
 
+const BADGE_DEFAULT_CONFIG = {
+  show_name: false,
+  show_state: true,
+  show_icon: true,
+};
+
 // Tile Card feature that surfaces the open-zone snapshot inline. Home
 // Assistant forwards `hass`, the Tile's entity context and (for backwards
 // compatibility with older custom features) `stateObj` to custom features.
@@ -216,19 +222,25 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
-    this._config = config;
+    this._config = { ...BADGE_DEFAULT_CONFIG, ...config };
     this._lastKey = null;
   }
 
   set hass(hass) {
     this._hass = hass;
     const stateObj = hass.states[this._config.entity];
+    const name = stateObj ? this._resolveName(stateObj) : "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}`
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${name}|${hass.language}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
       this._renderBadge();
+    } else if (stateObj) {
+      // A configured state_content attribute can change while the entity's
+      // state stays the same. Forward every HA update to the native display
+      // element without rebuilding the whole badge or its gesture handlers.
+      this._updateStateDisplay(stateObj);
     }
     // Forward hass to the dialog card if open
     if (this._dialogCard) this._dialogCard.hass = hass;
@@ -238,40 +250,58 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     if (!this._hass || !this._config) return;
 
     const stateObj = this._hass.states[this._config.entity];
+    const lang = this._hass.language || this._hass.locale?.language || "en";
     if (!stateObj) {
-      this.shadowRoot.innerHTML = `<ha-icon icon="mdi:shield-alert" style="color:var(--error-color)"></ha-icon>`;
+      const name = typeof this._config.name === "string"
+        ? this._config.name
+        : this._config.entity;
+      this.shadowRoot.innerHTML = `
+        <style>:host { display: inline-block; }</style>
+        <ha-badge label="${escHtml(name)}" style="--badge-color:var(--error-color,#f44336)">
+          <ha-icon slot="icon" icon="mdi:shield-alert"></ha-icon>
+          ${_t(lang, "unavailable")}
+        </ha-badge>`;
       return;
     }
 
     const state = stateObj.state;
-    const icons = stateObj.attributes.arm_exception_active || stateObj.attributes.force_arm_available
+    const name = this._resolveName(stateObj);
+    const armExceptionActive =
+      stateObj.attributes.arm_exception_active || stateObj.attributes.force_arm_available;
+    const icons = armExceptionActive
       ? { icon: "mdi:alert", color: "var(--warning-color, #FF9800)" }
       : STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
+    const icon = armExceptionActive ? icons.icon : (this._config.icon || icons.icon);
+    const color = armExceptionActive
+      ? icons.color
+      : (this._config.colors?.[state] || icons.color);
+    const showName = this._config.show_name === true;
+    const showState = this._config.show_state !== false;
+    const showIcon = this._config.show_icon !== false;
+    const hasContent = showState || showName;
+    const label = showState && showName ? name : "";
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: inline-block; }
-        .badge {
+        ha-badge {
           cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: transform 0.1s;
+          transition: transform 0.1s ease;
         }
-        .badge:active { transform: scale(0.9); }
-        .badge ha-icon {
-          --mdc-icon-size: 24px;
-          color: ${icons.color};
-        }
+        ha-badge:active { transform: scale(0.95); }
       </style>
-      <div class="badge" id="badge">
-        <ha-icon icon="${icons.icon}"></ha-icon>
-      </div>`;
+      <ha-badge id="badge" type="button" ${label ? `label="${escHtml(label)}"` : ""} ${hasContent ? "" : "icon-only"}>
+        ${showIcon ? `<ha-icon slot="icon" icon="${escHtml(icon)}"></ha-icon>` : ""}
+        ${showState ? `<state-display id="badge-state"></state-display>` : showName ? escHtml(name) : ""}
+      </ha-badge>`;
+
+    const badgeEl = this.shadowRoot.getElementById("badge");
+    badgeEl.style.setProperty("--badge-color", color);
+    this._updateStateDisplay(stateObj, name);
 
     // Clean up previous gesture listeners (badge re-renders on state change)
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
 
-    const badgeEl = this.shadowRoot.getElementById("badge");
     const gestureConfig = {
       tap_action:        this._config.tap_action        || { action: "more-info" },
       hold_action:       this._config.hold_action       || { action: "arm_or_disarm", arm_state: defaultArmState(this._hass, this._config.entity, this._config.states) },
@@ -290,6 +320,35 @@ class VerisureOwaAlarmBadge extends HTMLElement {
       },
       this._config.states,
     );
+  }
+
+  _updateStateDisplay(stateObj, resolvedName) {
+    const stateDisplay = this.shadowRoot.getElementById("badge-state");
+    if (!stateDisplay) return;
+    stateDisplay.hass = this._hass;
+    stateDisplay.stateObj = stateObj;
+    stateDisplay.content = this._config.state_content;
+    stateDisplay.timeFormat = this._config.time_format;
+    stateDisplay.name = resolvedName || this._resolveName(stateObj);
+  }
+
+  _resolveName(stateObj) {
+    if (typeof this._hass?.formatEntityName === "function") {
+      try {
+        return this._hass.formatEntityName(stateObj, this._config.name);
+      } catch (_) {
+        // Older/minimal HA clients may not expose all entity registries needed
+        // by structured entity-name configs. Fall back to the friendly name.
+      }
+    }
+    if (typeof this._config.name === "string") return this._config.name;
+    const nameItems = Array.isArray(this._config.name)
+      ? this._config.name
+      : this._config.name ? [this._config.name] : [];
+    if (nameItems.length && nameItems.every(item => item?.type === "text")) {
+      return nameItems.map(item => item.text || "").join(" ");
+    }
+    return stateObj.attributes.friendly_name || this._config.entity;
   }
 
   _startBadgePinEntry(svcAction) {
@@ -506,6 +565,10 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     return document.createElement("verisure-owa-alarm-card-editor");
   }
 
+  static getDefaultConfig() {
+    return { ...BADGE_DEFAULT_CONFIG };
+  }
+
   static getStubConfig(hass) {
     const entities = Object.keys(hass.states).filter(e => e.startsWith("alarm_control_panel."));
     return { entity: entities[0] || "" };
@@ -683,8 +746,8 @@ if (!window.customBadges.find(b => b.type === "verisure-owa-alarm-badge")) {
   window.customBadges.push({
     type:        "verisure-owa-alarm-badge",
     name:        "Verisure OWA Alarm Badge",
-    description: "Compact alarm badge — click to open full alarm card with force-arm support.",
-    preview:     false,
+    description: "Alarm badge with name and state — click to open the full alarm card.",
+    preview:     true,
   });
 }
 window.customCardFeatures = window.customCardFeatures || [];

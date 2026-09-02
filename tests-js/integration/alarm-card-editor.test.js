@@ -106,6 +106,109 @@ describe("verisure-owa-alarm-card-editor name field", () => {
   });
 });
 
+describe("verisure-owa-alarm-card-editor badge content", () => {
+  function mountBadgeEditor(config = {}) {
+    const editor = document.createElement("verisure-owa-alarm-card-editor");
+    editor.setConfig({
+      type: "custom:verisure-owa-alarm-badge",
+      entity: "alarm_control_panel.x",
+      ...config,
+    });
+    editor.hass = makeHass({
+      states: { "alarm_control_panel.x": makeAlarmEntity() },
+    });
+    document.body.appendChild(editor);
+    return editor;
+  }
+
+  it("uses Home Assistant selectors for the standard badge Content options", () => {
+    const editor = mountBadgeEditor();
+    const form = editor.shadowRoot.getElementById("badge-content-form");
+
+    expect(form).not.toBeNull();
+    expect(form.data.displayed_elements).toEqual(["state", "icon"]);
+    expect(form.schema).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "name", selector: { entity_name: {} } }),
+        expect.objectContaining({ name: "icon", selector: { icon: {} } }),
+        expect.objectContaining({
+          name: "state_content",
+          selector: { ui_state_content: { allow_name: true } },
+        }),
+        expect.objectContaining({
+          name: "time_format",
+          selector: { ui_time_format: {} },
+        }),
+      ]),
+    );
+    expect(editor.shadowRoot.querySelector("#name-slot ha-textfield")).toBeNull();
+  });
+
+  it("maps Displayed elements and Content values to the badge config", () => {
+    const editor = mountBadgeEditor();
+    let captured = null;
+    editor.addEventListener("config-changed", (event) => {
+      captured = event.detail.config;
+    });
+    const form = editor.shadowRoot.getElementById("badge-content-form");
+    form.dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: {
+          value: {
+            entity: "alarm_control_panel.x",
+            name: "Entrance",
+            icon: "mdi:shield-home",
+            displayed_elements: ["name", "state"],
+            state_content: ["state", "arm_exceptions"],
+            time_format: "24",
+          },
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    expect(captured).toMatchObject({
+      name: "Entrance",
+      icon: "mdi:shield-home",
+      show_name: true,
+      show_state: true,
+      show_icon: false,
+      state_content: ["state", "arm_exceptions"],
+      time_format: "24",
+    });
+  });
+
+  it("removes optional Content keys when they are cleared", () => {
+    const editor = mountBadgeEditor({
+      name: "Old",
+      icon: "mdi:shield",
+      state_content: "state",
+      time_format: "12",
+    });
+    let captured = null;
+    editor.addEventListener("config-changed", (event) => {
+      captured = event.detail.config;
+    });
+    editor.shadowRoot.getElementById("badge-content-form").dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: { value: { displayed_elements: ["icon"] } },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    expect(captured).not.toHaveProperty("name");
+    expect(captured).not.toHaveProperty("state_content");
+    expect(captured).not.toHaveProperty("time_format");
+    expect(captured).toMatchObject({
+      show_name: false,
+      show_state: false,
+      show_icon: true,
+    });
+  });
+});
+
 describe("verisure-owa-alarm-card-editor color pickers", () => {
   function mountEditor(config = {}) {
     const editor = document.createElement("verisure-owa-alarm-card-editor");

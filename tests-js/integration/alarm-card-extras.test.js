@@ -13,10 +13,7 @@ describe("verisure-owa-alarm-badge", () => {
     expect(customElements.get("verisure-owa-alarm-badge")).toBeDefined();
   });
 
-  it("renders a shield-lock icon when armed_away", () => {
-    // The badge intentionally renders only an icon — not state text — so we
-    // assert on the per-state icon mapping from STATE_CFG (armed_away ->
-    // mdi:shield-lock) instead of the original "Armed Away" text assertion.
+  it("renders a standard HA badge with the default state content and icon", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY });
     badge.hass = makeHass({
@@ -26,11 +23,13 @@ describe("verisure-owa-alarm-badge", () => {
     const html = badge.shadowRoot.innerHTML;
     expect(html).toContain("mdi:shield-lock");
     expect(html).toContain("<ha-icon");
+    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBeNull();
+    const stateDisplay = badge.shadowRoot.getElementById("badge-state");
+    expect(stateDisplay.stateObj.state).toBe("armed_away");
+    expect(stateDisplay.name).toBe("Test Alarm");
   });
 
-  it("renders the shield-off-outline icon for unavailable state", () => {
-    // Same reasoning as above: badge has no text rendering. The STATE_CFG
-    // entry for unavailable maps to mdi:shield-off-outline.
+  it("renders the shield-off-outline icon and native state content for unavailable", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY });
     badge.hass = makeHass({
@@ -38,14 +37,122 @@ describe("verisure-owa-alarm-badge", () => {
     });
     document.body.appendChild(badge);
     expect(badge.shadowRoot.innerHTML).toContain("mdi:shield-off-outline");
+    expect(badge.shadowRoot.getElementById("badge-state").stateObj.state).toBe("unavailable");
   });
 
-  it("renders the error shield-alert icon when the entity is missing", () => {
+  it("renders an error badge when the entity is missing", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY });
     badge.hass = makeHass({ states: {} });
     document.body.appendChild(badge);
     expect(badge.shadowRoot.innerHTML).toContain("mdi:shield-alert");
+    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBe(ENTITY);
+    expect(badge.shadowRoot.textContent).toContain("Unavailable");
+  });
+
+  it("keeps the state text and switches to an alert icon for an arming exception", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, name: "Entrance", show_name: true });
+    badge.hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          armExceptionActive: true,
+          armExceptions: ["Kitchen"],
+        }),
+      },
+    });
+    document.body.appendChild(badge);
+
+    expect(badge.shadowRoot.innerHTML).toContain("mdi:alert");
+    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBe("Entrance");
+    expect(badge.shadowRoot.getElementById("badge-state").stateObj.state).toBe("disarmed");
+  });
+
+  it("escapes a configured badge name", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      name: 'Alarm <img src=x onerror="bad">',
+      show_name: true,
+    });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    const rendered = badge.shadowRoot.querySelector("ha-badge").getAttribute("label");
+    expect(rendered).toBe('Alarm <img src=x onerror="bad">');
+    expect(badge.shadowRoot.querySelector("img")).toBeNull();
+  });
+
+  it("supports the standard name, state and icon visibility options", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      name: "Entrance",
+      show_name: true,
+      show_state: false,
+      show_icon: false,
+    });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    expect(badge.shadowRoot.querySelector("ha-icon")).toBeNull();
+    expect(badge.shadowRoot.getElementById("badge-state")).toBeNull();
+    expect(badge.shadowRoot.textContent).toContain("Entrance");
+  });
+
+  it("uses a configured icon without allowing attribute injection", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, icon: 'mdi:shield" data-bad="true' });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    const icon = badge.shadowRoot.querySelector("ha-icon");
+    expect(icon.getAttribute("icon")).toBe('mdi:shield" data-bad="true');
+    expect(icon.hasAttribute("data-bad")).toBe(false);
+  });
+
+  it("forwards configured state content and time format to state-display", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      state_content: ["state", "arm_exceptions"],
+      time_format: "24",
+    });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    const stateDisplay = badge.shadowRoot.getElementById("badge-state");
+    expect(stateDisplay.content).toEqual(["state", "arm_exceptions"]);
+    expect(stateDisplay.timeFormat).toBe("24");
+  });
+
+  it("resolves structured entity-name content through Home Assistant", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    const formatEntityName = vi.fn(() => "Front Door Alarm");
+    badge.setConfig({
+      entity: ENTITY,
+      name: [{ type: "area" }, { type: "entity" }],
+      show_name: true,
+    });
+    badge.hass = makeHass({
+      formatEntityName,
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    expect(formatEntityName).toHaveBeenCalled();
+    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBe(
+      "Front Door Alarm",
+    );
   });
 
   it("throws when setConfig is called without an entity", () => {
@@ -602,11 +709,16 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
   it("badge skips re-render when neither state nor force_arm_available change", () => {
     const badge = mountBadge();
     const firstHtml = badge.shadowRoot.innerHTML;
+    const firstStateDisplay = badge.shadowRoot.getElementById("badge-state");
+    const updatedEntity = makeAlarmEntity({ state: "disarmed" });
+    updatedEntity.attributes.arm_exceptions = ["Kitchen"];
     // Same hass — identity key matches, no rerender.
     badge.hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+      states: { [ENTITY]: updatedEntity },
     });
     expect(badge.shadowRoot.innerHTML).toBe(firstHtml);
+    expect(badge.shadowRoot.getElementById("badge-state")).toBe(firstStateDisplay);
+    expect(firstStateDisplay.stateObj.attributes.arm_exceptions).toEqual(["Kitchen"]);
   });
 
   it("clicking outside the dialog overlay closes it (transparent-area dismissal)", () => {
@@ -667,12 +779,17 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(dialogCard.shadowRoot.innerHTML).toContain("Armed Home");
   });
 
-  it("badge getCardSize returns 1; getConfigElement returns the editor", () => {
+  it("badge exposes the standard defaults, stub config and visual editor", () => {
     const badge = mountBadge();
     expect(badge.getCardSize()).toBe(1);
     const ctor = customElements.get("verisure-owa-alarm-badge");
     const editor = ctor.getConfigElement();
     expect(editor.tagName.toLowerCase()).toBe("verisure-owa-alarm-card-editor");
+    expect(ctor.getDefaultConfig()).toEqual({
+      show_name: false,
+      show_state: true,
+      show_icon: true,
+    });
     const hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity() },
     });

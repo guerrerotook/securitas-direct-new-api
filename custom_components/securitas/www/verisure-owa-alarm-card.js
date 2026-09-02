@@ -1179,6 +1179,128 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     return section;
   }
 
+  _isBadgeVariant() {
+    return /-alarm-badge$/.test(this._config.type || "");
+  }
+
+  _buildBadgeContentSection(lang) {
+    const section = document.createElement("ha-expansion-panel");
+    const localize = (key, fallback) => this._hass?.localize?.(key) || fallback;
+    section.header = localize(
+      "ui.panel.lovelace.editor.card.generic.content",
+      "Content",
+    );
+    section.expanded = true;
+
+    const displayedElements = [];
+    if (this._config.show_name === true) displayedElements.push("name");
+    if (this._config.show_state !== false) displayedElements.push("state");
+    if (this._config.show_icon !== false) displayedElements.push("icon");
+
+    const form = document.createElement("ha-form");
+    form.id = "badge-content-form";
+    form.hass = this._hass;
+    form.data = {
+      entity: this._config.entity || "",
+      name: this._config.name,
+      icon: this._config.icon,
+      displayed_elements: displayedElements,
+      state_content: this._config.state_content,
+      time_format: this._config.time_format,
+    };
+    form.schema = [
+      {
+        name: "name",
+        selector: { entity_name: {} },
+        context: { entity: "entity" },
+      },
+      {
+        name: "icon",
+        selector: { icon: {} },
+        context: { icon_entity: "entity" },
+      },
+      {
+        name: "displayed_elements",
+        selector: {
+          select: {
+            mode: "list",
+            multiple: true,
+            options: [
+              {
+                value: "name",
+                label: localize(
+                  "ui.panel.lovelace.editor.badge.entity.displayed_elements_options.name",
+                  _t(lang, "editor_name"),
+                ),
+              },
+              {
+                value: "state",
+                label: localize(
+                  "ui.panel.lovelace.editor.badge.entity.displayed_elements_options.state",
+                  "State",
+                ),
+              },
+              {
+                value: "icon",
+                label: localize(
+                  "ui.panel.lovelace.editor.badge.entity.displayed_elements_options.icon",
+                  "Icon",
+                ),
+              },
+            ],
+          },
+        },
+      },
+      {
+        name: "state_content",
+        selector: { ui_state_content: { allow_name: true } },
+        context: { filter_entity: "entity" },
+      },
+      {
+        name: "time_format",
+        selector: { ui_time_format: {} },
+      },
+    ];
+    form.computeLabel = schema => {
+      if (schema.name === "displayed_elements" || schema.name === "state_content") {
+        return localize(
+          `ui.panel.lovelace.editor.badge.entity.${schema.name}`,
+          schema.name === "displayed_elements" ? "Displayed elements" : "State content",
+        );
+      }
+      return localize(
+        `ui.panel.lovelace.editor.card.generic.${schema.name}`,
+        schema.name.replace(/_/g, " ").replace(/^./, value => value.toUpperCase()),
+      );
+    };
+
+    form.addEventListener("value-changed", e => {
+      const value = e.detail?.value || {};
+      const nextConfig = { ...this._config };
+      for (const key of ["name", "icon", "state_content", "time_format"]) {
+        if (value[key] === undefined || value[key] === "" || value[key] === null) {
+          delete nextConfig[key];
+        } else {
+          nextConfig[key] = value[key];
+        }
+      }
+      const shown = Array.isArray(value.displayed_elements)
+        ? value.displayed_elements
+        : displayedElements;
+      nextConfig.show_name = shown.includes("name");
+      nextConfig.show_state = shown.includes("state");
+      nextConfig.show_icon = shown.includes("icon");
+      this._config = nextConfig;
+      this._fireChanged();
+    });
+
+    const content = document.createElement("div");
+    content.className = "badge-content";
+    content.appendChild(form);
+    section.appendChild(content);
+    return section;
+  }
+
   _render() {
     if (!this._hass) return;
 
@@ -1190,6 +1312,8 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
         ha-entity-picker, ha-textfield { width: 100%; display: block; }
+        .badge-content { padding: 8px 0 4px; }
+        .badge-content ha-form { display: block; width: 100%; }
         .section-hint {
           font-size: 0.8em;
           color: var(--secondary-text-color);
@@ -1269,6 +1393,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
+        <div id="badge-content-slot"></div>
         <div id="arm-modes-slot"></div>
         <div id="colors-slot"></div>
         <div id="gesture-slot"></div>
@@ -1316,22 +1441,27 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       }
     });
 
-    // ── Name field (HA native) ───────────────────────────────────────────────
-    const nameTf = document.createElement("ha-textfield");
-    nameTf.label = _t(lang, "editor_name");
-    nameTf.value = this._config.name || "";
-    nameTf.placeholder = _t(lang, "editor_name_placeholder");
-    nameTf.addEventListener("input", (e) => {
-      const val = e.target.value.trim();
-      if (val) {
-        this._config = { ...this._config, name: val };
-      } else {
-        const { name: _, ...rest } = this._config;
-        this._config = rest;
-      }
-      this._fireChanged();
-    });
-    this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
+    if (this._isBadgeVariant()) {
+      this.shadowRoot.getElementById("badge-content-slot")
+        .appendChild(this._buildBadgeContentSection(lang));
+    } else {
+      // ── Name field (HA native) ─────────────────────────────────────────────
+      const nameTf = document.createElement("ha-textfield");
+      nameTf.label = _t(lang, "editor_name");
+      nameTf.value = this._config.name || "";
+      nameTf.placeholder = _t(lang, "editor_name_placeholder");
+      nameTf.addEventListener("input", (e) => {
+        const val = e.target.value.trim();
+        if (val) {
+          this._config = { ...this._config, name: val };
+        } else {
+          const { name: _, ...rest } = this._config;
+          this._config = rest;
+        }
+        this._fireChanged();
+      });
+      this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
+    }
 
     // ── Arm modes section ────────────────────────────────────────────────────
     const armModesSlot = this.shadowRoot.getElementById("arm-modes-slot");
@@ -1390,7 +1520,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     // resolves correctly — `_config.type === "custom:securitas-alarm-badge"`
     // alone misses the canonical verisure-owa-* names and the mushroom chip.
     const type = this._config.type || "";
-    const isBadge = /-alarm-badge$/.test(type);
+    const isBadge = this._isBadgeVariant();
     const isChip  = /-alarm-chip$/.test(type);
 
     // Editor defaults MUST mirror the variant's runtime fallbacks (see the

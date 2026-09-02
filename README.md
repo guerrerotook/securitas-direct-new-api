@@ -183,9 +183,9 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 
 ### Badge
 
-A compact dashboard badge for the badges row, with a state-specific shield icon (amber warning triangle when arming fails). Tap to open the full alarm card; hold and double-tap can be configured to arm/disarm directly — see [Gesture Actions](#gesture-actions) below.
+A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open the full alarm card; hold and double-tap can be configured to arm/disarm directly — see [Gesture Actions](#gesture-actions) below.
 
-Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity.
+Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its visual editor includes the same **Content** controls as Home Assistant's entity badge: configure the name and icon, choose whether to show the name, state and icon, select state attributes to display, and choose the time format for timestamp content.
 
 ### Mushroom Chip
 

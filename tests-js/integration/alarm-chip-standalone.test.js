@@ -24,7 +24,10 @@ describe("verisure-owa-alarm-chip standalone module", () => {
 
   it("registers the chip in customCards and the badge in customBadges", () => {
     expect(window.customCards?.some((c) => c.type === "verisure-owa-alarm-chip")).toBe(true);
-    expect(window.customBadges?.some((b) => b.type === "verisure-owa-alarm-badge")).toBe(true);
+    expect(window.customBadges?.find((b) => b.type === "verisure-owa-alarm-badge")).toMatchObject({
+      preview: true,
+      name: "Verisure OWA Alarm Badge",
+    });
   });
 
   it("opening the popup before the card module loads falls back to native more-info", () => {
