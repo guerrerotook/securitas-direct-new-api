@@ -444,15 +444,15 @@ if (!customElements.get("verisure-owa-arm-exception")) {
 }
 if (!customElements.get("securitas-alarm-badge")) {
   customElements.define("securitas-alarm-badge",
-    _makeLegacyShim(VerisureOwaAlarmBadge, "securitas-alarm-badge", "verisure-owa-alarm-badge"));
+    _makeLegacyShim(VerisureOwaAlarmBadge));
 }
 if (!customElements.get("securitas-alarm-chip")) {
   customElements.define("securitas-alarm-chip",
-    _makeLegacyShim(VerisureOwaAlarmChip, "securitas-alarm-chip", "verisure-owa-alarm-chip"));
+    _makeLegacyShim(VerisureOwaAlarmChip));
 }
 if (!customElements.get("mushroom-securitas-alarm-chip")) {
   customElements.define("mushroom-securitas-alarm-chip",
-    _makeLegacyShim(VerisureOwaAlarmChip, "mushroom-securitas-alarm-chip", "mushroom-verisure-owa-alarm-chip"));
+    _makeLegacyShim(VerisureOwaAlarmChip));
 }
 
 window.customCards = window.customCards || [];

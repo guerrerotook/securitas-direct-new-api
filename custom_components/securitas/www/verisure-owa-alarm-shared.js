@@ -604,6 +604,6 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
 // ── Legacy tag-name alias factory ─────────────────────────────────────────────
 // Returns a thin subclass so a `securitas-*` (pre-v5) tag renders identically
 // to its canonical `verisure-owa-*` element.
-export function _makeLegacyShim(canonicalClass, _oldTag, _newTag) {
+export function _makeLegacyShim(canonicalClass) {
   return class extends canonicalClass {};
 }

@@ -198,7 +198,7 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
     expect(exceptionRoot(feature).textContent).toContain("Window 2Window 3");
   });
 
-  it("uses native HA control buttons and recovers from rejected services", async () => {
+  it("uses native HA buttons and recovers from rejected services", async () => {
     const hass = makeHass({
       states: {
         [ENTITY]: makeAlarmEntity({ forceArmAvailable: true, armExceptions: ["Office"] }),
@@ -209,10 +209,11 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
     const notification = vi.fn();
     feature.addEventListener("hass-notification", notification);
     const root = exceptionRoot(feature);
-    const force = root.querySelector("ha-control-button.force");
+    const force = root.querySelector("ha-button.force");
 
-    expect(force.querySelector(".button-content").textContent).toBe("Force Arm");
-    expect(root.querySelector(".cancel .button-content").localName).toBe("ha-icon");
+    expect(force.textContent).toBe("Force Arm");
+    expect(root.querySelector("ha-button.cancel ha-icon")).not.toBeNull();
+    expect(root.querySelector("ha-button.cancel .visually-hidden").textContent).toBe("Cancel");
     force.click();
     await Promise.resolve();
     await Promise.resolve();

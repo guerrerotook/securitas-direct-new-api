@@ -113,7 +113,7 @@ describe("verisure-owa-alarm-card service calls", () => {
     const alertButtons = Array.from(
       card.shadowRoot
         .querySelector("verisure-owa-arm-exception-alert")
-        ?.shadowRoot.querySelectorAll("ha-control-button") || [],
+        ?.shadowRoot.querySelectorAll("ha-button") || [],
     );
     const buttons = [...card.shadowRoot.querySelectorAll("button"), ...alertButtons];
     return buttons.find((b) =>

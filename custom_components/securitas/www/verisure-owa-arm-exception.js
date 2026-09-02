@@ -81,16 +81,6 @@ function appendTextElement(parent, tagName, className, text) {
   return element;
 }
 
-function replaceButtonLabel(button, label) {
-  // ha-control-button paints its background with a positioned ::before
-  // pseudo-element. A fully opaque fill can cover an unwrapped text node, so
-  // keep the slotted label in an explicit stacking layer above that fill.
-  const content = document.createElement("span");
-  content.className = "button-content";
-  content.textContent = label;
-  button.replaceChildren(content);
-}
-
 export class VerisureOwaArmExceptionAlert extends HTMLElement {
   constructor() {
     super();
@@ -132,32 +122,24 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
         justify-content: flex-end;
         margin-top: var(--ha-space-4, 16px);
       }
-      ha-control-button-group { display: flex; }
-      ha-control-button {
-        display: block;
-        width: auto;
-        min-width: 40px;
-        height: 40px;
-        color: var(--primary-text-color);
-        --control-button-border-radius: var(--ha-border-radius-md, 10px);
-      }
-      ha-control-button.force {
+      .button-group { display: flex; gap: var(--ha-space-3, 12px); }
+      ha-button { --ha-button-height: 40px; }
+      ha-button.force {
         min-width: 104px;
-        color: var(--text-primary-color, #fff);
-        --control-button-background-color: var(--warning-color, #ff9800);
-        --control-button-background-opacity: 1;
       }
-      ha-control-button.cancel {
+      ha-button.cancel {
         min-width: 88px;
-        --control-button-background-color: var(--secondary-background-color);
-        --control-button-background-opacity: 1;
       }
-      .button-content {
-        position: relative;
-        z-index: 1;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
       :host([presentation="compact"]) .warning {
         min-height: var(--feature-height, 42px);
@@ -184,16 +166,20 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
       :host([presentation="compact"]) .sensor-list li { display: inline; }
       :host([presentation="compact"]) .sensor-list li:not(:last-child)::after { content: ", "; }
       :host([presentation="compact"]) .actions { grid-column: auto; margin: 0; }
-      :host([presentation="compact"]) ha-control-button {
-        height: 32px;
+      :host([presentation="compact"]) ha-button {
+        --ha-button-height: 32px;
         min-width: 32px;
         --mdc-icon-size: 18px;
       }
-      :host([presentation="compact"]) ha-control-button.force {
+      :host([presentation="compact"]) ha-button.force {
         min-width: 84px;
         font-size: var(--ha-font-size-xs, 12px);
       }
-      :host([presentation="compact"]) ha-control-button.cancel { min-width: 32px; width: 32px; }
+      :host([presentation="compact"]) ha-button.cancel {
+        min-width: 32px;
+        width: 32px;
+        --wa-form-control-padding-inline: 0;
+      }
     `;
 
     this._section = document.createElement("section");
@@ -215,11 +201,16 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
 
     this._actions = document.createElement("div");
     this._actions.className = "actions force-btns";
-    this._buttonGroup = document.createElement("ha-control-button-group");
-    this._cancelButton = document.createElement("ha-control-button");
+    this._buttonGroup = document.createElement("div");
+    this._buttonGroup.className = "button-group";
+    this._cancelButton = document.createElement("ha-button");
     this._cancelButton.className = "cancel dismiss";
-    this._forceButton = document.createElement("ha-control-button");
+    this._cancelButton.setAttribute("appearance", "filled");
+    this._cancelButton.setAttribute("variant", "neutral");
+    this._forceButton = document.createElement("ha-button");
     this._forceButton.className = "force";
+    this._forceButton.setAttribute("appearance", "filled");
+    this._forceButton.setAttribute("variant", "warning");
     this._buttonGroup.append(this._cancelButton, this._forceButton);
     this._actions.appendChild(this._buttonGroup);
     this._section.appendChild(this._actions);
@@ -279,20 +270,21 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
 
     const cancelLabel = armExceptionTranslation(lang, "cancel");
     const forceLabel = armExceptionTranslation(lang, "force_arm");
-    this._cancelButton.label = cancelLabel;
     this._cancelButton.setAttribute("aria-label", cancelLabel);
     this._cancelButton.replaceChildren();
     if (presentation === "compact") {
       const closeIcon = document.createElement("ha-icon");
-      closeIcon.className = "button-content";
       closeIcon.setAttribute("icon", "mdi:close");
-      this._cancelButton.appendChild(closeIcon);
+      closeIcon.setAttribute("aria-hidden", "true");
+      const accessibleLabel = document.createElement("span");
+      accessibleLabel.className = "visually-hidden";
+      accessibleLabel.textContent = cancelLabel;
+      this._cancelButton.append(closeIcon, accessibleLabel);
     } else {
-      replaceButtonLabel(this._cancelButton, cancelLabel);
+      this._cancelButton.textContent = cancelLabel;
     }
-    this._forceButton.label = forceLabel;
     this._forceButton.setAttribute("aria-label", forceLabel);
-    replaceButtonLabel(this._forceButton, forceLabel);
+    this._forceButton.textContent = forceLabel;
     this._forceButton.hidden = !state.forceArmAvailable;
     this._setBusy(this._busy);
   }

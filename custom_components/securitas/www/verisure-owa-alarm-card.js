@@ -1357,11 +1357,11 @@ if (!customElements.get("verisure-owa-alarm-card-editor")) {
 }
 if (!customElements.get("securitas-alarm-card")) {
   customElements.define("securitas-alarm-card",
-    _makeLegacyShim(VerisureOwaAlarmCard, "securitas-alarm-card", "verisure-owa-alarm-card"));
+    _makeLegacyShim(VerisureOwaAlarmCard));
 }
 if (!customElements.get("securitas-alarm-card-editor")) {
   customElements.define("securitas-alarm-card-editor",
-    _makeLegacyShim(VerisureOwaAlarmCardEditor, "securitas-alarm-card-editor", "verisure-owa-alarm-card-editor"));
+    _makeLegacyShim(VerisureOwaAlarmCardEditor));
 }
 
 window.customCards = window.customCards || [];

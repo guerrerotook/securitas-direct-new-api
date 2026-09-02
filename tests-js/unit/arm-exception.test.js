@@ -61,7 +61,7 @@ describe("verisure-owa-arm-exception-alert public API", () => {
       presentation: null,
     });
     expect(alert.getAttribute("presentation")).toBe("full");
-    expect(alert.shadowRoot.querySelector(".cancel .button-content").textContent).toBe("Cancelar");
+    expect(alert.shadowRoot.querySelector("ha-button.cancel").textContent).toBe("Cancelar");
     expect(alert.shadowRoot.querySelector("style").textContent).toContain("grid-column: 2");
   });
 
