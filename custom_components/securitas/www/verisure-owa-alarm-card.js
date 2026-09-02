@@ -55,9 +55,8 @@ export {
 // bundle. It is deliberately NOT imported here: a relative import would resolve
 // to a different URL than the registered chip resource (the resource carries
 // _card_url's ?v=<hash>-<version>), so importing it would just fetch chip.js a
-// second time for no benefit. The badge/chip create the full card lazily
-// (document.createElement) when their popup opens — by then this resource has
-// loaded.
+// second time for no benefit. Badge/chip taps now open HA's native More Info
+// dialog; this custom card remains available as an explicit Lovelace card.
 
 class VerisureOwaAlarmCard extends HTMLElement {
   constructor() {

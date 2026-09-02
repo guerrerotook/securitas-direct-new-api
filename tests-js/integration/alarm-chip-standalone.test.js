@@ -30,11 +30,9 @@ describe("verisure-owa-alarm-chip standalone module", () => {
     });
   });
 
-  it("opening the popup before the card module loads falls back to native more-info", () => {
-    // Slow cold load: the chip can be tapped before the separate
-    // verisure-owa-alarm-card.js resource has loaded (securitas-alarm-card is
-    // undefined here). The popup must not throw — it should fall back to HA's
-    // native more-info dialog so the user can still arm/disarm.
+  it("opens native More Info without loading the custom alarm card", () => {
+    // The compact module never needs to wait for the separate heavy card:
+    // Home Assistant owns the dialog and loads our global More Info extension.
     expect(customElements.get("securitas-alarm-card")).toBeUndefined();
 
     const chip = document.createElement("verisure-owa-alarm-chip");
@@ -54,6 +52,5 @@ describe("verisure-owa-alarm-chip standalone module", () => {
 
     expect(() => chip._openDialog()).not.toThrow();
     expect(moreInfoEntity).toBe("alarm_control_panel.test");
-    expect(chip._dialogOpen).toBe(false);
   });
 });

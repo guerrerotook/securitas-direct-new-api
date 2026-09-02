@@ -20,7 +20,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.alarm_control_panel import (
+    AnnexVerisureOwaAlarmPanel,
+    BaseVerisureOwaAlarmPanel,
     CombinedVerisureOwaAlarmPanel,
+    InteriorVerisureOwaAlarmPanel,
+    PerimeterVerisureOwaAlarmPanel,
 )
 from custom_components.securitas.const import (
     CONF_AUTO_FORCE_ARM,
@@ -247,6 +251,23 @@ class TestForceArmNotificationsConfig:
         """The card capability gate is off by default: attribute is present and False."""
         alarm = make_alarm()
         assert alarm._attr_extra_state_attributes["auto_force_arm_enabled"] is False
+
+    @pytest.mark.parametrize(
+        "panel_cls",
+        [
+            CombinedVerisureOwaAlarmPanel,
+            InteriorVerisureOwaAlarmPanel,
+            PerimeterVerisureOwaAlarmPanel,
+            AnnexVerisureOwaAlarmPanel,
+        ],
+    )
+    def test_all_alarm_panels_use_the_integration_more_info_control(self, panel_cls):
+        """Every region/panel inherits the native More Info extension."""
+        alarm = make_alarm(panel_cls=panel_cls)
+        assert (
+            alarm._attr_extra_state_attributes["custom_ui_more_info"]
+            == "more-info-verisure-owa-alarm"
+        )
 
     def test_auto_force_arm_attribute_reflects_config(self):
         """auto_force_arm=True in config surfaces as the entity attribute."""
@@ -530,8 +551,9 @@ def make_alarm(
     has_peri=False,
     initial_status=None,
     code=None,
-) -> CombinedVerisureOwaAlarmPanel:
-    """Create a CombinedVerisureOwaAlarmPanel with mocked dependencies.
+    panel_cls=CombinedVerisureOwaAlarmPanel,
+) -> BaseVerisureOwaAlarmPanel:
+    """Create an alarm panel with mocked dependencies.
 
     ``code`` is the raw PIN that check_code() should accept; it's hashed
     into config["code_hash"] since the entity only ever reads the hash.
@@ -588,14 +610,10 @@ def make_alarm(
 
     # Patch Entity state-writing methods that require a running HA instance.
     with (
-        patch.object(
-            CombinedVerisureOwaAlarmPanel, "async_schedule_update_ha_state", MagicMock()
-        ),
-        patch.object(
-            CombinedVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
-        ),
+        patch.object(panel_cls, "async_schedule_update_ha_state", MagicMock()),
+        patch.object(panel_cls, "async_write_ha_state", MagicMock()),
     ):
-        alarm = CombinedVerisureOwaAlarmPanel(
+        alarm = panel_cls(
             installation=installation,
             client=client,
             hass=hass,

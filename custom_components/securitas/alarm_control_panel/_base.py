@@ -48,6 +48,7 @@ from ..const import (
     CONF_UNSUPPORTED_COMMANDS,
     DEFAULT_AUTO_FORCE_ARM,
     DEFAULT_OPERATION_POLL_TIMEOUT,
+    MORE_INFO_ELEMENT,
     PROJECT_URL,
 )
 from ..coordinators import AlarmCoordinator, AlarmStatusData
@@ -183,6 +184,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}
+        # Use one integration-wide extension of HA's native alarm More Info
+        # control. The custom element composes the stock control and adds the
+        # Verisure force-arm exception UI only while an exception is active.
+        self._attr_extra_state_attributes["custom_ui_more_info"] = MORE_INFO_ELEMENT
         # Advertise the auto-force-arm capability gate to the Lovelace card.
         # Static per config (an options change reloads the entry), so it's set
         # once here. The card only offers its per-device tick box when True.

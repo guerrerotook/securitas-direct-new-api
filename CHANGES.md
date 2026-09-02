@@ -8,15 +8,27 @@ A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnost
 
 ### Added
 
+**Force Arm inside Home Assistant's native alarm More Info dialog.**  Every
+alarm panel created by the integration now keeps Home Assistant's standard
+alarm modes, PIN handling, state header, history and settings UI.  When an arm
+attempt is rejected, an integration-wide More Info extension adds the affected
+sensor list and **Force Arm** / **Cancel** actions directly below those native
+controls.  Availability is capability-driven rather than country-specific:
+panels that permit forcing get the button, while Spanish and any other
+non-forceable panels still get the useful sensor warning and Cancel action.
+Badge and chip taps now open this native dialog instead of a separate custom
+popup.  The standalone Verisure OWA Alarm Card remains available for dashboards
+that explicitly use it.
+
 **Native Badge preview and Content settings.**  The Verisure OWA Alarm Badge
 now uses Home Assistant's native `ha-badge` and `state-display` components, so
 it appears as a live preview in the badge picker and can display the alarm state
 directly in the badges row.  Its visual editor now has the standard **Content**
 controls for name, icon, displayed elements, state attributes and timestamp
 format.  The Verisure warning behaviour remains intact: a blocked arm attempt
-temporarily switches the badge to the amber alert icon, and tapping it still
-opens the full card with the affected sensors and any available Force Arm
-action.
+temporarily switches the badge to the amber alert icon, and tapping it opens
+the native More Info dialog with the affected sensors and any available Force
+Arm action.
 
 **Open sensors directly in the Home Assistant Tile Card.**  A new
 **Verisure OWA Open Sensors** custom Tile feature can sit below HA's native

@@ -711,8 +711,8 @@ class TestAsyncSetupEntry:
         assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
 
-        # Verify all card JS URLs are registered (alarm + chip + camera + events)
-        assert mock_add_js.call_count == 4
+        # Verify all card JS URLs plus the global More Info module are registered.
+        assert mock_add_js.call_count == 5
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
@@ -745,6 +745,10 @@ class TestAsyncSetupEntry:
         )
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
             for u in js_urls
         )
 
@@ -844,9 +848,10 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        # All card resources registered exactly once despite two setup calls
+        # All card resources and the global More Info module are registered
+        # exactly once despite two setup calls.
         # (guarded by card_registered flag)
-        assert mock_add_js.call_count == 4
+        assert mock_add_js.call_count == 5
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
@@ -858,6 +863,10 @@ class TestAsyncSetupEntry:
         )
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
             for u in js_urls
         )
 

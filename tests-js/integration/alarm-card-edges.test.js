@@ -223,6 +223,68 @@ describe("alarm-card chip fallbacks", () => {
   });
 });
 
+describe("compact alarm element defensive fallbacks", () => {
+  it("allows badge and chip render methods to run before configuration", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    const chip = document.createElement("verisure-owa-alarm-chip");
+
+    expect(() => badge._renderBadge()).not.toThrow();
+    expect(() => chip._render()).not.toThrow();
+  });
+
+  it("forwards unchanged entity updates without rebuilding the badge", () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = hass;
+    const stateDisplay = badge.shadowRoot.getElementById("badge-state");
+
+    badge.hass = hass;
+    expect(badge.shadowRoot.getElementById("badge-state")).toBe(stateDisplay);
+    expect(stateDisplay.stateObj).toBe(hass.states[ENTITY]);
+  });
+
+  it("uses the HA locale and supports a structured text name", () => {
+    const hass = makeHass({
+      language: undefined,
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    hass.locale = { language: "es" };
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      name: { type: "text", text: "Entrada" },
+      show_name: true,
+      show_state: false,
+    });
+
+    badge.hass = hass;
+    expect(badge.shadowRoot.textContent).toContain("Entrada");
+  });
+
+  it("does not call Tile actions when no entity id is available", () => {
+    const hass = makeHass();
+    const feature = document.createElement("verisure-owa-arm-exception");
+    feature.hass = hass;
+    feature.context = null;
+    feature.stateObj = {
+      state: "disarmed",
+      attributes: {
+        arm_exception_active: true,
+        force_arm_available: true,
+        arm_exceptions: ["Window"],
+      },
+    };
+    document.body.appendChild(feature);
+
+    feature.shadowRoot.querySelector(".force").click();
+    feature.shadowRoot.querySelector(".dismiss").click();
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+});
+
 describe("alarm-card executeAction null-guards", () => {
   it("tap_action: arm_or_disarm with no stateObj is a no-op (executeAction !stateObj guard)", () => {
     // Card mounted with a state, gesture wired. Then the entity state vanishes

@@ -2,15 +2,14 @@
 //
 // Kept in their own lightweight module (separate from the heavy
 // verisure-owa-alarm-card.js) so they render immediately on a cold dashboard
-// load without first downloading the full card + editor. The full card is
-// created lazily (document.createElement) only when the chip/badge popup
-// opens, by which time the card module has loaded. The Tile feature remains
-// self-contained in this lightweight module.
+// load without first downloading the full card + editor. Badge/chip taps ask
+// HA to open its native More Info dialog; the separate global More Info module
+// adds the Verisure force-arm section there. The Tile feature remains self-
+// contained in this lightweight module.
 
 import {
   _t,
   STATE_CFG,
-  GESTURE_KEYS,
   defaultArmState,
   attachGesture,
   _makeLegacyShim,
@@ -204,7 +203,6 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._dialogOpen = false;
     this._pinOverlay = null;   // floating PIN overlay element (or null)
     this._pinState   = null;   // { service, labelKey } when PIN entry active
     this._pin        = "";
@@ -242,8 +240,6 @@ class VerisureOwaAlarmBadge extends HTMLElement {
       // element without rebuilding the whole badge or its gesture handlers.
       this._updateStateDisplay(stateObj);
     }
-    // Forward hass to the dialog card if open
-    if (this._dialogCard) this._dialogCard.hass = hass;
   }
 
   _renderBadge() {
@@ -467,96 +463,14 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   }
 
   _openDialog() {
-    if (this._dialogOpen) return;
-
-    // The full card lives in a separate module (verisure-owa-alarm-card.js)
-    // loaded as its own Lovelace resource. On a slow cold load the chip/badge
-    // can be tapped before that module has finished loading, so the
-    // `securitas-alarm-card` element isn't defined yet. Fall back to HA's
-    // native more-info dialog so the user can still arm/disarm rather than the
-    // popup throwing.
-    if (!customElements.get("securitas-alarm-card")) {
-      this.dispatchEvent(new CustomEvent("hass-more-info", {
-        detail: { entityId: this._config.entity },
-        bubbles: true,
-        composed: true,
-      }));
-      return;
-    }
-
-    this._dialogOpen = true;
-    const lang = this._hass?.language || "en";
-
-    const overlay = document.createElement("div");
-    Object.assign(overlay.style, {
-      position: "fixed", top: "0", left: "0", right: "0", bottom: "0",
-      background: "rgba(0,0,0,0.5)", zIndex: "7",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "16px",
-    });
-
-    const content = document.createElement("div");
-    Object.assign(content.style, {
-      width: "100%", maxWidth: "400px", maxHeight: "90vh", overflowY: "auto",
-      borderRadius: "16px", background: "var(--card-background-color, var(--ha-card-background, #fff))",
-      boxShadow: "0 8px 32px rgba(0,0,0,0.25)", position: "relative",
-    });
-
-    const closeBtn = document.createElement("button");
-    closeBtn.textContent = "\u2715";
-    closeBtn.setAttribute("aria-label", _t(lang, "close"));
-    closeBtn.title = _t(lang, "close");
-    Object.assign(closeBtn.style, {
-      position: "absolute", top: "8px", right: "8px", width: "32px", height: "32px",
-      border: "none", borderRadius: "50%", background: "var(--secondary-background-color)",
-      color: "var(--primary-text-color)", fontSize: "1.1em", cursor: "pointer",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: "1",
-    });
-
-    content.appendChild(closeBtn);
-    overlay.appendChild(content);
-    document.body.appendChild(overlay);
-
-    // Create the full alarm card inside the dialog.
-    //
-    // Strip the badge/chip's gesture config before passing it down. The same
-    // tap_action key means different things in different contexts: on a badge
-    // or chip, `more-info` is wired to open THIS popup; on the alarm-card,
-    // `more-info` dispatches `hass-more-info` and opens HA's standard dialog.
-    // Forwarding the badge's gestures verbatim would make a tap on the icon
-    // inside the popup open HA's dialog on top of our popup.
-    const innerConfig = { ...this._config };
-    for (const k of GESTURE_KEYS) delete innerConfig[k];
-    this._dialogCard = document.createElement("securitas-alarm-card");
-    this._dialogCard.setConfig(innerConfig);
-    this._dialogCard.hass = this._hass;
-    content.appendChild(this._dialogCard);
-
-    // Close handlers
-    const close = () => {
-      this._dialogOpen = false;
-      this._dialogCard = null;
-      overlay.remove();
-      if (this._unsubConnection) {
-        this._unsubConnection();
-        this._unsubConnection = null;
-      }
-    };
-    closeBtn.addEventListener("click", close);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) close();
-    });
-
-    // Close overlay when HA connection drops (e.g. restart). The connection's
-    // addEventListener returns void, so we build our own unsubscribe via
-    // removeEventListener (capturing the same conn) — otherwise each open would
-    // leak a "disconnected" listener.
-    if (this._hass?.connection) {
-      const conn = this._hass.connection;
-      conn.addEventListener("disconnected", close);
-      this._unsubConnection = () =>
-        conn.removeEventListener("disconnected", close);
-    }
+    // Let Home Assistant own the dialog shell, history/settings actions and
+    // native alarm controls. The entity's custom_ui_more_info attribute selects
+    // our small wrapper, which composes HA's stock control with Force Arm UI.
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      detail: { entityId: this._config.entity },
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   getCardSize() { return 1; }
@@ -581,7 +495,6 @@ class VerisureOwaAlarmChip extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._dialogOpen = false;
     this._pinOverlay = null;
     this._pinState   = null;
     this._pin        = "";
@@ -609,7 +522,6 @@ class VerisureOwaAlarmChip extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     this._tryRender();
-    if (this._dialogCard) this._dialogCard.hass = hass;
   }
 
   _tryRender() {
@@ -746,7 +658,7 @@ if (!window.customBadges.find(b => b.type === "verisure-owa-alarm-badge")) {
   window.customBadges.push({
     type:        "verisure-owa-alarm-badge",
     name:        "Verisure OWA Alarm Badge",
-    description: "Alarm badge with name and state — click to open the full alarm card.",
+    description: "Alarm badge with name and state — click to open native More Info.",
     preview:     true,
   });
 }
