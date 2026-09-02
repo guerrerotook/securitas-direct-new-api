@@ -106,6 +106,8 @@ describe("Verisure native alarm More Info extension", () => {
     expect(root.textContent).toContain("Kitchen Window");
     expect(root.textContent).toContain("Front Door");
     const force = root.querySelector(".force");
+    expect(force.querySelector(".button-content").textContent).toBe("Force Arm");
+    expect(root.querySelector(".cancel .button-content").textContent).toBe("Cancel");
     force.click();
     expect(force.disabled).toBe(true);
     expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {

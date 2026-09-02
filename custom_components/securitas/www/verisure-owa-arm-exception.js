@@ -81,6 +81,16 @@ function appendTextElement(parent, tagName, className, text) {
   return element;
 }
 
+function replaceButtonLabel(button, label) {
+  // ha-control-button paints its background with a positioned ::before
+  // pseudo-element. A fully opaque fill can cover an unwrapped text node, so
+  // keep the slotted label in an explicit stacking layer above that fill.
+  const content = document.createElement("span");
+  content.className = "button-content";
+  content.textContent = label;
+  button.replaceChildren(content);
+}
+
 export class VerisureOwaArmExceptionAlert extends HTMLElement {
   constructor() {
     super();
@@ -109,7 +119,7 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
         --mdc-icon-size: 20px;
         color: var(--warning-color, #ff9800);
       }
-      .copy { min-width: 0; }
+      .copy { min-width: 0; text-align: start; }
       .force-title { font-weight: var(--ha-font-weight-medium, 500); }
       .sensor-list {
         margin: var(--ha-space-3, 12px) 0 0;
@@ -117,6 +127,7 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
         color: var(--secondary-text-color);
       }
       .actions {
+        grid-column: 2;
         display: flex;
         justify-content: flex-end;
         margin-top: var(--ha-space-4, 16px);
@@ -140,6 +151,13 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
         min-width: 88px;
         --control-button-background-color: var(--secondary-background-color);
         --control-button-background-opacity: 1;
+      }
+      .button-content {
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
       :host([presentation="compact"]) .warning {
         min-height: var(--feature-height, 42px);
@@ -165,7 +183,7 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
       }
       :host([presentation="compact"]) .sensor-list li { display: inline; }
       :host([presentation="compact"]) .sensor-list li:not(:last-child)::after { content: ", "; }
-      :host([presentation="compact"]) .actions { margin: 0; }
+      :host([presentation="compact"]) .actions { grid-column: auto; margin: 0; }
       :host([presentation="compact"]) ha-control-button {
         height: 32px;
         min-width: 32px;
@@ -286,14 +304,15 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
     this._cancelButton.replaceChildren();
     if (presentation === "compact") {
       const closeIcon = document.createElement("ha-icon");
+      closeIcon.className = "button-content";
       closeIcon.setAttribute("icon", "mdi:close");
       this._cancelButton.appendChild(closeIcon);
     } else {
-      this._cancelButton.textContent = cancelLabel;
+      replaceButtonLabel(this._cancelButton, cancelLabel);
     }
     this._forceButton.label = forceLabel;
     this._forceButton.setAttribute("aria-label", forceLabel);
-    this._forceButton.textContent = forceLabel;
+    replaceButtonLabel(this._forceButton, forceLabel);
     this._forceButton.hidden = !state.forceArmAvailable;
     this._setBusy(this._busy);
   }

@@ -53,6 +53,8 @@ describe("verisure-owa-arm-exception-alert public properties", () => {
 
     alert.presentation = null;
     expect(alert.getAttribute("presentation")).toBe("full");
+    expect(alert.shadowRoot.querySelector(".cancel .button-content").textContent).toBe("Cancelar");
+    expect(alert.shadowRoot.querySelector("style").textContent).toContain("grid-column: 2");
   });
 
   it("uses the generic notification for non-Error service rejections", async () => {

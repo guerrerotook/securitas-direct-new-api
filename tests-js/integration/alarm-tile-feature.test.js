@@ -211,6 +211,8 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
     const root = exceptionRoot(feature);
     const force = root.querySelector("ha-control-button.force");
 
+    expect(force.querySelector(".button-content").textContent).toBe("Force Arm");
+    expect(root.querySelector(".cancel .button-content").localName).toBe("ha-icon");
     force.click();
     await Promise.resolve();
     await Promise.resolve();
