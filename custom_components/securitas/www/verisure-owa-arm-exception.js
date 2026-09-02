@@ -248,26 +248,6 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
     this._render();
   }
 
-  set hass(hass) {
-    this._hass = hass;
-    this._render();
-  }
-
-  set stateObj(stateObj) {
-    this._stateObj = stateObj;
-    this._render();
-  }
-
-  set entity(entityId) {
-    this._entityId = entityId;
-    this._render();
-  }
-
-  set presentation(presentation) {
-    this._presentation = presentation || "full";
-    this._render();
-  }
-
   get active() {
     return armExceptionState(this._resolvedStateObj()).active;
   }

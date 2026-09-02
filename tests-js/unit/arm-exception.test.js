@@ -33,25 +33,33 @@ describe("arming-exception shared helpers", () => {
   });
 });
 
-describe("verisure-owa-arm-exception-alert public properties", () => {
-  it("supports incremental HA-style property updates", () => {
+describe("verisure-owa-arm-exception-alert public API", () => {
+  it("updates all presentation state through one method", () => {
     const alert = document.createElement("verisure-owa-arm-exception-alert");
     const stateObj = {
       entity_id: "alarm_control_panel.test",
       attributes: { arm_exception_active: true, arm_exceptions: ["Patio"] },
     };
+    const hass = makeHass({ language: undefined, locale: { language: "es" } });
 
-    alert.hass = makeHass({ language: undefined, locale: { language: "es" } });
-    alert.stateObj = stateObj;
-    alert.entity = "alarm_control_panel.test";
-    alert.presentation = "compact";
+    alert.update({
+      hass,
+      stateObj,
+      entityId: "alarm_control_panel.test",
+      presentation: "compact",
+    });
     document.body.appendChild(alert);
 
     expect(alert.active).toBe(true);
     expect(alert.getAttribute("presentation")).toBe("compact");
     expect(alert.shadowRoot.textContent).toContain("Patio");
 
-    alert.presentation = null;
+    alert.update({
+      hass,
+      stateObj,
+      entityId: "alarm_control_panel.test",
+      presentation: null,
+    });
     expect(alert.getAttribute("presentation")).toBe("full");
     expect(alert.shadowRoot.querySelector(".cancel .button-content").textContent).toBe("Cancelar");
     expect(alert.shadowRoot.querySelector("style").textContent).toContain("grid-column: 2");

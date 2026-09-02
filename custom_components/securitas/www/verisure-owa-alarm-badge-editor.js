@@ -20,10 +20,7 @@ const PRESERVED_CUSTOM_KEYS = ["colors"];
 const BADGE_ACTIONS = ["more-info", "navigate", "perform-action", "none"];
 
 function nativeAction(action) {
-  // arm_or_disarm predates the Badge's native HA interactions. More Info is
-  // the lossless native replacement: it exposes every supported arm mode and
-  // lets Home Assistant own PIN entry. The runtime still understands old YAML
-  // until the Badge is next saved through the visual editor.
+  // Match the runtime migration when the editor receives old dashboard YAML.
   return action?.action === "arm_or_disarm" ? { action: "more-info" } : action;
 }
 
@@ -239,7 +236,6 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
         next[key] = { action: "more-info" };
       }
     }
-
     this._config = next;
     this._render();
     this.dispatchEvent(

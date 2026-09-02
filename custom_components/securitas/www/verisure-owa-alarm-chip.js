@@ -11,7 +11,6 @@ import {
   _t,
   STATE_CFG,
   attachGesture,
-  callServiceWithErrorNotification,
   _makeLegacyShim,
 } from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
 import "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
@@ -21,6 +20,20 @@ const BADGE_DEFAULT_CONFIG = {
   show_state: true,
   show_icon: true,
 };
+
+const COMPACT_ACTION_KEYS = ["tap_action", "hold_action", "double_tap_action"];
+
+// Replace the removed conditional Badge/Chip action as old YAML is loaded.
+// The native More Info dialog provides mode selection and PIN handling.
+function migrateCompactAlarmConfig(config) {
+  let migrated = config;
+  for (const key of COMPACT_ACTION_KEYS) {
+    if (config[key]?.action !== "arm_or_disarm") continue;
+    if (migrated === config) migrated = { ...config };
+    migrated[key] = { action: "more-info" };
+  }
+  return migrated;
+}
 
 const HA_THEME_COLORS = new Set([
   "primary", "accent", "red", "pink", "purple", "deep-purple", "indigo",
@@ -48,7 +61,6 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._config = {};
     this._context = {};
     this._stateObj = null;
 
@@ -65,8 +77,7 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._render();
   }
 
-  setConfig(config) {
-    this._config = config || {};
+  setConfig() {
     this._render();
   }
 
@@ -128,24 +139,18 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._pinOverlay = null;   // floating PIN overlay element (or null)
-    this._pinState   = null;   // { service, labelKey } when PIN entry active
-    this._pin        = "";
     this._gestureCleanup = null; // cleanup fn returned by attachGesture
   }
 
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
-    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
     // Reset for re-render on reconnection — see VerisureOwaAlarmCard.disconnectedCallback.
     this._lastKey = null;
-    this._pinState = null;
-    this._pin = "";
   }
 
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
-    this._config = { ...BADGE_DEFAULT_CONFIG, ...config };
+    this._config = { ...BADGE_DEFAULT_CONFIG, ...migrateCompactAlarmConfig(config) };
     this._lastKey = null;
     if (this._hass) this._renderBadge();
   }
@@ -259,23 +264,12 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     // Clean up previous gesture listeners (badge re-renders on state change)
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
 
-    const gestureConfig = {
-      tap_action:        this._config.tap_action        || { action: "more-info" },
-      hold_action:       this._config.hold_action       || { action: "none" },
-      double_tap_action: this._config.double_tap_action || { action: "none" },
-    };
-
     this._gestureCleanup = attachGesture(
       badgeEl,
-      gestureConfig,
+      this._config,
       this._hass,
       this._config.entity,
       this,
-      {
-        onMoreInfo:    () => this._openDialog(),
-        startPinEntry: (svcAction) => this._startBadgePinEntry(svcAction),
-      },
-      this._config.states,
     );
   }
 
@@ -308,139 +302,6 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     return stateObj.attributes.friendly_name || this._config.entity;
   }
 
-  _startBadgePinEntry(svcAction) {
-    if (this._pinOverlay) return; // already showing
-
-    const hass   = this._hass;
-    const entity = this._config.entity;
-    const lang   = hassLanguage(hass);
-    const stateObj = hass.states[entity];
-    const codeFormat = stateObj?.attributes?.code_format || "number";
-
-    this._pinState = svcAction;
-    this._pin      = "";
-
-    const overlay = document.createElement("div");
-    Object.assign(overlay.style, {
-      position: "fixed", top: "0", left: "0", right: "0", bottom: "0",
-      background: "rgba(0,0,0,0.5)", zIndex: "8",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "16px",
-    });
-
-    const box = document.createElement("div");
-    Object.assign(box.style, {
-      width: "100%", maxWidth: "340px",
-      borderRadius: "16px",
-      background: "var(--card-background-color, var(--ha-card-background, #fff))",
-      boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-      padding: "20px",
-      fontFamily: "inherit",
-    });
-
-    const actionLabel = svcAction.labelKey ? _t(lang, svcAction.labelKey) : (svcAction.label || "");
-    const promptKey   = codeFormat === "number" ? "enter_pin" : "enter_code";
-
-    box.innerHTML = `
-      <div style="font-size:0.9em;font-weight:600;color:var(--primary-text-color);margin-bottom:12px">
-        ${_t(lang, promptKey, { action: actionLabel })}
-      </div>
-      ${codeFormat === "number" ? `
-        <input id="badge-pin-input" type="password" inputmode="numeric" autocomplete="off"
-               style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--divider-color);
-                      border-radius:8px;font-size:1.1em;margin-bottom:12px;background:var(--secondary-background-color);
-                      color:var(--primary-text-color)" placeholder="••••" />
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px">
-          ${[1,2,3,4,5,6,7,8,9].map(n =>
-            `<button data-badge-key="${n}" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${n}</button>`
-          ).join("")}
-          <button data-badge-key="cancel" aria-label="${_t(lang, "cancel")}" title="${_t(lang, "cancel")}" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--error-color)">✕</button>
-          <button data-badge-key="0" style="padding:10px;border:none;border-radius:8px;font-size:1em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">0</button>
-          <button data-badge-key="del" aria-label="${_t(lang, "delete")}" title="${_t(lang, "delete")}" style="padding:10px;border:none;border-radius:8px;font-size:1em;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">⌫</button>
-        </div>
-      ` : `
-        <input id="badge-pin-input" type="password" autocomplete="off"
-               style="width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--divider-color);
-                      border-radius:8px;font-size:1em;margin-bottom:12px;background:var(--secondary-background-color);
-                      color:var(--primary-text-color)" placeholder="${_t(lang, "code")}" />
-      `}
-      <div style="display:flex;gap:8px">
-        <button id="badge-pin-cancel" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:0.9em;font-weight:600;cursor:pointer;background:var(--secondary-background-color);color:var(--primary-text-color)">${_t(lang, "cancel")}</button>
-        <button id="badge-pin-confirm" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:0.9em;font-weight:600;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,#fff)">${_t(lang, "confirm")}</button>
-      </div>`;
-
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-    this._pinOverlay = overlay;
-
-    const close = () => {
-      overlay.remove();
-      this._pinOverlay = null;
-      this._pinState   = null;
-      this._pin        = "";
-    };
-
-    // Keypad
-    const pinInput = box.querySelector("#badge-pin-input");
-    const syncInput = () => { if (pinInput) pinInput.value = this._pin; };
-
-    box.querySelectorAll("[data-badge-key]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const k = btn.dataset.badgeKey;
-        if (k === "cancel") { close(); return; }
-        if (k === "del")    { this._pin = this._pin.slice(0, -1); syncInput(); return; }
-        this._pin += k; syncInput();
-      });
-    });
-
-    if (pinInput) {
-      requestAnimationFrame(() => pinInput.focus());
-      pinInput.addEventListener("input", e => {
-        this._pin = codeFormat === "number"
-          ? e.target.value.replace(/\D/g, "")
-          : e.target.value;
-        if (codeFormat === "number") e.target.value = this._pin;
-      });
-      pinInput.addEventListener("keydown", e => {
-        if (e.key === "Enter")  this._submitBadgePin(close);
-        if (e.key === "Escape") close();
-      });
-    }
-
-    box.querySelector("#badge-pin-cancel").addEventListener("click", close);
-    box.querySelector("#badge-pin-confirm").addEventListener("click", () => this._submitBadgePin(close));
-
-    // Tap outside to close
-    overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
-  }
-
-  _submitBadgePin(closeFn) {
-    if (!this._pinState || !this._pin) return;
-    callServiceWithErrorNotification(
-      this._hass,
-      "alarm_control_panel",
-      this._pinState.service,
-      {
-        entity_id: this._config.entity,
-        code: this._pin,
-      },
-      undefined,
-      this,
-    );
-    closeFn();
-  }
-
-  _openDialog() {
-    // Let Home Assistant own the dialog shell, history/settings actions and
-    // native alarm controls. The entity's custom_ui_more_info attribute selects
-    // our small wrapper, which composes HA's stock control with Force Arm UI.
-    this.dispatchEvent(new CustomEvent("hass-more-info", {
-      detail: { entityId: this._config.entity },
-      bubbles: true,
-      composed: true,
-    }));
-  }
-
   getCardSize() { return 1; }
 
   static async getConfigElement() {
@@ -470,24 +331,18 @@ class VerisureOwaAlarmChip extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._pinOverlay = null;
-    this._pinState   = null;
-    this._pin        = "";
     this._gestureCleanup = null;
   }
 
   disconnectedCallback() {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
-    if (this._pinOverlay) { this._pinOverlay.remove(); this._pinOverlay = null; }
     // Reset for re-render on reconnection — see VerisureOwaAlarmCard.disconnectedCallback.
     this._lastKey = null;
-    this._pinState = null;
-    this._pin = "";
   }
 
   setConfig(config) {
     if (!config.entity) throw new Error("Please define an entity");
-    this._config = config;
+    this._config = migrateCompactAlarmConfig(config);
     this._lastKey = null;  // force re-render on config change
     if (this._hass) this._tryRender();
   }
@@ -561,32 +416,13 @@ class VerisureOwaAlarmChip extends HTMLElement {
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
 
     const chipEl = this.shadowRoot.getElementById("chip");
-    const gestureConfig = {
-      tap_action:        this._config.tap_action        || { action: "more-info" },
-      hold_action:       this._config.hold_action       || { action: "none" },
-      double_tap_action: this._config.double_tap_action || { action: "none" },
-    };
-
     this._gestureCleanup = attachGesture(
       chipEl,
-      gestureConfig,
+      this._config,
       this._hass,
       this._config.entity,
       this,
-      {
-        onMoreInfo:    () => this._openDialog(),
-        startPinEntry: (svcAction) => VerisureOwaAlarmBadge.prototype._startBadgePinEntry.call(this, svcAction),
-      },
-      this._config.states,
     );
-  }
-
-  _openDialog() {
-    VerisureOwaAlarmBadge.prototype._openDialog.call(this);
-  }
-
-  _submitBadgePin(closeFn) {
-    VerisureOwaAlarmBadge.prototype._submitBadgePin.call(this, closeFn);
   }
 
   getCardSize() { return 1; }

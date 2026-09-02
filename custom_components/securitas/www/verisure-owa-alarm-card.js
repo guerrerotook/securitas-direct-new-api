@@ -374,11 +374,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
         this._config.entity,
         this,
         {
-          onMoreInfo: () => this.dispatchEvent(new CustomEvent("hass-more-info", {
-            detail: { entityId: this._config.entity },
-            bubbles: true,
-            composed: true,
-          })),
           startPinEntry: (svcAction) => this._startPinEntry(svcAction),
         },
         this._config.states,

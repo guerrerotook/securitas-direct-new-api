@@ -211,7 +211,7 @@ chips:
 
 ### Gesture Actions
 
-All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card has its integration-specific action editor. The Badge uses Home Assistant's native action selectors, and the chip is YAML-only. Older Badge YAML containing `arm_or_disarm` still runs for compatibility; opening and saving it in the visual editor migrates that gesture to native More Info.
+All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card has its integration-specific action editor. The Badge uses Home Assistant's native action selectors, and the chip is YAML-only. On update, older Badge and Chip YAML containing `arm_or_disarm` is interpreted as native More Info, so Home Assistant owns mode selection and PIN entry.
 
 ![Gesture Actions](./docs/images/card-gestures.png)
 
@@ -257,9 +257,7 @@ double_tap_action:
 
 Other fixed arm actions are `alarm_control_panel.alarm_arm_home`, `alarm_control_panel.alarm_arm_night`, `alarm_control_panel.alarm_arm_vacation` and `alarm_control_panel.alarm_arm_custom_bypass`, when advertised by the entity. A direct **Perform action** is fixed; it does not automatically switch between arm and disarm. If a code is required, use More Info instead of storing the code in dashboard YAML.
 
-Older Badge YAML containing the custom `arm_or_disarm` action remains executable for compatibility. Opening and saving that Badge in the visual editor replaces the legacy action with **More Info**.
-
-#### Migrating a Badge from `arm_or_disarm`
+#### Migrating a Badge or Chip from `arm_or_disarm`
 
 The legacy action selected an arm or disarm service from the current alarm state:
 
@@ -282,11 +280,11 @@ hold_action:
   action: none
 ```
 
-You can perform this migration without editing YAML: open the existing Badge in the visual editor and save it. Any Badge gesture using `arm_or_disarm` is converted to **More Info**. You can then leave that gesture as More Info or change it to None.
+The integration performs this migration at runtime after the update, so old Badge and Chip configurations immediately open More Info instead of the removed custom PIN dialog. To persist the new YAML, open an existing Badge in the visual editor and save it. The Chip is YAML-only, so replace its legacy action manually when convenient.
 
 If direct shortcuts are still preferred, replace the conditional action with the two explicit `perform-action` gestures shown in [Using a fixed direct action](#using-a-fixed-direct-action). That variant does not open Home Assistant's PIN dialog, so use the More Info migration when the panel requires a code.
 
-The standalone Alarm Card and YAML-only Chip additionally retain their existing integration-specific actions:
+The standalone Alarm Card retains its existing integration-specific actions:
 
 | Option   | Description                                                                                         |
 | -------- | --------------------------------------------------------------------------------------------------- |
@@ -305,18 +303,21 @@ chips:
     tap_action:
       action: more-info           # default — opens native More Info
     hold_action:
-      action: arm_or_disarm       # arms when disarmed, disarms when armed
+      action: perform-action
+      perform_action: alarm_control_panel.alarm_arm_away
+      target:
+        entity_id: alarm_control_panel.my_alarm
     double_tap_action:
       action: navigate
       navigation_path: /lovelace/security
 ```
 
-| Action           | YAML value                                                           |
-| ---------------- | -------------------------------------------------------------------- |
-| None             | `action: none`                                                       |
-| Open More Info   | `action: more-info`                                                  |
-| Navigate         | `action: navigate` + `navigation_path: /path`                       |
-| Arm or Disarm    | `action: arm_or_disarm` (optionally + `arm_state: arm_away` etc.)   |
+| Action         | YAML value                                                        |
+| -------------- | ----------------------------------------------------------------- |
+| None           | `action: none`                                                    |
+| Open More Info | `action: more-info`                                               |
+| Navigate       | `action: navigate` + `navigation_path: /path`                    |
+| Perform action | `action: perform-action` + `perform_action: domain.service`       |
 
 ### Tile Card
 

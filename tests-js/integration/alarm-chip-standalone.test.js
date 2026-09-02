@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import "../../custom_components/securitas/www/verisure-owa-alarm-chip.js";
 
 // The chip/badge are what sit on an always-visible dashboard. They must be
@@ -50,7 +50,13 @@ describe("verisure-owa-alarm-chip standalone module", () => {
       moreInfoEntity = e.detail.entityId;
     });
 
-    expect(() => chip._openDialog()).not.toThrow();
+    vi.useFakeTimers();
+    const chipElement = chip.shadowRoot.getElementById("chip");
+    chipElement.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    chipElement.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    vi.advanceTimersByTime(301);
+    vi.useRealTimers();
+
     expect(moreInfoEntity).toBe("alarm_control_panel.test");
   });
 });

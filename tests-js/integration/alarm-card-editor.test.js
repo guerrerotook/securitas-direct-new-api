@@ -294,7 +294,7 @@ describe("verisure-owa-alarm-badge-editor", () => {
       new CustomEvent("value-changed", {
         detail: {
           value: {
-            entity: "alarm_control_panel.x",
+            ...form.data,
             displayed_elements: ["state", "icon"],
           },
         },

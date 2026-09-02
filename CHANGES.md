@@ -28,7 +28,10 @@ controls for name, icon, displayed elements, state attributes and timestamp
 format.  The Verisure warning behaviour remains intact: a blocked arm attempt
 temporarily switches the badge to the amber alert icon, and tapping it opens
 the native More Info dialog with the affected sensors and any available Force
-Arm action.
+Arm action.  Legacy Badge and Chip `arm_or_disarm` gestures are migrated to
+More Info at runtime, allowing the duplicate custom PIN dialog and its alarm
+control logic to be removed; the standalone Alarm Card keeps its existing
+integration-specific gestures.
 
 **Open sensors directly in the Home Assistant Tile Card.**  A new
 **Verisure OWA Open Sensors** custom Tile feature can sit below HA's native

@@ -411,7 +411,7 @@ export function alarmEntitySuggestion(hass, entityId) {
  * @param {object}        hass        - Home Assistant hass object
  * @param {string}        entityId    - Alarm entity id
  * @param {HTMLElement}   srcEl       - Element to dispatch events from
- * @param {object}        callbacks   - { startPinEntry(action), onMoreInfo() }
+ * @param {object}        callbacks   - { startPinEntry(action) }
  * @param {string[]}      [cardStates] - Card's `_config.states` (optional);
  *                                       passed to executeAction so its
  *                                       arm_or_disarm fallback honors the
@@ -506,7 +506,7 @@ export function attachGesture(el, config, hass, entityId, srcEl, callbacks = {},
  * @param {object}      hass        - Home Assistant hass object
  * @param {string}      entityId    - Alarm entity id
  * @param {HTMLElement} srcEl       - Element to dispatch events from (for more-info)
- * @param {object}      callbacks   - { startPinEntry(serviceAction), onMoreInfo() }
+ * @param {object}      callbacks   - { startPinEntry(serviceAction) }
  * @param {string[]}    [cardStates] - Card's `_config.states` (optional); when
  *                                     `arm_or_disarm` has no explicit
  *                                     `arm_state`, the fallback default is
@@ -518,9 +518,7 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
   switch (action.action) {
 
     case "more-info":
-      if (callbacks.onMoreInfo) {
-        callbacks.onMoreInfo();
-      } else if (srcEl) {
+      if (srcEl) {
         srcEl.dispatchEvent(new CustomEvent("hass-more-info", {
           detail: { entityId },
           bubbles: true,
