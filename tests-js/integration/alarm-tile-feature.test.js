@@ -14,6 +14,10 @@ function mountFeature({ entity = makeAlarmEntity(), hass, context = true } = {})
   return feature;
 }
 
+function exceptionRoot(feature) {
+  return feature.shadowRoot.querySelector("verisure-owa-arm-exception-alert").shadowRoot;
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
 });
@@ -51,7 +55,7 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
   it("stays hidden while there is no arming exception", () => {
     const feature = mountFeature();
     expect(feature.hidden).toBe(true);
-    expect(feature.shadowRoot.querySelector(".warning")).toBeNull();
+    expect(feature.shadowRoot.querySelector("verisure-owa-arm-exception-alert").hidden).toBe(true);
   });
 
   it("lists all non-forceable sensors inline and escapes their names", () => {
@@ -63,11 +67,12 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
     });
 
     expect(feature.hidden).toBe(false);
-    expect(feature.shadowRoot.textContent).toContain("Open sensor(s) — close them before arming");
-    expect(feature.shadowRoot.textContent).toContain("Kitchen window");
-    expect(feature.shadowRoot.textContent).toContain("Bedroom <script>");
-    expect(feature.shadowRoot.innerHTML).not.toContain("Bedroom <script>");
-    expect(feature.shadowRoot.querySelector(".force")).toBeNull();
+    const root = exceptionRoot(feature);
+    expect(root.textContent).toContain("Open sensor(s) — close them before arming");
+    expect(root.textContent).toContain("Kitchen window");
+    expect(root.textContent).toContain("Bedroom <script>");
+    expect(root.innerHTML).not.toContain("Bedroom <script>");
+    expect(root.querySelector(".force").hidden).toBe(true);
   });
 
   it("uses the HA locale fallback and tolerates a malformed sensor list", () => {
@@ -82,13 +87,13 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
       }),
     });
 
-    expect(feature.shadowRoot.textContent).toContain(
+    expect(exceptionRoot(feature).textContent).toContain(
       "Sensor(es) abierto(s) — ciérrelos antes de armar",
     );
-    expect(feature.shadowRoot.querySelector(".sensors")).toBeNull();
+    expect(exceptionRoot(feature).querySelector(".sensors").hidden).toBe(true);
   });
 
-  it("offers Force Arm only when allowed and calls both feature services", () => {
+  it("offers Force Arm only when allowed and calls both feature services", async () => {
     const parentClick = vi.fn();
     const parent = document.createElement("div");
     parent.addEventListener("click", parentClick);
@@ -108,12 +113,14 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
     feature.hass = hass;
     parent.appendChild(feature);
 
-    feature.shadowRoot.querySelector(".force").click();
+    exceptionRoot(feature).querySelector(".force").click();
     expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
       entity_id: ENTITY,
     });
+    await Promise.resolve();
+    await Promise.resolve();
 
-    feature.shadowRoot.querySelector(".dismiss").click();
+    exceptionRoot(feature).querySelector(".dismiss").click();
     expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm_cancel", {
       entity_id: ENTITY,
     });
@@ -143,7 +150,7 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
       },
     });
     expect(wrapper.hidden).toBe(false);
-    expect(feature.shadowRoot.textContent).toContain("Patio");
+    expect(exceptionRoot(feature).textContent).toContain("Patio");
 
     feature.hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity() },
@@ -163,8 +170,8 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
     const feature = mountFeature({ hass, context: false });
     feature.stateObj = entity;
 
-    expect(feature.shadowRoot.textContent).toContain("Garage");
-    feature.shadowRoot.querySelector(".dismiss").click();
+    expect(exceptionRoot(feature).textContent).toContain("Garage");
+    exceptionRoot(feature).querySelector(".dismiss").click();
     expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm_cancel", {
       entity_id: ENTITY,
     });
@@ -177,7 +184,7 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
         armExceptions: ["Window 1"],
       }),
     });
-    expect(feature.shadowRoot.textContent).toContain("Window 1");
+    expect(exceptionRoot(feature).textContent).toContain("Window 1");
 
     feature.hass = makeHass({
       states: {
@@ -187,7 +194,28 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
         }),
       },
     });
-    expect(feature.shadowRoot.textContent).not.toContain("Window 1");
-    expect(feature.shadowRoot.textContent).toContain("Window 2, Window 3");
+    expect(exceptionRoot(feature).textContent).not.toContain("Window 1");
+    expect(exceptionRoot(feature).textContent).toContain("Window 2Window 3");
+  });
+
+  it("uses native HA control buttons and recovers from rejected services", async () => {
+    const hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({ forceArmAvailable: true, armExceptions: ["Office"] }),
+      },
+    });
+    hass.callService.mockRejectedValueOnce(new Error("unavailable"));
+    const feature = mountFeature({ hass });
+    const notification = vi.fn();
+    feature.addEventListener("hass-notification", notification);
+    const root = exceptionRoot(feature);
+    const force = root.querySelector("ha-control-button.force");
+
+    force.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(notification).toHaveBeenCalledOnce();
+    expect(force.disabled).toBe(false);
   });
 });

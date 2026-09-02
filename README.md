@@ -196,7 +196,7 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 
 A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog; hold and double-tap can be configured to arm/disarm directly — see [Gesture Actions](#gesture-actions) below.
 
-Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its visual editor includes the same **Content** controls as Home Assistant's entity badge: configure the name and icon, choose whether to show the name, state and icon, select state attributes to display, and choose the time format for timestamp content.
+Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; and choose the time format for timestamp content. A small **Alarm behavior** section represents the Badge's default hold-to-arm/disarm action and arm mode.
 
 ### Mushroom Chip
 
@@ -211,7 +211,7 @@ chips:
 
 ### Gesture Actions
 
-All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card and badge expose them in the visual editor; the chip is YAML-only.
+All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card has its integration-specific action editor. The Badge uses Home Assistant's native action selectors plus its **Alarm behavior** section; existing advanced `arm_or_disarm` YAML actions remain supported. The chip is YAML-only.
 
 ![Gesture Actions](./docs/images/card-gestures.png)
 

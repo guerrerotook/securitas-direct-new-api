@@ -22,6 +22,7 @@
  */
 
 import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 import {
   _t,
   STATE_CFG,
@@ -264,7 +265,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // Backwards compatibility: older backends exposed only
     // force_arm_available when an exception prompt was active.
     const armExceptionActive = attrs.arm_exception_active === true || forceArmAvailable;
-    const openSensors         = attrs.arm_exceptions || [];
     const wafBlocked        = attrs.waf_blocked === true;
     const refreshFailed     = attrs.refresh_failed === true;
     // Capability gate set by the integration options; only then is the
@@ -319,7 +319,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
           <!-- ── Arming exception / optional force-arm section ── -->
           ${!isUnavailable && armExceptionActive ? `
-            ${this._renderArmException(openSensors, lang, forceArmAvailable)}
+            <div id="arm-exception-slot"></div>
             ${canDisarm ? `<div class="btn-grid"><button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button></div>` : ""}
           ` : ""}
 
@@ -346,6 +346,18 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
         </div>
       </ha-card>`;
+
+    const armExceptionSlot = this.shadowRoot.getElementById("arm-exception-slot");
+    if (armExceptionSlot) {
+      const alert = document.createElement("verisure-owa-arm-exception-alert");
+      alert.update({
+        hass: this._hass,
+        stateObj,
+        entityId: this._config.entity,
+        presentation: "full",
+      });
+      armExceptionSlot.appendChild(alert);
+    }
 
     // Attach gesture actions to the header icon (always-visible touch target)
     const iconWrap = this.shadowRoot.querySelector(".icon-wrap");
@@ -374,25 +386,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
     }
 
     this._attachListeners(stateObj, codeFormat, codeArmRequired, hasCode, isArmed);
-  }
-
-  // ── Force arm section ───────────────────────────────────────────────────────
-  _renderArmException(sensors, lang, allowForcing) {
-    const list = sensors.length
-      ? `<ul class="sensor-list">${sensors.map(s => `<li>${escHtml(s)}</li>`).join("")}</ul>`
-      : "";
-    return `
-      <div class="force-section">
-        <div class="force-title">
-          <ha-icon icon="mdi:alert"></ha-icon>
-          ${_t(lang, allowForcing ? "open_sensors" : "open_sensors_no_force")}
-        </div>
-        ${list}
-        <div class="force-btns">
-          <button class="btn btn-cancel-force" data-action="cancel_force">${_t(lang, "cancel")}</button>
-          ${allowForcing ? `<button class="btn btn-force" data-action="force_arm">${_t(lang, "force_arm")}</button>` : ""}
-        </div>
-      </div>`;
   }
 
   // ── PIN entry section ───────────────────────────────────────────────────────
@@ -508,15 +501,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
             if (b) b.classList.remove("spinning");
           }, 2000);
         });
-      return;
-    }
-    // Force-arm / cancel
-    if (action === "force_arm") {
-      this._hass.callService("verisure_owa", "force_arm", { entity_id: entity });
-      return;
-    }
-    if (action === "cancel_force") {
-      this._hass.callService("verisure_owa", "force_arm_cancel", { entity_id: entity });
       return;
     }
     if (action === "confirm-pin") { this._submitPin(entity); return; }
@@ -744,48 +728,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
         cursor: pointer;
       }
 
-      /* ── Force arm section ── */
-      .force-section {
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--warning-color, #FF9800) 9%, transparent);
-        border: 1.5px solid var(--warning-color, #FF9800);
-        padding: 14px;
-        margin-bottom: 16px;
-      }
-      .force-title {
-        display: flex; align-items: center; gap: 8px;
-        font-weight: 600;
-        font-size: 0.9em;
-        color: var(--warning-color, #FF9800);
-        margin-bottom: 8px;
-      }
-      .force-title ha-icon {
-        --mdc-icon-size: 18px;
-        color: var(--warning-color, #FF9800);
-        flex-shrink: 0;
-      }
-      .sensor-list {
-        list-style: none; padding: 0; margin: 0 0 12px 26px;
-      }
-      .sensor-list li {
-        font-size: 0.85em;
-        color: var(--secondary-text-color);
-        padding: 2px 0;
-      }
-      .sensor-list li::before {
-        content: "• ";
-        color: var(--warning-color, #FF9800);
-        font-weight: bold;
-      }
-      .force-btns {
-        display: flex; gap: 8px;
-      }
-      .btn-force {
-        flex: 2;
-        background: var(--warning-color, #FF9800);
-        color: var(--text-primary-color, #fff);
-      }
-      .btn-force:hover { filter: brightness(1.1); }
+      #arm-exception-slot { margin-bottom: var(--ha-space-4, 16px); }
+
+      /* Cancel button used by PIN/code entry. The arming-exception actions
+         are native ha-control-button elements owned by the shared component. */
       .btn-cancel-force {
         flex: 1;
         background: var(--secondary-background-color);
@@ -1178,128 +1124,6 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     return section;
   }
 
-  _isBadgeVariant() {
-    return /-alarm-badge$/.test(this._config.type || "");
-  }
-
-  _buildBadgeContentSection(lang) {
-    const section = document.createElement("ha-expansion-panel");
-    const localize = (key, fallback) => this._hass?.localize?.(key) || fallback;
-    section.header = localize(
-      "ui.panel.lovelace.editor.card.generic.content",
-      "Content",
-    );
-    section.expanded = true;
-
-    const displayedElements = [];
-    if (this._config.show_name === true) displayedElements.push("name");
-    if (this._config.show_state !== false) displayedElements.push("state");
-    if (this._config.show_icon !== false) displayedElements.push("icon");
-
-    const form = document.createElement("ha-form");
-    form.id = "badge-content-form";
-    form.hass = this._hass;
-    form.data = {
-      entity: this._config.entity || "",
-      name: this._config.name,
-      icon: this._config.icon,
-      displayed_elements: displayedElements,
-      state_content: this._config.state_content,
-      time_format: this._config.time_format,
-    };
-    form.schema = [
-      {
-        name: "name",
-        selector: { entity_name: {} },
-        context: { entity: "entity" },
-      },
-      {
-        name: "icon",
-        selector: { icon: {} },
-        context: { icon_entity: "entity" },
-      },
-      {
-        name: "displayed_elements",
-        selector: {
-          select: {
-            mode: "list",
-            multiple: true,
-            options: [
-              {
-                value: "name",
-                label: localize(
-                  "ui.panel.lovelace.editor.badge.entity.displayed_elements_options.name",
-                  _t(lang, "editor_name"),
-                ),
-              },
-              {
-                value: "state",
-                label: localize(
-                  "ui.panel.lovelace.editor.badge.entity.displayed_elements_options.state",
-                  "State",
-                ),
-              },
-              {
-                value: "icon",
-                label: localize(
-                  "ui.panel.lovelace.editor.badge.entity.displayed_elements_options.icon",
-                  "Icon",
-                ),
-              },
-            ],
-          },
-        },
-      },
-      {
-        name: "state_content",
-        selector: { ui_state_content: { allow_name: true } },
-        context: { filter_entity: "entity" },
-      },
-      {
-        name: "time_format",
-        selector: { ui_time_format: {} },
-      },
-    ];
-    form.computeLabel = schema => {
-      if (schema.name === "displayed_elements" || schema.name === "state_content") {
-        return localize(
-          `ui.panel.lovelace.editor.badge.entity.${schema.name}`,
-          schema.name === "displayed_elements" ? "Displayed elements" : "State content",
-        );
-      }
-      return localize(
-        `ui.panel.lovelace.editor.card.generic.${schema.name}`,
-        schema.name.replace(/_/g, " ").replace(/^./, value => value.toUpperCase()),
-      );
-    };
-
-    form.addEventListener("value-changed", e => {
-      const value = e.detail?.value || {};
-      const nextConfig = { ...this._config };
-      for (const key of ["name", "icon", "state_content", "time_format"]) {
-        if (value[key] === undefined || value[key] === "" || value[key] === null) {
-          delete nextConfig[key];
-        } else {
-          nextConfig[key] = value[key];
-        }
-      }
-      const shown = Array.isArray(value.displayed_elements)
-        ? value.displayed_elements
-        : displayedElements;
-      nextConfig.show_name = shown.includes("name");
-      nextConfig.show_state = shown.includes("state");
-      nextConfig.show_icon = shown.includes("icon");
-      this._config = nextConfig;
-      this._fireChanged();
-    });
-
-    const content = document.createElement("div");
-    content.className = "badge-content";
-    content.appendChild(form);
-    section.appendChild(content);
-    return section;
-  }
-
   _render() {
     if (!this._hass) return;
 
@@ -1311,8 +1135,6 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       <style>
         .editor { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
         ha-entity-picker, ha-textfield { width: 100%; display: block; }
-        .badge-content { padding: 8px 0 4px; }
-        .badge-content ha-form { display: block; width: 100%; }
         .section-hint {
           font-size: 0.8em;
           color: var(--secondary-text-color);
@@ -1392,7 +1214,6 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       <div class="editor">
         <ha-form id="entity-form"></ha-form>
         <div id="name-slot"></div>
-        <div id="badge-content-slot"></div>
         <div id="arm-modes-slot"></div>
         <div id="colors-slot"></div>
         <div id="gesture-slot"></div>
@@ -1440,27 +1261,22 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       }
     });
 
-    if (this._isBadgeVariant()) {
-      this.shadowRoot.getElementById("badge-content-slot")
-        .appendChild(this._buildBadgeContentSection(lang));
-    } else {
-      // ── Name field (HA native) ─────────────────────────────────────────────
-      const nameTf = document.createElement("ha-textfield");
-      nameTf.label = _t(lang, "editor_name");
-      nameTf.value = this._config.name || "";
-      nameTf.placeholder = _t(lang, "editor_name_placeholder");
-      nameTf.addEventListener("input", (e) => {
-        const val = e.target.value.trim();
-        if (val) {
-          this._config = { ...this._config, name: val };
-        } else {
-          const { name: _, ...rest } = this._config;
-          this._config = rest;
-        }
-        this._fireChanged();
-      });
-      this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
-    }
+    // ── Name field (HA native) ─────────────────────────────────────────────
+    const nameTf = document.createElement("ha-textfield");
+    nameTf.label = _t(lang, "editor_name");
+    nameTf.value = this._config.name || "";
+    nameTf.placeholder = _t(lang, "editor_name_placeholder");
+    nameTf.addEventListener("input", (e) => {
+      const val = e.target.value.trim();
+      if (val) {
+        this._config = { ...this._config, name: val };
+      } else {
+        const { name: _, ...rest } = this._config;
+        this._config = rest;
+      }
+      this._fireChanged();
+    });
+    this.shadowRoot.getElementById("name-slot").appendChild(nameTf);
 
     // ── Arm modes section ────────────────────────────────────────────────────
     const armModesSlot = this.shadowRoot.getElementById("arm-modes-slot");
@@ -1514,29 +1330,8 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     if (!gestureSlot) return;
     gestureSlot.innerHTML = "";
 
-    // Detect the card variant from the configured type. Match the tag-name
-    // suffix so every alias (securitas-*, verisure-owa-*, mushroom-*)
-    // resolves correctly — `_config.type === "custom:securitas-alarm-badge"`
-    // alone misses the canonical verisure-owa-* names and the mushroom chip.
-    const type = this._config.type || "";
-    const isBadge = this._isBadgeVariant();
-    const isChip  = /-alarm-chip$/.test(type);
-
-    // Editor defaults MUST mirror the variant's runtime fallbacks (see the
-    // `gestureConfig` blocks in VerisureOwaAlarmCard / *AlarmBadge /
-    // *AlarmChip). Otherwise the editor displays an action that the runtime
-    // wouldn't actually invoke — e.g. the Card runtime defaults to
-    // `{ action: "none" }` for hold, so showing "Arm or disarm" here is a
-    // lie and the user's saved card silently does nothing on long-press.
-    const tapDefaults = (isBadge || isChip)
-      ? { action: "more-info" }
-      : { action: "none" };
-    const holdDefaults = isBadge
-      ? {
-          action: "arm_or_disarm",
-          arm_state: defaultArmState(this._hass, this._config.entity, this._config.states),
-        }
-      : { action: "none" };
+    const tapDefaults = { action: "none" };
+    const holdDefaults = { action: "none" };
     const dblDefaults  = { action: "none" };
 
     const lang = this._hass?.language || "en";

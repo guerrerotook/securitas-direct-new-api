@@ -31,6 +31,10 @@ async function mountMoreInfo({ stateObj = makeState(), hass = makeHass() } = {})
   return element;
 }
 
+function exceptionRoot(element) {
+  return element.shadowRoot.getElementById("force-extension").shadowRoot;
+}
+
 afterEach(() => {
   document.body.innerHTML = "";
   vi.clearAllMocks();
@@ -96,11 +100,12 @@ describe("Verisure native alarm More Info extension", () => {
       }),
     });
     const extension = element.shadowRoot.getElementById("force-extension");
+    const root = exceptionRoot(element);
 
     expect(extension.hidden).toBe(false);
-    expect(extension.textContent).toContain("Kitchen Window");
-    expect(extension.textContent).toContain("Front Door");
-    const force = extension.querySelector(".force");
+    expect(root.textContent).toContain("Kitchen Window");
+    expect(root.textContent).toContain("Front Door");
+    const force = root.querySelector(".force");
     force.click();
     expect(force.disabled).toBe(true);
     expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
@@ -120,11 +125,11 @@ describe("Verisure native alarm More Info extension", () => {
         armExceptions: ["Ventana cocina"],
       }),
     });
-    const extension = element.shadowRoot.getElementById("force-extension");
+    const root = exceptionRoot(element);
 
-    expect(extension.textContent).toContain("Ventana cocina");
-    expect(extension.querySelector(".force")).toBeNull();
-    extension.querySelector(".cancel").click();
+    expect(root.textContent).toContain("Ventana cocina");
+    expect(root.querySelector(".force").hidden).toBe(true);
+    root.querySelector(".cancel").click();
     expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm_cancel", {
       entity_id: ENTITY,
     });
@@ -137,15 +142,15 @@ describe("Verisure native alarm More Info extension", () => {
     stateObj.attributes.arm_exceptions = "not-an-array";
     const localized = await mountMoreInfo({ hass: localeHass, stateObj });
 
-    expect(localized.shadowRoot.querySelector(".force-title").textContent).toContain(
+    expect(exceptionRoot(localized).querySelector(".force-title").textContent).toContain(
       "Sensor(es) abierto(s)",
     );
-    expect(localized.shadowRoot.querySelector(".sensor-list")).toBeNull();
+    expect(exceptionRoot(localized).querySelector(".sensor-list").hidden).toBe(true);
 
     const englishHass = makeHass({ language: undefined });
     delete englishHass.locale;
     const english = await mountMoreInfo({ hass: englishHass, stateObj });
-    expect(english.shadowRoot.querySelector(".force-title").textContent).toContain(
+    expect(exceptionRoot(english).querySelector(".force-title").textContent).toContain(
       "Open sensor(s)",
     );
   });
@@ -159,12 +164,13 @@ describe("Verisure native alarm More Info extension", () => {
     });
     const extension = element.shadowRoot.getElementById("force-extension");
 
-    expect(extension.querySelector("img")).toBeNull();
-    expect(extension.querySelector("li").textContent).toBe('Window <img src=x onerror="bad">');
+    expect(exceptionRoot(element).querySelector("img")).toBeNull();
+    expect(exceptionRoot(element).querySelector("li").textContent).toBe(
+      'Window <img src=x onerror="bad">',
+    );
 
     element.stateObj = makeState();
     expect(extension.hidden).toBe(true);
-    expect(extension.children).toHaveLength(0);
   });
 
   it("does not call services without an entity id", async () => {
@@ -177,7 +183,7 @@ describe("Verisure native alarm More Info extension", () => {
         entityId: "",
       }),
     });
-    const force = element.shadowRoot.querySelector(".force");
+    const force = exceptionRoot(element).querySelector(".force");
 
     force.click();
     expect(hass.callService).not.toHaveBeenCalled();
@@ -197,7 +203,7 @@ describe("Verisure native alarm More Info extension", () => {
       hass,
       stateObj: makeState({ armExceptionActive: true, forceArmAvailable: true }),
     });
-    const force = element.shadowRoot.querySelector(".force");
+    const force = exceptionRoot(element).querySelector(".force");
 
     force.click();
     element.remove();
@@ -212,7 +218,32 @@ describe("Verisure native alarm More Info extension", () => {
 
     element._nativeControl = null;
     expect(() => element._forwardNativeProperties()).not.toThrow();
-    element.shadowRoot.getElementById("force-extension").remove();
-    expect(() => element._renderForceExtension()).not.toThrow();
+    element._forceExtension = null;
+    expect(() => element._updateForceExtension()).not.toThrow();
+  });
+
+  it("reports service failures through Home Assistant and restores both actions", async () => {
+    const hass = makeHass();
+    hass.callService.mockRejectedValueOnce(new Error("panel offline"));
+    const element = await mountMoreInfo({
+      hass,
+      stateObj: makeState({ armExceptionActive: true, forceArmAvailable: true }),
+    });
+    const notification = vi.fn();
+    element.addEventListener("hass-notification", notification);
+    const root = exceptionRoot(element);
+    const force = root.querySelector(".force");
+    const cancel = root.querySelector(".cancel");
+
+    force.click();
+    expect(force.disabled).toBe(true);
+    expect(cancel.disabled).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(force.disabled).toBe(false);
+    expect(cancel.disabled).toBe(false);
+    expect(notification).toHaveBeenCalledOnce();
+    expect(notification.mock.calls[0][0].detail.message).toContain("panel offline");
   });
 });

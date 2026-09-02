@@ -203,16 +203,21 @@ class _AlarmMixin(_ClientBase):
         # ── Process result ──
         error = raw.get("error")
         if raw.get("res") == "ERROR":
-            allow_forcing = bool(error and error.get("allowForcing"))
-            exceptions_number = error.get("exceptionsNumber") if error else None
+            # Normalize the optional response block once. Besides keeping the
+            # logic readable, this gives Pyright a concrete mapping below;
+            # narrowing through the derived ``is_mpj_sensor_exception`` bool
+            # does not prove that the original ``error`` value is non-None.
+            error_info = error or {}
+            allow_forcing = bool(error_info.get("allowForcing"))
+            exceptions_number = error_info.get("exceptionsNumber")
             try:
                 has_reported_exceptions = int(exceptions_number or 0) > 0
             except (TypeError, ValueError):
                 has_reported_exceptions = False
             is_mpj_sensor_exception = bool(
-                error
+                error_info
                 and (
-                    error.get("type") in _ARMING_EXCEPTION_ERROR_TYPES
+                    error_info.get("type") in _ARMING_EXCEPTION_ERROR_TYPES
                     or (
                         raw.get("msg") == _MPJ_ARMING_EXCEPTION_MSG
                         and (allow_forcing or has_reported_exceptions)
@@ -220,8 +225,8 @@ class _AlarmMixin(_ClientBase):
                 )
             )
             if is_mpj_sensor_exception:
-                error_ref = error.get("referenceId", "")
-                error_suid = error.get("suid", "")
+                error_ref = error_info.get("referenceId", "")
+                error_suid = error_info.get("suid", "")
                 exceptions = await self._get_exceptions(
                     installation, error_ref, error_suid
                 )
@@ -231,7 +236,6 @@ class _AlarmMixin(_ClientBase):
                     exceptions,
                     allow_forcing=allow_forcing,
                 )
-            error_info = error or {}
             if error_info.get("type") != "NON_BLOCKING":
                 raw_msg = raw.get("msg", "unknown error")
                 raise VerisureOwaError(

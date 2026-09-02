@@ -184,7 +184,7 @@ describe("alarm-card badge fallbacks", () => {
         },
       }),
     });
-    expect(badge.shadowRoot.innerHTML).toContain("mdi:shield");
+    expect(badge.shadowRoot.querySelector("ha-state-icon").icon).toBe("mdi:shield");
   });
 
   it("renders without crashing when hass.language is unset", () => {
@@ -279,8 +279,11 @@ describe("compact alarm element defensive fallbacks", () => {
     };
     document.body.appendChild(feature);
 
-    feature.shadowRoot.querySelector(".force").click();
-    feature.shadowRoot.querySelector(".dismiss").click();
+    const alertRoot = feature.shadowRoot.querySelector(
+      "verisure-owa-arm-exception-alert",
+    ).shadowRoot;
+    alertRoot.querySelector(".force").click();
+    alertRoot.querySelector(".dismiss").click();
     expect(hass.callService).not.toHaveBeenCalled();
   });
 });

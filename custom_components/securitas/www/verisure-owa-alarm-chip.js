@@ -14,13 +14,26 @@ import {
   attachGesture,
   _makeLegacyShim,
 } from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
-import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
   show_state: true,
   show_icon: true,
 };
+
+const HA_THEME_COLORS = new Set([
+  "primary", "accent", "red", "pink", "purple", "deep-purple", "indigo",
+  "blue", "light-blue", "cyan", "teal", "green", "light-green", "lime",
+  "yellow", "amber", "orange", "deep-orange", "brown", "light-grey", "grey",
+  "dark-grey", "blue-grey", "black", "white", "primary-text",
+  "secondary-text", "disabled",
+]);
+
+function badgeCssColor(color, fallback) {
+  if (!color || color === "state") return fallback;
+  return HA_THEME_COLORS.has(color) ? `var(--${color}-color)` : color;
+}
 
 // Tile Card feature that surfaces the open-zone snapshot inline. Home
 // Assistant forwards `hass`, the Tile's entity context and (for backwards
@@ -34,7 +47,14 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._config = {};
     this._context = {};
     this._stateObj = null;
-    this._lastKey = null;
+
+    const style = document.createElement("style");
+    style.textContent = `
+      :host { display: block; min-width: 0; }
+      :host([hidden]) { display: none; }
+    `;
+    this._alert = document.createElement("verisure-owa-arm-exception-alert");
+    this.shadowRoot.append(style, this._alert);
   }
 
   connectedCallback() {
@@ -43,7 +63,6 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
 
   setConfig(config) {
     this._config = config || {};
-    this._lastKey = null;
     this._render();
   }
 
@@ -91,111 +110,13 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
 
   _render() {
     const stateObj = this._entity();
-    const attrs = stateObj?.attributes || {};
-    const forceArmAvailable = attrs.force_arm_available === true;
-    const active = attrs.arm_exception_active === true || forceArmAvailable;
-    const sensors = Array.isArray(attrs.arm_exceptions)
-      ? attrs.arm_exceptions.map(sensor => String(sensor))
-      : [];
-    const lang = this._hass?.language || this._hass?.locale?.language || "en";
-    const key = `${active}|${forceArmAvailable}|${lang}|${sensors.join("\u0000")}`;
-
-    this._setVisible(active);
-    if (!active || key === this._lastKey) return;
-    this._lastKey = key;
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host {
-          display: block;
-          min-width: 0;
-        }
-        :host([hidden]) { display: none; }
-        .warning {
-          box-sizing: border-box;
-          min-height: var(--feature-height, 42px);
-          display: grid;
-          grid-template-columns: auto minmax(0, 1fr) auto;
-          align-items: center;
-          gap: 8px;
-          padding: 7px 8px;
-          border: 1px solid color-mix(in srgb, var(--warning-color, #ff9800) 45%, transparent);
-          border-radius: var(--feature-border-radius, 12px);
-          background: color-mix(in srgb, var(--warning-color, #ff9800) 14%, transparent);
-          color: var(--primary-text-color);
-        }
-        ha-icon {
-          --mdc-icon-size: 20px;
-          align-self: start;
-          margin-top: 1px;
-          color: var(--warning-color, #ff9800);
-        }
-        .copy { min-width: 0; }
-        .title {
-          font-size: 12px;
-          font-weight: 600;
-          line-height: 16px;
-        }
-        .sensors {
-          margin-top: 1px;
-          font-size: 12px;
-          line-height: 16px;
-          color: var(--secondary-text-color);
-          overflow-wrap: anywhere;
-        }
-        .actions {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-        button {
-          min-height: 30px;
-          border: none;
-          border-radius: 15px;
-          cursor: pointer;
-          font: inherit;
-          font-size: 12px;
-          font-weight: 600;
-        }
-        .force {
-          padding: 0 10px;
-          background: var(--warning-color, #ff9800);
-          color: var(--text-primary-color, #fff);
-        }
-        .dismiss {
-          width: 30px;
-          padding: 0;
-          background: transparent;
-          color: var(--secondary-text-color);
-          font-size: 16px;
-        }
-      </style>
-      <div class="warning" role="alert">
-        <ha-icon icon="mdi:alert"></ha-icon>
-        <div class="copy">
-          <div class="title">${_t(lang, forceArmAvailable ? "open_sensors" : "open_sensors_no_force")}</div>
-          ${sensors.length ? `<div class="sensors">${sensors.map(escHtml).join(", ")}</div>` : ""}
-        </div>
-        <div class="actions">
-          ${forceArmAvailable ? `<button class="force" type="button">${_t(lang, "force_arm")}</button>` : ""}
-          <button class="dismiss" type="button" title="${_t(lang, "cancel")}" aria-label="${_t(lang, "cancel")}">✕</button>
-        </div>
-      </div>`;
-
-    this.shadowRoot.querySelector(".force")?.addEventListener("click", e => {
-      e.stopPropagation();
-      const entityId = this._entityId();
-      if (entityId) {
-        this._hass?.callService("verisure_owa", "force_arm", { entity_id: entityId });
-      }
+    this._alert.update({
+      hass: this._hass,
+      stateObj,
+      entityId: this._entityId(),
+      presentation: "compact",
     });
-    this.shadowRoot.querySelector(".dismiss")?.addEventListener("click", e => {
-      e.stopPropagation();
-      const entityId = this._entityId();
-      if (entityId) {
-        this._hass?.callService("verisure_owa", "force_arm_cancel", { entity_id: entityId });
-      }
-    });
+    this._setVisible(this._alert.active);
   }
 }
 
@@ -222,6 +143,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     if (!config.entity) throw new Error("Please define an entity");
     this._config = { ...BADGE_DEFAULT_CONFIG, ...config };
     this._lastKey = null;
+    if (this._hass) this._renderBadge();
   }
 
   set hass(hass) {
@@ -229,7 +151,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     const stateObj = hass.states[this._config.entity];
     const name = stateObj ? this._resolveName(stateObj) : "";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${name}|${hass.language}`
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${stateObj.attributes.entity_picture}|${name}|${hass.language}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -247,16 +169,28 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
     const stateObj = this._hass.states[this._config.entity];
     const lang = this._hass.language || this._hass.locale?.language || "en";
+    const style = document.createElement("style");
+    style.textContent = `
+      :host { display: inline-block; }
+      ha-badge {
+        cursor: pointer;
+        transition: transform 0.1s ease;
+      }
+      ha-badge:active { transform: scale(0.95); }
+      img[slot="icon"] { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+    `;
     if (!stateObj) {
       const name = typeof this._config.name === "string"
         ? this._config.name
         : this._config.entity;
-      this.shadowRoot.innerHTML = `
-        <style>:host { display: inline-block; }</style>
-        <ha-badge label="${escHtml(name)}" style="--badge-color:var(--error-color,#f44336)">
-          <ha-icon slot="icon" icon="mdi:shield-alert"></ha-icon>
-          ${_t(lang, "unavailable")}
-        </ha-badge>`;
+      const badge = document.createElement("ha-badge");
+      badge.label = name;
+      badge.style.setProperty("--badge-color", "var(--error-color, #f44336)");
+      const icon = document.createElement("ha-icon");
+      icon.slot = "icon";
+      icon.setAttribute("icon", "mdi:shield-alert");
+      badge.append(icon, document.createTextNode(_t(lang, "unavailable")));
+      this.shadowRoot.replaceChildren(style, badge);
       return;
     }
 
@@ -270,28 +204,50 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     const icon = armExceptionActive ? icons.icon : (this._config.icon || icons.icon);
     const color = armExceptionActive
       ? icons.color
-      : (this._config.colors?.[state] || icons.color);
+      : badgeCssColor(this._config.colors?.[state] || this._config.color, icons.color);
     const showName = this._config.show_name === true;
     const showState = this._config.show_state !== false;
     const showIcon = this._config.show_icon !== false;
     const hasContent = showState || showName;
     const label = showState && showName ? name : "";
 
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display: inline-block; }
-        ha-badge {
-          cursor: pointer;
-          transition: transform 0.1s ease;
-        }
-        ha-badge:active { transform: scale(0.95); }
-      </style>
-      <ha-badge id="badge" type="button" ${label ? `label="${escHtml(label)}"` : ""} ${hasContent ? "" : "icon-only"}>
-        ${showIcon ? `<ha-icon slot="icon" icon="${escHtml(icon)}"></ha-icon>` : ""}
-        ${showState ? `<state-display id="badge-state"></state-display>` : showName ? escHtml(name) : ""}
-      </ha-badge>`;
-
-    const badgeEl = this.shadowRoot.getElementById("badge");
+    const badgeEl = document.createElement("ha-badge");
+    badgeEl.id = "badge";
+    badgeEl.type = "button";
+    badgeEl.label = label || undefined;
+    badgeEl.iconOnly = !hasContent;
+    if (showIcon) {
+      const entityPicture =
+        stateObj.attributes.entity_picture_local || stateObj.attributes.entity_picture;
+      if (!armExceptionActive && this._config.show_entity_picture && entityPicture) {
+        const picture = document.createElement("img");
+        picture.slot = "icon";
+        picture.setAttribute("aria-hidden", "true");
+        picture.src = typeof this._hass.hassUrl === "function"
+          ? this._hass.hassUrl(entityPicture)
+          : entityPicture;
+        badgeEl.appendChild(picture);
+      } else if (armExceptionActive) {
+        const alertIcon = document.createElement("ha-icon");
+        alertIcon.slot = "icon";
+        alertIcon.setAttribute("icon", icon);
+        badgeEl.appendChild(alertIcon);
+      } else {
+        const stateIcon = document.createElement("ha-state-icon");
+        stateIcon.slot = "icon";
+        stateIcon.stateObj = stateObj;
+        stateIcon.icon = icon;
+        badgeEl.appendChild(stateIcon);
+      }
+    }
+    if (showState) {
+      const stateDisplay = document.createElement("state-display");
+      stateDisplay.id = "badge-state";
+      badgeEl.appendChild(stateDisplay);
+    } else if (showName) {
+      badgeEl.appendChild(document.createTextNode(name));
+    }
+    this.shadowRoot.replaceChildren(style, badgeEl);
     badgeEl.style.setProperty("--badge-color", color);
     this._updateStateDisplay(stateObj, name);
 
@@ -475,8 +431,9 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
   getCardSize() { return 1; }
 
-  static getConfigElement() {
-    return document.createElement("verisure-owa-alarm-card-editor");
+  static async getConfigElement() {
+    await import("./verisure-owa-alarm-badge-editor.js?v=5.8.0-beta.2");
+    return document.createElement("verisure-owa-alarm-badge-editor");
   }
 
   static getDefaultConfig() {

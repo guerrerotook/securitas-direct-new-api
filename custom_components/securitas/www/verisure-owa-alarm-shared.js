@@ -9,6 +9,7 @@
 // sync by tests-js/integration/card-cache-busting.test.js).
 
 import { formatTranslation } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import { ARM_EXCEPTION_TRANSLATIONS } from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {
@@ -22,6 +23,7 @@ export const FEATURE = {
 // ── Translations ─────────────────────────────────────────────────────────────
 export const TRANSLATIONS = {
   en: {
+    ...ARM_EXCEPTION_TRANSLATIONS.en,
     disarmed: "Disarmed", armed_away: "Armed Away", armed_home: "Armed Home",
     armed_night: "Armed Night", armed_vacation: "Armed Vacation",
     armed_custom: "Armed Custom",
@@ -29,9 +31,6 @@ export const TRANSLATIONS = {
     unavailable: "Unavailable", unknown: "Unknown",
     arm_away: "Arm Away", arm_home: "Arm Home", arm_night: "Arm Night",
     arm_vacation: "Arm Vacation", arm_custom: "Arm Custom", disarm: "Disarm",
-    force_arm: "Force Arm", cancel: "Cancel",
-    open_sensors: "Open sensor(s) \u2014 arm anyway?",
-    open_sensors_no_force: "Open sensor(s) \u2014 close them before arming",
     auto_force_arm: "Automatically force-arm past open sensors",
     enter_pin: "Enter PIN to {action}", enter_code: "Enter code to {action}",
     code: "Code", confirm: "Confirm",
@@ -60,6 +59,8 @@ export const TRANSLATIONS = {
     editor_perform_action: "Action (e.g. light.turn_on)",
     editor_perform_data: "Data (JSON, optional)",
     editor_arm_state: "Arm state",
+    editor_alarm_behavior: "Alarm behavior",
+    editor_hold_to_arm_or_disarm: "Hold to arm or disarm",
     editor_tap_action: "Tap action",
     editor_hold_action: "Hold action",
     editor_double_tap_action: "Double-tap action",
@@ -67,6 +68,7 @@ export const TRANSLATIONS = {
     card_description: "Alarm card for Verisure: dynamic arm modes, PIN support, force-arm for open sensors.",
   },
   es: {
+    ...ARM_EXCEPTION_TRANSLATIONS.es,
     disarmed: "Desarmado", armed_away: "Armado (fuera)", armed_home: "Armado (casa)",
     armed_night: "Armado (noche)", armed_vacation: "Armado (vacaciones)",
     armed_custom: "Armado (personalizado)",
@@ -74,9 +76,6 @@ export const TRANSLATIONS = {
     unavailable: "No disponible", unknown: "Desconocido",
     arm_away: "Armar fuera", arm_home: "Armar casa", arm_night: "Armar noche",
     arm_vacation: "Armar vacaciones", arm_custom: "Armar personalizado", disarm: "Desarmar",
-    force_arm: "Forzar armado", cancel: "Cancelar",
-    open_sensors: "Sensor(es) abierto(s) \u2014 \u00bfarmar igualmente?",
-    open_sensors_no_force: "Sensor(es) abierto(s) \u2014 ci\u00e9rrelos antes de armar",
     auto_force_arm: "Forzar armado autom\u00e1ticamente con sensores abiertos",
     enter_pin: "Introduzca PIN para {action}", enter_code: "Introduzca c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
@@ -105,6 +104,8 @@ export const TRANSLATIONS = {
     editor_perform_action: "Acción (p. ej. light.turn_on)",
     editor_perform_data: "Datos (JSON, opcional)",
     editor_arm_state: "Modo de armado",
+    editor_alarm_behavior: "Comportamiento de la alarma",
+    editor_hold_to_arm_or_disarm: "Mantener pulsado para armar o desarmar",
     editor_tap_action: "Acción al tocar",
     editor_hold_action: "Acción al mantener pulsado",
     editor_double_tap_action: "Acción al tocar dos veces",
@@ -112,6 +113,7 @@ export const TRANSLATIONS = {
     card_description: "Tarjeta de alarma para Verisure: modos de armado, PIN y armado forzado.",
   },
   fr: {
+    ...ARM_EXCEPTION_TRANSLATIONS.fr,
     disarmed: "D\u00e9sarm\u00e9", armed_away: "Arm\u00e9 (absent)", armed_home: "Arm\u00e9 (domicile)",
     armed_night: "Arm\u00e9 (nuit)", armed_vacation: "Arm\u00e9 (vacances)",
     armed_custom: "Arm\u00e9 (personnalis\u00e9)",
@@ -119,9 +121,6 @@ export const TRANSLATIONS = {
     unavailable: "Indisponible", unknown: "Inconnu",
     arm_away: "Armer absent", arm_home: "Armer domicile", arm_night: "Armer nuit",
     arm_vacation: "Armer vacances", arm_custom: "Armer personnalis\u00e9", disarm: "D\u00e9sarmer",
-    force_arm: "Forcer l\u2019armement", cancel: "Annuler",
-    open_sensors: "Capteur(s) ouvert(s) \u2014 armer quand m\u00eame\u00a0?",
-    open_sensors_no_force: "Capteur(s) ouvert(s) \u2014 fermez-les avant d\u2019armer",
     auto_force_arm: "Forcer l\u2019armement automatiquement malgr\u00e9 les capteurs ouverts",
     enter_pin: "Entrez le PIN pour {action}", enter_code: "Entrez le code pour {action}",
     code: "Code", confirm: "Confirmer",
@@ -150,6 +149,8 @@ export const TRANSLATIONS = {
     editor_perform_action: "Action (p. ex. light.turn_on)",
     editor_perform_data: "Donn\u00e9es (JSON, facultatif)",
     editor_arm_state: "\u00c9tat d\u2019armement",
+    editor_alarm_behavior: "Comportement de l\u2019alarme",
+    editor_hold_to_arm_or_disarm: "Maintenir pour armer ou d\u00e9sarmer",
     editor_tap_action: "Action sur appui",
     editor_hold_action: "Action sur appui long",
     editor_double_tap_action: "Action sur double appui",
@@ -157,6 +158,7 @@ export const TRANSLATIONS = {
     card_description: "Carte d\u2019alarme Verisure\u00a0: modes d\u2019armement, PIN et armement forc\u00e9.",
   },
   it: {
+    ...ARM_EXCEPTION_TRANSLATIONS.it,
     disarmed: "Disarmato", armed_away: "Armato (fuori)", armed_home: "Armato (casa)",
     armed_night: "Armato (notte)", armed_vacation: "Armato (vacanza)",
     armed_custom: "Armato (personalizzato)",
@@ -164,9 +166,6 @@ export const TRANSLATIONS = {
     unavailable: "Non disponibile", unknown: "Sconosciuto",
     arm_away: "Arma fuori", arm_home: "Arma casa", arm_night: "Arma notte",
     arm_vacation: "Arma vacanza", arm_custom: "Arma personalizzato", disarm: "Disarma",
-    force_arm: "Forza armamento", cancel: "Annulla",
-    open_sensors: "Sensore/i aperto/i \u2014 armare comunque?",
-    open_sensors_no_force: "Sensore/i aperto/i \u2014 chiuderli prima di attivare",
     auto_force_arm: "Forza l\u2019armamento automaticamente con sensori aperti",
     enter_pin: "Inserisci PIN per {action}", enter_code: "Inserisci codice per {action}",
     code: "Codice", confirm: "Conferma",
@@ -195,6 +194,8 @@ export const TRANSLATIONS = {
     editor_perform_action: "Azione (es. light.turn_on)",
     editor_perform_data: "Dati (JSON, opzionale)",
     editor_arm_state: "Stato di armamento",
+    editor_alarm_behavior: "Comportamento dell\u2019allarme",
+    editor_hold_to_arm_or_disarm: "Tieni premuto per armare o disarmare",
     editor_tap_action: "Azione al tocco",
     editor_hold_action: "Azione alla pressione prolungata",
     editor_double_tap_action: "Azione al doppio tocco",
@@ -202,6 +203,7 @@ export const TRANSLATIONS = {
     card_description: "Scheda allarme Verisure: modalit\u00e0 di armamento, PIN e armamento forzato.",
   },
   pt: {
+    ...ARM_EXCEPTION_TRANSLATIONS.pt,
     disarmed: "Desarmado", armed_away: "Armado (aus\u00eancia)", armed_home: "Armado (casa)",
     armed_night: "Armado (noite)", armed_vacation: "Armado (f\u00e9rias)",
     armed_custom: "Armado (personalizado)",
@@ -209,9 +211,6 @@ export const TRANSLATIONS = {
     unavailable: "Indispon\u00edvel", unknown: "Desconhecido",
     arm_away: "Armar aus\u00eancia", arm_home: "Armar casa", arm_night: "Armar noite",
     arm_vacation: "Armar f\u00e9rias", arm_custom: "Armar personalizado", disarm: "Desarmar",
-    force_arm: "For\u00e7ar armamento", cancel: "Cancelar",
-    open_sensors: "Sensor(es) aberto(s) \u2014 armar na mesma?",
-    open_sensors_no_force: "Sensor(es) aberto(s) \u2014 feche-os antes de armar",
     auto_force_arm: "For\u00e7ar armamento automaticamente com sensores abertos",
     enter_pin: "Introduza PIN para {action}", enter_code: "Introduza c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
@@ -240,6 +239,8 @@ export const TRANSLATIONS = {
     editor_perform_action: "A\u00e7\u00e3o (ex.: light.turn_on)",
     editor_perform_data: "Dados (JSON, opcional)",
     editor_arm_state: "Modo de armar",
+    editor_alarm_behavior: "Comportamento do alarme",
+    editor_hold_to_arm_or_disarm: "Manter premido para armar ou desarmar",
     editor_tap_action: "A\u00e7\u00e3o ao tocar",
     editor_hold_action: "A\u00e7\u00e3o ao manter premido",
     editor_double_tap_action: "A\u00e7\u00e3o ao tocar duas vezes",

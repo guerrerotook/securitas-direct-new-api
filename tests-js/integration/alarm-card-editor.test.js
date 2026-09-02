@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import "../../custom_components/securitas/www/verisure-owa-alarm-card.js";
+import "../../custom_components/securitas/www/verisure-owa-alarm-badge-editor.js";
 import { makeHass } from "../fixtures/hass.js";
 import { makeAlarmEntity } from "../fixtures/entities.js";
 
@@ -106,9 +107,9 @@ describe("verisure-owa-alarm-card-editor name field", () => {
   });
 });
 
-describe("verisure-owa-alarm-card-editor badge content", () => {
+describe("verisure-owa-alarm-badge-editor", () => {
   function mountBadgeEditor(config = {}) {
-    const editor = document.createElement("verisure-owa-alarm-card-editor");
+    const editor = document.createElement("verisure-owa-alarm-badge-editor");
     editor.setConfig({
       type: "custom:verisure-owa-alarm-badge",
       entity: "alarm_control_panel.x",
@@ -121,27 +122,41 @@ describe("verisure-owa-alarm-card-editor badge content", () => {
     return editor;
   }
 
-  it("uses Home Assistant selectors for the standard badge Content options", () => {
+  function flattenSchema(schema) {
+    return schema.flatMap((entry) => [entry, ...(entry.schema ? flattenSchema(entry.schema) : [])]);
+  }
+
+  it("uses one native ha-form for standard Content and Interactions options", () => {
     const editor = mountBadgeEditor();
-    const form = editor.shadowRoot.getElementById("badge-content-form");
+    const form = editor.shadowRoot.getElementById("badge-form");
+    const schema = flattenSchema(form.schema);
 
     expect(form).not.toBeNull();
     expect(form.data.displayed_elements).toEqual(["state", "icon"]);
-    expect(form.schema).toEqual(
+    expect(schema).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "name", selector: { entity_name: {} } }),
         expect.objectContaining({ name: "icon", selector: { icon: {} } }),
+        expect.objectContaining({
+          name: "color",
+          selector: {
+            ui_color: { default_color: "state", include_state: true },
+          },
+        }),
+        expect.objectContaining({
+          name: "show_entity_picture",
+          selector: { boolean: {} },
+        }),
         expect.objectContaining({
           name: "state_content",
           selector: { ui_state_content: { allow_name: true } },
         }),
         expect.objectContaining({
-          name: "time_format",
-          selector: { ui_time_format: {} },
+          name: "tap_action",
+          selector: { ui_action: { default_action: "more-info" } },
         }),
       ]),
     );
-    expect(editor.shadowRoot.querySelector("#name-slot ha-textfield")).toBeNull();
   });
 
   it("maps Displayed elements and Content values to the badge config", () => {
@@ -150,7 +165,7 @@ describe("verisure-owa-alarm-card-editor badge content", () => {
     editor.addEventListener("config-changed", (event) => {
       captured = event.detail.config;
     });
-    const form = editor.shadowRoot.getElementById("badge-content-form");
+    const form = editor.shadowRoot.getElementById("badge-form");
     form.dispatchEvent(
       new CustomEvent("value-changed", {
         detail: {
@@ -158,9 +173,12 @@ describe("verisure-owa-alarm-card-editor badge content", () => {
             entity: "alarm_control_panel.x",
             name: "Entrance",
             icon: "mdi:shield-home",
+            color: "amber",
+            show_entity_picture: true,
             displayed_elements: ["name", "state"],
             state_content: ["state", "arm_exceptions"],
             time_format: "24",
+            tap_action: { action: "more-info" },
           },
         },
         bubbles: true,
@@ -171,6 +189,8 @@ describe("verisure-owa-alarm-card-editor badge content", () => {
     expect(captured).toMatchObject({
       name: "Entrance",
       icon: "mdi:shield-home",
+      color: "amber",
+      show_entity_picture: true,
       show_name: true,
       show_state: true,
       show_icon: false,
@@ -190,7 +210,7 @@ describe("verisure-owa-alarm-card-editor badge content", () => {
     editor.addEventListener("config-changed", (event) => {
       captured = event.detail.config;
     });
-    editor.shadowRoot.getElementById("badge-content-form").dispatchEvent(
+    editor.shadowRoot.getElementById("badge-form").dispatchEvent(
       new CustomEvent("value-changed", {
         detail: { value: { displayed_elements: ["icon"] } },
         bubbles: true,
@@ -204,6 +224,125 @@ describe("verisure-owa-alarm-card-editor badge content", () => {
     expect(captured).toMatchObject({
       show_name: false,
       show_state: false,
+      show_icon: true,
+    });
+  });
+
+  it("shows time format only for timestamp content", () => {
+    const regular = mountBadgeEditor({ state_content: "state" });
+    expect(flattenSchema(regular.shadowRoot.getElementById("badge-form").schema)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "time_format" })]),
+    );
+
+    const timestamp = mountBadgeEditor({ state_content: "last_triggered" });
+    expect(flattenSchema(timestamp.shadowRoot.getElementById("badge-form").schema)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "time_format",
+          selector: { ui_time_format: {} },
+        }),
+      ]),
+    );
+  });
+
+  it("preserves legacy state options and custom arm_or_disarm actions", () => {
+    const editor = mountBadgeEditor({
+      colors: { disarmed: "#123456" },
+      states: ["arm_home"],
+      hold_action: { action: "arm_or_disarm", arm_state: "arm_home" },
+    });
+    let captured = null;
+    editor.addEventListener("config-changed", (event) => {
+      captured = event.detail.config;
+    });
+
+    const form = editor.shadowRoot.getElementById("badge-form");
+    expect(form.data).not.toHaveProperty("colors");
+    expect(form.data).not.toHaveProperty("hold_action");
+    form.dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: {
+          value: {
+            entity: "alarm_control_panel.x",
+            displayed_elements: ["state", "icon"],
+          },
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    expect(captured.colors).toEqual({ disarmed: "#123456" });
+    expect(captured.states).toEqual(["arm_home"]);
+    expect(captured.hold_action).toEqual({
+      action: "arm_or_disarm",
+      arm_state: "arm_home",
+    });
+  });
+
+  it("represents the Badge hold-to-arm default and can switch to native actions", () => {
+    const editor = mountBadgeEditor();
+    const form = editor.shadowRoot.getElementById("badge-form");
+    expect(form.data.hold_to_arm_or_disarm).toBe(true);
+    expect(form.data.arm_state).toBe("arm_away");
+    expect(flattenSchema(form.schema)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "hold_action" })]),
+    );
+
+    let captured = null;
+    editor.addEventListener("config-changed", (event) => {
+      captured = event.detail.config;
+    });
+    form.dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: {
+          value: {
+            entity: "alarm_control_panel.x",
+            displayed_elements: ["state", "icon"],
+            hold_to_arm_or_disarm: false,
+          },
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    expect(captured.hold_action).toEqual({ action: "none" });
+    expect(flattenSchema(form.schema)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "hold_action",
+          selector: { ui_action: { default_action: "none" } },
+        }),
+      ]),
+    );
+  });
+
+  it("provides native labels/helpers and handles an empty form update", () => {
+    const localize = vi.fn((key) =>
+      key === "ui.panel.lovelace.editor.badge.entity.color" ? "Colour" : undefined,
+    );
+    const editor = document.createElement("verisure-owa-alarm-badge-editor");
+    editor.setConfig({ entity: "alarm_control_panel.x", show_name: true });
+    editor.hass = makeHass({ localize });
+    document.body.appendChild(editor);
+    const form = editor.shadowRoot.getElementById("badge-form");
+
+    expect(form.computeLabel({ name: "color" })).toBe("Colour");
+    expect(form.computeLabel({ name: "entity" })).toBe("Entity");
+    expect(form.computeHelper({ name: "icon" })).toBeUndefined();
+    expect(form.computeHelper({ name: "color" })).toBeUndefined();
+
+    let captured = null;
+    editor.addEventListener("config-changed", (event) => {
+      captured = event.detail.config;
+    });
+    form.dispatchEvent(new CustomEvent("value-changed", { bubbles: true, composed: true }));
+
+    expect(captured).not.toHaveProperty("type");
+    expect(captured).toMatchObject({
+      show_name: true,
+      show_state: true,
       show_icon: true,
     });
   });
@@ -275,22 +414,6 @@ describe("verisure-owa-alarm-card-editor gesture sections", () => {
     const editor = mountEditor();
     const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
     expect(sections.length).toBe(3);
-  });
-
-  it("badge-type editor uses more-info as the default tap action", () => {
-    const editor = document.createElement("verisure-owa-alarm-card-editor");
-    editor.setConfig({
-      type: "custom:securitas-alarm-badge",
-      entity: "alarm_control_panel.x",
-    });
-    editor.hass = makeHass({
-      states: { "alarm_control_panel.x": makeAlarmEntity() },
-    });
-    document.body.appendChild(editor);
-    const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
-    // First section is tap_action — its ha-form.data.action should be more-info.
-    const tapForm = sections[0].querySelector("ha-form");
-    expect(tapForm.data.action).toBe("more-info");
   });
 
   it("transitioning action through perform-action and arm_or_disarm toggles each sub-field block", () => {
@@ -734,12 +857,7 @@ describe("verisure-owa-alarm-card-editor arm modes checkbox section", () => {
   });
 });
 
-describe("verisure-owa-alarm-card-editor per-variant gesture defaults", () => {
-  // PR #475: editor's gesture defaults mirror each variant's runtime
-  // fallbacks. card: tap=none, hold=none. badge: tap=more-info,
-  // hold=arm_or_disarm. chip: tap=more-info, hold=none. Otherwise the editor
-  // would display an action the runtime would never actually invoke.
-
+describe("verisure-owa-alarm-card-editor gesture defaults", () => {
   function mountEditorForType(type) {
     const editor = document.createElement("verisure-owa-alarm-card-editor");
     editor.setConfig({ type, entity: "alarm_control_panel.x" });
@@ -755,34 +873,5 @@ describe("verisure-owa-alarm-card-editor per-variant gesture defaults", () => {
     const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
     expect(sections[0].querySelector("ha-form").data.action).toBe("none");
     expect(sections[1].querySelector("ha-form").data.action).toBe("none");
-  });
-
-  it("badge variant: tap default is 'more-info', hold default is 'arm_or_disarm'", () => {
-    const editor = mountEditorForType("custom:verisure-owa-alarm-badge");
-    const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
-    expect(sections[0].querySelector("ha-form").data.action).toBe("more-info");
-    expect(sections[1].querySelector("ha-form").data.action).toBe("arm_or_disarm");
-  });
-
-  it("chip variant: tap default is 'more-info', hold default is 'none'", () => {
-    // The chip's runtime defaults are tap=more-info, hold=none (chips have
-    // no PIN-overlay-on-long-press fallback like the badge does).
-    const editor = mountEditorForType("custom:verisure-owa-alarm-chip");
-    const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
-    expect(sections[0].querySelector("ha-form").data.action).toBe("more-info");
-    expect(sections[1].querySelector("ha-form").data.action).toBe("none");
-  });
-
-  it("mushroom chip variant resolves to chip defaults via the -alarm-chip suffix match", () => {
-    const editor = mountEditorForType("custom:mushroom-verisure-owa-alarm-chip");
-    const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
-    expect(sections[0].querySelector("ha-form").data.action).toBe("more-info");
-  });
-
-  it("legacy securitas-alarm-badge type alias still resolves to badge defaults", () => {
-    const editor = mountEditorForType("custom:securitas-alarm-badge");
-    const sections = editor.shadowRoot.querySelectorAll(".gesture-section");
-    expect(sections[0].querySelector("ha-form").data.action).toBe("more-info");
-    expect(sections[1].querySelector("ha-form").data.action).toBe("arm_or_disarm");
   });
 });

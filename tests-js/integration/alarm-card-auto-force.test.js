@@ -236,7 +236,11 @@ describe("auto-force behaviour", () => {
       entity_id: ENTITY,
     });
     // Manual force section is still offered.
-    expect(card.shadowRoot.querySelector('[data-action="force_arm"]')).not.toBeNull();
+    expect(
+      card.shadowRoot
+        .querySelector("verisure-owa-arm-exception-alert")
+        .shadowRoot.querySelector(".force").hidden,
+    ).toBe(false);
   });
 
   it("drops the intent after a non-forceable rejection bounces back to disarmed", () => {

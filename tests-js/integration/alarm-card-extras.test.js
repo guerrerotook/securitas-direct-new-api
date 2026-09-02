@@ -20,10 +20,9 @@ describe("verisure-owa-alarm-badge", () => {
       states: { [ENTITY]: makeAlarmEntity({ state: "armed_away" }) },
     });
     document.body.appendChild(badge);
-    const html = badge.shadowRoot.innerHTML;
-    expect(html).toContain("mdi:shield-lock");
-    expect(html).toContain("<ha-icon");
-    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBeNull();
+    const stateIcon = badge.shadowRoot.querySelector("ha-state-icon");
+    expect(stateIcon.icon).toBe("mdi:shield-lock");
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBeUndefined();
     const stateDisplay = badge.shadowRoot.getElementById("badge-state");
     expect(stateDisplay.stateObj.state).toBe("armed_away");
     expect(stateDisplay.name).toBe("Test Alarm");
@@ -36,7 +35,7 @@ describe("verisure-owa-alarm-badge", () => {
       states: { [ENTITY]: makeAlarmEntity({ state: "unavailable" }) },
     });
     document.body.appendChild(badge);
-    expect(badge.shadowRoot.innerHTML).toContain("mdi:shield-off-outline");
+    expect(badge.shadowRoot.querySelector("ha-state-icon").icon).toBe("mdi:shield-off-outline");
     expect(badge.shadowRoot.getElementById("badge-state").stateObj.state).toBe("unavailable");
   });
 
@@ -46,7 +45,7 @@ describe("verisure-owa-alarm-badge", () => {
     badge.hass = makeHass({ states: {} });
     document.body.appendChild(badge);
     expect(badge.shadowRoot.innerHTML).toContain("mdi:shield-alert");
-    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBe(ENTITY);
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBe(ENTITY);
     expect(badge.shadowRoot.textContent).toContain("Unavailable");
   });
 
@@ -65,7 +64,7 @@ describe("verisure-owa-alarm-badge", () => {
     document.body.appendChild(badge);
 
     expect(badge.shadowRoot.innerHTML).toContain("mdi:alert");
-    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBe("Entrance");
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBe("Entrance");
     expect(badge.shadowRoot.getElementById("badge-state").stateObj.state).toBe("disarmed");
   });
 
@@ -81,7 +80,7 @@ describe("verisure-owa-alarm-badge", () => {
     });
     document.body.appendChild(badge);
 
-    const rendered = badge.shadowRoot.querySelector("ha-badge").getAttribute("label");
+    const rendered = badge.shadowRoot.querySelector("ha-badge").label;
     expect(rendered).toBe('Alarm <img src=x onerror="bad">');
     expect(badge.shadowRoot.querySelector("img")).toBeNull();
   });
@@ -113,8 +112,8 @@ describe("verisure-owa-alarm-badge", () => {
     });
     document.body.appendChild(badge);
 
-    const icon = badge.shadowRoot.querySelector("ha-icon");
-    expect(icon.getAttribute("icon")).toBe('mdi:shield" data-bad="true');
+    const icon = badge.shadowRoot.querySelector("ha-state-icon");
+    expect(icon.icon).toBe('mdi:shield" data-bad="true');
     expect(icon.hasAttribute("data-bad")).toBe(false);
   });
 
@@ -135,6 +134,51 @@ describe("verisure-owa-alarm-badge", () => {
     expect(stateDisplay.timeFormat).toBe("24");
   });
 
+  it("supports the native badge color setting", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, color: "amber" });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    expect(badge.shadowRoot.querySelector("ha-badge").style.getPropertyValue("--badge-color")).toBe(
+      "var(--amber-color)",
+    );
+  });
+
+  it("applies editor config updates without waiting for another HA state update", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    badge.setConfig({ entity: ENTITY, color: "amber", show_icon: false });
+
+    expect(badge.shadowRoot.querySelector("ha-state-icon")).toBeNull();
+    expect(badge.shadowRoot.querySelector("ha-badge").style.getPropertyValue("--badge-color")).toBe(
+      "var(--amber-color)",
+    );
+  });
+
+  it("supports the native show_entity_picture setting", () => {
+    const entity = makeAlarmEntity();
+    entity.attributes.entity_picture = "/local/alarm.png";
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, show_entity_picture: true });
+    badge.hass = makeHass({
+      hassUrl: (path) => `https://example.test${path}`,
+      states: { [ENTITY]: entity },
+    });
+    document.body.appendChild(badge);
+
+    const picture = badge.shadowRoot.querySelector('img[slot="icon"]');
+    expect(picture.src).toBe("https://example.test/local/alarm.png");
+    expect(badge.shadowRoot.querySelector("ha-state-icon")).toBeNull();
+  });
+
   it("resolves structured entity-name content through Home Assistant", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     const formatEntityName = vi.fn(() => "Front Door Alarm");
@@ -150,9 +194,7 @@ describe("verisure-owa-alarm-badge", () => {
     document.body.appendChild(badge);
 
     expect(formatEntityName).toHaveBeenCalled();
-    expect(badge.shadowRoot.querySelector("ha-badge").getAttribute("label")).toBe(
-      "Front Door Alarm",
-    );
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBe("Front Door Alarm");
   });
 
   it("throws when setConfig is called without an entity", () => {
@@ -619,12 +661,12 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(document.querySelector("#badge-pin-input")).toBeNull();
   });
 
-  it("badge exposes the standard defaults, stub config and visual editor", () => {
+  it("badge exposes the standard defaults, stub config and visual editor", async () => {
     const badge = mountBadge();
     expect(badge.getCardSize()).toBe(1);
     const ctor = customElements.get("verisure-owa-alarm-badge");
-    const editor = ctor.getConfigElement();
-    expect(editor.tagName.toLowerCase()).toBe("verisure-owa-alarm-card-editor");
+    const editor = await ctor.getConfigElement();
+    expect(editor.tagName.toLowerCase()).toBe("verisure-owa-alarm-badge-editor");
     expect(ctor.getDefaultConfig()).toEqual({
       show_name: false,
       show_state: true,
