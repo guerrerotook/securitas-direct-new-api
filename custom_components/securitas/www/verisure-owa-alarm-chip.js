@@ -150,9 +150,10 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     this._hass = hass;
     const stateObj = hass.states[this._config.entity];
     const name = stateObj ? this._resolveName(stateObj) : "";
+    const lang = hass.language || hass.locale?.language || "en";
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${stateObj.attributes.entity_picture}|${name}|${hass.language}`
-      : "missing";
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${stateObj.attributes.entity_picture}|${name}|${lang}`
+      : `missing|${lang}`;
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
       this._renderBadge();

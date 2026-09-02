@@ -49,6 +49,19 @@ describe("verisure-owa-alarm-badge", () => {
     expect(badge.shadowRoot.textContent).toContain("Unavailable");
   });
 
+  it("re-renders locale-fallback text when hass.language is unset", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = makeHass({ language: undefined, locale: { language: "en" }, states: {} });
+    document.body.appendChild(badge);
+    expect(badge.shadowRoot.textContent).toContain("Unavailable");
+
+    badge.hass = makeHass({ language: undefined, locale: { language: "es" }, states: {} });
+
+    expect(badge.shadowRoot.textContent).toContain("No disponible");
+    expect(badge.shadowRoot.textContent).not.toContain("Unavailable");
+  });
+
   it("keeps the state text and switches to an alert icon for an arming exception", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY, name: "Entrance", show_name: true });
