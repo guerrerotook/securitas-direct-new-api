@@ -37,9 +37,9 @@ def _card_url(filename: str) -> str:
 
 CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-alarm-card.js"
 CARD_URL = _card_url("verisure-owa-alarm-card.js")
-# Lightweight chip/badge module — registered as its own resource so the
-# always-visible alarm chip renders without first downloading the heavy
-# alarm-card bundle.
+# Lightweight chip/badge/Tile-feature module — registered as its own resource
+# so the always-visible alarm elements render without first downloading the
+# heavy alarm-card bundle.
 CHIP_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-alarm-chip.js"
 CHIP_CARD_URL = _card_url("verisure-owa-alarm-chip.js")
 CAMERA_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-camera-card.js"

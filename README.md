@@ -15,7 +15,7 @@ Full alarm control: the mappings between HA's five buttons (Home/Away/Night/Vaca
 
 Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. A connectivity diagnostic for the panel itself.
 
-Bundled Lovelace cards: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, camera card, activity-log card.
+Bundled Lovelace UI: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, Tile open-sensor feature, camera card, activity-log card.
 
 The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
 
@@ -243,6 +243,29 @@ chips:
 | Open alarm card  | `action: more-info`                                                  |
 | Navigate         | `action: navigate` + `navigation_path: /path`                       |
 | Arm or Disarm    | `action: arm_or_disarm` (optionally + `arm_state: armed_away` etc.) |
+
+### Tile Card
+
+The stock Tile Card can keep its native **Alarm modes** controls and show the
+same open-sensor warning inline. In the Tile editor, add the
+**Verisure OWA Open Sensors** feature after **Alarm modes**. The warning stays
+hidden until an arm attempt is rejected, then lists every affected zone inside
+the Tile. On panels that permit forcing it also offers **Force Arm**; Spanish
+panels that report `allowForcing: false` show only the close-and-retry warning.
+
+The equivalent YAML is:
+
+```yaml
+type: tile
+entity: alarm_control_panel.my_alarm
+features_position: bottom
+features:
+  - type: alarm-modes
+  - type: custom:verisure-owa-arm-exception
+```
+
+As with the full alarm card, this is the snapshot returned by Verisure after a
+failed arm attempt, not a live view of every contact before arming.
 
 ## Sentinel Sensors
 
