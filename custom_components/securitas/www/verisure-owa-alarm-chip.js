@@ -45,7 +45,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     this._hass = hass;
     const stateObj = hass.states[this._config.entity];
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}`
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -65,7 +65,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
     }
 
     const state = stateObj.state;
-    const icons = stateObj.attributes.force_arm_available
+    const icons = stateObj.attributes.arm_exception_active || stateObj.attributes.force_arm_available
       ? { icon: "mdi:alert", color: "var(--warning-color, #FF9800)" }
       : STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
 
@@ -374,7 +374,7 @@ class VerisureOwaAlarmChip extends HTMLElement {
     if (!this._hass || !this._config) return;
     const stateObj = this._hass.states[this._config.entity];
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}`
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -392,7 +392,7 @@ class VerisureOwaAlarmChip extends HTMLElement {
     }
 
     const state = stateObj.state;
-    const cfg = stateObj.attributes.force_arm_available
+    const cfg = stateObj.attributes.arm_exception_active || stateObj.attributes.force_arm_available
       ? { icon: "mdi:alert", color: "var(--warning-color, #FF9800)" }
       : STATE_CFG[state] || { icon: "mdi:shield", color: "var(--disabled-color,#9E9E9E)" };
 

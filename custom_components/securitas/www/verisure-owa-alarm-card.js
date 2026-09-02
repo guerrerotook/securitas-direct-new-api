@@ -9,9 +9,9 @@
  *  - PIN / code support: numeric keypad for digit codes, text input for
  *    alphanumeric codes; respects `code_arm_required` and always asks for
  *    code on Disarm when a code is configured
- *  - Force-arm section: automatically appears when `force_arm_available`
- *    is true, lists open sensors from `arm_exceptions`, provides
- *    Force Arm and Cancel buttons — no helper entity required
+ *  - Arming-exception section: lists open sensors from `arm_exceptions`.
+ *    Force Arm appears only when `force_arm_available` is true; panels that
+ *    prohibit forcing still show the sensor warning and Cancel button
  *  - Handles `unavailable` and `unknown` entity states gracefully
  *  - Styling aligned with Home Assistant's design language (CSS variables)
  *
@@ -210,7 +210,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // freshly-appeared force-arm context is handled even on the same tick.
     this._maybeAutoForceArm(stateObj);
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -262,7 +262,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
     const features = attrs.supported_features || 0;
 
     const forceArmAvailable = attrs.force_arm_available === true;
-    const openSensors       = attrs.arm_exceptions || [];
+    // Backwards compatibility: older backends exposed only
+    // force_arm_available when an exception prompt was active.
+    const armExceptionActive = attrs.arm_exception_active === true || forceArmAvailable;
+    const openSensors         = attrs.arm_exceptions || [];
     const wafBlocked        = attrs.waf_blocked === true;
     const refreshFailed     = attrs.refresh_failed === true;
     // Capability gate set by the integration options; only then is the
@@ -315,9 +318,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
           <!-- ── Refresh failed banner ── -->
           ${refreshFailed ? `<div class="stale-banner"><ha-icon icon="mdi:clock-alert-outline"></ha-icon> ${_t(lang, "refresh_failed")}</div>` : ""}
 
-          <!-- ── Force arm section ── -->
-          ${!isUnavailable && forceArmAvailable ? `
-            ${this._renderForceArm(openSensors, lang)}
+          <!-- ── Arming exception / optional force-arm section ── -->
+          ${!isUnavailable && armExceptionActive ? `
+            ${this._renderArmException(openSensors, lang, forceArmAvailable)}
             ${canDisarm ? `<div class="btn-grid"><button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button></div>` : ""}
           ` : ""}
 
@@ -325,7 +328,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
           ${!isUnavailable && this._uiState === "pin" ? this._renderPin(codeFormat, lang) : ""}
 
           <!-- ── Normal buttons (hidden during pin entry / force arm / unavailable) ── -->
-          ${!isUnavailable && this._uiState === "normal" && !forceArmAvailable ? `
+          ${!isUnavailable && this._uiState === "normal" && !armExceptionActive ? `
             <div class="btn-grid">
               ${canDisarm
                 ? `<button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button>`
@@ -375,7 +378,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
   }
 
   // ── Force arm section ───────────────────────────────────────────────────────
-  _renderForceArm(sensors, lang) {
+  _renderArmException(sensors, lang, allowForcing) {
     const list = sensors.length
       ? `<ul class="sensor-list">${sensors.map(s => `<li>${escHtml(s)}</li>`).join("")}</ul>`
       : "";
@@ -383,12 +386,12 @@ class VerisureOwaAlarmCard extends HTMLElement {
       <div class="force-section">
         <div class="force-title">
           <ha-icon icon="mdi:alert"></ha-icon>
-          ${_t(lang, "open_sensors")}
+          ${_t(lang, allowForcing ? "open_sensors" : "open_sensors_no_force")}
         </div>
         ${list}
         <div class="force-btns">
           <button class="btn btn-cancel-force" data-action="cancel_force">${_t(lang, "cancel")}</button>
-          <button class="btn btn-force" data-action="force_arm">${_t(lang, "force_arm")}</button>
+          ${allowForcing ? `<button class="btn btn-force" data-action="force_arm">${_t(lang, "force_arm")}</button>` : ""}
         </div>
       </div>`;
   }
@@ -864,7 +867,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
   getCardSize() {
     if (this._uiState === "pin") return 6;
     const stateObj = this._hass?.states[this._config?.entity];
-    if (stateObj?.attributes?.force_arm_available) return 5;
+    if (stateObj?.attributes?.arm_exception_active || stateObj?.attributes?.force_arm_available) return 5;
     return 3;
   }
 

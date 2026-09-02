@@ -93,13 +93,14 @@ def arm_status_response(
     status: str = "ARMED",
     protom_response: str = "T",
     error: dict | str | None = None,
+    msg: str = "",
 ) -> dict:
     """Build a mock xSArmStatus response."""
     return {
         "data": {
             "xSArmStatus": {
                 "res": res,
-                "msg": "",
+                "msg": msg,
                 "status": status,
                 "numinst": "123456",
                 "protomResponse": protom_response,
@@ -375,12 +376,8 @@ class TestArm:
         assert len(exc_info.value.exceptions) == 1
         assert exc_info.value.exceptions[0]["alias"] == "Main door"
 
-    async def test_arm_zone_not_forceable_blocking_error(self, client, transport):
-        """ZONE error without allowForcing is a genuine blocking failure.
-
-        An open zone that cannot be force-armed must still raise
-        VerisureOwaError rather than being silently swallowed.
-        """
+    async def test_arm_zone_not_forceable_still_lists_sensor(self, client, transport):
+        """ZONE without allowForcing warns but does not enable force-arm."""
         transport.execute.side_effect = [
             arm_submit_response("ref-arm-zone-002"),
             arm_status_response(
@@ -389,13 +386,134 @@ class TestArm:
                     "code": "ERR_ZONE_OPEN",
                     "type": "ZONE",
                     "allowForcing": False,
+                    "exceptionsNumber": 1,
+                    "referenceId": "exc-ref-zone-blocked",
+                    "suid": "suid-zone-blocked",
+                },
+            ),
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {"status": "OPEN", "deviceType": "DOOR", "alias": "Main door"}
+                ],
+            ),
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.allow_forcing is False
+        assert exc_info.value.exceptions[0]["alias"] == "Main door"
+
+    async def test_arm_mpj_exception_with_unknown_type_is_arming_exception(
+        self, client, transport
+    ):
+        """The canonical MPJ exception message survives backend type drift.
+
+        ``allowForcing`` is the panel's explicit safety gate.  When it is true,
+        a known ``error_mpj_exception`` must enter the arming-exception flow
+        even if a panel reports a new ``error.type`` value, so Home Assistant
+        can fetch and display the affected sensors instead of showing the raw
+        backend message.
+        """
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-mpj-001"),
+            arm_status_response(
+                res="ERROR",
+                msg="error_mpj_exception",
+                error={
+                    "code": "102",
+                    "type": "MPJ_EXCEPTION",
+                    "allowForcing": True,
+                    "exceptionsNumber": 3,
+                    "referenceId": "exc-ref-mpj",
+                    "suid": "suid-mpj",
+                },
+            ),
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {"status": "0", "deviceType": "MG", "alias": "Kitchen"},
+                    {"status": "0", "deviceType": "MG", "alias": "Bedroom"},
+                    {"status": "0", "deviceType": "MG", "alias": "Office"},
+                ],
+            ),
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.reference_id == "exc-ref-mpj"
+        assert exc_info.value.suid == "suid-mpj"
+        assert [item["alias"] for item in exc_info.value.exceptions] == [
+            "Kitchen",
+            "Bedroom",
+            "Office",
+        ]
+
+    async def test_arm_mpj_exception_without_allow_forcing_lists_sensors(
+        self, client, transport
+    ):
+        """Spain panels can report open sensors but prohibit force-arming."""
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-mpj-002"),
+            arm_status_response(
+                res="ERROR",
+                msg="error_mpj_exception",
+                error={
+                    "code": "102",
+                    "type": "NON_BLOCKING",
+                    "allowForcing": False,
+                    "exceptionsNumber": 3,
+                    "referenceId": "exc-ref-mpj-blocked",
+                    "suid": "suid-mpj-blocked",
+                },
+            ),
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {"status": "0", "deviceType": "MG", "alias": "Kitchen"},
+                    {"status": "0", "deviceType": "MG", "alias": "Bedroom"},
+                    {"status": "0", "deviceType": "MG", "alias": "Office"},
+                ],
+            ),
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.allow_forcing is False
+        assert [item["alias"] for item in exc_info.value.exceptions] == [
+            "Kitchen",
+            "Bedroom",
+            "Office",
+        ]
+
+    async def test_unrelated_mpj_error_does_not_become_sensor_warning(
+        self, client, transport
+    ):
+        """MPJ command errors without exceptions retain the failure path."""
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-mpj-003"),
+            arm_status_response(
+                res="ERROR",
+                msg="error_mpj_exception",
+                error={
+                    "code": "101",
+                    "type": "BLOCKING",
+                    "allowForcing": False,
+                    "exceptionsNumber": 0,
+                    "referenceId": "ref-partition-error",
+                    "suid": "",
                 },
             ),
         ]
 
-        inst = _make_installation()
-        with pytest.raises(VerisureOwaError, match="Arm command failed"):
-            await client.arm(inst, "ARM1")
+        with pytest.raises(
+            VerisureOwaError,
+            match="Arm command failed: error_mpj_exception",
+        ):
+            await client.arm(_make_installation(), "ARM1")
 
     async def test_arm_with_force_id(self, client, transport):
         """force_id is passed as forceArmingRemoteId in submit variables."""

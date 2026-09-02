@@ -2047,6 +2047,39 @@ class TestForceArmContext:
         assert alarm._attr_extra_state_attributes["force_arm_available"] is True
         assert "Kitchen Door" in alarm._attr_extra_state_attributes["arm_exceptions"]
 
+    async def test_non_forceable_arming_exception_still_exposes_open_sensors(self):
+        """Spain panels show sensor details without enabling force-arm."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+        exc = ArmingExceptionError(
+            "ref-exc-spain",
+            "suid-spain",
+            [
+                {"status": "0", "deviceType": "MG", "alias": "Kitchen"},
+                {"status": "0", "deviceType": "MG", "alias": "Bedroom"},
+                {"status": "0", "deviceType": "MG", "alias": "Office"},
+            ],
+            allow_forcing=False,
+        )
+        alarm.client.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm._state == AlarmControlPanelState.DISARMED
+        assert alarm._attr_extra_state_attributes["arm_exception_active"] is True
+        assert alarm._attr_extra_state_attributes["force_arm_available"] is False
+        assert alarm._attr_extra_state_attributes["arm_exceptions"] == [
+            "Kitchen",
+            "Bedroom",
+            "Office",
+        ]
+        event_data = alarm.hass.bus.async_fire.call_args_list[0][0][1]
+        assert event_data["allow_forcing"] is False
+
+        await alarm.async_force_arm()
+        alarm.client.arm_alarm.assert_awaited_once()
+
     async def test_widget_re_arm_does_not_force(self):
         """Re-arming via the widget does NOT auto-force — force context is ignored."""
         alarm = make_alarm()
@@ -5237,6 +5270,33 @@ class TestNotificationContent:
         assert actions[0]["title"] == "Forçar"
         assert actions[1]["action"] == "SECURITAS_CANCEL_FORCE_ARM_123456"
         assert actions[1]["title"] == "Cancel·lar"
+
+    async def test_non_forceable_notification_has_sensor_warning_without_actions(self):
+        """Spain panels that prohibit forcing still notify with zone names."""
+        alarm = self._alarm_with_async_call()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        event = self._make_event(zones=["Kitchen", "Bedroom", "Office"])
+        event.data["allow_forcing"] = False
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ) as get_strings:
+            await alarm._async_notify_arm_exceptions(event)
+
+        get_strings.assert_called_once_with(
+            alarm.hass, "arm_blocked_open_sensors_no_force"
+        )
+        mobile_call = next(
+            c
+            for c in alarm.hass.services.async_call.call_args_list
+            if c[1]["domain"] == "notify"
+        )
+        service_data = mobile_call[1]["service_data"]
+        assert "Kitchen" in service_data["message"]
+        assert "Bedroom" in service_data["message"]
+        assert "Office" in service_data["message"]
+        assert "actions" not in service_data["data"]
 
     async def test_mobile_notification_short_message(self):
         """Mobile message is shorter than persistent message and contains sensor alias."""

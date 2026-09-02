@@ -472,11 +472,11 @@ Most users won't need anything below — the alarm card and built-in mobile noti
 
 ### What happens when arming is blocked
 
-The arm command reverts, the entity gains `force_arm_available` and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The card shows a warning with **Force Arm** / **Cancel** buttons. If built-in notifications are enabled, you also get a persistent notification and — when a notify service is configured — a mobile notification with the same buttons.
+The arm command reverts, the entity gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The card and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
 
-You then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
+When force-arming is allowed, you then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
 
-Some panels refuse force-arming altogether (Spain has been observed). In that case you'll get an "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
+Some panels refuse force-arming altogether (Spain has been observed). The sensor names are still shown, but there is no **Force Arm** action — close those zones and retry.
 
 ### Auto-force-arm from the card
 
@@ -493,6 +493,7 @@ Because the choice lives in the browser, the built-in notification still fires b
 | `entity_id` | The alarm panel entity that failed to arm. |
 | `mode` | The HA state that was attempted (`armed_away`, `armed_home`, …). |
 | `zones` | Open zone names, e.g. `["Kitchen window", "Bedroom sensor"]`. |
+| `allow_forcing` | Whether this panel permits force-arming past the listed sensors. |
 | `details.installation` | The Verisure installation number. |
 | `details.exceptions` | Full exception list from the API (`alias`, `zone_id`, `device_type`). |
 
@@ -602,5 +603,3 @@ For protocol-level bugs — wrong alarm state, lock or camera misbehaving — a 
 > **Warning:** HAR files can contain credentials or session tokens. Either redact them (it's plain JSON) or email it to one of the maintainers directly.
 
 The same technique is used to [capture payloads for new operations](./docs/new_operations.md) if you'd like to help add support.
-
-

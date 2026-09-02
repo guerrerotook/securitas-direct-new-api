@@ -85,6 +85,22 @@ describe("verisure-owa-alarm-chip", () => {
     expect(chip.shadowRoot.innerHTML).toContain("mdi:alert");
   });
 
+  it("renders the warning alert icon for a non-forceable arming exception", () => {
+    const chip = document.createElement("verisure-owa-alarm-chip");
+    chip.setConfig({ entity: ENTITY });
+    chip.hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          armExceptionActive: true,
+          forceArmAvailable: false,
+        }),
+      },
+    });
+    document.body.appendChild(chip);
+    expect(chip.shadowRoot.innerHTML).toContain("mdi:alert");
+  });
+
   it("throws when setConfig is called without an entity", () => {
     const chip = document.createElement("verisure-owa-alarm-chip");
     expect(() => chip.setConfig({})).toThrow(/entity/i);

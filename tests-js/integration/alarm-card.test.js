@@ -278,6 +278,28 @@ describe("verisure-owa-alarm-card banners and force-arm", () => {
     expect(items[1].textContent).toBe("Garage");
   });
 
+  it("shows non-forceable open sensors without a Force Arm button", () => {
+    const card = mountAlarmCard({
+      hass: makeHass({
+        states: {
+          [ENTITY]: makeAlarmEntity({
+            state: "disarmed",
+            armExceptionActive: true,
+            forceArmAvailable: false,
+            armExceptions: ["Kitchen", "Bedroom", "Office"],
+          }),
+        },
+      }),
+    });
+
+    const items = card.shadowRoot.querySelectorAll(".sensor-list li");
+    expect(Array.from(items, (item) => item.textContent)).toEqual(["Kitchen", "Bedroom", "Office"]);
+    expect(card.shadowRoot.textContent).toMatch(/close them before arming/i);
+    const buttons = Array.from(card.shadowRoot.querySelectorAll("button"));
+    expect(buttons.find((button) => /Force Arm/i.test(button.textContent))).toBeUndefined();
+    expect(buttons.find((button) => /Cancel/i.test(button.textContent))).toBeDefined();
+  });
+
   it("disarm button next to force-arm calls alarm_disarm when armed", () => {
     const hass = makeHass({
       states: {
