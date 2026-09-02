@@ -14,6 +14,17 @@ A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnost
 
 ### Fixed
 
+**Some open-window arm attempts showed the raw `error_mpj_exception` message.**
+The integration now recognises the backend's canonical arming-exception
+response independently of country-specific error types and fetches the
+affected sensor names instead of reporting the opaque backend message.  This
+also covers Spanish panels that report the open sensors but set
+`allowForcing: false`: the alarm card, persistent notification, mobile
+notification and activity entry now list those sensors and tell the user to
+close them before retrying, without offering an unsafe Force Arm action.  When
+the panel explicitly sets `allowForcing: true`, the existing Force Arm / Cancel
+flow remains available.
+
 **Force-arm past open zones never offered on French installations ([#583](https://github.com/guerrerotook/securitas-direct-new-api/issues/583)).**  When you armed with a door or window open, the alarm was supposed to block, list the open zones, and let you force-arm past them — the same flow the auto-force-arm tick box builds on.  On French (SDVFAST) panels it never did: the arm just failed with *Open zone (…)*, no `verisure_owa_arming_exception` event fired, and force-arming was a silent no-op because the force context was never populated.  The cause was the panel's error type — French panels report an open-zone rejection as `ZONE` where Spanish panels report `NON_BLOCKING`, and only the latter was recognised as force-armable, so the French case fell through to a generic failure.  Both types are now recognised, so a French arm blocked by open zones raises the arming exception, fires the event with the full zone list, and populates the force-arm context just like everywhere else.  A `ZONE` rejection that genuinely cannot be forced still fails as before.  Thanks to [@rpouetpouet](https://github.com/rpouetpouet) for the detailed report and live testing on a French SDVFAST panel.
 
 **A cleared alarm-state mapping came back on its own ([#575](https://github.com/guerrerotook/securitas-direct-new-api/pull/575)).**  Clearing one of the alarm-state mappings in the integration's options — setting a button to *not used* — didn't stick: reopen the options dialog and the field had reverted to its default, and saving again silently restored it.  It was most visible on perimeter-capable installations, where a cleared *custom* mapping reappeared as *perimeter only* every time.  The cleared state (recorded internally as an explicit empty value) is now honoured on redisplay, so cleared mappings stay cleared.

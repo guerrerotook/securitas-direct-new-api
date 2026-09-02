@@ -88,6 +88,17 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Force Arm",
             "cancel_action": "Cancel",
         },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure: Arm blocked — open sensor(s)",
+            "message": (
+                "Arming was blocked because the following sensor(s) are open:\n"
+                "{sensor_list}\n\nClose them before trying to arm again. This panel "
+                "does not allow force-arming past these sensors."
+            ),
+            "mobile_message": (
+                "Arm blocked — open sensor(s): {sensor_list}. Close them and try again."
+            ),
+        },
         "armed_with_exceptions": {
             "title": "Verisure: Alarm force-armed",
             "message": (
@@ -184,6 +195,18 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             ),
             "force_arm_action": "Armar de todos modos",
             "cancel_action": "Cancelar",
+        },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure: Armado bloqueado — sensor(es) abierto(s)",
+            "message": (
+                "El armado se bloqueó porque los siguientes sensores están "
+                "abiertos:\n{sensor_list}\n\nCiérralos antes de volver a intentarlo. "
+                "Este panel no permite ignorar estos sensores al armar."
+            ),
+            "mobile_message": (
+                "Armado bloqueado — sensor(es) abierto(s): {sensor_list}. "
+                "Ciérralos y vuelve a intentarlo."
+            ),
         },
         "armed_with_exceptions": {
             "title": "Verisure: Alarma armada a la fuerza",
@@ -288,6 +311,18 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Armer quand même",
             "cancel_action": "Annuler",
         },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure : Armement bloqué — capteur(s) ouvert(s)",
+            "message": (
+                "L'armement a été bloqué car les capteurs suivants sont "
+                "ouverts :\n{sensor_list}\n\nFermez-les avant de réessayer. Ce panneau "
+                "ne permet pas de contourner ces capteurs lors de l'armement."
+            ),
+            "mobile_message": (
+                "Armement bloqué — capteur(s) ouvert(s) : {sensor_list}. "
+                "Fermez-les et réessayez."
+            ),
+        },
         "armed_with_exceptions": {
             "title": "Verisure : Alarme armée de force",
             "message": (
@@ -390,6 +425,18 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Attiva comunque",
             "cancel_action": "Annulla",
         },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure: Attivazione bloccata — sensore(i) aperto(i)",
+            "message": (
+                "L'attivazione è stata bloccata perché i seguenti sensori sono "
+                "aperti:\n{sensor_list}\n\nChiudili prima di riprovare. Questa "
+                "centrale non consente di ignorarli durante l'attivazione."
+            ),
+            "mobile_message": (
+                "Attivazione bloccata — sensore(i) aperto(i): {sensor_list}. "
+                "Chiudili e riprova."
+            ),
+        },
         "armed_with_exceptions": {
             "title": "Verisure: Allarme attivato forzatamente",
             "message": (
@@ -488,6 +535,18 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             ),
             "force_arm_action": "Armar na mesma",
             "cancel_action": "Cancelar",
+        },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure: Armar bloqueado — sensor(es) aberto(s)",
+            "message": (
+                "O armar foi bloqueado porque os seguintes sensores estão "
+                "abertos:\n{sensor_list}\n\nFeche-os antes de tentar novamente. "
+                "Este painel não permite ignorá-los ao armar."
+            ),
+            "mobile_message": (
+                "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. "
+                "Feche-os e tente novamente."
+            ),
         },
         "armed_with_exceptions": {
             "title": "Verisure: Alarme armado à força",
@@ -589,6 +648,18 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "force_arm_action": "Forçar armado",
             "cancel_action": "Cancelar",
         },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure: Armar bloqueado — sensor(es) aberto(s)",
+            "message": (
+                "Armar foi bloqueado porque os seguintes sensores estão "
+                "abertos:\n{sensor_list}\n\nFeche-os antes de tentar novamente. "
+                "Este painel não permite desconsiderá-los ao armar."
+            ),
+            "mobile_message": (
+                "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. "
+                "Feche-os e tente novamente."
+            ),
+        },
         "armed_with_exceptions": {
             "title": "Verisure: Alarme armado à força",
             "message": (
@@ -687,6 +758,18 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             ),
             "force_arm_action": "Forçar armat",
             "cancel_action": "Cancel·lar",
+        },
+        "arm_blocked_open_sensors_no_force": {
+            "title": "Verisure: Armat bloquejat — sensor(s) obert(s)",
+            "message": (
+                "L'armat s'ha bloquejat perquè els següents sensors estan "
+                "oberts:\n{sensor_list}\n\nTanca'ls abans de tornar-ho a provar. "
+                "Aquest panell no permet ignorar-los en armar."
+            ),
+            "mobile_message": (
+                "Armat bloquejat — sensor(s) obert(s): {sensor_list}. "
+                "Tanca'ls i torna-ho a provar."
+            ),
         },
         "armed_with_exceptions": {
             "title": "Verisure: Alarma armada a la força",

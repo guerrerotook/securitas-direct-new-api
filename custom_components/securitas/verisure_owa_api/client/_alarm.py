@@ -44,12 +44,20 @@ _ERROR_TYPE_LABELS: dict[str, str] = {
 
 _ALARM_MANAGER_PREFIX = "alarm-manager."
 
-# Panel ``error.type`` values that, when paired with ``allowForcing``, represent
-# an arm rejected because of open zones that can still be force-armed. Different
-# countries report this differently: ES panels use ``NON_BLOCKING`` while FR
-# (SDVFAST) panels use ``ZONE``. Both must raise ArmingExceptionError so the
-# force-arm flow triggers. See issue #583.
-_FORCEABLE_ERROR_TYPES: frozenset[str] = frozenset({"NON_BLOCKING", "ZONE"})
+# Panel ``error.type`` values that represent an arm rejected because of sensor
+# exceptions. Countries report this differently: ES panels use
+# ``NON_BLOCKING`` while FR (SDVFAST) panels use ``ZONE``. ``allowForcing`` is
+# evaluated separately: even when it is false, the sensor details still belong
+# in the arming-warning flow. See issue #583.
+_ARMING_EXCEPTION_ERROR_TYPES: frozenset[str] = frozenset({"NON_BLOCKING", "ZONE"})
+
+# Canonical message returned by the MPJ alarm backend when an arm attempt has
+# exceptions. Some panel/backend variants use an error type outside the known
+# country-specific values above. Pairing this message with either an explicit
+# force permission or a positive exception count identifies the sensor-warning
+# flow without mistaking unrelated MPJ failures (for example unsupported
+# partition commands) for open sensors.
+_MPJ_ARMING_EXCEPTION_MSG = "error_mpj_exception"
 
 # Surfaced when the panel rejects an arm/disarm because the user's
 # state mapping asks for a mode the panel isn't configured to support.
@@ -195,17 +203,34 @@ class _AlarmMixin(_ClientBase):
         # ── Process result ──
         error = raw.get("error")
         if raw.get("res") == "ERROR":
-            if (
+            allow_forcing = bool(error and error.get("allowForcing"))
+            exceptions_number = error.get("exceptionsNumber") if error else None
+            try:
+                has_reported_exceptions = int(exceptions_number or 0) > 0
+            except (TypeError, ValueError):
+                has_reported_exceptions = False
+            is_mpj_sensor_exception = bool(
                 error
-                and error.get("type") in _FORCEABLE_ERROR_TYPES
-                and error.get("allowForcing")
-            ):
+                and (
+                    error.get("type") in _ARMING_EXCEPTION_ERROR_TYPES
+                    or (
+                        raw.get("msg") == _MPJ_ARMING_EXCEPTION_MSG
+                        and (allow_forcing or has_reported_exceptions)
+                    )
+                )
+            )
+            if is_mpj_sensor_exception:
                 error_ref = error.get("referenceId", "")
                 error_suid = error.get("suid", "")
                 exceptions = await self._get_exceptions(
                     installation, error_ref, error_suid
                 )
-                raise ArmingExceptionError(error_ref, error_suid, exceptions)
+                raise ArmingExceptionError(
+                    error_ref,
+                    error_suid,
+                    exceptions,
+                    allow_forcing=allow_forcing,
+                )
             error_info = error or {}
             if error_info.get("type") != "NON_BLOCKING":
                 raw_msg = raw.get("msg", "unknown error")
