@@ -60,7 +60,7 @@ async def _register_card_resource(
         )
     try:
         frontend.add_extra_js_url(hass, card_url)
-    except (KeyError, Exception):  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
         _LOGGER.debug("[setup] Could not register %s via add_extra_js_url", base_url)
 
 
@@ -89,7 +89,7 @@ def _register_global_module(hass: HomeAssistant, module_url: str) -> None:
     """Register a frontend module independently of Lovelace resources."""
     try:
         frontend.add_extra_js_url(hass, module_url)
-    except (KeyError, Exception):  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
         _LOGGER.debug("[setup] Could not register global module %s", module_url)
 
 

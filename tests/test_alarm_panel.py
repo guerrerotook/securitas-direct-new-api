@@ -3,6 +3,7 @@
 import inspect
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import call as mock_call
 
 import attr
 import pytest
@@ -1629,42 +1630,16 @@ class TestForceState:
 class TestAsyncWillRemoveFromHass:
     """Tests for async_will_remove_from_hass()."""
 
-    async def test_unsubscribes_mobile_action_listener(self):
-        """Calls _mobile_action_unsub() when it is set."""
+    async def test_cancels_force_arm_expiry(self):
+        """Cancel a pending force-arm timer during entity teardown."""
         alarm = make_alarm()
-        mobile_unsub_mock = MagicMock()
-        alarm._mobile_action_unsub = mobile_unsub_mock
+        expiry_unsub = MagicMock()
+        alarm._force_arm_expiry_unsub = expiry_unsub
 
         await alarm.async_will_remove_from_hass()
 
-        mobile_unsub_mock.assert_called_once()
-
-    async def test_handles_none_mobile_action_unsub_gracefully(self):
-        """Handles None _mobile_action_unsub gracefully (no crash)."""
-        alarm = make_alarm()
-        alarm._mobile_action_unsub = None
-
-        # Should not raise
-        await alarm.async_will_remove_from_hass()
-
-    async def test_unsubscribes_arming_event_listener(self):
-        """Calls _arming_event_unsub_new() when set on teardown."""
-        alarm = make_alarm()
-        new_unsub_mock = MagicMock()
-        alarm._arming_event_unsub_new = new_unsub_mock
-
-        await alarm.async_will_remove_from_hass()
-
-        new_unsub_mock.assert_called_once()
-
-    async def test_handles_none_arming_event_unsub_gracefully(self):
-        """Handles None _arming_event_unsub_new gracefully (no crash)."""
-        alarm = make_alarm()
-        alarm._arming_event_unsub_new = None
-        alarm._mobile_action_unsub = None
-
-        # Should not raise
-        await alarm.async_will_remove_from_hass()
+        expiry_unsub.assert_called_once()
+        assert alarm._force_arm_expiry_unsub is None
 
     async def test_calls_super_to_clean_up_coordinator_listener(self):
         """Calls super().async_will_remove_from_hass() so CoordinatorEntity unsubscribes its listener."""
@@ -5394,7 +5369,7 @@ class TestNotificationContent:
         assert "Kitchen Door" in sd["message"]
         assert sd["notification_id"] == "securitas.arming_exception_123456"
 
-    def test_event_handler_schedules_async_helper(self):
+    async def test_event_handler_schedules_async_helper(self):
         """The sync event handler schedules the async helper via async_create_task."""
         alarm = make_alarm()
         event = self._make_event()
@@ -5534,15 +5509,17 @@ class TestAsyncAddedToHass:
 
         alarm.hass.bus.async_listen.assert_not_called()  # type: ignore[attr-defined]
 
-    async def test_mobile_action_unsub_stored(self):
-        """async_added_to_hass stores the unsubscribe callable from bus.async_listen."""
+    async def test_listeners_use_entity_lifecycle_cleanup(self):
+        """Register every bus unsubscribe callable with the entity lifecycle."""
         alarm = make_alarm()
         sentinel = MagicMock()
+        alarm.async_on_remove = MagicMock()
         alarm.hass.bus.async_listen.return_value = sentinel  # type: ignore[attr-defined]
 
         await alarm.async_added_to_hass()
 
-        assert alarm._mobile_action_unsub is sentinel
+        # Four bus listeners plus CoordinatorEntity's own coordinator listener.
+        assert alarm.async_on_remove.call_args_list.count(mock_call(sentinel)) == 4
 
 
 # ===========================================================================
@@ -5748,15 +5725,14 @@ class TestForceArmWorkflow:
 class TestHassNoneGuardsAlarm:
     """Verify alarm entity bails out when hass is None (after removal)."""
 
-    def test_force_state_skips_schedule_when_hass_is_none(self):
+    def test_force_state_skips_write_when_hass_is_none(self):
         alarm = make_alarm()
-        alarm.async_schedule_update_ha_state = MagicMock()
         alarm.hass = None  # type: ignore[attr-defined]
 
         alarm._force_state(AlarmControlPanelState.ARMING)
 
         assert alarm._state == AlarmControlPanelState.ARMING
-        alarm.async_schedule_update_ha_state.assert_not_called()
+        alarm.async_write_ha_state.assert_not_called()
 
 
 # ===========================================================================

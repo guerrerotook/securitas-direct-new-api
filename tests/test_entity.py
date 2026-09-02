@@ -75,16 +75,16 @@ async def test_camera_device_info_uses_via_device_id_when_supported(hass, monkey
     """On HA >= 2026.8, link the child by the parent's registry id."""
     monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
     parent, entry_id = _register_installation_device(hass)
-    registry = dr.async_get(hass)
+
+    def get_device_id(_hass, identifier, *, config_entry_id):
+        assert identifier == (DOMAIN, "v4_securitas_direct.100001")
+        assert config_entry_id == entry_id
+        return parent.id
+
     monkeypatch.setattr(
-        type(registry),
-        "async_get_device_by_identifier",
-        lambda _registry, identifier, owner_entry_id: (
-            parent
-            if identifier == (DOMAIN, "v4_securitas_direct.100001")
-            and owner_entry_id == entry_id
-            else None
-        ),
+        entity_mod.dr,
+        "async_get_device_id_by_identifier",
+        get_device_id,
         raising=False,
     )
     # via_device_id isn't a defined DeviceInfo key before HA 2026.8; read the
@@ -105,11 +105,14 @@ async def test_camera_device_info_falls_back_when_parent_missing(hass, monkeypat
     """via_device_id supported but the parent isn't registered yet → keep
     via_device so HA links it exactly as before (no first-setup regression)."""
     monkeypatch.setattr(entity_mod, "_SUPPORTS_VIA_DEVICE_ID", True)
-    registry = dr.async_get(hass)
+
+    def get_missing_device_id(_hass, _identifier, *, config_entry_id):
+        raise ValueError
+
     monkeypatch.setattr(
-        type(registry),
-        "async_get_device_by_identifier",
-        lambda _registry, _identifier, _entry_id: None,
+        entity_mod.dr,
+        "async_get_device_id_by_identifier",
+        get_missing_device_id,
         raising=False,
     )
     info = camera_device_info(

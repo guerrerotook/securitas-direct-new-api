@@ -260,10 +260,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # warning cleanly.
         self._force_context: dict[str, Any] | None = None
         self._force_arm_expiry_unsub: Callable[[], None] | None = None
-        self._mobile_action_unsub = None
-        self._arming_event_unsub_new = None
-        self._force_arm_expired_event_unsub = None
-        self._arming_exception_dismissed_event_unsub = None
         self._last_handled_event_id: str | None = None
         # Monotonic deadline until which the next arming-exception prompt is
         # suppressed. The auto-force card sets this (via the
@@ -293,9 +289,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         await super().async_added_to_hass()
         if self._notifications_enabled:
             self._register_arming_exception_handler()
-            self._mobile_action_unsub = self.hass.bus.async_listen(
-                "mobile_app_notification_action",
-                self._handle_mobile_action,
+            self.async_on_remove(
+                self.hass.bus.async_listen(
+                    "mobile_app_notification_action",
+                    self._handle_mobile_action,
+                )
             )
 
     @callback
@@ -328,14 +326,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
         # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
         self._cancel_force_arm_expiry()
-        if self._arming_event_unsub_new:
-            self._arming_event_unsub_new()
-        if self._force_arm_expired_event_unsub:
-            self._force_arm_expired_event_unsub()
-        if self._arming_exception_dismissed_event_unsub:
-            self._arming_exception_dismissed_event_unsub()
-        if self._mobile_action_unsub:
-            self._mobile_action_unsub()
         await super().async_will_remove_from_hass()
 
     @callback
@@ -1583,18 +1573,15 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # the integration itself produces. A user-fired securitas_*
         # event won't trigger this listener; user-facing code should fire
         # the verisure_owa_* form.
-        self._arming_event_unsub_new = self.hass.bus.async_listen(
-            ARMING_EXCEPTION_EVENT_TYPE,
-            _handle_arming_exception_event,
-        )
-        self._force_arm_expired_event_unsub = self.hass.bus.async_listen(
-            FORCE_ARM_EXPIRED_EVENT_TYPE,
-            _handle_force_arm_expired_event,
-        )
-        self._arming_exception_dismissed_event_unsub = self.hass.bus.async_listen(
-            ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
-            _handle_arming_exception_dismissed_event,
-        )
+        for event_type, handler in (
+            (ARMING_EXCEPTION_EVENT_TYPE, _handle_arming_exception_event),
+            (FORCE_ARM_EXPIRED_EVENT_TYPE, _handle_force_arm_expired_event),
+            (
+                ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+                _handle_arming_exception_dismissed_event,
+            ),
+        ):
+            self.async_on_remove(self.hass.bus.async_listen(event_type, handler))
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
         """Send notifications about arming exceptions from event data."""

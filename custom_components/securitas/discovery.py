@@ -165,7 +165,7 @@ def _schedule_lock_config_retry(
             )
 
     unsub = async_call_later(hass, delay, _retry)
-    lock_entity.add_config_retry_unsub(unsub)
+    lock_entity.async_on_remove(unsub)
     # Also tracked at entry scope so unload can cancel pending retries.
     if hub.config_entry is not None:
         entry_data = hass.data.get(DOMAIN, {}).get(hub.config_entry.entry_id)

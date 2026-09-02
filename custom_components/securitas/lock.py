@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import lock
@@ -214,8 +213,6 @@ class VerisureLock(  # type: ignore[override]
             self._attr_code_format = r"^\d+$" if is_numeric else r".+"
 
         self._operation_in_progress: bool = False
-        self._config_retry_unsubs: list[Callable[[], None]] = []
-
         # Verification-poll tuning (overridable in tests).
         self._verify_attempts: int = LOCK_VERIFY_ATTEMPTS
         self._verify_delay: float = LOCK_VERIFY_DELAY
@@ -223,7 +220,6 @@ class VerisureLock(  # type: ignore[override]
         # Auto-lock state — populated when added to hass.
         self._alarm_coordinator = None  # set by async_added_to_hass
         self._combined_alarm_panel = None  # set by async_added_to_hass
-        self._alarm_listener_unsub: Callable[[], None] | None = None
         self._alarm_baseline: set[str] | None = None  # armed circuits at last update
         self._lock_on_arm_circuits: list[str] = []
         self._unlock_disarms_circuits: list[str] = []
@@ -254,10 +250,6 @@ class VerisureLock(  # type: ignore[override]
             config_entry_id=self._entry_id,
         )
         self.async_write_ha_state()
-
-    def add_config_retry_unsub(self, unsub: Callable[[], None]) -> None:
-        """Track a config retry cancel handle for cleanup on removal."""
-        self._config_retry_unsubs.append(unsub)
 
     # -- Coordinator integration ---------------------------------------------
 
@@ -410,19 +402,11 @@ class VerisureLock(  # type: ignore[override]
         if self._alarm_coordinator is not None:
             # Read the current state to seed the baseline (no firing).
             self._alarm_baseline = _armed_circuits(self._alarm_coordinator.alarm_state)
-            self._alarm_listener_unsub = self._alarm_coordinator.async_add_listener(
-                self._handle_alarm_coordinator_update
+            self.async_on_remove(
+                self._alarm_coordinator.async_add_listener(
+                    self._handle_alarm_coordinator_update
+                )
             )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """When entity will be removed from Home Assistant."""
-        await super().async_will_remove_from_hass()
-        if self._alarm_listener_unsub is not None:
-            self._alarm_listener_unsub()
-            self._alarm_listener_unsub = None
-        for unsub in self._config_retry_unsubs:
-            unsub()
-        self._config_retry_unsubs.clear()
 
     # -- State properties ----------------------------------------------------
 

@@ -17,12 +17,15 @@ import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
 )
-from homeassistant.components.http import (
-    # HA 2026.8 moved StaticPathConfig to homeassistant.components.http.server,
-    # but it is still re-exported here at runtime and this path also works on
-    # our minimum supported HA (2025.2), where http.server does not yet exist.
-    StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
-)
+
+try:
+    # Public location since HA 2026.8.
+    from homeassistant.components.http.server import StaticPathConfig
+except ImportError:
+    # Compatibility with our minimum supported HA (2025.2).
+    from homeassistant.components.http import (
+        StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
+    )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_CODE,
