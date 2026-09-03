@@ -140,6 +140,9 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    // HA may assign hass before setConfig() with some element lifecycles; stay
+    // a no-op until configured (setConfig triggers the first render).
+    if (!this._config) return;
     const stateObj = hass.states[this._config.entity];
     const name = stateObj ? this._resolveName(stateObj) : "";
     const lang = hassLanguage(hass);
@@ -453,7 +456,12 @@ if (!window.customBadges.find(b => b.type === "verisure-owa-alarm-badge")) {
     type:        "verisure-owa-alarm-badge",
     name:        "Verisure OWA Alarm Badge",
     description: "Alarm badge with name and state — click to open native More Info.",
-    preview:     true,
+    // preview:false — a live picker preview calls setConfig(getStubConfig(hass)),
+    // and on a system with no alarm_control_panel.* entity that stub is
+    // { entity: "" }, which setConfig rejects ("Please define an entity"),
+    // breaking the picker preview. Keep the misconfiguration throw and disable
+    // the live preview instead.
+    preview:     false,
   });
 }
 window.customCardFeatures = window.customCardFeatures || [];
@@ -464,8 +472,12 @@ if (!window.customCardFeatures.find(f => f.type === "verisure-owa-arm-exception"
     isSupported: (hass, context) => {
       const entityId = context?.entity_id || "";
       if (!entityId.startsWith("alarm_control_panel.")) return false;
+      // Require the entity to be a registered Verisure (securitas) panel. An
+      // absent registry entry means a YAML / other-integration alarm panel, on
+      // which this Verisure-specific feature must not be offered. Securitas
+      // panels are config-entry entities, so they are always in hass.entities.
       const registryEntry = hass?.entities?.[entityId];
-      return !registryEntry || registryEntry.platform === "securitas";
+      return registryEntry?.platform === "securitas";
     },
     // HA before the context-based custom-feature API calls `supported` with
     // the state object instead. Current HA prefers isSupported above.
