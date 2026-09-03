@@ -166,11 +166,10 @@ def _schedule_lock_config_retry(
 
     unsub = async_call_later(hass, delay, _retry)
     lock_entity.async_on_remove(unsub)
-    # Also tracked at entry scope so unload can cancel pending retries.
+    # The entity callback handles normal platform removal; the entry callback
+    # also covers a retry scheduled while setup is only partially complete.
     if hub.config_entry is not None:
-        entry_data = hass.data.get(DOMAIN, {}).get(hub.config_entry.entry_id)
-        if entry_data is not None:
-            entry_data.setdefault("lock_config_retry_unsubs", []).append(unsub)
+        hub.config_entry.async_on_unload(unsub)
 
 
 async def _discover_locks(

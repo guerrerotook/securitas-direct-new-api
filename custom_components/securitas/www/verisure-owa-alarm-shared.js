@@ -9,7 +9,10 @@
 // sync by tests-js/integration/card-cache-busting.test.js).
 
 import { formatTranslation } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
-import { ARM_EXCEPTION_TRANSLATIONS } from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
+import {
+  ARM_EXCEPTION_TRANSLATIONS,
+  notifyActionFailure,
+} from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {
@@ -244,22 +247,6 @@ TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
 
 export const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
 
-function notifyActionFailure(hass, srcEl, error) {
-  if (!srcEl) return;
-  const lang = hass?.language || hass?.locale?.language || "en";
-  const message =
-    error instanceof Error && error.message
-      ? _t(lang, "action_failed_detail", { error: error.message })
-      : _t(lang, "action_failed");
-  srcEl.dispatchEvent(
-    new CustomEvent("hass-notification", {
-      detail: { message },
-      bubbles: true,
-      composed: true,
-    }),
-  );
-}
-
 /**
  * Run a Home Assistant service without leaving rejected service promises
  * unhandled. The notification event is Home Assistant's established custom-UI
@@ -346,6 +333,17 @@ export const ARM_ACTIONS = [
 ];
 
 export const GESTURE_KEYS = ["tap_action", "hold_action", "double_tap_action"];
+
+/** Replace the removed compact Badge/Chip action as old YAML is loaded. */
+export function migrateCompactAlarmConfig(config) {
+  let migrated = config;
+  for (const key of GESTURE_KEYS) {
+    if (config[key]?.action !== "arm_or_disarm") continue;
+    if (migrated === config) migrated = { ...config };
+    migrated[key] = { action: "more-info" };
+  }
+  return migrated;
+}
 
 // ── Gesture helpers ───────────────────────────────────────────────────────────
 

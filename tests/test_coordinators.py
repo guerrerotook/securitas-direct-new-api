@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from datetime import timedelta
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,6 +57,11 @@ def _make_hass() -> MagicMock:
     """Create a minimal mock HomeAssistant instance."""
     hass = MagicMock(spec=HomeAssistant)
     hass.data = {}
+
+    def _close_coro(coro: Coroutine[Any, Any, Any]) -> None:
+        coro.close()
+
+    hass.async_create_task.side_effect = _close_coro
     return hass
 
 

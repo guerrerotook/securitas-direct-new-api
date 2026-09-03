@@ -4,13 +4,17 @@
 // Keeping it in a separate, dynamically imported module prevents the compact
 // Badge from depending on the much larger Alarm Card editor at runtime.
 
+import {
+  GESTURE_KEYS,
+  migrateCompactAlarmConfig,
+} from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
+
 const DEFAULT_CONFIG = {
   show_name: false,
   show_state: true,
   show_icon: true,
 };
 
-const ACTION_KEYS = ["tap_action", "hold_action", "double_tap_action"];
 const PRESERVED_CUSTOM_KEYS = ["colors"];
 // Keep the stock HA action editor, but only advertise actions that this
 // dependency-free custom Badge can faithfully execute. `toggle` is not valid
@@ -18,11 +22,6 @@ const PRESERVED_CUSTOM_KEYS = ["colors"];
 // services), while URL and Assist require private frontend helpers that are
 // not part of the custom-card API.
 const BADGE_ACTIONS = ["more-info", "navigate", "perform-action", "none"];
-
-function nativeAction(action) {
-  // Match the runtime migration when the editor receives old dashboard YAML.
-  return action?.action === "arm_or_disarm" ? { action: "more-info" } : action;
-}
 
 function displayedElements(config) {
   const result = [];
@@ -58,7 +57,10 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    this._config = { ...DEFAULT_CONFIG, ...config };
+    this._config = {
+      ...DEFAULT_CONFIG,
+      ...migrateCompactAlarmConfig(config),
+    };
     this._render();
   }
 
@@ -152,7 +154,7 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
             name: "",
             type: "optional_actions",
             flatten: true,
-            schema: ["hold_action", "double_tap_action"].map((name) => ({
+            schema: GESTURE_KEYS.slice(1).map((name) => ({
               name,
               selector: {
                 ui_action: { default_action: "none", actions: BADGE_ACTIONS },
@@ -173,9 +175,6 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
     delete data.type;
     delete data.states;
     for (const key of PRESERVED_CUSTOM_KEYS) delete data[key];
-    for (const key of ACTION_KEYS) {
-      if (data[key]) data[key] = nativeAction(data[key]);
-    }
     return data;
   }
 
@@ -230,11 +229,6 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
 
     for (const key of PRESERVED_CUSTOM_KEYS) {
       if (previous[key] !== undefined) next[key] = previous[key];
-    }
-    for (const key of ACTION_KEYS) {
-      if (previous[key]?.action === "arm_or_disarm" && value[key] === undefined) {
-        next[key] = { action: "more-info" };
-      }
     }
     this._config = next;
     this._render();

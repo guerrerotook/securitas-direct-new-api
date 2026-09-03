@@ -289,7 +289,7 @@ async def test_activity_polling_disabled_by_default(
     activity_coord = entry_data["activity_coordinator"]
     assert activity_coord is not None
     assert activity_coord.update_interval is None
-    assert entry_data["activity_listener_unsub"] is not None
+    assert "activity_listener_unsub" not in entry_data
 
 
 async def test_activity_polling_enabled_sets_interval(
@@ -305,7 +305,7 @@ async def test_activity_polling_enabled_sets_interval(
     activity_coord = entry_data["activity_coordinator"]
     assert activity_coord is not None
     assert activity_coord.update_interval == timedelta(seconds=60)
-    assert entry_data["activity_listener_unsub"] is not None
+    assert "activity_listener_unsub" not in entry_data
 
 
 async def _setup_and_settle(hass, mock_server, **overrides) -> None:

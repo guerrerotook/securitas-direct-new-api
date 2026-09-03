@@ -1566,21 +1566,17 @@ class TestAsyncUnloadEntry:
         assert hub.config_entry is owner
         hub.persist_current_refresh_token.assert_not_called()
 
-    async def test_unload_cancels_pending_lock_config_retries(self, hass):
-        """async_unload_entry cancels any pending lock-config retry timers."""
+    async def test_failed_platform_unload_preserves_runtime_data(self, hass):
+        """A failed platform unload must leave the loaded entry intact."""
         hub = make_securitas_hub_mock()
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
         username = entry.data[CONF_USERNAME]
 
-        unsub_a = MagicMock()
-        unsub_b = MagicMock()
-
         hass.data[DOMAIN] = {
             entry.entry_id: {
                 "hub": hub,
                 "devices": [],
-                "lock_config_retry_unsubs": [unsub_a, unsub_b],
             },
             "sessions": {username: {"hub": hub, "ref_count": 1}},
         }
@@ -1589,12 +1585,13 @@ class TestAsyncUnloadEntry:
             hass.config_entries,
             "async_unload_platforms",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=False,
         ):
-            await async_unload_entry(hass, entry)
+            result = await async_unload_entry(hass, entry)
 
-        unsub_a.assert_called_once_with()
-        unsub_b.assert_called_once_with()
+        assert result is False
+        assert hass.data[DOMAIN][entry.entry_id]["hub"] is hub
+        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
 
     async def test_unload_removes_domain_when_empty(self, hass):
         """When the last entry is unloaded, DOMAIN should be removed from hass.data."""
@@ -2434,6 +2431,31 @@ class TestDiscoverCameras:
         assert "Failed to get camera devices" in caplog.text
         camera_add.assert_not_called()
         button_add.assert_not_called()
+
+
+class TestLockConfigRetry:
+    """Tests for lock-config retry lifecycle ownership."""
+
+    def test_cancel_callback_is_owned_by_entity_and_entry(self, hass):
+        """Either entity removal or entry unload can cancel a pending retry."""
+        from custom_components.securitas import _schedule_lock_config_retry
+
+        hub = make_securitas_hub_mock()
+        hub.config_entry = MagicMock()
+        lock_entity = MagicMock()
+        lock_entity.device_id = "1"
+        cancel = MagicMock()
+
+        with patch("homeassistant.helpers.event.async_call_later", return_value=cancel):
+            _schedule_lock_config_retry(
+                hass,
+                hub,
+                make_installation(),
+                lock_entity,
+            )
+
+        lock_entity.async_on_remove.assert_called_once_with(cancel)
+        hub.config_entry.async_on_unload.assert_called_once_with(cancel)
 
 
 # ===========================================================================

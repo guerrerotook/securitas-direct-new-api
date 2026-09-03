@@ -48,6 +48,10 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
 
 ARM_EXCEPTION_TRANSLATIONS["pt-BR"] = ARM_EXCEPTION_TRANSLATIONS.pt;
 
+export function hassLanguage(hass) {
+  return hass?.language || hass?.locale?.language || "en";
+}
+
 export function armExceptionTranslation(lang, key, vars) {
   const table =
     ARM_EXCEPTION_TRANSLATIONS[lang] ||
@@ -59,6 +63,22 @@ export function armExceptionTranslation(lang, key, vars) {
     value = value.replaceAll(`{${name}}`, () => safeReplacement);
   }
   return value;
+}
+
+export function notifyActionFailure(hass, srcEl, error) {
+  if (!srcEl) return;
+  const lang = hassLanguage(hass);
+  const message =
+    error instanceof Error && error.message
+      ? armExceptionTranslation(lang, "action_failed_detail", { error: error.message })
+      : armExceptionTranslation(lang, "action_failed");
+  srcEl.dispatchEvent(
+    new CustomEvent("hass-notification", {
+      detail: { message },
+      bubbles: true,
+      composed: true,
+    }),
+  );
 }
 
 export function armExceptionState(stateObj) {
@@ -250,7 +270,7 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
   _render() {
     if (!this.shadowRoot) return;
     const state = armExceptionState(this._resolvedStateObj());
-    const lang = this._hass?.language || this._hass?.locale?.language || "en";
+    const lang = hassLanguage(this._hass);
     const presentation = this._presentation === "compact" ? "compact" : "full";
     const key = `${state.active}|${state.forceArmAvailable}|${lang}|${presentation}|${state.sensors.join("\u0000")}`;
     this.hidden = !state.active;
@@ -302,18 +322,7 @@ export class VerisureOwaArmExceptionAlert extends HTMLElement {
     try {
       await this._hass.callService("verisure_owa", service, { entity_id: entityId });
     } catch (error) {
-      const lang = this._hass?.language || this._hass?.locale?.language || "en";
-      const detail =
-        error instanceof Error && error.message
-          ? armExceptionTranslation(lang, "action_failed_detail", { error: error.message })
-          : armExceptionTranslation(lang, "action_failed");
-      this.dispatchEvent(
-        new CustomEvent("hass-notification", {
-          detail: { message: detail },
-          bubbles: true,
-          composed: true,
-        }),
-      );
+      notifyActionFailure(this._hass, this, error);
     } finally {
       if (this.isConnected) this._setBusy(false);
     }

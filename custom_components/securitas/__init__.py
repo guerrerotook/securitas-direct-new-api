@@ -7,7 +7,6 @@ import inspect
 import logging
 import time
 from collections import OrderedDict
-from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -20,7 +19,9 @@ from homeassistant.components import (
 
 try:
     # Public location since HA 2026.8.
-    from homeassistant.components.http.server import StaticPathConfig
+    from homeassistant.components.http.server import (  # type: ignore[reportMissingImports]
+        StaticPathConfig,
+    )
 except ImportError:
     # Compatibility with our minimum supported HA (2025.2).
     from homeassistant.components.http import (
@@ -1180,11 +1181,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # automations keep working even if the user disables the
         # ActivityLogSensor entity.  Attaching here also starts the
         # coordinator's periodic timer so polling continues for as long as
-        # the integration is loaded; async_unload_entry detaches it.
-        activity_listener_unsub: Callable[[], None] | None = None
+        # the integration is loaded. Let ConfigEntry own the unsubscribe
+        # callback so failed setup and successful unload share one cleanup path.
         if activity_coord is not None and devices:
-            activity_listener_unsub = attach_activity_listener(
-                hass, activity_coord, devices[0].installation.number
+            entry.async_on_unload(
+                attach_activity_listener(
+                    hass, activity_coord, devices[0].installation.number
+                )
             )
 
         # Store per-entry data
@@ -1195,7 +1198,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "sentinel_coordinator": sentinel_coord,
             "lock_coordinator": lock_coord,
             "activity_coordinator": activity_coord,
-            "activity_listener_unsub": activity_listener_unsub,
             "config_entry": entry,
         }
         # Signalled by _async_discover_devices once lock discovery has either
@@ -1281,20 +1283,8 @@ def _release_shared_session(
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
-    activity_listener_unsub = entry_data.get("activity_listener_unsub")
-    if activity_listener_unsub is not None:
-        activity_listener_unsub()
-
-    # Cancel any pending lock-config retry timers before tearing down platforms,
-    # so a timer firing mid-unload can't schedule a follow-up retry against a
-    # half-disposed hub.
-    for unsub in entry_data.get("lock_config_retry_unsubs", []):
-        unsub()
-
-    unload_ok = await hass.config_entries.async_unload_platforms(
-        config_entry, PLATFORMS
-    )
+    if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
+        return False
 
     # Decrement shared session ref count (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
@@ -1343,4 +1333,4 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
         hass.data.pop(DOMAIN, None)
 
-    return unload_ok
+    return True

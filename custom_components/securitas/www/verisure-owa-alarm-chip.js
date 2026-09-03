@@ -12,28 +12,15 @@ import {
   STATE_CFG,
   attachGesture,
   _makeLegacyShim,
+  migrateCompactAlarmConfig,
 } from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
-import "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
+import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
   show_state: true,
   show_icon: true,
 };
-
-const COMPACT_ACTION_KEYS = ["tap_action", "hold_action", "double_tap_action"];
-
-// Replace the removed conditional Badge/Chip action as old YAML is loaded.
-// The native More Info dialog provides mode selection and PIN handling.
-function migrateCompactAlarmConfig(config) {
-  let migrated = config;
-  for (const key of COMPACT_ACTION_KEYS) {
-    if (config[key]?.action !== "arm_or_disarm") continue;
-    if (migrated === config) migrated = { ...config };
-    migrated[key] = { action: "more-info" };
-  }
-  return migrated;
-}
 
 const HA_THEME_COLORS = new Set([
   "primary", "accent", "red", "pink", "purple", "deep-purple", "indigo",
@@ -46,10 +33,6 @@ const HA_THEME_COLORS = new Set([
 function badgeCssColor(color, fallback) {
   if (!color || color === "state") return fallback;
   return HA_THEME_COLORS.has(color) ? `var(--${color}-color)` : color;
-}
-
-function hassLanguage(hass) {
-  return hass?.language || hass?.locale?.language || "en";
 }
 
 // Tile Card feature that surfaces the open-zone snapshot inline. Home
