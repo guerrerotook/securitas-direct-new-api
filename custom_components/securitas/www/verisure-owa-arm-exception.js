@@ -6,6 +6,7 @@
 export const ARM_EXCEPTION_TRANSLATIONS = {
   en: {
     force_arm: "Force Arm",
+    auto_force_arm: "Automatically force-arm past open sensors",
     cancel: "Cancel",
     open_sensors: "Open sensor(s) — arm anyway?",
     open_sensors_no_force: "Open sensor(s) — close them before arming",
@@ -14,6 +15,7 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
   },
   es: {
     force_arm: "Forzar armado",
+    auto_force_arm: "Forzar armado automáticamente con sensores abiertos",
     cancel: "Cancelar",
     open_sensors: "Sensor(es) abierto(s) — ¿armar igualmente?",
     open_sensors_no_force: "Sensor(es) abierto(s) — ciérrelos antes de armar",
@@ -22,6 +24,7 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
   },
   fr: {
     force_arm: "Forcer l’armement",
+    auto_force_arm: "Forcer l’armement automatiquement malgré les capteurs ouverts",
     cancel: "Annuler",
     open_sensors: "Capteur(s) ouvert(s) — armer quand même ?",
     open_sensors_no_force: "Capteur(s) ouvert(s) — fermez-les avant d’armer",
@@ -30,6 +33,7 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
   },
   it: {
     force_arm: "Forza armamento",
+    auto_force_arm: "Forza l’armamento automaticamente con sensori aperti",
     cancel: "Annulla",
     open_sensors: "Sensore/i aperto/i — armare comunque?",
     open_sensors_no_force: "Sensore/i aperto/i — chiuderli prima di attivare",
@@ -38,6 +42,7 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
   },
   pt: {
     force_arm: "Forçar armamento",
+    auto_force_arm: "Forçar armamento automaticamente com sensores abertos",
     cancel: "Cancelar",
     open_sensors: "Sensor(es) aberto(s) — armar na mesma?",
     open_sensors_no_force: "Sensor(es) aberto(s) — feche-os antes de armar",
@@ -50,6 +55,39 @@ ARM_EXCEPTION_TRANSLATIONS["pt-BR"] = ARM_EXCEPTION_TRANSLATIONS.pt;
 
 export function hassLanguage(hass) {
   return hass?.language || hass?.locale?.language || "en";
+}
+
+// ── Per-device auto-force-arm preference (shared by the alarm card and the
+// native More Info dialog) ──────────────────────────────────────────────────
+// Defined here, in the module both surfaces import, so the storage key can
+// never drift between them: the tick is remembered per device and shared, so
+// ticking it in either place enables it for the other.
+export function autoForceStorageKey(entityId) {
+  return `verisure-owa:auto-force-arm:${entityId}`;
+}
+
+export function readAutoForce(entityId) {
+  try {
+    return globalThis.localStorage?.getItem(autoForceStorageKey(entityId)) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function writeAutoForce(entityId, on) {
+  try {
+    globalThis.localStorage?.setItem(autoForceStorageKey(entityId), on ? "true" : "false");
+  } catch {
+    /* private mode / storage disabled — the tick box just won't persist */
+  }
+}
+
+// Auto-force only ever acts when BOTH the integration capability gate is on
+// AND this device's tick box is ticked. The gate is authoritative: a
+// remembered tick from when the gate was enabled must not keep auto-forcing
+// after an admin turns the option off.
+export function autoForceActive(stateObj, ticked) {
+  return ticked === true && stateObj?.attributes?.auto_force_arm_enabled === true;
 }
 
 export function armExceptionTranslation(lang, key, vars) {

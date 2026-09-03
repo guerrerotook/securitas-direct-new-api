@@ -1791,17 +1791,21 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # set_arm_state's success path uses these to populate the injected
         # `armed_with_exceptions` event with the bypassed-zone list.
         bypassed = list(self._force_context.get("exceptions", []))
-        # An auto-force (card set the suppress flag) took the prompt's place;
-        # capture it before _clear_force_context resets the window so the
-        # success path can send the "force-armed" confirmation instead, and so
-        # we skip dismissing a prompt that was never shown.
+        # An auto-force (suppress flag set) took the prompt's place; capture it
+        # before _clear_force_context resets the window so the success path can
+        # send the "force-armed" confirmation instead of the plain prompt.
         auto_forced = self._arm_prompt_suppressed()
         _LOGGER.info(
             "Force-arming: overriding previous exceptions %s",
             [e.get("alias") for e in bypassed],
         )
         self._clear_force_context()
-        if self._notifications_enabled and not auto_forced:
+        # Always dismiss the arming-exception prompt (a no-op when it was never
+        # shown). The dashboard card pre-suppresses so nothing appears, but the
+        # native More Info dialog can only suppress reactively — after HA
+        # dispatches the arm — so the prompt may already be on screen; the
+        # "force-armed" confirmation replaces it.
+        if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
         self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(

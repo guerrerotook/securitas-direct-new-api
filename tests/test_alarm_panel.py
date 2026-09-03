@@ -519,6 +519,34 @@ class TestForceArmNotificationsConfig:
 
         alarm._notify_force_armed.assert_not_called()
 
+    async def test_force_arm_manual_dismisses_prompt(self):
+        """A manual Force Arm tap dismisses the arming-exception prompt it acts on."""
+        alarm = self._force_context_alarm()
+        alarm._dismiss_arming_exception_notification = MagicMock()
+
+        await alarm.async_force_arm()
+
+        alarm._dismiss_arming_exception_notification.assert_called_once()
+
+    async def test_force_arm_auto_still_dismisses_prompt(self):
+        """An auto-forced arm dismisses the arming-exception prompt too.
+
+        The dashboard card pre-suppresses the prompt so nothing is shown, but the
+        native More Info dialog can only react after HA dispatches the arm — the
+        prompt may already be on screen when our suppress lands. Dismiss it in
+        both cases (a no-op when it was never shown); the "force-armed"
+        confirmation still fires as the replacement.
+        """
+        alarm = self._force_context_alarm()
+        alarm._dismiss_arming_exception_notification = MagicMock()
+        alarm._notify_force_armed = MagicMock()
+
+        alarm.suppress_arm_exception_prompt()
+        await alarm.async_force_arm()
+
+        alarm._dismiss_arming_exception_notification.assert_called_once()
+        alarm._notify_force_armed.assert_called_once()
+
     async def test_force_armed_confirmation_content(self):
         """The confirmation lists the bypassed sensors (persistent + mobile) under
         a dedicated notification id."""
