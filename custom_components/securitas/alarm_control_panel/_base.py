@@ -1132,6 +1132,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             result = await self._execute_transition(target, **force_params)
             self._set_waf_blocked(False)
             self.update_status_alarm(result)
+            # A plain arm that succeeds while a force context is still pending
+            # (the user retried after closing the sensor, or the panel now
+            # accepts it) leaves nothing to force past — the panel is armed. A
+            # force-arm has already cleared its own context before reaching
+            # here, so a surviving context is necessarily a stale plain-arm one.
+            # Clear it before the state write so its lingering force_arm_available
+            # can't drive a spurious auto-force from the card / More Info dialog.
+            if self._force_context is not None:
+                if self._notifications_enabled:
+                    self._dismiss_arming_exception_notification()
+                self._clear_force_context()
             self.async_write_ha_state()
             await self.coordinator.async_request_refresh()
             # Force-arm (after exceptions) keeps a different category so the

@@ -2222,6 +2222,50 @@ class TestForceArmContext:
         assert alarm._force_context is None
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
+    async def test_successful_plain_arm_clears_stale_force_context(self):
+        """A plain arm that succeeds while a force context is still pending must
+        clear it — the panel is now armed, so nothing remains to force past.
+
+        Otherwise the lingering force_arm_available drives a spurious auto-force
+        from the card / native More Info dialog (both check force_arm_available
+        before firing).
+        """
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm._force_context = {
+            "reference_id": "ref-stale",
+            "suid": "suid-stale",
+            "mode": AlarmControlPanelState.ARMED_AWAY,
+            "exceptions": [{"alias": "Door"}],
+            "created_at": datetime.now(),
+        }
+        alarm._attr_extra_state_attributes["force_arm_available"] = True
+        alarm._attr_extra_state_attributes["arm_exceptions"] = ["Door"]
+        alarm._attr_extra_state_attributes["arm_exception_active"] = True
+        alarm._dismiss_arming_exception_notification = MagicMock()
+
+        alarm.client.arm_alarm = AsyncMock(
+            return_value=OperationStatus(
+                operation_status="OK",
+                message="",
+                status="",
+                installation_number="123456",
+                protom_response="T",
+                protom_response_date="",
+            )
+        )
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+        assert alarm._force_context is None
+        assert "force_arm_available" not in alarm._attr_extra_state_attributes
+        assert "arm_exceptions" not in alarm._attr_extra_state_attributes
+        assert "arm_exception_active" not in alarm._attr_extra_state_attributes
+        # The stale prompt, if still on screen, is dismissed.
+        alarm._dismiss_arming_exception_notification.assert_called_once()
+
     async def test_arming_exception_sends_persistent_notification(self):
         """ArmingExceptionError triggers async notification helper via event handler."""
         alarm = make_alarm()
