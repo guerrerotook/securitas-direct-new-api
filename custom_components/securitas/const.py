@@ -46,8 +46,11 @@ CAMERA_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-camera-card.js"
 CAMERA_CARD_URL = _card_url("verisure-owa-camera-card.js")
 ACTIVITY_LOG_CARD_BASE_URL = "/verisure-owa-panel/verisure-owa-activity-log-card.js"
 ACTIVITY_LOG_CARD_URL = _card_url("verisure-owa-activity-log-card.js")
-# Loaded independently of Lovelace resources because alarm entities use it as
-# their custom More Info control throughout the frontend.
+# Registered as a Lovelace resource like the cards (loaded during Lovelace
+# init, post-registry-swap) so alarm entities' custom More Info control
+# resolves on a cold load; falls back to add_extra_js_url only when Lovelace
+# resources are unavailable.
+MORE_INFO_BASE_URL = "/verisure-owa-panel/verisure-owa-more-info.js"
 MORE_INFO_MODULE_URL = _card_url("verisure-owa-more-info.js")
 MORE_INFO_ELEMENT = "more-info-verisure-owa-alarm"
 
