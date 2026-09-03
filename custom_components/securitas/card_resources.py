@@ -61,7 +61,9 @@ async def _register_card_resource(
     try:
         frontend.add_extra_js_url(hass, card_url)
     except Exception:  # pylint: disable=broad-exception-caught
-        _LOGGER.debug("[setup] Could not register %s via add_extra_js_url", base_url)
+        # Both the Lovelace-resource registration AND this fallback failed, so
+        # the module never loads and the UI silently breaks — surface it.
+        _LOGGER.warning("[setup] Could not register %s via add_extra_js_url", base_url)
 
 
 async def _unregister_card_resource(
@@ -83,17 +85,3 @@ async def _unregister_card_resource(
                 await resources.async_delete_item(resource_id)
     except Exception:  # pylint: disable=broad-exception-caught
         _LOGGER.debug("[teardown] Could not remove Lovelace resource %s", resource_id)
-
-
-def _register_global_module(hass: HomeAssistant, module_url: str) -> None:
-    """Register a frontend module independently of Lovelace resources."""
-    try:
-        frontend.add_extra_js_url(hass, module_url)
-    except Exception:  # pylint: disable=broad-exception-caught
-        _LOGGER.debug("[setup] Could not register global module %s", module_url)
-
-
-def _unregister_global_module(hass: HomeAssistant, module_url: str) -> None:
-    """Remove a globally registered frontend module."""
-    with contextlib.suppress(Exception):
-        frontend.remove_extra_js_url(hass, module_url)

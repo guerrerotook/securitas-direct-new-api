@@ -870,6 +870,85 @@ class TestAsyncSetupEntry:
             for u in js_urls
         )
 
+    async def test_setup_registers_more_info_as_lovelace_resource(self, hass, mock_hub):
+        """The More Info module registers as a Lovelace resource, not extra JS.
+
+        On a cold load HA swaps window.customElements for a fresh registry on
+        first Lovelace render, dropping any element defined by a module loaded
+        via add_extra_js_url (which runs at page load, pre-swap). The alarm
+        entity's custom More Info control (custom_ui_more_info) then resolves to
+        an undefined element and the dialog body renders empty. Registering the
+        module as a Lovelace resource (loaded post-swap during Lovelace init)
+        fixes it, matching how the four card modules are registered.
+        """
+
+        class _FakeResources:
+            """Minimal stand-in for HA's Lovelace ResourceStorageCollection."""
+
+            def __init__(self):
+                self.loaded = False
+                self._items = []
+                self._next_id = 0
+
+            async def async_load(self):
+                self.loaded = True
+
+            def async_items(self):
+                return list(self._items)
+
+            async def async_create_item(self, data):
+                self._next_id += 1
+                item = {"id": f"res-{self._next_id}", **data}
+                self._items.append(item)
+                return item
+
+        fake_resources = _FakeResources()
+        lovelace_data = MagicMock()
+        lovelace_data.resources = fake_resources
+        hass.data["lovelace"] = lovelace_data
+
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "custom_components.securitas.frontend.add_extra_js_url"
+            ) as mock_add_js,
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+
+        # The More Info module is registered as a Lovelace resource of type
+        # "module" (loaded post-swap during Lovelace init) ...
+        registered = fake_resources.async_items()
+        more_info = [
+            item
+            for item in registered
+            if item["url"].startswith(
+                "/verisure-owa-panel/verisure-owa-more-info.js?v="
+            )
+        ]
+        assert len(more_info) == 1, [item["url"] for item in registered]
+        assert more_info[0]["res_type"] == "module"
+
+        # ... and NOT via the add_extra_js_url fallback (which runs pre-swap).
+        js_urls = [call[0][1] for call in mock_add_js.call_args_list]
+        assert not any(
+            u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
+            for u in js_urls
+        ), js_urls
+
     async def test_two_accounts_each_fetches_own_installations(self, hass):
         """Two entries with different usernames must not share installations_cache.
 

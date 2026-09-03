@@ -53,9 +53,7 @@ from homeassistant.helpers.service import (
 from .api_queue import ApiQueue
 from .card_resources import (
     _register_card_resource,
-    _register_global_module,
     _unregister_card_resource,
-    _unregister_global_module,
 )
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
     ACTIVITY_LOG_CARD_BASE_URL,
@@ -105,6 +103,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MORE_INFO_BASE_URL,
     MORE_INFO_MODULE_URL,
     PANEL_OPTION_KEYS,
     PLATFORMS,
@@ -1031,7 +1030,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ACTIVITY_LOG_CARD_URL,
             "activity_log_card_resource_id",
         )
-        _register_global_module(hass, MORE_INFO_MODULE_URL)
+        await _register_card_resource(
+            hass, MORE_INFO_BASE_URL, MORE_INFO_MODULE_URL, "more_info_resource_id"
+        )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
     # Register verisure_owa.* service aliases alongside the securitas.* primary
@@ -1321,7 +1322,9 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         await _unregister_card_resource(
             hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
         )
-        _unregister_global_module(hass, MORE_INFO_MODULE_URL)
+        await _unregister_card_resource(
+            hass, MORE_INFO_MODULE_URL, "more_info_resource_id"
+        )
 
         # Tear down the verisure_owa.* service aliases on full unload —
         # leaving them registered after the integration's last entry
