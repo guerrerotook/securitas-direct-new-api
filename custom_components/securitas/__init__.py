@@ -3,25 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections import OrderedDict
-from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
 )
-from homeassistant.components.http import (
-    # HA 2026.8 moved StaticPathConfig to homeassistant.components.http.server,
-    # but it is still re-exported here at runtime and this path also works on
-    # our minimum supported HA (2025.2), where http.server does not yet exist.
-    StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
-)
+
+try:
+    # Public location since HA 2026.8.
+    from homeassistant.components.http.server import (  # type: ignore[reportMissingImports]
+        StaticPathConfig,
+    )
+except ImportError:
+    # Compatibility with our minimum supported HA (2025.2).
+    from homeassistant.components.http import (
+        StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
+    )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_CODE,
@@ -98,6 +103,8 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MORE_INFO_BASE_URL,
+    MORE_INFO_MODULE_URL,
     PANEL_OPTION_KEYS,
     PLATFORMS,
     SENTINEL_SERVICE_NAMES,
@@ -139,6 +146,19 @@ from .verisure_owa_api import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# HA 2026.10 removes the old leading ``hass`` argument. Keep the integration's
+# HA 2025.2 minimum working while calling only the modern form on current Core.
+_EXTRACT_ENTITY_IDS_REQUIRES_HASS = (
+    next(iter(inspect.signature(async_extract_entity_ids).parameters)) == "hass"
+)
+
+
+async def _async_extract_service_entity_ids(call: ServiceCall) -> set[str]:
+    """Extract service targets across the supported Home Assistant versions."""
+    args = (call.hass, call) if _EXTRACT_ENTITY_IDS_REQUIRES_HASS else (call,)
+    return await cast(Any, async_extract_entity_ids)(*args)
+
 
 # Inert: this integration is config-entry only and ``async_setup`` ignores the
 # YAML config entirely. The schema exists so a legacy ``securitas:`` block from
@@ -745,7 +765,7 @@ def _register_verisure_owa_entity_service(
                 f"Platform '{component_domain}' is not loaded; cannot "
                 f"dispatch verisure_owa.{service_name}"
             )
-        entity_ids = await async_extract_entity_ids(call)
+        entity_ids = await _async_extract_service_entity_ids(call)
         method_kwargs = {k: v for k, v in call.data.items() if k != "entity_id"}
         responses: dict[str, Any] = {}
         for eid in entity_ids:
@@ -899,6 +919,7 @@ def register_service_aliases(hass: HomeAssistant) -> None:
                 _name,
                 dict(call.data),
                 blocking=True,
+                context=call.context,
                 return_response=_supports_response == SupportsResponse.ONLY,
             )
 
@@ -1008,6 +1029,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ACTIVITY_LOG_CARD_BASE_URL,
             ACTIVITY_LOG_CARD_URL,
             "activity_log_card_resource_id",
+        )
+        await _register_card_resource(
+            hass, MORE_INFO_BASE_URL, MORE_INFO_MODULE_URL, "more_info_resource_id"
         )
         hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
@@ -1158,11 +1182,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # automations keep working even if the user disables the
         # ActivityLogSensor entity.  Attaching here also starts the
         # coordinator's periodic timer so polling continues for as long as
-        # the integration is loaded; async_unload_entry detaches it.
-        activity_listener_unsub: Callable[[], None] | None = None
+        # the integration is loaded. Let ConfigEntry own the unsubscribe
+        # callback so failed setup and successful unload share one cleanup path.
         if activity_coord is not None and devices:
-            activity_listener_unsub = attach_activity_listener(
-                hass, activity_coord, devices[0].installation.number
+            entry.async_on_unload(
+                attach_activity_listener(
+                    hass, activity_coord, devices[0].installation.number
+                )
             )
 
         # Store per-entry data
@@ -1173,7 +1199,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "sentinel_coordinator": sentinel_coord,
             "lock_coordinator": lock_coord,
             "activity_coordinator": activity_coord,
-            "activity_listener_unsub": activity_listener_unsub,
             "config_entry": entry,
         }
         # Signalled by _async_discover_devices once lock discovery has either
@@ -1259,20 +1284,8 @@ def _release_shared_session(
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id, {})
-    activity_listener_unsub = entry_data.get("activity_listener_unsub")
-    if activity_listener_unsub is not None:
-        activity_listener_unsub()
-
-    # Cancel any pending lock-config retry timers before tearing down platforms,
-    # so a timer firing mid-unload can't schedule a follow-up retry against a
-    # half-disposed hub.
-    for unsub in entry_data.get("lock_config_retry_unsubs", []):
-        unsub()
-
-    unload_ok = await hass.config_entries.async_unload_platforms(
-        config_entry, PLATFORMS
-    )
+    if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
+        return False
 
     # Decrement shared session ref count (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
@@ -1309,6 +1322,9 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         await _unregister_card_resource(
             hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
         )
+        await _unregister_card_resource(
+            hass, MORE_INFO_MODULE_URL, "more_info_resource_id"
+        )
 
         # Tear down the verisure_owa.* service aliases on full unload —
         # leaving them registered after the integration's last entry
@@ -1320,4 +1336,4 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
         hass.data.pop(DOMAIN, None)
 
-    return unload_ok
+    return True

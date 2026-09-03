@@ -105,6 +105,7 @@ def _make_lock_coordinator(data: LockData | None = None):
     """Create a mock LockCoordinator for lock tests."""
     coordinator = MagicMock()
     coordinator.data = data
+    coordinator.config_entry = None
     coordinator.async_request_refresh = AsyncMock()
     return coordinator
 
@@ -118,6 +119,7 @@ def make_lock(
     code_required: bool = False,
     config: dict | None = None,
     registry_hass=None,
+    config_entry_id: str | None = None,
 ):
     """Create a VerisureLock with mocked dependencies.
 
@@ -138,6 +140,7 @@ def make_lock(
             device-info construction can resolve ``via_device_id`` from the
             registry (HA >= 2026.8). Defaults to ``None`` — the deterministic
             ``via_device`` fallback used by the schema tests.
+        config_entry_id: Config entry that owns the device in the registry.
     """
     installation = make_installation()
     code_hash, code_is_numeric = encode_pin(code)
@@ -162,6 +165,9 @@ def make_lock(
     hass.services = MagicMock()
 
     coordinator = _make_lock_coordinator()
+    coordinator.config_entry = (
+        MagicMock(entry_id=config_entry_id) if config_entry_id is not None else None
+    )
 
     lock_entity = VerisureLock(
         coordinator=coordinator,
@@ -989,7 +995,23 @@ class TestVerisureLockV5Schema:
             identifiers={(DOMAIN, "v4_securitas_direct.123456")},
             manufacturer="Verisure",
         )
-        lk = make_lock(device_id="01", registry_hass=hass)
+
+        def get_device_id(_hass, identifier, *, config_entry_id):
+            assert identifier == (DOMAIN, "v4_securitas_direct.123456")
+            assert config_entry_id == entry.entry_id
+            return parent.id
+
+        monkeypatch.setattr(
+            entity_mod.dr,
+            "async_get_device_id_by_identifier",
+            get_device_id,
+            raising=False,
+        )
+        lk = make_lock(
+            device_id="01",
+            registry_hass=hass,
+            config_entry_id=entry.entry_id,
+        )
         # via_device_id isn't a defined DeviceInfo key before HA 2026.8; read
         # the DeviceInfo as a plain dict so the assertion type-checks on any core.
         info = dict(lk._attr_device_info or {})
@@ -1010,7 +1032,23 @@ class TestVerisureLockV5Schema:
             identifiers={(DOMAIN, "v4_securitas_direct.123456")},
             manufacturer="Verisure",
         )
-        lk = make_lock(device_id="02", registry_hass=hass)
+
+        def get_device_id(_hass, identifier, *, config_entry_id):
+            assert identifier == (DOMAIN, "v4_securitas_direct.123456")
+            assert config_entry_id == entry.entry_id
+            return parent.id
+
+        monkeypatch.setattr(
+            entity_mod.dr,
+            "async_get_device_id_by_identifier",
+            get_device_id,
+            raising=False,
+        )
+        lk = make_lock(
+            device_id="02",
+            registry_hass=hass,
+            config_entry_id=entry.entry_id,
+        )
         lk.update_lock_config(
             SmartLock(location="Front", family="DANALOCK", serial_number="sn")
         )
@@ -1030,9 +1068,7 @@ class TestVerisureLockActions:
 
         # After successful lock, state comes from the fresh API poll ("2")
         assert lock._state == "2"
-        # async_schedule_update_ha_state was called during _force_state("4")
-        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
-        # async_write_ha_state is called after successful state change
+        # Transitional and confirmed states are written directly.
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
         # get_lock_modes was called with FOREGROUND priority (baseline + verify)
         lock._client.get_lock_modes.assert_awaited_with(  # type: ignore[attr-defined]
@@ -1058,7 +1094,6 @@ class TestVerisureLockActions:
 
         # After successful unlock, state comes from fresh API poll ("1")
         assert lock._state == "1"
-        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
 
     async def test_async_lock_error_restores_previous_state(self):
@@ -1129,7 +1164,6 @@ class TestVerisureLockActions:
         await lock.async_open()
 
         assert lock._state == "1"
-        lock.async_schedule_update_ha_state.assert_called()  # type: ignore[attr-defined]
         lock.async_write_ha_state.assert_called()  # type: ignore[attr-defined]
 
     async def test_async_open_error_restores_previous_state(self):
@@ -1526,26 +1560,6 @@ class TestVerisureLockCoordinatorUpdate:
         assert lock.supported_features == lock_mod.LockEntityFeature.OPEN
 
 
-class TestVerisureLockRemoval:
-    """Tests for VerisureLock async_will_remove_from_hass."""
-
-    async def test_async_will_remove_from_hass_cleans_up_config_retries(self):
-        lock = make_lock()
-        unsub_mock = MagicMock()
-        lock.add_config_retry_unsub(unsub_mock)
-
-        await lock.async_will_remove_from_hass()
-
-        unsub_mock.assert_called_once()
-        assert lock._config_retry_unsubs == []
-
-    async def test_async_will_remove_from_hass_no_config_retries(self):
-        lock = make_lock()
-
-        # Should not raise
-        await lock.async_will_remove_from_hass()
-
-
 # ===========================================================================
 # hass-is-None guard tests (issue #323)
 # ===========================================================================
@@ -1554,14 +1568,14 @@ class TestVerisureLockRemoval:
 class TestHassNoneGuards:
     """Verify entities bail out when hass is None (after removal)."""
 
-    def test_lock_force_state_skips_schedule_when_hass_is_none(self):
+    def test_lock_force_state_skips_write_when_hass_is_none(self):
         lock = make_lock()
         lock.hass = None  # type: ignore[attr-defined]
 
         lock._force_state("1")
 
         assert lock._state == "1"
-        lock.async_schedule_update_ha_state.assert_not_called()  # type: ignore[attr-defined]
+        lock.async_write_ha_state.assert_not_called()  # type: ignore[attr-defined]
 
 
 class TestVerisureLockAlarmListener:
@@ -2886,6 +2900,7 @@ class TestVerisureLockSetupAndTeardown:
         lock = make_lock(initial_status="2")
         # Stand in for hass-managed plumbing.
         unsub = MagicMock()
+        lock.async_on_remove = MagicMock()
         alarm_coord = MagicMock()
         alarm_coord.async_add_listener = MagicMock(return_value=unsub)
         from custom_components.securitas.verisure_owa_api.models import (
@@ -2930,6 +2945,7 @@ class TestVerisureLockSetupAndTeardown:
         assert lock._alarm_coordinator is alarm_coord
         assert lock._combined_alarm_panel is panel
         alarm_coord.async_add_listener.assert_called_once()
+        lock.async_on_remove.assert_any_call(unsub)
         # Baseline established (no firing on first call).
         assert lock._alarm_baseline is not None
 
@@ -2968,10 +2984,3 @@ class TestVerisureLockSetupAndTeardown:
 
         assert lock._lock_on_arm_circuits == []
         assert lock._unlock_disarms_circuits == []
-
-    async def test_unsubscribe_called_on_removal(self):
-        lock = make_lock()
-        unsub = MagicMock()
-        lock._alarm_listener_unsub = unsub
-        await lock.async_will_remove_from_hass()
-        unsub.assert_called_once()

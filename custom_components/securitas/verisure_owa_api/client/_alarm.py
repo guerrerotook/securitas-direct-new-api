@@ -44,12 +44,20 @@ _ERROR_TYPE_LABELS: dict[str, str] = {
 
 _ALARM_MANAGER_PREFIX = "alarm-manager."
 
-# Panel ``error.type`` values that, when paired with ``allowForcing``, represent
-# an arm rejected because of open zones that can still be force-armed. Different
-# countries report this differently: ES panels use ``NON_BLOCKING`` while FR
-# (SDVFAST) panels use ``ZONE``. Both must raise ArmingExceptionError so the
-# force-arm flow triggers. See issue #583.
-_FORCEABLE_ERROR_TYPES: frozenset[str] = frozenset({"NON_BLOCKING", "ZONE"})
+# Panel ``error.type`` values that represent an arm rejected because of sensor
+# exceptions. Countries report this differently: ES panels use
+# ``NON_BLOCKING`` while FR (SDVFAST) panels use ``ZONE``. ``allowForcing`` is
+# evaluated separately: even when it is false, the sensor details still belong
+# in the arming-warning flow. See issue #583.
+_ARMING_EXCEPTION_ERROR_TYPES: frozenset[str] = frozenset({"NON_BLOCKING", "ZONE"})
+
+# Canonical message returned by the MPJ alarm backend when an arm attempt has
+# exceptions. Some panel/backend variants use an error type outside the known
+# country-specific values above. Pairing this message with either an explicit
+# force permission or a positive exception count identifies the sensor-warning
+# flow without mistaking unrelated MPJ failures (for example unsupported
+# partition commands) for open sensors.
+_MPJ_ARMING_EXCEPTION_MSG = "error_mpj_exception"
 
 # Surfaced when the panel rejects an arm/disarm because the user's
 # state mapping asks for a mode the panel isn't configured to support.
@@ -195,18 +203,49 @@ class _AlarmMixin(_ClientBase):
         # ── Process result ──
         error = raw.get("error")
         if raw.get("res") == "ERROR":
-            if (
-                error
-                and error.get("type") in _FORCEABLE_ERROR_TYPES
-                and error.get("allowForcing")
-            ):
-                error_ref = error.get("referenceId", "")
-                error_suid = error.get("suid", "")
+            # Normalize the optional response block once. Besides keeping the
+            # logic readable, this gives Pyright a concrete mapping below;
+            # narrowing through the derived ``is_mpj_sensor_exception`` bool
+            # does not prove that the original ``error`` value is non-None.
+            error_info = error or {}
+            allow_forcing = bool(error_info.get("allowForcing"))
+            exceptions_number = error_info.get("exceptionsNumber")
+            try:
+                has_reported_exceptions = int(exceptions_number or 0) > 0
+            except (TypeError, ValueError):
+                has_reported_exceptions = False
+            is_mpj_sensor_exception = bool(
+                error_info
+                and (
+                    error_info.get("type") in _ARMING_EXCEPTION_ERROR_TYPES
+                    or (
+                        raw.get("msg") == _MPJ_ARMING_EXCEPTION_MSG
+                        and (allow_forcing or has_reported_exceptions)
+                    )
+                )
+            )
+            if is_mpj_sensor_exception:
+                error_ref = error_info.get("referenceId", "")
+                error_suid = error_info.get("suid", "")
+                # A genuinely-blocking rejection can arrive as ZONE/NON_BLOCKING
+                # with no referenceId and no suid. _get_exceptions returns []
+                # without polling in that case (nothing to look up), so we
+                # surface the arming exception immediately with an empty list.
                 exceptions = await self._get_exceptions(
                     installation, error_ref, error_suid
                 )
-                raise ArmingExceptionError(error_ref, error_suid, exceptions)
-            error_info = error or {}
+                # Force-arming targets the bypass via referenceId/suid; without
+                # either, forcing is impossible (an empty force id degrades to a
+                # plain re-arm that just re-hits this rejection). Don't advertise
+                # a Force Arm affordance that can't work, whatever allowForcing
+                # claims.
+                can_force = allow_forcing and bool(error_ref or error_suid)
+                raise ArmingExceptionError(
+                    error_ref,
+                    error_suid,
+                    exceptions,
+                    allow_forcing=can_force,
+                )
             if error_info.get("type") != "NON_BLOCKING":
                 raw_msg = raw.get("msg", "unknown error")
                 raise VerisureOwaError(
@@ -347,7 +386,14 @@ class _AlarmMixin(_ClientBase):
         """Fetch arming exception details (e.g. open windows/doors).
 
         Polls until the exceptions list is non-empty or the result is not WAIT.
+
+        Returns an empty list when neither ``reference_id`` nor ``suid`` is
+        given: xSGetExceptions has nothing to look up without a reference, and
+        would otherwise poll on WAIT for the full poll timeout before raising
+        OperationTimeoutError (#553).
         """
+        if not reference_id and not suid:
+            return []
         counter = 0
 
         async def _check() -> dict[str, Any]:

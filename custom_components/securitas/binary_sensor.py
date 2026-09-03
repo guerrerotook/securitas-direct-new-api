@@ -32,7 +32,7 @@ async def async_setup_entry(
         WifiConnectedSensor(coordinator, device.installation)
         for device in securitas_devices
     ]
-    async_add_entities(entities, False)
+    async_add_entities(entities)
 
 
 class WifiConnectedSensor(  # type: ignore[override]

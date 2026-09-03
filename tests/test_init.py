@@ -711,8 +711,8 @@ class TestAsyncSetupEntry:
         assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
 
-        # Verify all card JS URLs are registered (alarm + chip + camera + events)
-        assert mock_add_js.call_count == 4
+        # Verify all card JS URLs plus the global More Info module are registered.
+        assert mock_add_js.call_count == 5
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
@@ -745,6 +745,10 @@ class TestAsyncSetupEntry:
         )
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
+            for u in js_urls
+        )
+        assert any(
+            u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
             for u in js_urls
         )
 
@@ -844,9 +848,10 @@ class TestAsyncSetupEntry:
 
         assert result1 is True
         assert result2 is True
-        # All card resources registered exactly once despite two setup calls
+        # All card resources and the global More Info module are registered
+        # exactly once despite two setup calls.
         # (guarded by card_registered flag)
-        assert mock_add_js.call_count == 4
+        assert mock_add_js.call_count == 5
         js_urls = [call[0][1] for call in mock_add_js.call_args_list]
         assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-alarm-card.js?v=")
@@ -860,6 +865,89 @@ class TestAsyncSetupEntry:
             u.startswith("/verisure-owa-panel/verisure-owa-activity-log-card.js?v=")
             for u in js_urls
         )
+        assert any(
+            u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
+            for u in js_urls
+        )
+
+    async def test_setup_registers_more_info_as_lovelace_resource(self, hass, mock_hub):
+        """The More Info module registers as a Lovelace resource, not extra JS.
+
+        On a cold load HA swaps window.customElements for a fresh registry on
+        first Lovelace render, dropping any element defined by a module loaded
+        via add_extra_js_url (which runs at page load, pre-swap). The alarm
+        entity's custom More Info control (custom_ui_more_info) then resolves to
+        an undefined element and the dialog body renders empty. Registering the
+        module as a Lovelace resource (loaded post-swap during Lovelace init)
+        fixes it, matching how the four card modules are registered.
+        """
+
+        class _FakeResources:
+            """Minimal stand-in for HA's Lovelace ResourceStorageCollection."""
+
+            def __init__(self):
+                self.loaded = False
+                self._items = []
+                self._next_id = 0
+
+            async def async_load(self):
+                self.loaded = True
+
+            def async_items(self):
+                return list(self._items)
+
+            async def async_create_item(self, data):
+                self._next_id += 1
+                item = {"id": f"res-{self._next_id}", **data}
+                self._items.append(item)
+                return item
+
+        fake_resources = _FakeResources()
+        lovelace_data = MagicMock()
+        lovelace_data.resources = fake_resources
+        hass.data["lovelace"] = lovelace_data
+
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        hass.http = MagicMock()
+        hass.http.async_register_static_paths = AsyncMock()
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "custom_components.securitas.frontend.add_extra_js_url"
+            ) as mock_add_js,
+        ):
+            result = await async_setup_entry(hass, entry)
+
+        assert result is True
+
+        # The More Info module is registered as a Lovelace resource of type
+        # "module" (loaded post-swap during Lovelace init) ...
+        registered = fake_resources.async_items()
+        more_info = [
+            item
+            for item in registered
+            if item["url"].startswith(
+                "/verisure-owa-panel/verisure-owa-more-info.js?v="
+            )
+        ]
+        assert len(more_info) == 1, [item["url"] for item in registered]
+        assert more_info[0]["res_type"] == "module"
+
+        # ... and NOT via the add_extra_js_url fallback (which runs pre-swap).
+        js_urls = [call[0][1] for call in mock_add_js.call_args_list]
+        assert not any(
+            u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
+            for u in js_urls
+        ), js_urls
 
     async def test_two_accounts_each_fetches_own_installations(self, hass):
         """Two entries with different usernames must not share installations_cache.
@@ -1557,21 +1645,17 @@ class TestAsyncUnloadEntry:
         assert hub.config_entry is owner
         hub.persist_current_refresh_token.assert_not_called()
 
-    async def test_unload_cancels_pending_lock_config_retries(self, hass):
-        """async_unload_entry cancels any pending lock-config retry timers."""
+    async def test_failed_platform_unload_preserves_runtime_data(self, hass):
+        """A failed platform unload must leave the loaded entry intact."""
         hub = make_securitas_hub_mock()
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
         username = entry.data[CONF_USERNAME]
 
-        unsub_a = MagicMock()
-        unsub_b = MagicMock()
-
         hass.data[DOMAIN] = {
             entry.entry_id: {
                 "hub": hub,
                 "devices": [],
-                "lock_config_retry_unsubs": [unsub_a, unsub_b],
             },
             "sessions": {username: {"hub": hub, "ref_count": 1}},
         }
@@ -1580,12 +1664,13 @@ class TestAsyncUnloadEntry:
             hass.config_entries,
             "async_unload_platforms",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=False,
         ):
-            await async_unload_entry(hass, entry)
+            result = await async_unload_entry(hass, entry)
 
-        unsub_a.assert_called_once_with()
-        unsub_b.assert_called_once_with()
+        assert result is False
+        assert hass.data[DOMAIN][entry.entry_id]["hub"] is hub
+        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
 
     async def test_unload_removes_domain_when_empty(self, hass):
         """When the last entry is unloaded, DOMAIN should be removed from hass.data."""
@@ -2427,6 +2512,31 @@ class TestDiscoverCameras:
         button_add.assert_not_called()
 
 
+class TestLockConfigRetry:
+    """Tests for lock-config retry lifecycle ownership."""
+
+    def test_cancel_callback_is_owned_by_entity_and_entry(self, hass):
+        """Either entity removal or entry unload can cancel a pending retry."""
+        from custom_components.securitas import _schedule_lock_config_retry
+
+        hub = make_securitas_hub_mock()
+        hub.config_entry = MagicMock()
+        lock_entity = MagicMock()
+        lock_entity.device_id = "1"
+        cancel = MagicMock()
+
+        with patch("homeassistant.helpers.event.async_call_later", return_value=cancel):
+            _schedule_lock_config_retry(
+                hass,
+                hub,
+                make_installation(),
+                lock_entity,
+            )
+
+        lock_entity.async_on_remove.assert_called_once_with(cancel)
+        hub.config_entry.async_on_unload.assert_called_once_with(cancel)
+
+
 # ===========================================================================
 # _async_discover_devices tests — ordering + completion signalling
 # ===========================================================================
@@ -2597,6 +2707,47 @@ class TestStaticPathAliases:
         paths = [cfg.url_path for cfg in call_args]
         assert "/verisure-owa-panel" in paths
         assert "/securitas_panel" in paths
+
+
+# ===========================================================================
+# TestServiceTargetCompatibility
+# ===========================================================================
+
+
+class TestServiceTargetCompatibility:
+    """Service target extraction supports both ends of the HA version range."""
+
+    async def test_legacy_helper_receives_hass(self):
+        import custom_components.securitas as integration
+
+        hass = MagicMock()
+        call = MagicMock()
+        call.hass = hass
+        extract = AsyncMock(return_value={"alarm_control_panel.home"})
+
+        with (
+            patch.object(integration, "_EXTRACT_ENTITY_IDS_REQUIRES_HASS", True),
+            patch.object(integration, "async_extract_entity_ids", extract),
+        ):
+            result = await integration._async_extract_service_entity_ids(call)
+
+        assert result == {"alarm_control_panel.home"}
+        extract.assert_awaited_once_with(hass, call)
+
+    async def test_current_helper_receives_only_service_call(self):
+        import custom_components.securitas as integration
+
+        call = MagicMock()
+        extract = AsyncMock(return_value={"alarm_control_panel.home"})
+
+        with (
+            patch.object(integration, "_EXTRACT_ENTITY_IDS_REQUIRES_HASS", False),
+            patch.object(integration, "async_extract_entity_ids", extract),
+        ):
+            result = await integration._async_extract_service_entity_ids(call)
+
+        assert result == {"alarm_control_panel.home"}
+        extract.assert_awaited_once_with(call)
 
 
 # ===========================================================================

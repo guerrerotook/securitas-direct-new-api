@@ -1,7 +1,7 @@
 """Lovelace card resource registration for the Verisure OWA cards.
 
 The integration ships several custom Lovelace card modules under www/ (the
-alarm card, the lightweight alarm chip/badge, the camera card, and the
+alarm card, the lightweight alarm chip/badge/Tile feature, the camera card, and the
 activity-log card). Each one is
 registered as a Lovelace resource (preferred) so it survives HA restarts,
 or — if the resources storage isn't available — falls back to
@@ -60,8 +60,10 @@ async def _register_card_resource(
         )
     try:
         frontend.add_extra_js_url(hass, card_url)
-    except (KeyError, Exception):  # pylint: disable=broad-exception-caught
-        _LOGGER.debug("[setup] Could not register %s via add_extra_js_url", base_url)
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Both the Lovelace-resource registration AND this fallback failed, so
+        # the module never loads and the UI silently breaks — surface it.
+        _LOGGER.warning("[setup] Could not register %s via add_extra_js_url", base_url)
 
 
 async def _unregister_card_resource(

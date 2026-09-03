@@ -15,7 +15,7 @@ Full alarm control: the mappings between HA's five buttons (Home/Away/Night/Vaca
 
 Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. A connectivity diagnostic for the panel itself.
 
-Bundled Lovelace cards: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, camera card, activity-log card.
+Bundled Lovelace UI: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, Tile open-sensor feature, camera card, activity-log card.
 
 The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
 
@@ -161,6 +161,17 @@ The Interior toggle appears whenever any sibling circuit exists; otherwise the m
 
 If you expose entities to a voice assistant, remember each new sub-panel is a separate entity — exposing all of them to voice tends to make commands ambiguous. A common pattern is to enable all sub-panels for dashboards but expose only the main panel to voice.
 
+## Native Alarm More Info
+
+Every alarm panel from the integration automatically extends Home Assistant's
+standard **More Info** dialog. No dashboard card or YAML configuration is
+required: open the entity from an HA Alarm card, Tile, Badge, entity row, or
+device page and the normal HA alarm modes and PIN controls remain in place.
+When arming is blocked, the dialog adds the affected sensor names below those
+controls. **Force Arm** appears only when that panel explicitly permits it;
+otherwise the dialog shows the sensors and a **Cancel** action so they can be
+closed before retrying.
+
 ## Custom Alarm Card
 
 The custom alarm card (`verisure-owa-alarm-card`) is the default way to interact with the alarm from a dashboard. Unlike the stock HA alarm panel card, it surfaces the force-arm warning and buttons inline when arming is blocked.
@@ -183,13 +194,13 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 
 ### Badge
 
-A compact dashboard badge for the badges row, with a state-specific shield icon (amber warning triangle when arming fails). Tap to open the full alarm card; hold and double-tap can be configured to arm/disarm directly — see [Gesture Actions](#gesture-actions) below.
+A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog, where Home Assistant owns the alarm modes and PIN entry. Hold and double-tap can use the supported dashboard actions described under [Gesture Actions](#gesture-actions).
 
-Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity.
+Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; choose the time format for timestamp content; and configure tap, hold and double-tap actions.
 
 ### Mushroom Chip
 
-For a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom), use `type: verisure-owa-alarm`. Same icon and colors as the badge in a Mushroom-compatible pill. Tap opens the alarm card; hold and double-tap are configured in YAML — see [Gesture Actions](#gesture-actions) below.
+For a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom), use `type: verisure-owa-alarm`. Same icon and colors as the badge in a Mushroom-compatible pill. Tap opens the native More Info dialog; hold and double-tap are configured in YAML — see [Gesture Actions](#gesture-actions) below.
 
 ```yaml
 type: custom:mushroom-chips-card
@@ -200,17 +211,80 @@ chips:
 
 ### Gesture Actions
 
-All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card and badge expose them in the visual editor; the chip is YAML-only.
+All three variants — card, badge, chip — support configurable tap, hold, and double-tap actions. The card has its integration-specific action editor. The Badge uses Home Assistant's native action selectors, and the chip is YAML-only. On update, older Badge and Chip YAML containing `arm_or_disarm` is interpreted as native More Info, so Home Assistant owns mode selection and PIN entry.
 
 ![Gesture Actions](./docs/images/card-gestures.png)
 
-| Action     | Badge default | Chip default    | Card default |
-| ---------- | ------------- | --------------- | ------------ |
-| Tap        | Open alarm card | Open alarm card | _(none)_   |
-| Hold       | Arm / Disarm  | _(none)_        | _(none)_     |
-| Double-tap | _(none)_      | _(none)_        | _(none)_     |
+| Action     | Badge default  | Chip default   | Card default |
+| ---------- | -------------- | -------------- | ------------ |
+| Tap        | Open More Info | Open More Info | _(none)_     |
+| Hold       | _(none)_       | _(none)_       | _(none)_     |
+| Double-tap | _(none)_       | _(none)_       | _(none)_     |
 
-Each action can be:
+The Badge offers the Home Assistant **More Info**, **Navigate**, **Perform action** and **None** actions. It intentionally does not offer **Toggle**: alarm panels do not have `turn_on` / `turn_off` actions and require a specific arm mode. Use **More Info** for the native alarm controls, supported modes and PIN entry.
+
+#### Using the Badge with native alarm controls
+
+No YAML is required for the recommended setup:
+
+1. Add **Verisure OWA Alarm Badge** and select the alarm entity.
+2. Leave **Tap action** at its default, **More Info**.
+3. Tap the Badge and choose an available arm mode, or **Disarm**, in Home Assistant's native dialog.
+4. If an arm attempt is blocked, the same dialog adds the affected sensor names and, when allowed by the panel, **Force Arm**.
+
+This route is recommended when the alarm requires a PIN. Home Assistant selects the supported modes and owns the code prompt; the Badge does not need to duplicate that security UI.
+
+#### Using a fixed direct action
+
+For an explicit shortcut, open **Interactions**, set **Hold action** or **Double tap action** to **Perform action**, choose the alarm action, and select the alarm entity as its target. For example, this configuration holds to arm Away and double-taps to disarm:
+
+```yaml
+type: custom:verisure-owa-alarm-badge
+entity: alarm_control_panel.my_alarm
+tap_action:
+  action: more-info
+hold_action:
+  action: perform-action
+  perform_action: alarm_control_panel.alarm_arm_away
+  target:
+    entity_id: alarm_control_panel.my_alarm
+double_tap_action:
+  action: perform-action
+  perform_action: alarm_control_panel.alarm_disarm
+  target:
+    entity_id: alarm_control_panel.my_alarm
+```
+
+Other fixed arm actions are `alarm_control_panel.alarm_arm_home`, `alarm_control_panel.alarm_arm_night`, `alarm_control_panel.alarm_arm_vacation` and `alarm_control_panel.alarm_arm_custom_bypass`, when advertised by the entity. A direct **Perform action** is fixed; it does not automatically switch between arm and disarm. If a code is required, use More Info instead of storing the code in dashboard YAML.
+
+#### Migrating a Badge or Chip from `arm_or_disarm`
+
+The legacy action selected an arm or disarm service from the current alarm state:
+
+```yaml
+type: custom:verisure-owa-alarm-badge
+entity: alarm_control_panel.my_alarm
+hold_action:
+  action: arm_or_disarm
+  arm_state: arm_away
+```
+
+There is no equivalent conditional action in Home Assistant's native dashboard actions. The recommended migration is to let More Info select the appropriate mode and handle PIN entry:
+
+```yaml
+type: custom:verisure-owa-alarm-badge
+entity: alarm_control_panel.my_alarm
+tap_action:
+  action: more-info
+hold_action:
+  action: none
+```
+
+The integration performs this migration at runtime after the update, so old Badge and Chip configurations immediately open More Info instead of the removed custom PIN dialog. To persist the new YAML, open an existing Badge in the visual editor and save it. The Chip is YAML-only, so replace its legacy action manually when convenient.
+
+If direct shortcuts are still preferred, replace the conditional action with the two explicit `perform-action` gestures shown in [Using a fixed direct action](#using-a-fixed-direct-action). That variant does not open Home Assistant's PIN dialog, so use the More Info migration when the panel requires a code.
+
+The standalone Alarm Card retains its existing integration-specific actions:
 
 | Option   | Description                                                                                         |
 | -------- | --------------------------------------------------------------------------------------------------- |
@@ -218,8 +292,6 @@ Each action can be:
 | Navigate | Navigate to a dashboard path. A path selector appears to choose the destination.                    |
 | Arm      | Arm the alarm to a chosen state (Home, Away, Night, Custom, or Vacation). Only fires when disarmed. |
 | Disarm   | Disarm the alarm. Only fires when armed.                                                            |
-
-Example: set **Hold** to **Disarm** on the badge to disarm with a long press without opening the card popup.
 
 #### Chip YAML
 
@@ -229,20 +301,46 @@ chips:
   - type: verisure-owa-alarm
     entity: alarm_control_panel.my_alarm
     tap_action:
-      action: more-info           # default — opens alarm card popup
+      action: more-info           # default — opens native More Info
     hold_action:
-      action: arm_or_disarm       # arms when disarmed, disarms when armed
+      action: perform-action
+      perform_action: alarm_control_panel.alarm_arm_away
+      target:
+        entity_id: alarm_control_panel.my_alarm
     double_tap_action:
       action: navigate
       navigation_path: /lovelace/security
 ```
 
-| Action           | YAML value                                                           |
-| ---------------- | -------------------------------------------------------------------- |
-| None             | `action: none`                                                       |
-| Open alarm card  | `action: more-info`                                                  |
-| Navigate         | `action: navigate` + `navigation_path: /path`                       |
-| Arm or Disarm    | `action: arm_or_disarm` (optionally + `arm_state: armed_away` etc.) |
+| Action         | YAML value                                                        |
+| -------------- | ----------------------------------------------------------------- |
+| None           | `action: none`                                                    |
+| Open More Info | `action: more-info`                                               |
+| Navigate       | `action: navigate` + `navigation_path: /path`                    |
+| Perform action | `action: perform-action` + `perform_action: domain.service`       |
+
+### Tile Card
+
+The stock Tile Card can keep its native **Alarm modes** controls and show the
+same open-sensor warning inline. In the Tile editor, add the
+**Verisure OWA Open Sensors** feature after **Alarm modes**. The warning stays
+hidden until an arm attempt is rejected, then lists every affected zone inside
+the Tile. On panels that permit forcing it also offers **Force Arm**; Spanish
+panels that report `allowForcing: false` show only the close-and-retry warning.
+
+The equivalent YAML is:
+
+```yaml
+type: tile
+entity: alarm_control_panel.my_alarm
+features_position: bottom
+features:
+  - type: alarm-modes
+  - type: custom:verisure-owa-arm-exception
+```
+
+As with the full alarm card, this is the snapshot returned by Verisure after a
+failed arm attempt, not a live view of every contact before arming.
 
 ## Sentinel Sensors
 
@@ -472,11 +570,11 @@ Most users won't need anything below — the alarm card and built-in mobile noti
 
 ### What happens when arming is blocked
 
-The arm command reverts, the entity gains `force_arm_available` and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The card shows a warning with **Force Arm** / **Cancel** buttons. If built-in notifications are enabled, you also get a persistent notification and — when a notify service is configured — a mobile notification with the same buttons.
+The arm command reverts, the entity gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). Native More Info, the custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
 
-You then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
+When force-arming is allowed, you then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from native More Info, the custom card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
 
-Some panels refuse force-arming altogether (Spain has been observed). In that case you'll get an "Arm command failed: Open zone (...)" notification instead — close the zone and retry.
+Some panels refuse force-arming altogether (Spain has been observed). The sensor names are still shown, but there is no **Force Arm** action — close those zones and retry.
 
 ### Auto-force-arm from the card
 
@@ -493,6 +591,7 @@ Because the choice lives in the browser, the built-in notification still fires b
 | `entity_id` | The alarm panel entity that failed to arm. |
 | `mode` | The HA state that was attempted (`armed_away`, `armed_home`, …). |
 | `zones` | Open zone names, e.g. `["Kitchen window", "Bedroom sensor"]`. |
+| `allow_forcing` | Whether this panel permits force-arming past the listed sensors. |
 | `details.installation` | The Verisure installation number. |
 | `details.exceptions` | Full exception list from the API (`alias`, `zone_id`, `device_type`). |
 
@@ -602,5 +701,3 @@ For protocol-level bugs — wrong alarm state, lock or camera misbehaving — a 
 > **Warning:** HAR files can contain credentials or session tokens. Either redact them (it's plain JSON) or email it to one of the maintainers directly.
 
 The same technique is used to [capture payloads for new operations](./docs/new_operations.md) if you'd like to help add support.
-
-

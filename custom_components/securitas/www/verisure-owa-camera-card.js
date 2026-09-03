@@ -519,17 +519,17 @@ if (!customElements.get("verisure-owa-camera-card-editor")) {
 // `securitas-camera-card` tag-name alias for `verisure-owa-camera-card`.
 // Kept registered indefinitely — both names are equal-weight, no
 // deprecation. The card picker only offers the verisure-owa form.
-function _makeLegacyShim(canonicalClass, _oldTag, _newTag) {
+function _makeLegacyShim(canonicalClass) {
   return class extends canonicalClass {};
 }
 
 if (!customElements.get("securitas-camera-card")) {
   customElements.define("securitas-camera-card",
-    _makeLegacyShim(VerisureOwaCameraCard, "securitas-camera-card", "verisure-owa-camera-card"));
+    _makeLegacyShim(VerisureOwaCameraCard));
 }
 if (!customElements.get("securitas-camera-card-editor")) {
   customElements.define("securitas-camera-card-editor",
-    _makeLegacyShim(VerisureOwaCameraCardEditor, "securitas-camera-card-editor", "verisure-owa-camera-card-editor"));
+    _makeLegacyShim(VerisureOwaCameraCardEditor));
 }
 
 window.customCards = window.customCards || [];

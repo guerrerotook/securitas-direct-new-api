@@ -96,10 +96,10 @@ class OperationFailedError(VerisureOwaError):
 
 
 class ArmingExceptionError(VerisureOwaError):
-    """Raised when arming fails due to non-blocking exceptions (e.g. open window).
+    """Raised when arming is blocked by sensor exceptions (e.g. open window).
 
-    Carries force-arm context (reference_id, suid) so the caller can retry
-    with forceArmingRemoteId to override the exception.
+    Carries the affected sensors and, when ``allow_forcing`` is true, the
+    context (reference_id, suid) needed to retry with forceArmingRemoteId.
     """
 
     def __init__(
@@ -107,12 +107,22 @@ class ArmingExceptionError(VerisureOwaError):
         reference_id: str,
         suid: str,
         exceptions: list[dict[str, Any]],
+        *,
+        allow_forcing: bool = True,
     ) -> None:
         self.reference_id = reference_id
         self.suid = suid
         self.exceptions = exceptions  # [{status, deviceType, alias}, ...]
+        self.allow_forcing = allow_forcing
         details = ", ".join(e.get("alias", "unknown") for e in exceptions)
-        super().__init__(f"Arming blocked by exceptions: {details}")
+        # A rejection without a referenceId/suid yields no sensor details
+        # (nothing to look up) — avoid a dangling "…exceptions: " message.
+        message = (
+            f"Arming blocked by exceptions: {details}"
+            if details
+            else "Arming blocked by open sensors (no sensor details available)"
+        )
+        super().__init__(message)
 
 
 class ImageCaptureError(VerisureOwaError):

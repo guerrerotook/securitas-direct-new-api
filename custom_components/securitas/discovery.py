@@ -95,16 +95,19 @@ async def _discover_cameras(
                 + [
                     VerisureCameraFull(camera_coord, hub, installation, cam)
                     for cam in cameras
-                ],
-                False,
+                ]
             )
         if button_add:
             button_add(
                 [
-                    VerisureCaptureButton(hub, installation, cam, camera_entity=thumb)
+                    VerisureCaptureButton(
+                        hub,
+                        installation,
+                        cam,
+                        camera_entity=thumb,
+                    )
                     for cam, thumb in zip(cameras, thumbnail_entities, strict=True)
-                ],
-                True,
+                ]
             )
 
 
@@ -162,12 +165,11 @@ def _schedule_lock_config_retry(
             )
 
     unsub = async_call_later(hass, delay, _retry)
-    lock_entity.add_config_retry_unsub(unsub)
-    # Also tracked at entry scope so unload can cancel pending retries.
+    lock_entity.async_on_remove(unsub)
+    # The entity callback handles normal platform removal; the entry callback
+    # also covers a retry scheduled while setup is only partially complete.
     if hub.config_entry is not None:
-        entry_data = hass.data.get(DOMAIN, {}).get(hub.config_entry.entry_id)
-        if entry_data is not None:
-            entry_data.setdefault("lock_config_retry_unsubs", []).append(unsub)
+        hub.config_entry.async_on_unload(unsub)
 
 
 async def _discover_locks(
@@ -175,7 +177,6 @@ async def _discover_locks(
     hub: VerisureHub,
     installation: Installation,
     entry_data: dict[str, Any],
-    entry: ConfigEntry | None = None,
 ) -> None:
     """Discover lock devices for an installation and add entities."""
     from .lock import (
@@ -236,8 +237,6 @@ async def _discover_locks(
                 initial_status=mode.lock_status,
                 lock_config=lock_config,
             )
-            if entry is not None:
-                new_lock._entry_id = entry.entry_id  # pylint: disable=protected-access
             locks.append(new_lock)
             # Register the lock so the options flow can discover it.
             entry_data.setdefault("registered_locks", []).append(
@@ -246,7 +245,7 @@ async def _discover_locks(
                     "alias": new_lock._attr_name or device_id,  # pylint: disable=protected-access
                 }
             )
-        lock_add(locks, False)
+        lock_add(locks)
         _LOGGER.info(
             "Lock discovery for %s registered %d lock(s)",
             installation.number,
@@ -278,7 +277,7 @@ async def _async_discover_devices(hass: HomeAssistant, entry: ConfigEntry) -> No
     try:
         for device in devices:
             installation = device.installation
-            await _discover_locks(hass, client, installation, entry_data, entry)
+            await _discover_locks(hass, client, installation, entry_data)
             await _discover_cameras(hass, client, installation, entry_data, entry)
     finally:
         # Always signal completion so the options-flow await unblocks even

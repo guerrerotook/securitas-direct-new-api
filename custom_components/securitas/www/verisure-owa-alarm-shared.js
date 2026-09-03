@@ -9,6 +9,10 @@
 // sync by tests-js/integration/card-cache-busting.test.js).
 
 import { formatTranslation } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import {
+  ARM_EXCEPTION_TRANSLATIONS,
+  notifyActionFailure,
+} from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {
@@ -22,6 +26,7 @@ export const FEATURE = {
 // ── Translations ─────────────────────────────────────────────────────────────
 export const TRANSLATIONS = {
   en: {
+    ...ARM_EXCEPTION_TRANSLATIONS.en,
     disarmed: "Disarmed", armed_away: "Armed Away", armed_home: "Armed Home",
     armed_night: "Armed Night", armed_vacation: "Armed Vacation",
     armed_custom: "Armed Custom",
@@ -29,8 +34,6 @@ export const TRANSLATIONS = {
     unavailable: "Unavailable", unknown: "Unknown",
     arm_away: "Arm Away", arm_home: "Arm Home", arm_night: "Arm Night",
     arm_vacation: "Arm Vacation", arm_custom: "Arm Custom", disarm: "Disarm",
-    force_arm: "Force Arm", cancel: "Cancel",
-    open_sensors: "Open sensor(s) \u2014 arm anyway?",
     auto_force_arm: "Automatically force-arm past open sensors",
     enter_pin: "Enter PIN to {action}", enter_code: "Enter code to {action}",
     code: "Code", confirm: "Confirm",
@@ -66,6 +69,7 @@ export const TRANSLATIONS = {
     card_description: "Alarm card for Verisure: dynamic arm modes, PIN support, force-arm for open sensors.",
   },
   es: {
+    ...ARM_EXCEPTION_TRANSLATIONS.es,
     disarmed: "Desarmado", armed_away: "Armado (fuera)", armed_home: "Armado (casa)",
     armed_night: "Armado (noche)", armed_vacation: "Armado (vacaciones)",
     armed_custom: "Armado (personalizado)",
@@ -73,8 +77,6 @@ export const TRANSLATIONS = {
     unavailable: "No disponible", unknown: "Desconocido",
     arm_away: "Armar fuera", arm_home: "Armar casa", arm_night: "Armar noche",
     arm_vacation: "Armar vacaciones", arm_custom: "Armar personalizado", disarm: "Desarmar",
-    force_arm: "Forzar armado", cancel: "Cancelar",
-    open_sensors: "Sensor(es) abierto(s) \u2014 \u00bfarmar igualmente?",
     auto_force_arm: "Forzar armado autom\u00e1ticamente con sensores abiertos",
     enter_pin: "Introduzca PIN para {action}", enter_code: "Introduzca c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
@@ -110,6 +112,7 @@ export const TRANSLATIONS = {
     card_description: "Tarjeta de alarma para Verisure: modos de armado, PIN y armado forzado.",
   },
   fr: {
+    ...ARM_EXCEPTION_TRANSLATIONS.fr,
     disarmed: "D\u00e9sarm\u00e9", armed_away: "Arm\u00e9 (absent)", armed_home: "Arm\u00e9 (domicile)",
     armed_night: "Arm\u00e9 (nuit)", armed_vacation: "Arm\u00e9 (vacances)",
     armed_custom: "Arm\u00e9 (personnalis\u00e9)",
@@ -117,8 +120,6 @@ export const TRANSLATIONS = {
     unavailable: "Indisponible", unknown: "Inconnu",
     arm_away: "Armer absent", arm_home: "Armer domicile", arm_night: "Armer nuit",
     arm_vacation: "Armer vacances", arm_custom: "Armer personnalis\u00e9", disarm: "D\u00e9sarmer",
-    force_arm: "Forcer l\u2019armement", cancel: "Annuler",
-    open_sensors: "Capteur(s) ouvert(s) \u2014 armer quand m\u00eame\u00a0?",
     auto_force_arm: "Forcer l\u2019armement automatiquement malgr\u00e9 les capteurs ouverts",
     enter_pin: "Entrez le PIN pour {action}", enter_code: "Entrez le code pour {action}",
     code: "Code", confirm: "Confirmer",
@@ -154,6 +155,7 @@ export const TRANSLATIONS = {
     card_description: "Carte d\u2019alarme Verisure\u00a0: modes d\u2019armement, PIN et armement forc\u00e9.",
   },
   it: {
+    ...ARM_EXCEPTION_TRANSLATIONS.it,
     disarmed: "Disarmato", armed_away: "Armato (fuori)", armed_home: "Armato (casa)",
     armed_night: "Armato (notte)", armed_vacation: "Armato (vacanza)",
     armed_custom: "Armato (personalizzato)",
@@ -161,8 +163,6 @@ export const TRANSLATIONS = {
     unavailable: "Non disponibile", unknown: "Sconosciuto",
     arm_away: "Arma fuori", arm_home: "Arma casa", arm_night: "Arma notte",
     arm_vacation: "Arma vacanza", arm_custom: "Arma personalizzato", disarm: "Disarma",
-    force_arm: "Forza armamento", cancel: "Annulla",
-    open_sensors: "Sensore/i aperto/i \u2014 armare comunque?",
     auto_force_arm: "Forza l\u2019armamento automaticamente con sensori aperti",
     enter_pin: "Inserisci PIN per {action}", enter_code: "Inserisci codice per {action}",
     code: "Codice", confirm: "Conferma",
@@ -198,6 +198,7 @@ export const TRANSLATIONS = {
     card_description: "Scheda allarme Verisure: modalit\u00e0 di armamento, PIN e armamento forzato.",
   },
   pt: {
+    ...ARM_EXCEPTION_TRANSLATIONS.pt,
     disarmed: "Desarmado", armed_away: "Armado (aus\u00eancia)", armed_home: "Armado (casa)",
     armed_night: "Armado (noite)", armed_vacation: "Armado (f\u00e9rias)",
     armed_custom: "Armado (personalizado)",
@@ -205,8 +206,6 @@ export const TRANSLATIONS = {
     unavailable: "Indispon\u00edvel", unknown: "Desconhecido",
     arm_away: "Armar aus\u00eancia", arm_home: "Armar casa", arm_night: "Armar noite",
     arm_vacation: "Armar f\u00e9rias", arm_custom: "Armar personalizado", disarm: "Desarmar",
-    force_arm: "For\u00e7ar armamento", cancel: "Cancelar",
-    open_sensors: "Sensor(es) aberto(s) \u2014 armar na mesma?",
     auto_force_arm: "For\u00e7ar armamento automaticamente com sensores abertos",
     enter_pin: "Introduza PIN para {action}", enter_code: "Introduza c\u00f3digo para {action}",
     code: "C\u00f3digo", confirm: "Confirmar",
@@ -247,6 +246,32 @@ export const TRANSLATIONS = {
 TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
 
 export const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
+
+/**
+ * Run a Home Assistant service without leaving rejected service promises
+ * unhandled. The notification event is Home Assistant's established custom-UI
+ * contract and lets the frontend own the actual toast presentation.
+ */
+export function callServiceWithErrorNotification(
+  hass,
+  domain,
+  service,
+  data,
+  target,
+  srcEl,
+) {
+  try {
+    const result =
+      target === undefined
+        ? hass.callService(domain, service, data)
+        : hass.callService(domain, service, data, target);
+    Promise.resolve(result).catch((error) => {
+      notifyActionFailure(hass, srcEl, error);
+    });
+  } catch (error) {
+    notifyActionFailure(hass, srcEl, error);
+  }
+}
 
 // ── Per-state visual config ───────────────────────────────────────────────────
 export const STATE_CFG = {
@@ -308,6 +333,17 @@ export const ARM_ACTIONS = [
 ];
 
 export const GESTURE_KEYS = ["tap_action", "hold_action", "double_tap_action"];
+
+/** Replace the removed compact Badge/Chip action as old YAML is loaded. */
+export function migrateCompactAlarmConfig(config) {
+  let migrated = config;
+  for (const key of GESTURE_KEYS) {
+    if (config[key]?.action !== "arm_or_disarm") continue;
+    if (migrated === config) migrated = { ...config };
+    migrated[key] = { action: "more-info" };
+  }
+  return migrated;
+}
 
 // ── Gesture helpers ───────────────────────────────────────────────────────────
 
@@ -373,7 +409,7 @@ export function alarmEntitySuggestion(hass, entityId) {
  * @param {object}        hass        - Home Assistant hass object
  * @param {string}        entityId    - Alarm entity id
  * @param {HTMLElement}   srcEl       - Element to dispatch events from
- * @param {object}        callbacks   - { startPinEntry(action), onMoreInfo() }
+ * @param {object}        callbacks   - { startPinEntry(action) }
  * @param {string[]}      [cardStates] - Card's `_config.states` (optional);
  *                                       passed to executeAction so its
  *                                       arm_or_disarm fallback honors the
@@ -468,7 +504,7 @@ export function attachGesture(el, config, hass, entityId, srcEl, callbacks = {},
  * @param {object}      hass        - Home Assistant hass object
  * @param {string}      entityId    - Alarm entity id
  * @param {HTMLElement} srcEl       - Element to dispatch events from (for more-info)
- * @param {object}      callbacks   - { startPinEntry(serviceAction), onMoreInfo() }
+ * @param {object}      callbacks   - { startPinEntry(serviceAction) }
  * @param {string[]}    [cardStates] - Card's `_config.states` (optional); when
  *                                     `arm_or_disarm` has no explicit
  *                                     `arm_state`, the fallback default is
@@ -480,9 +516,7 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
   switch (action.action) {
 
     case "more-info":
-      if (callbacks.onMoreInfo) {
-        callbacks.onMoreInfo();
-      } else if (srcEl) {
+      if (srcEl) {
         srcEl.dispatchEvent(new CustomEvent("hass-more-info", {
           detail: { entityId },
           bubbles: true,
@@ -500,11 +534,19 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
       break;
     }
 
-    case "perform-action": {
-      const call = action.perform_action || "";
+    case "perform-action":
+    case "call-service": {
+      const call = action.perform_action || action.service || "";
       const dot  = call.indexOf(".");
       if (dot > 0) {
-        hass.callService(call.slice(0, dot), call.slice(dot + 1), action.data || {});
+        callServiceWithErrorNotification(
+          hass,
+          call.slice(0, dot),
+          call.slice(dot + 1),
+          action.data ?? action.service_data ?? {},
+          action.target,
+          srcEl,
+        );
       }
       break;
     }
@@ -524,7 +566,14 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
         if (hasCode && callbacks.startPinEntry) {
           callbacks.startPinEntry(svcAction);
         } else {
-          hass.callService("alarm_control_panel", "alarm_disarm", { entity_id: entityId });
+          callServiceWithErrorNotification(
+            hass,
+            "alarm_control_panel",
+            "alarm_disarm",
+            { entity_id: entityId },
+            undefined,
+            srcEl,
+          );
         }
       } else if (state === "disarmed") {
         // Arm
@@ -535,7 +584,14 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
         if (hasCode && codeArmReq && callbacks.startPinEntry) {
           callbacks.startPinEntry(svcAction);
         } else {
-          hass.callService("alarm_control_panel", armDef.service, { entity_id: entityId });
+          callServiceWithErrorNotification(
+            hass,
+            "alarm_control_panel",
+            armDef.service,
+            { entity_id: entityId },
+            undefined,
+            srcEl,
+          );
         }
       }
       break;
@@ -546,6 +602,6 @@ function executeAction(action, hass, entityId, srcEl, callbacks = {}, cardStates
 // ── Legacy tag-name alias factory ─────────────────────────────────────────────
 // Returns a thin subclass so a `securitas-*` (pre-v5) tag renders identically
 // to its canonical `verisure-owa-*` element.
-export function _makeLegacyShim(canonicalClass, _oldTag, _newTag) {
+export function _makeLegacyShim(canonicalClass) {
   return class extends canonicalClass {};
 }

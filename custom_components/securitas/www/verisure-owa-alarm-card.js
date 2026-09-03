@@ -9,9 +9,9 @@
  *  - PIN / code support: numeric keypad for digit codes, text input for
  *    alphanumeric codes; respects `code_arm_required` and always asks for
  *    code on Disarm when a code is configured
- *  - Force-arm section: automatically appears when `force_arm_available`
- *    is true, lists open sensors from `arm_exceptions`, provides
- *    Force Arm and Cancel buttons — no helper entity required
+ *  - Arming-exception section: lists open sensors from `arm_exceptions`.
+ *    Force Arm appears only when `force_arm_available` is true; panels that
+ *    prohibit forcing still show the sensor warning and Cancel button
  *  - Handles `unavailable` and `unknown` entity states gracefully
  *  - Styling aligned with Home Assistant's design language (CSS variables)
  *
@@ -22,6 +22,7 @@
  */
 
 import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 import {
   _t,
   STATE_CFG,
@@ -55,9 +56,8 @@ export {
 // bundle. It is deliberately NOT imported here: a relative import would resolve
 // to a different URL than the registered chip resource (the resource carries
 // _card_url's ?v=<hash>-<version>), so importing it would just fetch chip.js a
-// second time for no benefit. The badge/chip create the full card lazily
-// (document.createElement) when their popup opens — by then this resource has
-// loaded.
+// second time for no benefit. Badge/chip taps now open HA's native More Info
+// dialog; this custom card remains available as an explicit Lovelace card.
 
 class VerisureOwaAlarmCard extends HTMLElement {
   constructor() {
@@ -210,7 +210,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
     // freshly-appeared force-arm context is handled even on the same tick.
     this._maybeAutoForceArm(stateObj);
     const newKey = stateObj
-      ? `${stateObj.state}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
+      ? `${stateObj.state}|${stateObj.attributes.arm_exception_active}|${stateObj.attributes.force_arm_available}|${(stateObj.attributes.arm_exceptions||[]).join(",")}|${stateObj.attributes.supported_features}|${stateObj.attributes.code_format}|${stateObj.attributes.code_arm_required}|${stateObj.attributes.waf_blocked}|${stateObj.attributes.refresh_failed}|${stateObj.attributes.auto_force_arm_enabled}|states:${this._statesFP || "*"}`
       : "missing";
     if (newKey !== this._lastKey) {
       this._lastKey = newKey;
@@ -262,7 +262,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
     const features = attrs.supported_features || 0;
 
     const forceArmAvailable = attrs.force_arm_available === true;
-    const openSensors       = attrs.arm_exceptions || [];
+    // Backwards compatibility: older backends exposed only
+    // force_arm_available when an exception prompt was active.
+    const armExceptionActive = attrs.arm_exception_active === true || forceArmAvailable;
     const wafBlocked        = attrs.waf_blocked === true;
     const refreshFailed     = attrs.refresh_failed === true;
     // Capability gate set by the integration options; only then is the
@@ -315,9 +317,9 @@ class VerisureOwaAlarmCard extends HTMLElement {
           <!-- ── Refresh failed banner ── -->
           ${refreshFailed ? `<div class="stale-banner"><ha-icon icon="mdi:clock-alert-outline"></ha-icon> ${_t(lang, "refresh_failed")}</div>` : ""}
 
-          <!-- ── Force arm section ── -->
-          ${!isUnavailable && forceArmAvailable ? `
-            ${this._renderForceArm(openSensors, lang)}
+          <!-- ── Arming exception / optional force-arm section ── -->
+          ${!isUnavailable && armExceptionActive ? `
+            <div id="arm-exception-slot"></div>
             ${canDisarm ? `<div class="btn-grid"><button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button></div>` : ""}
           ` : ""}
 
@@ -325,7 +327,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
           ${!isUnavailable && this._uiState === "pin" ? this._renderPin(codeFormat, lang) : ""}
 
           <!-- ── Normal buttons (hidden during pin entry / force arm / unavailable) ── -->
-          ${!isUnavailable && this._uiState === "normal" && !forceArmAvailable ? `
+          ${!isUnavailable && this._uiState === "normal" && !armExceptionActive ? `
             <div class="btn-grid">
               ${canDisarm
                 ? `<button class="btn btn-disarm" data-action="disarm">${_t(lang, "disarm")}</button>`
@@ -345,6 +347,18 @@ class VerisureOwaAlarmCard extends HTMLElement {
         </div>
       </ha-card>`;
 
+    const armExceptionSlot = this.shadowRoot.getElementById("arm-exception-slot");
+    if (armExceptionSlot) {
+      const alert = document.createElement("verisure-owa-arm-exception-alert");
+      alert.update({
+        hass: this._hass,
+        stateObj,
+        entityId: this._config.entity,
+        presentation: "full",
+      });
+      armExceptionSlot.appendChild(alert);
+    }
+
     // Attach gesture actions to the header icon (always-visible touch target)
     const iconWrap = this.shadowRoot.querySelector(".icon-wrap");
     if (iconWrap) {
@@ -360,11 +374,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
         this._config.entity,
         this,
         {
-          onMoreInfo: () => this.dispatchEvent(new CustomEvent("hass-more-info", {
-            detail: { entityId: this._config.entity },
-            bubbles: true,
-            composed: true,
-          })),
           startPinEntry: (svcAction) => this._startPinEntry(svcAction),
         },
         this._config.states,
@@ -372,25 +381,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
     }
 
     this._attachListeners(stateObj, codeFormat, codeArmRequired, hasCode, isArmed);
-  }
-
-  // ── Force arm section ───────────────────────────────────────────────────────
-  _renderForceArm(sensors, lang) {
-    const list = sensors.length
-      ? `<ul class="sensor-list">${sensors.map(s => `<li>${escHtml(s)}</li>`).join("")}</ul>`
-      : "";
-    return `
-      <div class="force-section">
-        <div class="force-title">
-          <ha-icon icon="mdi:alert"></ha-icon>
-          ${_t(lang, "open_sensors")}
-        </div>
-        ${list}
-        <div class="force-btns">
-          <button class="btn btn-cancel-force" data-action="cancel_force">${_t(lang, "cancel")}</button>
-          <button class="btn btn-force" data-action="force_arm">${_t(lang, "force_arm")}</button>
-        </div>
-      </div>`;
   }
 
   // ── PIN entry section ───────────────────────────────────────────────────────
@@ -506,15 +496,6 @@ class VerisureOwaAlarmCard extends HTMLElement {
             if (b) b.classList.remove("spinning");
           }, 2000);
         });
-      return;
-    }
-    // Force-arm / cancel
-    if (action === "force_arm") {
-      this._hass.callService("verisure_owa", "force_arm", { entity_id: entity });
-      return;
-    }
-    if (action === "cancel_force") {
-      this._hass.callService("verisure_owa", "force_arm_cancel", { entity_id: entity });
       return;
     }
     if (action === "confirm-pin") { this._submitPin(entity); return; }
@@ -742,48 +723,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
         cursor: pointer;
       }
 
-      /* ── Force arm section ── */
-      .force-section {
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--warning-color, #FF9800) 9%, transparent);
-        border: 1.5px solid var(--warning-color, #FF9800);
-        padding: 14px;
-        margin-bottom: 16px;
-      }
-      .force-title {
-        display: flex; align-items: center; gap: 8px;
-        font-weight: 600;
-        font-size: 0.9em;
-        color: var(--warning-color, #FF9800);
-        margin-bottom: 8px;
-      }
-      .force-title ha-icon {
-        --mdc-icon-size: 18px;
-        color: var(--warning-color, #FF9800);
-        flex-shrink: 0;
-      }
-      .sensor-list {
-        list-style: none; padding: 0; margin: 0 0 12px 26px;
-      }
-      .sensor-list li {
-        font-size: 0.85em;
-        color: var(--secondary-text-color);
-        padding: 2px 0;
-      }
-      .sensor-list li::before {
-        content: "• ";
-        color: var(--warning-color, #FF9800);
-        font-weight: bold;
-      }
-      .force-btns {
-        display: flex; gap: 8px;
-      }
-      .btn-force {
-        flex: 2;
-        background: var(--warning-color, #FF9800);
-        color: var(--text-primary-color, #fff);
-      }
-      .btn-force:hover { filter: brightness(1.1); }
+      #arm-exception-slot { margin-bottom: var(--ha-space-4, 16px); }
+
+      /* Cancel button used by PIN/code entry. The arming-exception actions
+         are native ha-control-button elements owned by the shared component. */
       .btn-cancel-force {
         flex: 1;
         background: var(--secondary-background-color);
@@ -864,7 +807,7 @@ class VerisureOwaAlarmCard extends HTMLElement {
   getCardSize() {
     if (this._uiState === "pin") return 6;
     const stateObj = this._hass?.states[this._config?.entity];
-    if (stateObj?.attributes?.force_arm_available) return 5;
+    if (stateObj?.attributes?.arm_exception_active || stateObj?.attributes?.force_arm_available) return 5;
     return 3;
   }
 
@@ -1313,7 +1256,7 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
       }
     });
 
-    // ── Name field (HA native) ───────────────────────────────────────────────
+    // ── Name field (HA native) ─────────────────────────────────────────────
     const nameTf = document.createElement("ha-textfield");
     nameTf.label = _t(lang, "editor_name");
     nameTf.value = this._config.name || "";
@@ -1382,29 +1325,8 @@ class VerisureOwaAlarmCardEditor extends HTMLElement {
     if (!gestureSlot) return;
     gestureSlot.innerHTML = "";
 
-    // Detect the card variant from the configured type. Match the tag-name
-    // suffix so every alias (securitas-*, verisure-owa-*, mushroom-*)
-    // resolves correctly — `_config.type === "custom:securitas-alarm-badge"`
-    // alone misses the canonical verisure-owa-* names and the mushroom chip.
-    const type = this._config.type || "";
-    const isBadge = /-alarm-badge$/.test(type);
-    const isChip  = /-alarm-chip$/.test(type);
-
-    // Editor defaults MUST mirror the variant's runtime fallbacks (see the
-    // `gestureConfig` blocks in VerisureOwaAlarmCard / *AlarmBadge /
-    // *AlarmChip). Otherwise the editor displays an action that the runtime
-    // wouldn't actually invoke — e.g. the Card runtime defaults to
-    // `{ action: "none" }` for hold, so showing "Arm or disarm" here is a
-    // lie and the user's saved card silently does nothing on long-press.
-    const tapDefaults = (isBadge || isChip)
-      ? { action: "more-info" }
-      : { action: "none" };
-    const holdDefaults = isBadge
-      ? {
-          action: "arm_or_disarm",
-          arm_state: defaultArmState(this._hass, this._config.entity, this._config.states),
-        }
-      : { action: "none" };
+    const tapDefaults = { action: "none" };
+    const holdDefaults = { action: "none" };
     const dblDefaults  = { action: "none" };
 
     const lang = this._hass?.language || "en";
@@ -1435,11 +1357,11 @@ if (!customElements.get("verisure-owa-alarm-card-editor")) {
 }
 if (!customElements.get("securitas-alarm-card")) {
   customElements.define("securitas-alarm-card",
-    _makeLegacyShim(VerisureOwaAlarmCard, "securitas-alarm-card", "verisure-owa-alarm-card"));
+    _makeLegacyShim(VerisureOwaAlarmCard));
 }
 if (!customElements.get("securitas-alarm-card-editor")) {
   customElements.define("securitas-alarm-card-editor",
-    _makeLegacyShim(VerisureOwaAlarmCardEditor, "securitas-alarm-card-editor", "verisure-owa-alarm-card-editor"));
+    _makeLegacyShim(VerisureOwaAlarmCardEditor));
 }
 
 window.customCards = window.customCards || [];

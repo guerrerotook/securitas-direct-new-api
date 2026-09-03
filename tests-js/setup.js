@@ -21,7 +21,10 @@ class MemoryStorage {
   }
 }
 
-if (typeof globalThis.localStorage === "undefined") {
+if (
+  typeof globalThis.localStorage === "undefined" ||
+  typeof globalThis.localStorage.clear !== "function"
+) {
   const storage = new MemoryStorage();
   globalThis.localStorage = storage;
   if (typeof window !== "undefined") {

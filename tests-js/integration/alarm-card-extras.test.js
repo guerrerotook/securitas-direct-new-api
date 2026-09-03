@@ -13,39 +13,201 @@ describe("verisure-owa-alarm-badge", () => {
     expect(customElements.get("verisure-owa-alarm-badge")).toBeDefined();
   });
 
-  it("renders a shield-lock icon when armed_away", () => {
-    // The badge intentionally renders only an icon — not state text — so we
-    // assert on the per-state icon mapping from STATE_CFG (armed_away ->
-    // mdi:shield-lock) instead of the original "Armed Away" text assertion.
+  it("renders a standard HA badge with the default state content and icon", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY });
     badge.hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity({ state: "armed_away" }) },
     });
     document.body.appendChild(badge);
-    const html = badge.shadowRoot.innerHTML;
-    expect(html).toContain("mdi:shield-lock");
-    expect(html).toContain("<ha-icon");
+    const stateIcon = badge.shadowRoot.querySelector("ha-state-icon");
+    expect(stateIcon.icon).toBe("mdi:shield-lock");
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBeUndefined();
+    const stateDisplay = badge.shadowRoot.getElementById("badge-state");
+    expect(stateDisplay.stateObj.state).toBe("armed_away");
+    expect(stateDisplay.name).toBe("Test Alarm");
   });
 
-  it("renders the shield-off-outline icon for unavailable state", () => {
-    // Same reasoning as above: badge has no text rendering. The STATE_CFG
-    // entry for unavailable maps to mdi:shield-off-outline.
+  it("renders the shield-off-outline icon and native state content for unavailable", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY });
     badge.hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity({ state: "unavailable" }) },
     });
     document.body.appendChild(badge);
-    expect(badge.shadowRoot.innerHTML).toContain("mdi:shield-off-outline");
+    expect(badge.shadowRoot.querySelector("ha-state-icon").icon).toBe("mdi:shield-off-outline");
+    expect(badge.shadowRoot.getElementById("badge-state").stateObj.state).toBe("unavailable");
   });
 
-  it("renders the error shield-alert icon when the entity is missing", () => {
+  it("renders an error badge when the entity is missing", () => {
     const badge = document.createElement("verisure-owa-alarm-badge");
     badge.setConfig({ entity: ENTITY });
     badge.hass = makeHass({ states: {} });
     document.body.appendChild(badge);
     expect(badge.shadowRoot.innerHTML).toContain("mdi:shield-alert");
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBe(ENTITY);
+    expect(badge.shadowRoot.textContent).toContain("Unavailable");
+  });
+
+  it("re-renders locale-fallback text when hass.language is unset", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = makeHass({ language: undefined, locale: { language: "en" }, states: {} });
+    document.body.appendChild(badge);
+    expect(badge.shadowRoot.textContent).toContain("Unavailable");
+
+    badge.hass = makeHass({ language: undefined, locale: { language: "es" }, states: {} });
+
+    expect(badge.shadowRoot.textContent).toContain("No disponible");
+    expect(badge.shadowRoot.textContent).not.toContain("Unavailable");
+  });
+
+  it("keeps the state text and switches to an alert icon for an arming exception", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, name: "Entrance", show_name: true });
+    badge.hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          armExceptionActive: true,
+          armExceptions: ["Kitchen"],
+        }),
+      },
+    });
+    document.body.appendChild(badge);
+
+    expect(badge.shadowRoot.innerHTML).toContain("mdi:alert");
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBe("Entrance");
+    expect(badge.shadowRoot.getElementById("badge-state").stateObj.state).toBe("disarmed");
+  });
+
+  it("escapes a configured badge name", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      name: 'Alarm <img src=x onerror="bad">',
+      show_name: true,
+    });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    const rendered = badge.shadowRoot.querySelector("ha-badge").label;
+    expect(rendered).toBe('Alarm <img src=x onerror="bad">');
+    expect(badge.shadowRoot.querySelector("img")).toBeNull();
+  });
+
+  it("supports the standard name, state and icon visibility options", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      name: "Entrance",
+      show_name: true,
+      show_state: false,
+      show_icon: false,
+    });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    expect(badge.shadowRoot.querySelector("ha-icon")).toBeNull();
+    expect(badge.shadowRoot.getElementById("badge-state")).toBeNull();
+    expect(badge.shadowRoot.textContent).toContain("Entrance");
+  });
+
+  it("uses a configured icon without allowing attribute injection", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, icon: 'mdi:shield" data-bad="true' });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    const icon = badge.shadowRoot.querySelector("ha-state-icon");
+    expect(icon.icon).toBe('mdi:shield" data-bad="true');
+    expect(icon.hasAttribute("data-bad")).toBe(false);
+  });
+
+  it("forwards configured state content and time format to state-display", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({
+      entity: ENTITY,
+      state_content: ["state", "arm_exceptions"],
+      time_format: "24",
+    });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    const stateDisplay = badge.shadowRoot.getElementById("badge-state");
+    expect(stateDisplay.content).toEqual(["state", "arm_exceptions"]);
+    expect(stateDisplay.timeFormat).toBe("24");
+  });
+
+  it("supports the native badge color setting", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, color: "amber" });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    expect(badge.shadowRoot.querySelector("ha-badge").style.getPropertyValue("--badge-color")).toBe(
+      "var(--amber-color)",
+    );
+  });
+
+  it("applies editor config updates without waiting for another HA state update", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY });
+    badge.hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    badge.setConfig({ entity: ENTITY, color: "amber", show_icon: false });
+
+    expect(badge.shadowRoot.querySelector("ha-state-icon")).toBeNull();
+    expect(badge.shadowRoot.querySelector("ha-badge").style.getPropertyValue("--badge-color")).toBe(
+      "var(--amber-color)",
+    );
+  });
+
+  it("supports the native show_entity_picture setting", () => {
+    const entity = makeAlarmEntity();
+    entity.attributes.entity_picture = "/local/alarm.png";
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    badge.setConfig({ entity: ENTITY, show_entity_picture: true });
+    badge.hass = makeHass({
+      hassUrl: (path) => `https://example.test${path}`,
+      states: { [ENTITY]: entity },
+    });
+    document.body.appendChild(badge);
+
+    const picture = badge.shadowRoot.querySelector('img[slot="icon"]');
+    expect(picture.src).toBe("https://example.test/local/alarm.png");
+    expect(badge.shadowRoot.querySelector("ha-state-icon")).toBeNull();
+  });
+
+  it("resolves structured entity-name content through Home Assistant", () => {
+    const badge = document.createElement("verisure-owa-alarm-badge");
+    const formatEntityName = vi.fn(() => "Front Door Alarm");
+    badge.setConfig({
+      entity: ENTITY,
+      name: [{ type: "area" }, { type: "entity" }],
+      show_name: true,
+    });
+    badge.hass = makeHass({
+      formatEntityName,
+      states: { [ENTITY]: makeAlarmEntity() },
+    });
+    document.body.appendChild(badge);
+
+    expect(formatEntityName).toHaveBeenCalled();
+    expect(badge.shadowRoot.querySelector("ha-badge").label).toBe("Front Door Alarm");
   });
 
   it("throws when setConfig is called without an entity", () => {
@@ -79,6 +241,22 @@ describe("verisure-owa-alarm-chip", () => {
     chip.hass = makeHass({
       states: {
         [ENTITY]: makeAlarmEntity({ state: "disarmed", forceArmAvailable: true }),
+      },
+    });
+    document.body.appendChild(chip);
+    expect(chip.shadowRoot.innerHTML).toContain("mdi:alert");
+  });
+
+  it("renders the warning alert icon for a non-forceable arming exception", () => {
+    const chip = document.createElement("verisure-owa-alarm-chip");
+    chip.setConfig({ entity: ENTITY });
+    chip.hass = makeHass({
+      states: {
+        [ENTITY]: makeAlarmEntity({
+          state: "disarmed",
+          armExceptionActive: true,
+          forceArmAvailable: false,
+        }),
       },
     });
     document.body.appendChild(chip);
@@ -136,90 +314,107 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     return badge;
   }
 
-  it("a tap opens the dialog (default tap_action=more-info)", () => {
+  it("a tap asks Home Assistant to open the native More Info dialog", () => {
     const badge = mountBadge();
+    const moreInfoCalls = vi.fn();
+    badge.addEventListener("hass-more-info", moreInfoCalls);
     const badgeEl = badge.shadowRoot.getElementById("badge");
     badgeEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
     badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     vi.advanceTimersByTime(301);
-    // The dialog mounts a verisure-owa-alarm-card under document.body, inside
-    // an overlay div.
-    const dialogCard = document.body.querySelector("securitas-alarm-card");
-    expect(dialogCard).not.toBeNull();
+    expect(moreInfoCalls).toHaveBeenCalledOnce();
+    expect(moreInfoCalls.mock.calls[0][0].detail).toEqual({ entityId: ENTITY });
+    expect(document.body.querySelector("securitas-alarm-card")).toBeNull();
   });
 
-  it("clicking the alarm-card icon inside the popup must NOT open HA's more-info dialog (default-tap config)", () => {
-    // User bug report: when our badge's popup is open and the user clicks the
-    // big shield icon in the embedded alarm-card, HA's standard more-info
-    // dialog appears. The embedded card's tap_action default is `none`, so
-    // tapping the icon should be a no-op. Listen on document for hass-more-info
-    // (the event HA's <home-assistant> root would catch to open the dialog).
-    const badge = mountBadge();
+  it("does nothing on hold by default", () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const badge = mountBadge({ hass });
+    const moreInfoCalls = vi.fn();
+    badge.addEventListener("hass-more-info", moreInfoCalls);
     const badgeEl = badge.shadowRoot.getElementById("badge");
+
     badgeEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
+    vi.advanceTimersByTime(501);
     badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     vi.advanceTimersByTime(301);
 
-    const popupCard = document.body.querySelector("securitas-alarm-card");
-    expect(popupCard).not.toBeNull();
-
-    const moreInfoCalls = vi.fn();
-    document.addEventListener("hass-more-info", moreInfoCalls);
-
-    const iconWrap = popupCard.shadowRoot.querySelector(".icon-wrap");
-    iconWrap.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    iconWrap.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    iconWrap.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
-    vi.advanceTimersByTime(301);
-
-    document.removeEventListener("hass-more-info", moreInfoCalls);
     expect(moreInfoCalls).not.toHaveBeenCalled();
+    expect(hass.callService).not.toHaveBeenCalled();
+    expect(document.querySelector("#badge-pin-input")).toBeNull();
   });
 
-  it("clicking the alarm-card icon inside the popup must NOT open HA's dialog when badge tap_action is more-info", () => {
-    // The badge's editor defaults tap_action to `more-info` (which means
-    // "open our popup" in badge context). That same config is passed
-    // wholesale to the popup's inner alarm-card via setConfig(this._config) —
-    // but in the alarm-card context, `more-info` means "open HA's dialog".
-    // So a user who configures their badge with the default tap action
-    // and then clicks the icon inside the popup gets HA's dialog. Bug.
-    const badge = mountBadge({ config: { tap_action: { action: "more-info" } } });
+  it("passes native Perform action data and target through Home Assistant", () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    const badge = mountBadge({
+      hass,
+      config: {
+        hold_action: {
+          action: "perform-action",
+          perform_action: "alarm_control_panel.alarm_arm_home",
+          data: { code: "1234" },
+          target: { entity_id: ENTITY },
+        },
+      },
+    });
     const badgeEl = badge.shadowRoot.getElementById("badge");
+
     badgeEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
+    vi.advanceTimersByTime(501);
 
-    const popupCard = document.body.querySelector("securitas-alarm-card");
-    expect(popupCard).not.toBeNull();
+    expect(hass.callService).toHaveBeenCalledWith(
+      "alarm_control_panel",
+      "alarm_arm_home",
+      { code: "1234" },
+      { entity_id: ENTITY },
+    );
+  });
 
-    const moreInfoCalls = vi.fn();
-    document.addEventListener("hass-more-info", moreInfoCalls);
+  it("reports a rejected native Perform action through Home Assistant", async () => {
+    const hass = makeHass({
+      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+    });
+    hass.callService.mockRejectedValueOnce(new Error("panel offline"));
+    const badge = mountBadge({
+      hass,
+      config: {
+        hold_action: {
+          action: "perform-action",
+          perform_action: "alarm_control_panel.alarm_arm_away",
+          target: { entity_id: ENTITY },
+        },
+      },
+    });
+    const notification = vi.fn();
+    badge.addEventListener("hass-notification", notification);
+    const badgeEl = badge.shadowRoot.getElementById("badge");
 
-    const iconWrap = popupCard.shadowRoot.querySelector(".icon-wrap");
-    iconWrap.dispatchEvent(
+    badgeEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
-    iconWrap.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    iconWrap.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
-    vi.advanceTimersByTime(301);
+    vi.advanceTimersByTime(501);
+    await Promise.resolve();
+    await Promise.resolve();
 
-    document.removeEventListener("hass-more-info", moreInfoCalls);
-    expect(moreInfoCalls).not.toHaveBeenCalled();
+    expect(notification).toHaveBeenCalledOnce();
+    expect(notification.mock.calls[0][0].detail.message).toContain("panel offline");
   });
 
   it("a tap on the badge stops the native click event from bubbling to parents", () => {
     // When the badge sits inside a parent (e.g. an HA tile-card wrapper or a
     // dashboard view that has its own tap_action default of `more-info`), the
     // browser's native click event must NOT bubble past the badge — otherwise
-    // the user sees BOTH our custom popup AND the standard HA more-info dialog.
+    // a parent action can open a second More Info dialog.
     const parent = document.createElement("div");
     document.body.appendChild(parent);
     const badge = document.createElement("verisure-owa-alarm-badge");
@@ -244,64 +439,7 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     expect(parentClicks).not.toHaveBeenCalled();
   });
 
-  it("closing the dialog via the close button removes the overlay", () => {
-    const badge = mountBadge();
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    const dialogCard = document.body.querySelector("securitas-alarm-card");
-    expect(dialogCard).not.toBeNull();
-    // The close button is the first button inside the overlay's content wrapper.
-    const closeBtn = dialogCard.parentElement.querySelector("button");
-    closeBtn.click();
-    expect(document.body.querySelector("securitas-alarm-card")).toBeNull();
-  });
-
-  it("re-entering the dialog is a no-op while one is already open", () => {
-    const badge = mountBadge();
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    // Open dialog
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    // Try to open again — handler should bail out due to _dialogOpen guard.
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    expect(document.body.querySelectorAll("securitas-alarm-card").length).toBe(1);
-  });
-
-  it("a long-press with arm_or_disarm + code opens the PIN overlay", () => {
-    const badge = mountBadge({
-      hass: makeHass({
-        states: {
-          [ENTITY]: makeAlarmEntity({
-            state: "armed_away",
-            codeArmRequired: true,
-            codeFormat: "number",
-          }),
-        },
-      }),
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    // The badge PIN overlay is attached to document.body with #badge-pin-input.
-    const overlayInput = document.querySelector("#badge-pin-input");
-    expect(overlayInput).not.toBeNull();
-  });
-
-  it("the PIN overlay submits alarm_disarm when Confirm is clicked", () => {
+  it("migrates Badge arm_or_disarm gestures to native More Info", () => {
     const hass = makeHass({
       states: {
         [ENTITY]: makeAlarmEntity({
@@ -313,350 +451,52 @@ describe("verisure-owa-alarm-badge dialog and overlay", () => {
     });
     const badge = mountBadge({
       hass,
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    // Type "1" via keypad
-    document.querySelector('[data-badge-key="1"]').click();
-    document.querySelector('[data-badge-key="2"]').click();
-    document.querySelector('[data-badge-key="3"]').click();
-    document.querySelector("#badge-pin-confirm").click();
-    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_disarm", {
-      entity_id: ENTITY,
-      code: "123",
-    });
-    // Overlay should be torn down
-    expect(document.querySelector("#badge-pin-input")).toBeNull();
-  });
-
-  it("PIN overlay del key removes the last digit; cancel key closes", () => {
-    const hass = makeHass({
-      states: {
-        [ENTITY]: makeAlarmEntity({
-          state: "armed_away",
-          codeArmRequired: true,
-          codeFormat: "number",
-        }),
+      config: {
+        hold_action: { action: "arm_or_disarm", arm_state: "arm_away" },
       },
     });
-    const badge = mountBadge({
-      hass,
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    document.querySelector('[data-badge-key="9"]').click();
-    document.querySelector('[data-badge-key="9"]').click();
-    document.querySelector('[data-badge-key="del"]').click();
-    document.querySelector("#badge-pin-confirm").click();
-    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_disarm", {
-      entity_id: ENTITY,
-      code: "9",
-    });
-    // Reopen and dismiss via cancel key — overlay must close, no service call.
-    const newBadge = mountBadge({
-      hass: makeHass({
-        states: {
-          [ENTITY]: makeAlarmEntity({
-            state: "armed_away",
-            codeArmRequired: true,
-            codeFormat: "number",
-          }),
-        },
-      }),
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const newBadgeEl = newBadge.shadowRoot.getElementById("badge");
-    newBadgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    document.querySelector('[data-badge-key="cancel"]').click();
-    expect(document.querySelector("#badge-pin-input")).toBeNull();
-  });
+    const moreInfoCalls = vi.fn();
+    badge.addEventListener("hass-more-info", moreInfoCalls);
 
-  it("PIN overlay text input event updates _pin and submit calls service with code", () => {
-    const hass = makeHass({
-      states: {
-        [ENTITY]: makeAlarmEntity({
-          state: "armed_away",
-          codeArmRequired: true,
-          codeFormat: "text",
-        }),
-      },
-    });
-    const badge = mountBadge({
-      hass,
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
     const badgeEl = badge.shadowRoot.getElementById("badge");
     badgeEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
     vi.advanceTimersByTime(501);
-    const input = document.querySelector("#badge-pin-input");
-    input.value = "abc!";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    document.querySelector("#badge-pin-confirm").click();
-    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_disarm", {
-      entity_id: ENTITY,
-      code: "abc!",
-    });
-  });
 
-  it("PIN confirm with empty PIN is a no-op (early-return guard)", () => {
-    const hass = makeHass({
-      states: {
-        [ENTITY]: makeAlarmEntity({
-          state: "armed_away",
-          codeArmRequired: true,
-          codeFormat: "number",
-        }),
-      },
-    });
-    const badge = mountBadge({
-      hass,
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    document.querySelector("#badge-pin-confirm").click();
-    expect(hass.callService).not.toHaveBeenCalled();
-  });
-
-  it("PIN overlay text-format renders a text input (no keypad)", () => {
-    const badge = mountBadge({
-      hass: makeHass({
-        states: {
-          [ENTITY]: makeAlarmEntity({
-            state: "armed_away",
-            codeArmRequired: true,
-            codeFormat: "text",
-          }),
-        },
-      }),
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    expect(document.querySelector('[data-badge-key="1"]')).toBeNull();
-    expect(document.querySelector("#badge-pin-input")).not.toBeNull();
-  });
-
-  it("PIN overlay Enter on the input submits; Escape closes", () => {
-    const hass = makeHass({
-      states: {
-        [ENTITY]: makeAlarmEntity({
-          state: "armed_away",
-          codeArmRequired: true,
-          codeFormat: "text",
-        }),
-      },
-    });
-    const badge = mountBadge({
-      hass,
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    const input = document.querySelector("#badge-pin-input");
-    input.value = "secret";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(hass.callService).toHaveBeenCalledWith("alarm_control_panel", "alarm_disarm", {
-      entity_id: ENTITY,
-      code: "secret",
-    });
-    // Now open a fresh overlay and dismiss with Escape.
-    const badge2 = mountBadge({
-      hass: makeHass({
-        states: {
-          [ENTITY]: makeAlarmEntity({
-            state: "armed_away",
-            codeArmRequired: true,
-            codeFormat: "text",
-          }),
-        },
-      }),
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl2 = badge2.shadowRoot.getElementById("badge");
-    badgeEl2.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    const input2 = document.querySelector("#badge-pin-input");
-    input2.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    expect(document.querySelector("#badge-pin-input")).toBeNull();
-  });
-
-  it("PIN overlay Cancel button closes without a service call", () => {
-    const hass = makeHass({
-      states: {
-        [ENTITY]: makeAlarmEntity({
-          state: "armed_away",
-          codeArmRequired: true,
-          codeFormat: "number",
-        }),
-      },
-    });
-    const badge = mountBadge({
-      hass,
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    document.querySelector("#badge-pin-cancel").click();
+    expect(badge._config.hold_action).toEqual({ action: "more-info" });
+    expect(moreInfoCalls).toHaveBeenCalledOnce();
+    expect(moreInfoCalls.mock.calls[0][0].detail).toEqual({ entityId: ENTITY });
     expect(hass.callService).not.toHaveBeenCalled();
     expect(document.querySelector("#badge-pin-input")).toBeNull();
-  });
-
-  it("badge disconnect tears down the PIN overlay if one is open", () => {
-    const badge = mountBadge({
-      hass: makeHass({
-        states: {
-          [ENTITY]: makeAlarmEntity({
-            state: "armed_away",
-            codeArmRequired: true,
-            codeFormat: "number",
-          }),
-        },
-      }),
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    expect(document.querySelector("#badge-pin-input")).not.toBeNull();
-    badge.remove();
-    expect(document.querySelector("#badge-pin-input")).toBeNull();
-  });
-
-  it("badge dialog wires up a connection 'disconnected' listener and removes it on close", () => {
-    // HA's connection.addEventListener returns void (not an unsubscribe), so
-    // the dialog must remove the SAME listener via removeEventListener on close
-    // — otherwise each open leaks a "disconnected" handler.
-    const hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
-      connection: {
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      },
-    });
-    const badge = mountBadge({ hass });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    expect(hass.connection.addEventListener).toHaveBeenCalledWith(
-      "disconnected",
-      expect.any(Function),
-    );
-    const handler = hass.connection.addEventListener.mock.calls[0][1];
-    // Closing the dialog removes that exact listener (no leak).
-    const dialogCard = document.body.querySelector("securitas-alarm-card");
-    const closeBtn = dialogCard.parentElement.querySelector("button");
-    closeBtn.click();
-    expect(hass.connection.removeEventListener).toHaveBeenCalledWith("disconnected", handler);
   });
 
   it("badge skips re-render when neither state nor force_arm_available change", () => {
     const badge = mountBadge();
     const firstHtml = badge.shadowRoot.innerHTML;
+    const firstStateDisplay = badge.shadowRoot.getElementById("badge-state");
+    const updatedEntity = makeAlarmEntity({ state: "disarmed" });
+    updatedEntity.attributes.arm_exceptions = ["Kitchen"];
     // Same hass — identity key matches, no rerender.
     badge.hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
+      states: { [ENTITY]: updatedEntity },
     });
     expect(badge.shadowRoot.innerHTML).toBe(firstHtml);
+    expect(badge.shadowRoot.getElementById("badge-state")).toBe(firstStateDisplay);
+    expect(firstStateDisplay.stateObj.attributes.arm_exceptions).toEqual(["Kitchen"]);
   });
 
-  it("clicking outside the dialog overlay closes it (transparent-area dismissal)", () => {
-    const badge = mountBadge();
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    const dialogCard = document.body.querySelector("securitas-alarm-card");
-    expect(dialogCard).not.toBeNull();
-    // The overlay is the dialogCard's grandparent (overlay → content → card).
-    const overlay = dialogCard.parentElement.parentElement;
-    // Click event targets the overlay itself (not its children).
-    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(document.body.querySelector("securitas-alarm-card")).toBeNull();
-  });
-
-  it("clicking outside the PIN overlay closes it (transparent-area dismissal)", () => {
-    const badge = mountBadge({
-      hass: makeHass({
-        states: {
-          [ENTITY]: makeAlarmEntity({
-            state: "armed_away",
-            codeArmRequired: true,
-            codeFormat: "number",
-          }),
-        },
-      }),
-      config: { hold_action: { action: "arm_or_disarm" } },
-    });
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    vi.advanceTimersByTime(501);
-    const pinInput = document.querySelector("#badge-pin-input");
-    expect(pinInput).not.toBeNull();
-    // Walk up to the outer overlay div.
-    const overlay = pinInput.closest("div").parentElement;
-    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(document.querySelector("#badge-pin-input")).toBeNull();
-  });
-
-  it("badge forwards subsequent hass updates to the open dialog card", () => {
-    const badge = mountBadge();
-    const badgeEl = badge.shadowRoot.getElementById("badge");
-    badgeEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    badgeEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    const dialogCard = document.body.querySelector("securitas-alarm-card");
-    badge.hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "armed_home" }) },
-    });
-    expect(dialogCard.shadowRoot.innerHTML).toContain("Armed Home");
-  });
-
-  it("badge getCardSize returns 1; getConfigElement returns the editor", () => {
+  it("badge exposes the standard defaults, stub config and visual editor", async () => {
     const badge = mountBadge();
     expect(badge.getCardSize()).toBe(1);
     const ctor = customElements.get("verisure-owa-alarm-badge");
-    const editor = ctor.getConfigElement();
-    expect(editor.tagName.toLowerCase()).toBe("verisure-owa-alarm-card-editor");
+    const editor = await ctor.getConfigElement();
+    expect(editor.tagName.toLowerCase()).toBe("verisure-owa-alarm-badge-editor");
+    expect(ctor.getDefaultConfig()).toEqual({
+      show_name: false,
+      show_state: true,
+      show_icon: true,
+    });
     const hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity() },
     });
@@ -672,57 +512,23 @@ describe("verisure-owa-alarm-chip dialog wiring", () => {
     document.body.innerHTML = "";
   });
 
-  it("a tap on the chip opens the dialog", () => {
+  it("a tap on the chip asks HA to open native More Info", () => {
     const chip = document.createElement("verisure-owa-alarm-chip");
     chip.setConfig({ entity: ENTITY });
     chip.hass = makeHass({
       states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
     });
     document.body.appendChild(chip);
-    const chipEl = chip.shadowRoot.getElementById("chip");
-    chipEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    expect(document.body.querySelector("securitas-alarm-card")).not.toBeNull();
-  });
-
-  it("clicking the alarm-card icon inside the chip's popup must NOT open HA's dialog", () => {
-    // Same bug as the badge: the chip's tap_action (default `more-info`) is
-    // passed wholesale to the embedded alarm-card via _openDialog. In the
-    // alarm-card context, `more-info` dispatches `hass-more-info` and opens
-    // HA's standard dialog on top of our popup. The chip delegates to the
-    // badge's _openDialog so the same gesture-stripping fix protects it.
-    const chip = document.createElement("verisure-owa-alarm-chip");
-    chip.setConfig({ entity: ENTITY, tap_action: { action: "more-info" } });
-    chip.hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
-    });
-    document.body.appendChild(chip);
-    const chipEl = chip.shadowRoot.getElementById("chip");
-    chipEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-
-    const popupCard = document.body.querySelector("securitas-alarm-card");
-    expect(popupCard).not.toBeNull();
-
     const moreInfoCalls = vi.fn();
-    document.addEventListener("hass-more-info", moreInfoCalls);
-
-    const iconWrap = popupCard.shadowRoot.querySelector(".icon-wrap");
-    iconWrap.dispatchEvent(
+    chip.addEventListener("hass-more-info", moreInfoCalls);
+    const chipEl = chip.shadowRoot.getElementById("chip");
+    chipEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
-    iconWrap.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    iconWrap.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     vi.advanceTimersByTime(301);
-
-    document.removeEventListener("hass-more-info", moreInfoCalls);
-    expect(moreInfoCalls).not.toHaveBeenCalled();
+    expect(moreInfoCalls).toHaveBeenCalledOnce();
+    expect(moreInfoCalls.mock.calls[0][0].detail).toEqual({ entityId: ENTITY });
   });
 
   it("a tap on the chip stops the native click event from bubbling to parents", () => {
@@ -794,35 +600,13 @@ describe("verisure-owa-alarm-chip dialog wiring", () => {
     expect(chip.shadowRoot.innerHTML).toContain("mdi:shield-off-outline");
   });
 
-  it("chip forwards subsequent hass updates to the open dialog card", () => {
-    const chip = document.createElement("verisure-owa-alarm-chip");
-    chip.setConfig({ entity: ENTITY });
-    chip.hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "disarmed" }) },
-    });
-    document.body.appendChild(chip);
-    const chipEl = chip.shadowRoot.getElementById("chip");
-    chipEl.dispatchEvent(
-      new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
-    );
-    chipEl.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
-    vi.advanceTimersByTime(301);
-    const dialogCard = document.body.querySelector("securitas-alarm-card");
-    expect(dialogCard).not.toBeNull();
-    // Push a new hass with armed state — the dialog card should re-render to armed.
-    chip.hass = makeHass({
-      states: { [ENTITY]: makeAlarmEntity({ state: "armed_away" }) },
-    });
-    expect(dialogCard.shadowRoot.innerHTML).toContain("Armed Away");
-  });
-
-  it("a long-press on the chip with arm_or_disarm + code opens the PIN overlay", () => {
+  it("migrates Chip arm_or_disarm gestures to native More Info", () => {
     const chip = document.createElement("verisure-owa-alarm-chip");
     chip.setConfig({
       entity: ENTITY,
-      hold_action: { action: "arm_or_disarm" },
+      hold_action: { action: "arm_or_disarm", arm_state: "arm_away" },
     });
-    chip.hass = makeHass({
+    const hass = makeHass({
       states: {
         [ENTITY]: makeAlarmEntity({
           state: "armed_away",
@@ -831,12 +615,21 @@ describe("verisure-owa-alarm-chip dialog wiring", () => {
         }),
       },
     });
+    chip.hass = hass;
     document.body.appendChild(chip);
+    const moreInfoCalls = vi.fn();
+    chip.addEventListener("hass-more-info", moreInfoCalls);
+
     const chipEl = chip.shadowRoot.getElementById("chip");
     chipEl.dispatchEvent(
       new PointerEvent("pointerdown", { bubbles: true, clientX: 0, clientY: 0 }),
     );
     vi.advanceTimersByTime(501);
-    expect(document.querySelector("#badge-pin-input")).not.toBeNull();
+
+    expect(chip._config.hold_action).toEqual({ action: "more-info" });
+    expect(moreInfoCalls).toHaveBeenCalledOnce();
+    expect(moreInfoCalls.mock.calls[0][0].detail).toEqual({ entityId: ENTITY });
+    expect(hass.callService).not.toHaveBeenCalled();
+    expect(document.querySelector("#badge-pin-input")).toBeNull();
   });
 });

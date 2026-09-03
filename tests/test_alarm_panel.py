@@ -3,6 +3,7 @@
 import inspect
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import call as mock_call
 
 import attr
 import pytest
@@ -20,7 +21,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas.alarm_control_panel import (
+    AnnexVerisureOwaAlarmPanel,
+    BaseVerisureOwaAlarmPanel,
     CombinedVerisureOwaAlarmPanel,
+    InteriorVerisureOwaAlarmPanel,
+    PerimeterVerisureOwaAlarmPanel,
 )
 from custom_components.securitas.const import (
     CONF_AUTO_FORCE_ARM,
@@ -247,6 +252,23 @@ class TestForceArmNotificationsConfig:
         """The card capability gate is off by default: attribute is present and False."""
         alarm = make_alarm()
         assert alarm._attr_extra_state_attributes["auto_force_arm_enabled"] is False
+
+    @pytest.mark.parametrize(
+        "panel_cls",
+        [
+            CombinedVerisureOwaAlarmPanel,
+            InteriorVerisureOwaAlarmPanel,
+            PerimeterVerisureOwaAlarmPanel,
+            AnnexVerisureOwaAlarmPanel,
+        ],
+    )
+    def test_all_alarm_panels_use_the_integration_more_info_control(self, panel_cls):
+        """Every region/panel inherits the native More Info extension."""
+        alarm = make_alarm(panel_cls=panel_cls)
+        assert (
+            alarm._attr_extra_state_attributes["custom_ui_more_info"]
+            == "more-info-verisure-owa-alarm"
+        )
 
     def test_auto_force_arm_attribute_reflects_config(self):
         """auto_force_arm=True in config surfaces as the entity attribute."""
@@ -530,8 +552,9 @@ def make_alarm(
     has_peri=False,
     initial_status=None,
     code=None,
-) -> CombinedVerisureOwaAlarmPanel:
-    """Create a CombinedVerisureOwaAlarmPanel with mocked dependencies.
+    panel_cls=CombinedVerisureOwaAlarmPanel,
+) -> BaseVerisureOwaAlarmPanel:
+    """Create an alarm panel with mocked dependencies.
 
     ``code`` is the raw PIN that check_code() should accept; it's hashed
     into config["code_hash"] since the entity only ever reads the hash.
@@ -588,19 +611,15 @@ def make_alarm(
 
     # Patch Entity state-writing methods that require a running HA instance.
     with (
-        patch.object(
-            CombinedVerisureOwaAlarmPanel, "async_schedule_update_ha_state", MagicMock()
-        ),
-        patch.object(
-            CombinedVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
-        ),
+        patch.object(panel_cls, "async_schedule_update_ha_state", MagicMock()),
+        patch.object(panel_cls, "async_write_ha_state", MagicMock()),
     ):
-        alarm = CombinedVerisureOwaAlarmPanel(
+        alarm = panel_cls(
             installation=installation,
             client=client,
-            hass=hass,
             coordinator=coordinator,
         )
+        alarm.hass = hass
     # Apply the initial status to set default state (e.g. DISARMED)
     alarm.update_status_alarm(initial_status)
     # Keep the patches alive on the instance for later calls in tests
@@ -1611,42 +1630,16 @@ class TestForceState:
 class TestAsyncWillRemoveFromHass:
     """Tests for async_will_remove_from_hass()."""
 
-    async def test_unsubscribes_mobile_action_listener(self):
-        """Calls _mobile_action_unsub() when it is set."""
+    async def test_cancels_force_arm_expiry(self):
+        """Cancel a pending force-arm timer during entity teardown."""
         alarm = make_alarm()
-        mobile_unsub_mock = MagicMock()
-        alarm._mobile_action_unsub = mobile_unsub_mock
+        expiry_unsub = MagicMock()
+        alarm._force_arm_expiry_unsub = expiry_unsub
 
         await alarm.async_will_remove_from_hass()
 
-        mobile_unsub_mock.assert_called_once()
-
-    async def test_handles_none_mobile_action_unsub_gracefully(self):
-        """Handles None _mobile_action_unsub gracefully (no crash)."""
-        alarm = make_alarm()
-        alarm._mobile_action_unsub = None
-
-        # Should not raise
-        await alarm.async_will_remove_from_hass()
-
-    async def test_unsubscribes_arming_event_listener(self):
-        """Calls _arming_event_unsub_new() when set on teardown."""
-        alarm = make_alarm()
-        new_unsub_mock = MagicMock()
-        alarm._arming_event_unsub_new = new_unsub_mock
-
-        await alarm.async_will_remove_from_hass()
-
-        new_unsub_mock.assert_called_once()
-
-    async def test_handles_none_arming_event_unsub_gracefully(self):
-        """Handles None _arming_event_unsub_new gracefully (no crash)."""
-        alarm = make_alarm()
-        alarm._arming_event_unsub_new = None
-        alarm._mobile_action_unsub = None
-
-        # Should not raise
-        await alarm.async_will_remove_from_hass()
+        expiry_unsub.assert_called_once()
+        assert alarm._force_arm_expiry_unsub is None
 
     async def test_calls_super_to_clean_up_coordinator_listener(self):
         """Calls super().async_will_remove_from_hass() so CoordinatorEntity unsubscribes its listener."""
@@ -2046,6 +2039,39 @@ class TestForceArmContext:
         # Attributes should expose exception info
         assert alarm._attr_extra_state_attributes["force_arm_available"] is True
         assert "Kitchen Door" in alarm._attr_extra_state_attributes["arm_exceptions"]
+
+    async def test_non_forceable_arming_exception_still_exposes_open_sensors(self):
+        """Spain panels show sensor details without enabling force-arm."""
+        alarm = make_alarm()
+        alarm._state = AlarmControlPanelState.ARMING
+        alarm._last_state = AlarmControlPanelState.DISARMED
+        exc = ArmingExceptionError(
+            "ref-exc-spain",
+            "suid-spain",
+            [
+                {"status": "0", "deviceType": "MG", "alias": "Kitchen"},
+                {"status": "0", "deviceType": "MG", "alias": "Bedroom"},
+                {"status": "0", "deviceType": "MG", "alias": "Office"},
+            ],
+            allow_forcing=False,
+        )
+        alarm.client.arm_alarm = AsyncMock(side_effect=exc)
+
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+        assert alarm._state == AlarmControlPanelState.DISARMED
+        assert alarm._attr_extra_state_attributes["arm_exception_active"] is True
+        assert alarm._attr_extra_state_attributes["force_arm_available"] is False
+        assert alarm._attr_extra_state_attributes["arm_exceptions"] == [
+            "Kitchen",
+            "Bedroom",
+            "Office",
+        ]
+        event_data = alarm.hass.bus.async_fire.call_args_list[0][0][1]
+        assert event_data["allow_forcing"] is False
+
+        await alarm.async_force_arm()
+        alarm.client.arm_alarm.assert_awaited_once()
 
     async def test_widget_re_arm_does_not_force(self):
         """Re-arming via the widget does NOT auto-force — force context is ignored."""
@@ -5238,6 +5264,33 @@ class TestNotificationContent:
         assert actions[1]["action"] == "SECURITAS_CANCEL_FORCE_ARM_123456"
         assert actions[1]["title"] == "Cancel·lar"
 
+    async def test_non_forceable_notification_has_sensor_warning_without_actions(self):
+        """Spain panels that prohibit forcing still notify with zone names."""
+        alarm = self._alarm_with_async_call()
+        alarm.client.config["notify_group"] = "mobile_app_phone"
+        event = self._make_event(zones=["Kitchen", "Bedroom", "Office"])
+        event.data["allow_forcing"] = False
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel._base.get_notification_strings",
+            return_value=_FAKE_NOTIFICATION_ENTRY,
+        ) as get_strings:
+            await alarm._async_notify_arm_exceptions(event)
+
+        get_strings.assert_called_once_with(
+            alarm.hass, "arm_blocked_open_sensors_no_force"
+        )
+        mobile_call = next(
+            c
+            for c in alarm.hass.services.async_call.call_args_list
+            if c[1]["domain"] == "notify"
+        )
+        service_data = mobile_call[1]["service_data"]
+        assert "Kitchen" in service_data["message"]
+        assert "Bedroom" in service_data["message"]
+        assert "Office" in service_data["message"]
+        assert "actions" not in service_data["data"]
+
     async def test_mobile_notification_short_message(self):
         """Mobile message is shorter than persistent message and contains sensor alias."""
         alarm = self._alarm_with_async_call()
@@ -5316,7 +5369,7 @@ class TestNotificationContent:
         assert "Kitchen Door" in sd["message"]
         assert sd["notification_id"] == "securitas.arming_exception_123456"
 
-    def test_event_handler_schedules_async_helper(self):
+    async def test_event_handler_schedules_async_helper(self):
         """The sync event handler schedules the async helper via async_create_task."""
         alarm = make_alarm()
         event = self._make_event()
@@ -5456,15 +5509,17 @@ class TestAsyncAddedToHass:
 
         alarm.hass.bus.async_listen.assert_not_called()  # type: ignore[attr-defined]
 
-    async def test_mobile_action_unsub_stored(self):
-        """async_added_to_hass stores the unsubscribe callable from bus.async_listen."""
+    async def test_listeners_use_entity_lifecycle_cleanup(self):
+        """Register every bus unsubscribe callable with the entity lifecycle."""
         alarm = make_alarm()
         sentinel = MagicMock()
+        alarm.async_on_remove = MagicMock()
         alarm.hass.bus.async_listen.return_value = sentinel  # type: ignore[attr-defined]
 
         await alarm.async_added_to_hass()
 
-        assert alarm._mobile_action_unsub is sentinel
+        # Four bus listeners plus CoordinatorEntity's own coordinator listener.
+        assert alarm.async_on_remove.call_args_list.count(mock_call(sentinel)) == 4
 
 
 # ===========================================================================
@@ -5670,15 +5725,14 @@ class TestForceArmWorkflow:
 class TestHassNoneGuardsAlarm:
     """Verify alarm entity bails out when hass is None (after removal)."""
 
-    def test_force_state_skips_schedule_when_hass_is_none(self):
+    def test_force_state_skips_write_when_hass_is_none(self):
         alarm = make_alarm()
-        alarm.async_schedule_update_ha_state = MagicMock()
         alarm.hass = None  # type: ignore[attr-defined]
 
         alarm._force_state(AlarmControlPanelState.ARMING)
 
         assert alarm._state == AlarmControlPanelState.ARMING
-        alarm.async_schedule_update_ha_state.assert_not_called()
+        alarm.async_write_ha_state.assert_not_called()
 
 
 # ===========================================================================
@@ -5758,7 +5812,8 @@ def _make_interior_panel(
             InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        panel = InteriorVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel.hass = hass
     panel.async_schedule_update_ha_state = MagicMock()
     panel.async_write_ha_state = MagicMock()
     return panel
@@ -5811,7 +5866,9 @@ def _make_perimeter_panel(
             PerimeterVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
         ),
     ):
-        return PerimeterVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = PerimeterVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel.hass = hass
+        return panel
 
 
 class TestSubPanelDisarmFromUnknownState:
@@ -6070,9 +6127,9 @@ class TestInteriorSubPanel:
                 InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
             ),
         ):
-            return InteriorVerisureOwaAlarmPanel(
-                installation, client, hass, coordinator
-            )
+            panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+            panel.hass = hass
+            return panel
 
     def test_hydrates_unsupported_from_legacy_flat_list(self):
         """Resolver starts pre-loaded with the persisted unsupported list so
@@ -6145,9 +6202,8 @@ class TestInteriorSubPanel:
                 InteriorVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()
             ),
         ):
-            panel = InteriorVerisureOwaAlarmPanel(
-                installation, client, hass, coordinator
-            )
+            panel = InteriorVerisureOwaAlarmPanel(installation, client, coordinator)
+            panel.hass = hass
         assert panel._resolver.unsupported == frozenset()
 
     async def test_subpanel_raises_subpanel_error_when_command_unsupported(self):
@@ -6443,7 +6499,9 @@ def _make_annex_panel(
         ),
         patch.object(AnnexVerisureOwaAlarmPanel, "async_write_ha_state", MagicMock()),
     ):
-        return AnnexVerisureOwaAlarmPanel(installation, client, hass, coordinator)
+        panel = AnnexVerisureOwaAlarmPanel(installation, client, coordinator)
+        panel.hass = hass
+        return panel
 
 
 class TestAnnexSubPanel:
@@ -7124,9 +7182,10 @@ async def test_verisure_owa_force_arm_alias_forwards_to_securitas(hass):
     from custom_components.securitas import register_service_aliases
 
     canonical_called = []
+    context = MagicMock()
 
     async def fake_handler(call):
-        canonical_called.append(dict(call.data))
+        canonical_called.append((dict(call.data), call.context))
 
     hass.services.async_register("securitas", "force_arm", fake_handler)
     register_service_aliases(hass)
@@ -7135,8 +7194,9 @@ async def test_verisure_owa_force_arm_alias_forwards_to_securitas(hass):
         "force_arm",
         {"entity_id": "alarm_control_panel.x"},
         blocking=True,
+        context=context,
     )
-    assert canonical_called == [{"entity_id": "alarm_control_panel.x"}]
+    assert canonical_called == [({"entity_id": "alarm_control_panel.x"}, context)]
 
 
 async def test_arming_exception_fires_both_legacy_and_new_events(hass):

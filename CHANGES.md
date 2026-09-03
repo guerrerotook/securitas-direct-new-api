@@ -8,11 +8,56 @@ A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnost
 
 ### Added
 
+**Force Arm inside Home Assistant's native alarm More Info dialog.**  Every
+alarm panel created by the integration now keeps Home Assistant's standard
+alarm modes, PIN handling, state header, history and settings UI.  When an arm
+attempt is rejected, an integration-wide More Info extension adds the affected
+sensor list and **Force Arm** / **Cancel** actions directly below those native
+controls.  Availability is capability-driven rather than country-specific:
+panels that permit forcing get the button, while Spanish and any other
+non-forceable panels still get the useful sensor warning and Cancel action.
+Badge and chip taps now open this native dialog instead of a separate custom
+popup.  The standalone Verisure OWA Alarm Card remains available for dashboards
+that explicitly use it.
+
+**Native Badge preview and Content settings.**  The Verisure OWA Alarm Badge
+now uses Home Assistant's native `ha-badge` and `state-display` components, so
+it appears as a live preview in the badge picker and can display the alarm state
+directly in the badges row.  Its visual editor now has the standard **Content**
+controls for name, icon, displayed elements, state attributes and timestamp
+format.  The Verisure warning behaviour remains intact: a blocked arm attempt
+temporarily switches the badge to the amber alert icon, and tapping it opens
+the native More Info dialog with the affected sensors and any available Force
+Arm action.  Legacy Badge and Chip `arm_or_disarm` gestures are migrated to
+More Info at runtime, allowing the duplicate custom PIN dialog and its alarm
+control logic to be removed; the standalone Alarm Card keeps its existing
+integration-specific gestures.
+
+**Open sensors directly in the Home Assistant Tile Card.**  A new
+**Verisure OWA Open Sensors** custom Tile feature can sit below HA's native
+**Alarm modes** controls.  It stays hidden during normal operation and, when
+an arm attempt is rejected, expands inline to list every affected door/window.
+Panels that allow forcing also get a compact **Force Arm** action; Spanish
+panels that prohibit it get the sensor list and a close-and-retry warning only.
+The feature is registered with the visual Tile editor and can also be added as
+`type: custom:verisure-owa-arm-exception` in YAML.
+
 **Auto-force-arm past open sensors, straight from the card ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  When you arm with a door or window left open, the alarm blocks and waits for you to tap **Force Arm** — easy to miss, and until you do the alarm never arms.  A new opt-in setting, **"Offer an auto-force-arm tick box on the alarm card"**, adds a *force-arm past open sensors* tick box below the arm buttons on the alarm card; with it ticked, arming from that card and hitting an open sensor force-arms past the open zones automatically instead of waiting for you to confirm.  Rather than flashing the "arm blocked — force arm?" prompt and clearing it a beat later, an auto-forced arm skips that prompt and sends a single **"force-armed"** confirmation naming the sensors it bypassed (a manual **Force Arm** tap is unchanged).  The bypassed zones are still recorded in the activity log as *Armed with exceptions*.  It is off by default — force-arming silently bypasses open doors and windows, and some panels (Spain has been observed) don't support it at all — and the tick box is remembered per device in the browser, so it only ever affects arming from that card and never changes how automations or the stock alarm card behave.  Thanks to [@WSorban](https://github.com/WSorban) for the request.
 
 **Opt-in diagnostics for the refresh-login crash that persists after v5.7.0 ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  v5.7.0 fixed one cause of the `xSRefreshLogin failed: Cannot read properties of undefined (reading 'fr')` crash that leaves the integration stuck until it is deleted and re-added, but a few accounts still hit it.  This release re-adds DEBUG-level logging — off by default and with no behaviour change — that fingerprints the refresh token across a restart, records each rotation and whether it was persisted, and tags the raw server response for the refresh call.  Together these tell apart the two remaining possibilities: a stale token loaded from disk (something our side still isn't persisting) versus the server crashing on a token that is actually current (a server-side fault, which re-authenticating would not fix).  If you are affected, enable debug logging for `custom_components.securitas` — a `logs:` entry under `logger:` in `configuration.yaml` — then leave Home Assistant running for half an hour, restart it, and share the log on the issue.  Thanks to [@amullr](https://github.com/amullr) for the report.
 
 ### Fixed
+
+**Some open-window arm attempts showed the raw `error_mpj_exception` message.**
+The integration now recognises the backend's canonical arming-exception
+response independently of country-specific error types and fetches the
+affected sensor names instead of reporting the opaque backend message.  This
+also covers Spanish panels that report the open sensors but set
+`allowForcing: false`: the alarm card, persistent notification, mobile
+notification and activity entry now list those sensors and tell the user to
+close them before retrying, without offering an unsafe Force Arm action.  When
+the panel explicitly sets `allowForcing: true`, the existing Force Arm / Cancel
+flow remains available.
 
 **Force-arm past open zones never offered on French installations ([#583](https://github.com/guerrerotook/securitas-direct-new-api/issues/583)).**  When you armed with a door or window open, the alarm was supposed to block, list the open zones, and let you force-arm past them — the same flow the auto-force-arm tick box builds on.  On French (SDVFAST) panels it never did: the arm just failed with *Open zone (…)*, no `verisure_owa_arming_exception` event fired, and force-arming was a silent no-op because the force context was never populated.  The cause was the panel's error type — French panels report an open-zone rejection as `ZONE` where Spanish panels report `NON_BLOCKING`, and only the latter was recognised as force-armable, so the French case fell through to a generic failure.  Both types are now recognised, so a French arm blocked by open zones raises the arming exception, fires the event with the full zone list, and populates the force-arm context just like everywhere else.  A `ZONE` rejection that genuinely cannot be forced still fails as before.  Thanks to [@rpouetpouet](https://github.com/rpouetpouet) for the detailed report and live testing on a French SDVFAST panel.
 

@@ -31,10 +31,8 @@ async def async_setup_entry(
     buttons = []
     securitas_devices: list[VerisureDevice] = entry_data["devices"]
     for device in securitas_devices:
-        buttons.append(
-            VerisureRefreshButton(device.installation, client, hass, entry.entry_id)
-        )
-    async_add_entities(buttons, True)
+        buttons.append(VerisureRefreshButton(device.installation, client))
+    async_add_entities(buttons)
 
     # Store callback for deferred camera capture button discovery
     entry_data["button_add_entities"] = async_add_entities
@@ -56,16 +54,12 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
         self,
         installation: Installation,
         client: VerisureHub,
-        hass: HomeAssistant,
-        entry_id: str,
     ) -> None:
         """Initialize the refresh button."""
         super().__init__(installation, client)
         self._attr_unique_id = (
             f"v4_securitas_direct.{installation.number}_refresh_button"
         )
-        self._entry_id = entry_id
-        self.hass = hass
 
     def _get_alarm_entity(self):
         """Return the alarm entity for this installation, if available."""
@@ -130,8 +124,18 @@ class VerisureCaptureButton(VerisureEntity, ButtonEntity):
         self._attr_unique_id = (
             f"v4_securitas_direct.{installation.number}_capture_{camera_device.zone_id}"
         )
+        config_entry = (
+            camera_entity.coordinator.config_entry
+            if camera_entity is not None
+            else None
+        )
         self._attr_device_info = camera_device_info(
-            installation, camera_device, client.hass
+            installation,
+            camera_device,
+            client.hass,
+            config_entry_id=(
+                config_entry.entry_id if config_entry is not None else None
+            ),
         )
 
     async def async_press(self) -> None:

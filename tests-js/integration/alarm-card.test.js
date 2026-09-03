@@ -110,7 +110,12 @@ describe("verisure-owa-alarm-card state transitions", () => {
 
 describe("verisure-owa-alarm-card service calls", () => {
   function findButton(card, labelMatcher) {
-    const buttons = Array.from(card.shadowRoot.querySelectorAll("button"));
+    const alertButtons = Array.from(
+      card.shadowRoot
+        .querySelector("verisure-owa-arm-exception-alert")
+        ?.shadowRoot.querySelectorAll("ha-button") || [],
+    );
+    const buttons = [...card.shadowRoot.querySelectorAll("button"), ...alertButtons];
     return buttons.find((b) =>
       typeof labelMatcher === "string"
         ? b.textContent.trim() === labelMatcher
@@ -272,10 +277,34 @@ describe("verisure-owa-alarm-card banners and force-arm", () => {
         },
       }),
     });
-    const items = card.shadowRoot.querySelectorAll(".sensor-list li");
+    const items = card.shadowRoot
+      .querySelector("verisure-owa-arm-exception-alert")
+      .shadowRoot.querySelectorAll(".sensor-list li");
     expect(items.length).toBe(2);
     expect(items[0].textContent).toBe("Front Door");
     expect(items[1].textContent).toBe("Garage");
+  });
+
+  it("shows non-forceable open sensors without a Force Arm button", () => {
+    const card = mountAlarmCard({
+      hass: makeHass({
+        states: {
+          [ENTITY]: makeAlarmEntity({
+            state: "disarmed",
+            armExceptionActive: true,
+            forceArmAvailable: false,
+            armExceptions: ["Kitchen", "Bedroom", "Office"],
+          }),
+        },
+      }),
+    });
+
+    const alertRoot = card.shadowRoot.querySelector("verisure-owa-arm-exception-alert").shadowRoot;
+    const items = alertRoot.querySelectorAll(".sensor-list li");
+    expect(Array.from(items, (item) => item.textContent)).toEqual(["Kitchen", "Bedroom", "Office"]);
+    expect(alertRoot.textContent).toMatch(/close them before arming/i);
+    expect(alertRoot.querySelector(".force").hidden).toBe(true);
+    expect(alertRoot.querySelector(".cancel")).not.toBeNull();
   });
 
   it("disarm button next to force-arm calls alarm_disarm when armed", () => {

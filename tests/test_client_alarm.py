@@ -93,13 +93,14 @@ def arm_status_response(
     status: str = "ARMED",
     protom_response: str = "T",
     error: dict | str | None = None,
+    msg: str = "",
 ) -> dict:
     """Build a mock xSArmStatus response."""
     return {
         "data": {
             "xSArmStatus": {
                 "res": res,
-                "msg": "",
+                "msg": msg,
                 "status": status,
                 "numinst": "123456",
                 "protomResponse": protom_response,
@@ -375,12 +376,8 @@ class TestArm:
         assert len(exc_info.value.exceptions) == 1
         assert exc_info.value.exceptions[0]["alias"] == "Main door"
 
-    async def test_arm_zone_not_forceable_blocking_error(self, client, transport):
-        """ZONE error without allowForcing is a genuine blocking failure.
-
-        An open zone that cannot be force-armed must still raise
-        VerisureOwaError rather than being silently swallowed.
-        """
+    async def test_arm_zone_not_forceable_still_lists_sensor(self, client, transport):
+        """ZONE without allowForcing warns but does not enable force-arm."""
         transport.execute.side_effect = [
             arm_submit_response("ref-arm-zone-002"),
             arm_status_response(
@@ -389,13 +386,201 @@ class TestArm:
                     "code": "ERR_ZONE_OPEN",
                     "type": "ZONE",
                     "allowForcing": False,
+                    "exceptionsNumber": 1,
+                    "referenceId": "exc-ref-zone-blocked",
+                    "suid": "suid-zone-blocked",
+                },
+            ),
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {"status": "OPEN", "deviceType": "DOOR", "alias": "Main door"}
+                ],
+            ),
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.allow_forcing is False
+        assert exc_info.value.exceptions[0]["alias"] == "Main door"
+
+    async def test_arm_zone_exception_without_reference_does_not_poll_exceptions(
+        self, client, transport
+    ):
+        """A ZONE rejection with no referenceId/suid raises immediately.
+
+        A genuinely-blocking arming rejection can arrive as ZONE/NON_BLOCKING
+        with no referenceId and no suid. There is nothing to fetch or force
+        without a reference, so arm() must surface ArmingExceptionError right
+        away with an empty exceptions list — never poll xSGetExceptions, which
+        would hang on WAIT for the full poll timeout then raise
+        OperationTimeoutError. See finding F3.
+
+        Force-arming targets the bypass via referenceId/suid, so with both
+        absent it cannot work (an empty force id degrades to a plain re-arm
+        that just re-hits this rejection). ``allow_forcing`` must therefore be
+        reported as False even when the API claims ``allowForcing: True``, so
+        the UI never offers a Force Arm button that would loop.
+        """
+        call_count = 0
+
+        async def _side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return arm_submit_response("ref-arm-noref")
+            if call_count == 2:
+                return arm_status_response(
+                    res="ERROR",
+                    error={
+                        "code": "ERR_ZONE_OPEN",
+                        "type": "ZONE",
+                        "allowForcing": True,
+                        "exceptionsNumber": 1,
+                        "referenceId": "",
+                        "suid": "",
+                    },
+                )
+            # Any further call is the xSGetExceptions poll; hold it in WAIT so
+            # the current (buggy) code would poll until the timeout expires.
+            return exceptions_response(res="WAIT")
+
+        transport.execute.side_effect = _side_effect
+        # Keep the red-phase timeout short so the buggy path fails fast.
+        client.poll_timeout = 0.2
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.exceptions == []
+        # API said allowForcing:True, but with no referenceId/suid forcing is
+        # impossible — must not advertise a non-functional Force Arm button.
+        assert exc_info.value.allow_forcing is False
+        assert exc_info.value.reference_id == ""
+        assert exc_info.value.suid == ""
+        # With no sensor aliases the message must not dangle a trailing colon.
+        assert (
+            str(exc_info.value)
+            == "Arming blocked by open sensors (no sensor details available)"
+        )
+
+        # xSGetExceptions must never be requested — nothing to fetch without a
+        # referenceId or suid.
+        requested_ops = [
+            call.args[0]["operationName"] for call in transport.execute.call_args_list
+        ]
+        assert "xSGetExceptions" not in requested_ops
+
+    async def test_arm_mpj_exception_with_unknown_type_is_arming_exception(
+        self, client, transport
+    ):
+        """The canonical MPJ exception message survives backend type drift.
+
+        ``allowForcing`` is the panel's explicit safety gate.  When it is true,
+        a known ``error_mpj_exception`` must enter the arming-exception flow
+        even if a panel reports a new ``error.type`` value, so Home Assistant
+        can fetch and display the affected sensors instead of showing the raw
+        backend message.
+        """
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-mpj-001"),
+            arm_status_response(
+                res="ERROR",
+                msg="error_mpj_exception",
+                error={
+                    "code": "102",
+                    "type": "MPJ_EXCEPTION",
+                    "allowForcing": True,
+                    "exceptionsNumber": 3,
+                    "referenceId": "exc-ref-mpj",
+                    "suid": "suid-mpj",
+                },
+            ),
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {"status": "0", "deviceType": "MG", "alias": "Kitchen"},
+                    {"status": "0", "deviceType": "MG", "alias": "Bedroom"},
+                    {"status": "0", "deviceType": "MG", "alias": "Office"},
+                ],
+            ),
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.reference_id == "exc-ref-mpj"
+        assert exc_info.value.suid == "suid-mpj"
+        assert [item["alias"] for item in exc_info.value.exceptions] == [
+            "Kitchen",
+            "Bedroom",
+            "Office",
+        ]
+
+    async def test_arm_mpj_exception_without_allow_forcing_lists_sensors(
+        self, client, transport
+    ):
+        """Spain panels can report open sensors but prohibit force-arming."""
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-mpj-002"),
+            arm_status_response(
+                res="ERROR",
+                msg="error_mpj_exception",
+                error={
+                    "code": "102",
+                    "type": "NON_BLOCKING",
+                    "allowForcing": False,
+                    "exceptionsNumber": 3,
+                    "referenceId": "exc-ref-mpj-blocked",
+                    "suid": "suid-mpj-blocked",
+                },
+            ),
+            exceptions_response(
+                res="OK",
+                exceptions=[
+                    {"status": "0", "deviceType": "MG", "alias": "Kitchen"},
+                    {"status": "0", "deviceType": "MG", "alias": "Bedroom"},
+                    {"status": "0", "deviceType": "MG", "alias": "Office"},
+                ],
+            ),
+        ]
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.allow_forcing is False
+        assert [item["alias"] for item in exc_info.value.exceptions] == [
+            "Kitchen",
+            "Bedroom",
+            "Office",
+        ]
+
+    async def test_unrelated_mpj_error_does_not_become_sensor_warning(
+        self, client, transport
+    ):
+        """MPJ command errors without exceptions retain the failure path."""
+        transport.execute.side_effect = [
+            arm_submit_response("ref-arm-mpj-003"),
+            arm_status_response(
+                res="ERROR",
+                msg="error_mpj_exception",
+                error={
+                    "code": "101",
+                    "type": "BLOCKING",
+                    "allowForcing": False,
+                    "exceptionsNumber": 0,
+                    "referenceId": "ref-partition-error",
+                    "suid": "",
                 },
             ),
         ]
 
-        inst = _make_installation()
-        with pytest.raises(VerisureOwaError, match="Arm command failed"):
-            await client.arm(inst, "ARM1")
+        with pytest.raises(
+            VerisureOwaError,
+            match="Arm command failed: error_mpj_exception",
+        ):
+            await client.arm(_make_installation(), "ARM1")
 
     async def test_arm_with_force_id(self, client, transport):
         """force_id is passed as forceArmingRemoteId in submit variables."""

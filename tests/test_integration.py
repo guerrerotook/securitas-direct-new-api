@@ -92,11 +92,30 @@ async def _setup(
 
 @pytest.fixture(autouse=True)
 async def _unload_setup_entries():
-    """Unload any entries created via ``_setup`` to release coordinator timers."""
+    """Unload any entries created via ``_setup`` to release coordinator timers.
+
+    In production the activity coordinator's periodic-refresh timer is released
+    when HA fires ``entry.async_on_unload`` (which removes the activity
+    listener) as part of unloading the entry. These tests call
+    ``async_unload_entry`` directly, which does NOT fire those callbacks, so the
+    timer would linger past the test. Shut the coordinators down explicitly to
+    cancel their timers before unloading.
+    """
     yield
     while _SETUP_ENTRIES:
         hass, entry = _SETUP_ENTRIES.pop()
-        if hass.data.get(DOMAIN, {}).get(entry.entry_id) is not None:
+        entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if entry_data is not None:
+            for key in (
+                "alarm_coordinator",
+                "sentinel_coordinator",
+                "lock_coordinator",
+                "activity_coordinator",
+            ):
+                coord = entry_data.get(key)
+                if coord is not None:
+                    with contextlib.suppress(Exception):
+                        await coord.async_shutdown()
             with contextlib.suppress(Exception):
                 await async_unload_entry(hass, entry)
 
@@ -289,7 +308,7 @@ async def test_activity_polling_disabled_by_default(
     activity_coord = entry_data["activity_coordinator"]
     assert activity_coord is not None
     assert activity_coord.update_interval is None
-    assert entry_data["activity_listener_unsub"] is not None
+    assert "activity_listener_unsub" not in entry_data
 
 
 async def test_activity_polling_enabled_sets_interval(
@@ -305,7 +324,7 @@ async def test_activity_polling_enabled_sets_interval(
     activity_coord = entry_data["activity_coordinator"]
     assert activity_coord is not None
     assert activity_coord.update_interval == timedelta(seconds=60)
-    assert entry_data["activity_listener_unsub"] is not None
+    assert "activity_listener_unsub" not in entry_data
 
 
 async def _setup_and_settle(hass, mock_server, **overrides) -> None:

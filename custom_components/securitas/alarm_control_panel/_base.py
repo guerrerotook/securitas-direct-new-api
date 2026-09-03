@@ -22,7 +22,7 @@ from homeassistant.components.alarm_control_panel import (
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.const import CONF_SCAN_INTERVAL
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import Event, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -48,6 +48,7 @@ from ..const import (
     CONF_UNSUPPORTED_COMMANDS,
     DEFAULT_AUTO_FORCE_ARM,
     DEFAULT_OPERATION_POLL_TIMEOUT,
+    MORE_INFO_ELEMENT,
     PROJECT_URL,
 )
 from ..coordinators import AlarmCoordinator, AlarmStatusData
@@ -171,7 +172,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self,
         installation: Installation,
         client: VerisureHub,
-        hass: HomeAssistant,
         coordinator: AlarmCoordinator,
     ) -> None:
         """Initialize the Verisure alarm panel."""
@@ -183,13 +183,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._time: datetime.datetime = datetime.datetime.now()
         self._message: str = ""
         self._attr_extra_state_attributes: dict[str, Any] = {}
+        # Use one integration-wide extension of HA's native alarm More Info
+        # control. The custom element composes the stock control and adds the
+        # Verisure force-arm exception UI only while an exception is active.
+        self._attr_extra_state_attributes["custom_ui_more_info"] = MORE_INFO_ELEMENT
         # Advertise the auto-force-arm capability gate to the Lovelace card.
         # Static per config (an options change reloads the entry), so it's set
         # once here. The card only offers its per-device tick box when True.
         self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
             self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
         )
-        self.hass: HomeAssistant = hass
         self._has_peri = coordinator.has_peri
         self._has_annex = coordinator.has_annex
         self._last_proto_code: str | None = None
@@ -250,15 +253,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         self._last_arm_result: OperationStatus | None = None
 
-        # Force-arm context: stored when arming fails due to non-blocking
-        # exceptions (e.g. open window).  Consumed on the next arm attempt to
-        # override the exception.  Cleared on status refresh.
+        # Arming-exception context: stored when arming is blocked by sensors
+        # (e.g. an open window).  ``allow_forcing`` controls whether it can be
+        # consumed by force-arm; non-forceable Spanish panels still retain the
+        # context long enough to show the affected sensor names and dismiss the
+        # warning cleanly.
         self._force_context: dict[str, Any] | None = None
         self._force_arm_expiry_unsub: Callable[[], None] | None = None
-        self._mobile_action_unsub = None
-        self._arming_event_unsub_new = None
-        self._force_arm_expired_event_unsub = None
-        self._arming_exception_dismissed_event_unsub = None
         self._last_handled_event_id: str | None = None
         # Monotonic deadline until which the next arming-exception prompt is
         # suppressed. The auto-force card sets this (via the
@@ -288,9 +289,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         await super().async_added_to_hass()
         if self._notifications_enabled:
             self._register_arming_exception_handler()
-            self._mobile_action_unsub = self.hass.bus.async_listen(
-                "mobile_app_notification_action",
-                self._handle_mobile_action,
+            self.async_on_remove(
+                self.hass.bus.async_listen(
+                    "mobile_app_notification_action",
+                    self._handle_mobile_action,
+                )
             )
 
     @callback
@@ -323,14 +326,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
         # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
         self._cancel_force_arm_expiry()
-        if self._arming_event_unsub_new:
-            self._arming_event_unsub_new()
-        if self._force_arm_expired_event_unsub:
-            self._force_arm_expired_event_unsub()
-        if self._arming_exception_dismissed_event_unsub:
-            self._arming_exception_dismissed_event_unsub()
-        if self._mobile_action_unsub:
-            self._mobile_action_unsub()
         await super().async_will_remove_from_hass()
 
     @callback
@@ -1216,18 +1211,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._operation_in_progress = False
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
-        """Store force-arm context from an arming exception."""
+        """Store sensor-warning and optional force-arm context."""
         self._force_context = {
             "reference_id": exc.reference_id,
             "suid": exc.suid,
             "mode": mode,
             "exceptions": exc.exceptions,
+            "allow_forcing": exc.allow_forcing,
             "created_at": datetime.datetime.now(),
         }
         self._attr_extra_state_attributes["arm_exceptions"] = [
             e.get("alias", "unknown") for e in exc.exceptions
         ]
-        self._attr_extra_state_attributes["force_arm_available"] = True
+        self._attr_extra_state_attributes["arm_exception_active"] = True
+        self._attr_extra_state_attributes["force_arm_available"] = exc.allow_forcing
         self._schedule_force_arm_expiry()
 
     def _fire_arming_exception_event(
@@ -1244,6 +1241,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             "entity_id": self.entity_id,
             "mode": mode,
             "zones": zones,
+            "allow_forcing": exc.allow_forcing,
             "details": {
                 "installation": self.installation.number,
                 "exceptions": exc.exceptions,
@@ -1331,9 +1329,15 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_arm_expiry_unsub = None
         if self._force_context is None:
             return
-        self._fire_force_arm_expired_event()
-        if self._notifications_enabled:
-            self._notify_force_arm_expired()
+        if self._force_context.get("allow_forcing", True):
+            self._fire_force_arm_expired_event()
+            if self._notifications_enabled:
+                self._notify_force_arm_expired()
+        elif self._notifications_enabled:
+            # A non-forceable open-sensor warning has no force-arm window to
+            # expire.  Quietly dismiss the stale prompt when its context TTL
+            # elapses instead of replacing it with a misleading expiry notice.
+            self._dismiss_arming_exception_notification()
         self._wipe_force_arm_state()
         self.async_write_ha_state()
 
@@ -1357,6 +1361,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """
         self._force_context = None
         self._attr_extra_state_attributes.pop("arm_exceptions", None)
+        self._attr_extra_state_attributes.pop("arm_exception_active", None)
         self._attr_extra_state_attributes.pop("force_arm_available", None)
         # The suppress window is spent once the context resolves (force_arm,
         # cancel, sibling dismissal, expiry) — clear it so it can't swallow a
@@ -1568,18 +1573,15 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # the integration itself produces. A user-fired securitas_*
         # event won't trigger this listener; user-facing code should fire
         # the verisure_owa_* form.
-        self._arming_event_unsub_new = self.hass.bus.async_listen(
-            ARMING_EXCEPTION_EVENT_TYPE,
-            _handle_arming_exception_event,
-        )
-        self._force_arm_expired_event_unsub = self.hass.bus.async_listen(
-            FORCE_ARM_EXPIRED_EVENT_TYPE,
-            _handle_force_arm_expired_event,
-        )
-        self._arming_exception_dismissed_event_unsub = self.hass.bus.async_listen(
-            ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
-            _handle_arming_exception_dismissed_event,
-        )
+        for event_type, handler in (
+            (ARMING_EXCEPTION_EVENT_TYPE, _handle_arming_exception_event),
+            (FORCE_ARM_EXPIRED_EVENT_TYPE, _handle_force_arm_expired_event),
+            (
+                ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
+                _handle_arming_exception_dismissed_event,
+            ),
+        ):
+            self.async_on_remove(self.hass.bus.async_listen(event_type, handler))
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
         """Send notifications about arming exceptions from event data."""
@@ -1588,8 +1590,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # tells the user what happened instead. The suppression window still
         # gates that confirmation (see set_arm_state), so it fires only for
         # this auto path, never for a manual Force Arm tap.
-        if self._arm_prompt_suppressed():
+        # Suppression is requested optimistically before the first arm call.
+        # A panel that then says forcing is prohibited cannot complete the
+        # auto-force flow, so its warning must never be suppressed.
+        if event.data.get("allow_forcing", True) and self._arm_prompt_suppressed():
             return
+        if not event.data.get("allow_forcing", True):
+            self._suppress_arm_prompt_until = 0.0
         self.hass.async_create_task(self._async_notify_arm_exceptions(event))
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
@@ -1602,7 +1609,15 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             sensor_list = "- (unknown sensor)"
             short_details = "open sensor"
 
-        entry = get_notification_strings(self.hass, "arm_blocked_open_sensors")
+        allow_forcing = event.data.get("allow_forcing", True)
+        entry = get_notification_strings(
+            self.hass,
+            (
+                "arm_blocked_open_sensors"
+                if allow_forcing
+                else "arm_blocked_open_sensors_no_force"
+            ),
+        )
         title = entry.get("title", "")
         persistent_message = entry.get("message", "").replace(
             "{sensor_list}", sensor_list
@@ -1625,30 +1640,29 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         notify_group = self.client.config.get(CONF_NOTIFY_GROUP)
         if notify_group:
+            notification_data: dict[str, Any] = {
+                "tag": self._arming_exception_notification_id,
+            }
+            if allow_forcing:
+                notification_data["actions"] = [
+                    {
+                        "action": f"SECURITAS_FORCE_ARM_{self.installation.number}",
+                        "title": force_arm_label,
+                    },
+                    {
+                        "action": (
+                            f"SECURITAS_CANCEL_FORCE_ARM_{self.installation.number}"
+                        ),
+                        "title": cancel_label,
+                    },
+                ]
             await self.hass.services.async_call(
                 domain="notify",
                 service=notify_group,
                 service_data={
                     "title": title,
                     "message": mobile_message,
-                    "data": {
-                        "tag": self._arming_exception_notification_id,
-                        "actions": [
-                            {
-                                "action": (
-                                    f"SECURITAS_FORCE_ARM_{self.installation.number}"
-                                ),
-                                "title": force_arm_label,
-                            },
-                            {
-                                "action": (
-                                    "SECURITAS_CANCEL_FORCE_ARM"
-                                    f"_{self.installation.number}"
-                                ),
-                                "title": cancel_label,
-                            },
-                        ],
-                    },
+                    "data": notification_data,
                 },
             )
 
@@ -1733,7 +1747,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 self.installation.number,
             )
             return
-        _LOGGER.info("Force-arm cancelled by user")
+        _LOGGER.info("Arming-exception prompt cancelled by user")
         self._clear_force_context()
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
@@ -1759,6 +1773,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if self._force_context is None:
             _LOGGER.warning(
                 "force_arm called for %s but no force context available",
+                self.installation.number,
+            )
+            return
+        if not self._force_context.get("allow_forcing", True):
+            _LOGGER.warning(
+                "force_arm called for %s but the panel did not allow forcing",
                 self.installation.number,
             )
             return

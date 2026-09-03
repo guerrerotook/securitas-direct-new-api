@@ -317,7 +317,6 @@ async def async_setup_entry(
         combined = CombinedVerisureOwaAlarmPanel(
             devices.installation,
             client=client,
-            hass=hass,
             coordinator=coordinator,
         )
         entry_data.setdefault("combined_alarm_panels", {})[
@@ -340,7 +339,6 @@ async def async_setup_entry(
             peri_panel = PerimeterVerisureOwaAlarmPanel(
                 devices.installation,
                 client=client,
-                hass=hass,
                 coordinator=coordinator,
             )
             all_entities.append(peri_panel)
@@ -350,7 +348,6 @@ async def async_setup_entry(
             annex_panel = AnnexVerisureOwaAlarmPanel(
                 devices.installation,
                 client=client,
-                hass=hass,
                 coordinator=coordinator,
             )
             all_entities.append(annex_panel)
@@ -360,13 +357,12 @@ async def async_setup_entry(
             interior_panel = InteriorVerisureOwaAlarmPanel(
                 devices.installation,
                 client=client,
-                hass=hass,
                 coordinator=coordinator,
             )
             all_entities.append(interior_panel)
             axis_panels[interior_panel._AXIS] = interior_panel  # pylint: disable=protected-access
 
-    async_add_entities(all_entities, False)
+    async_add_entities(all_entities)
     hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
 
     platform = async_get_current_platform()
