@@ -161,8 +161,14 @@ class TestArmingExceptionError:
         assert "unknown" in err.message
 
     def test_empty_exceptions(self):
+        # No sensor aliases → a clean fallback message, never a dangling
+        # "Arming blocked by exceptions: " with a trailing colon.
         err = ArmingExceptionError("ref-1", "suid-42", [])
-        assert "Arming blocked by exceptions:" in err.message
+        assert (
+            err.message
+            == "Arming blocked by open sensors (no sensor details available)"
+        )
+        assert not err.message.rstrip().endswith(":")
 
     def test_is_subclass(self):
         assert issubclass(ArmingExceptionError, VerisureOwaError)
