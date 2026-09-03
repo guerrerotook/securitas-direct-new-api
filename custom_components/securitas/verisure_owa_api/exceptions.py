@@ -115,7 +115,14 @@ class ArmingExceptionError(VerisureOwaError):
         self.exceptions = exceptions  # [{status, deviceType, alias}, ...]
         self.allow_forcing = allow_forcing
         details = ", ".join(e.get("alias", "unknown") for e in exceptions)
-        super().__init__(f"Arming blocked by exceptions: {details}")
+        # A rejection without a referenceId/suid yields no sensor details
+        # (nothing to look up) — avoid a dangling "…exceptions: " message.
+        message = (
+            f"Arming blocked by exceptions: {details}"
+            if details
+            else "Arming blocked by open sensors (no sensor details available)"
+        )
+        super().__init__(message)
 
 
 class ImageCaptureError(VerisureOwaError):

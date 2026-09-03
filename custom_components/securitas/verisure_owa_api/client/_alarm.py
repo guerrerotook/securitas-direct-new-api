@@ -227,14 +227,24 @@ class _AlarmMixin(_ClientBase):
             if is_mpj_sensor_exception:
                 error_ref = error_info.get("referenceId", "")
                 error_suid = error_info.get("suid", "")
+                # A genuinely-blocking rejection can arrive as ZONE/NON_BLOCKING
+                # with no referenceId and no suid. _get_exceptions returns []
+                # without polling in that case (nothing to look up), so we
+                # surface the arming exception immediately with an empty list.
                 exceptions = await self._get_exceptions(
                     installation, error_ref, error_suid
                 )
+                # Force-arming targets the bypass via referenceId/suid; without
+                # either, forcing is impossible (an empty force id degrades to a
+                # plain re-arm that just re-hits this rejection). Don't advertise
+                # a Force Arm affordance that can't work, whatever allowForcing
+                # claims.
+                can_force = allow_forcing and bool(error_ref or error_suid)
                 raise ArmingExceptionError(
                     error_ref,
                     error_suid,
                     exceptions,
-                    allow_forcing=allow_forcing,
+                    allow_forcing=can_force,
                 )
             if error_info.get("type") != "NON_BLOCKING":
                 raw_msg = raw.get("msg", "unknown error")
@@ -376,7 +386,14 @@ class _AlarmMixin(_ClientBase):
         """Fetch arming exception details (e.g. open windows/doors).
 
         Polls until the exceptions list is non-empty or the result is not WAIT.
+
+        Returns an empty list when neither ``reference_id`` nor ``suid`` is
+        given: xSGetExceptions has nothing to look up without a reference, and
+        would otherwise poll on WAIT for the full poll timeout before raising
+        OperationTimeoutError (#553).
         """
+        if not reference_id and not suid:
+            return []
         counter = 0
 
         async def _check() -> dict[str, Any]:

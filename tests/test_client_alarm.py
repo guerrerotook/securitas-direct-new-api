@@ -405,6 +405,73 @@ class TestArm:
         assert exc_info.value.allow_forcing is False
         assert exc_info.value.exceptions[0]["alias"] == "Main door"
 
+    async def test_arm_zone_exception_without_reference_does_not_poll_exceptions(
+        self, client, transport
+    ):
+        """A ZONE rejection with no referenceId/suid raises immediately.
+
+        A genuinely-blocking arming rejection can arrive as ZONE/NON_BLOCKING
+        with no referenceId and no suid. There is nothing to fetch or force
+        without a reference, so arm() must surface ArmingExceptionError right
+        away with an empty exceptions list — never poll xSGetExceptions, which
+        would hang on WAIT for the full poll timeout then raise
+        OperationTimeoutError. See finding F3.
+
+        Force-arming targets the bypass via referenceId/suid, so with both
+        absent it cannot work (an empty force id degrades to a plain re-arm
+        that just re-hits this rejection). ``allow_forcing`` must therefore be
+        reported as False even when the API claims ``allowForcing: True``, so
+        the UI never offers a Force Arm button that would loop.
+        """
+        call_count = 0
+
+        async def _side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return arm_submit_response("ref-arm-noref")
+            if call_count == 2:
+                return arm_status_response(
+                    res="ERROR",
+                    error={
+                        "code": "ERR_ZONE_OPEN",
+                        "type": "ZONE",
+                        "allowForcing": True,
+                        "exceptionsNumber": 1,
+                        "referenceId": "",
+                        "suid": "",
+                    },
+                )
+            # Any further call is the xSGetExceptions poll; hold it in WAIT so
+            # the current (buggy) code would poll until the timeout expires.
+            return exceptions_response(res="WAIT")
+
+        transport.execute.side_effect = _side_effect
+        # Keep the red-phase timeout short so the buggy path fails fast.
+        client.poll_timeout = 0.2
+
+        with pytest.raises(ArmingExceptionError) as exc_info:
+            await client.arm(_make_installation(), "ARM1")
+
+        assert exc_info.value.exceptions == []
+        # API said allowForcing:True, but with no referenceId/suid forcing is
+        # impossible — must not advertise a non-functional Force Arm button.
+        assert exc_info.value.allow_forcing is False
+        assert exc_info.value.reference_id == ""
+        assert exc_info.value.suid == ""
+        # With no sensor aliases the message must not dangle a trailing colon.
+        assert (
+            str(exc_info.value)
+            == "Arming blocked by open sensors (no sensor details available)"
+        )
+
+        # xSGetExceptions must never be requested — nothing to fetch without a
+        # referenceId or suid.
+        requested_ops = [
+            call.args[0]["operationName"] for call in transport.execute.call_args_list
+        ]
+        assert "xSGetExceptions" not in requested_ops
+
     async def test_arm_mpj_exception_with_unknown_type_is_arming_exception(
         self, client, transport
     ):
