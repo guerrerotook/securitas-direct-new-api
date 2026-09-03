@@ -48,6 +48,11 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
         entity_id: ENTITY,
       }),
     ).toBe(false);
+    // An alarm_control_panel.* entity that is absent from the registry map
+    // (a YAML or other-integration panel) must NOT offer this Verisure-specific
+    // feature. Securitas panels are config-entry entities, so they are always
+    // in hass.entities and still match via the securitas-platform check above.
+    expect(entry.isSupported(makeHass(), { entity_id: ENTITY })).toBe(false);
     expect(entry.supported({ entity_id: ENTITY })).toBe(true);
     expect(entry.supported({ entity_id: "sensor.temperature" })).toBe(false);
   });
