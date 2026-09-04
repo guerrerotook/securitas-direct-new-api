@@ -604,7 +604,7 @@ class _ClientBase:
         so only users who already know to enable them ever surface in the issue.
         The crash otherwise reaches the log as a generic transient-recovery
         WARNING (``record_auth_recovery_failure``) that names neither the issue
-        nor the data we need. This adds a targeted, once-per-process WARNING —
+        nor the data we need. This adds a targeted, once-per-client WARNING —
         only for the specific server crash — that both confirms the diagnosis
         and tells the user exactly how to capture the DEBUG timeline. Keeping it
         to the crash signature (not every transient failure) and to once per
@@ -620,7 +620,7 @@ class _ClientBase:
             "This is under investigation and does NOT mean your credentials are "
             "wrong — the integration keeps retrying. If it leaves your devices "
             "unavailable and you can help pin it down: enable debug logging for "
-            "'custom_components.securitas' (add it under logger: > logs: in "
+            "'custom_components.securitas' (a logs: entry under logger: in "
             "configuration.yaml), restart Home Assistant, let it run ~30 minutes, "
             "then share the log at %s.",
             err.message,

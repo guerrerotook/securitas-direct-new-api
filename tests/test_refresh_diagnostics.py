@@ -242,7 +242,7 @@ INVALID_SESSION_RESPONSE = {
 
 
 class TestRefreshCrashRecruitmentWarning:
-    """A once-per-process WARNING recruits affected users to the #568 issue.
+    """A once-per-client WARNING recruits affected users to the #568 issue.
 
     The fingerprint diagnostics above are DEBUG and off by default, so only
     users who already know to enable them ever surface in the issue. This
@@ -270,7 +270,7 @@ class TestRefreshCrashRecruitmentWarning:
         # and tells them exactly what to enable to capture the DEBUG data.
         assert "custom_components.securitas" in caplog.text
 
-    async def test_warning_fires_only_once_per_process(
+    async def test_warning_fires_only_once_per_client(
         self, mock_transport, caplog
     ) -> None:
         """A retry loop against a persistent crash logs the recruit line once.
