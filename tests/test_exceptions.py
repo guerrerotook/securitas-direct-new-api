@@ -20,6 +20,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     WAFBlockedError,
     _error_code_from_body,
     is_genuine_auth_failure,
+    is_refresh_login_crash,
 )
 
 # ── Subclass checks ───────────────────────────────────────────────────────────
@@ -279,6 +280,58 @@ class TestIsGenuineAuthFailure:
 
     def test_unknown_error_defaults_to_transient(self):
         assert is_genuine_auth_failure(VerisureOwaError("mystery")) is False
+
+
+# ── is_refresh_login_crash ────────────────────────────────────────────────────
+
+
+def _crash_body(*, path: str = "xSRefreshLogin", message: str) -> dict:
+    return {"errors": [{"message": message, "path": [path]}], "data": {path: None}}
+
+
+class TestIsRefreshLoginCrash:
+    """Identifies the #568 server crash, and only that."""
+
+    def test_canonical_fr_crash_matches(self):
+        err = VerisureOwaError("boom")
+        err.response_body = _crash_body(
+            message="Cannot read properties of undefined (reading 'fr')"
+        )
+        assert is_refresh_login_crash(err) is True
+
+    def test_sibling_property_deref_also_matches(self):
+        """The same server fault can dereference a sibling property, e.g. 'it'."""
+        err = VerisureOwaError("boom")
+        err.response_body = _crash_body(
+            message="Cannot read properties of undefined (reading 'it')"
+        )
+        assert is_refresh_login_crash(err) is True
+
+    def test_genuine_invalid_session_does_not_match(self):
+        """A real token rejection (err 60067) is not a null-deref crash."""
+        err = SessionExpiredError("Invalid Session", http_status=403)
+        err.response_body = {
+            "errors": [{"message": "Invalid Session", "path": ["xSRefreshLogin"]}],
+            "data": {"xSRefreshLogin": None},
+        }
+        assert is_refresh_login_crash(err) is False
+
+    def test_null_deref_on_a_different_path_does_not_match(self):
+        """Only the refresh-login resolver crash recruits; other resolvers don't."""
+        err = VerisureOwaError("boom")
+        err.response_body = _crash_body(
+            path="xSArmPanel",
+            message="Cannot read properties of undefined (reading 'fr')",
+        )
+        assert is_refresh_login_crash(err) is False
+
+    def test_no_response_body_does_not_match(self):
+        assert is_refresh_login_crash(VerisureOwaError("boom")) is False
+
+    def test_empty_errors_array_does_not_match(self):
+        err = VerisureOwaError("boom")
+        err.response_body = {"errors": [], "data": {"xSRefreshLogin": None}}
+        assert is_refresh_login_crash(err) is False
 
 
 # ── _error_code_from_body ─────────────────────────────────────────────────────

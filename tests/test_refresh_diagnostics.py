@@ -226,6 +226,91 @@ class TestAuthTokenLifetimeDiagnostics:
         assert 840 <= ttl <= 905
 
 
+# A genuine token rejection (err 60067 "Invalid Session"): NOT the server
+# crash. Used to prove the recruitment warning is specific to the #568 crash
+# and does not fire for a token the server has simply invalidated.
+INVALID_SESSION_RESPONSE = {
+    "errors": [
+        {
+            "message": "Invalid Session",
+            "path": ["xSRefreshLogin"],
+            "data": {"err": "60067"},
+        }
+    ],
+    "data": {"xSRefreshLogin": None},
+}
+
+
+class TestRefreshCrashRecruitmentWarning:
+    """A once-per-client WARNING recruits affected users to the #568 issue.
+
+    The fingerprint diagnostics above are DEBUG and off by default, so only
+    users who already know to enable them ever surface in the issue. This
+    surfaces the *specific* xSRefreshLogin server crash at WARNING for every
+    affected user, with the exact steps to capture the DEBUG data we still
+    need — without moving the noisy per-rotation lines (~every 15 min) off
+    DEBUG and spamming every healthy installation.
+    """
+
+    async def test_crash_logs_a_warning_naming_the_issue_and_next_steps(
+        self, mock_transport, caplog
+    ) -> None:
+        """The crash emits a WARNING naming issue #568 and how to help."""
+        mock_transport.execute.return_value = FR_CRASH_RESPONSE
+        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
+
+        with (
+            caplog.at_level(logging.WARNING, logger=_BASE_LOGGER),
+            pytest.raises(VerisureOwaError),
+        ):
+            await client.refresh_token()
+
+        # Names the issue so a reporter can find and follow it,
+        assert "#568" in caplog.text
+        # and tells them exactly what to enable to capture the DEBUG data.
+        assert "custom_components.securitas" in caplog.text
+
+    async def test_warning_fires_only_once_per_client(
+        self, mock_transport, caplog
+    ) -> None:
+        """A retry loop against a persistent crash logs the recruit line once.
+
+        The coordinator retries the failing refresh every poll; the recruitment
+        WARNING must not repeat on each retry or it becomes the very log spam it
+        was designed to avoid.
+        """
+        mock_transport.execute.return_value = FR_CRASH_RESPONSE
+        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
+
+        with caplog.at_level(logging.WARNING, logger=_BASE_LOGGER):
+            for _ in range(3):
+                with pytest.raises(VerisureOwaError):
+                    await client.refresh_token()
+
+        recruitment = [r for r in caplog.records if "#568" in r.getMessage()]
+        assert len(recruitment) == 1
+
+    async def test_genuine_token_rejection_does_not_recruit(
+        self, mock_transport, caplog
+    ) -> None:
+        """An invalidated token (err 60067) is not the crash — no recruit line.
+
+        Recruiting is specific to the server-side resolver crash. A genuinely
+        rejected token is a different failure (it leads to reauth), and pointing
+        those users at the crash issue would only add noise there.
+        """
+        mock_transport.execute.return_value = INVALID_SESSION_RESPONSE
+        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
+
+        with (
+            caplog.at_level(logging.WARNING, logger=_BASE_LOGGER),
+            pytest.raises(VerisureOwaError),
+        ):
+            await client.refresh_token()
+
+        assert "#568" not in caplog.text
+
+
 class TestRefreshCrashIsAnUnrecoverableTrap:
     """Characterisation of *existing* behaviour (these pass as-is).
 

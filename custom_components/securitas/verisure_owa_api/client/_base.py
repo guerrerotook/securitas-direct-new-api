@@ -28,6 +28,7 @@ from ..exceptions import (
     VerisureOwaError,
     _error_code_from_body,
     is_genuine_auth_failure,
+    is_refresh_login_crash,
 )
 from ..http_transport import HttpTransport
 from ..models import Installation, OtpPhone
@@ -92,6 +93,9 @@ ALARM_STATUS_SERVICE_ID = "11"
 _AUTH_ESCALATION_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
+# The open issue tracking the xSRefreshLogin server crash; the recruitment
+# WARNING points affected users straight at it.
+_ISSUE_568_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues/568"
 
 # Operations that ARE the authentication — never require auth before calling
 _AUTH_OPERATIONS = frozenset(
@@ -160,6 +164,12 @@ class _ClientBase:
         self._auth_streak_started: datetime | None = None
         self._last_auth_escalation: datetime | None = None
         self._last_auth_failure: datetime | None = None
+
+        # The #568 recruitment WARNING fires at most once per client instance
+        # (so once per account — each account is a separate report): a persistent
+        # crash re-presents the same token every poll, and repeating the recruit
+        # line on each retry would become the log spam it avoids.
+        self._refresh_crash_reported: bool = False
 
         # Device configuration
         self.device_id: str = device_id
@@ -586,6 +596,36 @@ class _ClientBase:
                     _ISSUES_URL,
                     err.log_detail(),
                 )
+
+    def warn_once_on_refresh_login_crash(self, err: VerisureOwaError) -> None:
+        """Emit a one-time WARNING recruiting reporters for the #568 crash.
+
+        The ``[refresh]`` fingerprint diagnostics are DEBUG and off by default,
+        so only users who already know to enable them ever surface in the issue.
+        The crash otherwise reaches the log as a generic transient-recovery
+        WARNING (``record_auth_recovery_failure``) that names neither the issue
+        nor the data we need. This adds a targeted, once-per-client WARNING —
+        only for the specific server crash — that both confirms the diagnosis
+        and tells the user exactly how to capture the DEBUG timeline. Keeping it
+        to the crash signature (not every transient failure) and to once per
+        client instance (not every retry) is what lets it stay at WARNING
+        without spamming healthy installations, where the noisy per-rotation
+        lines stay on DEBUG.
+        """
+        if self._refresh_crash_reported or not is_refresh_login_crash(err):
+            return
+        self._refresh_crash_reported = True
+        _LOGGER.warning(
+            "Verisure hit the known refresh-login server crash (issue #568): %s. "
+            "This is under investigation and does NOT mean your credentials are "
+            "wrong — the integration keeps retrying. If it leaves your devices "
+            "unavailable and you can help pin it down: enable debug logging for "
+            "'custom_components.securitas' (a logs: entry under logger: in "
+            "configuration.yaml), restart Home Assistant, let it run ~30 minutes, "
+            "then share the log at %s.",
+            err.message,
+            _ISSUE_568_URL,
+        )
 
     async def _ensure_capabilities(self, installation: Installation) -> None:
         """Check the capabilities token and get a new one if needed."""
