@@ -552,6 +552,7 @@ describe("verisure-owa-activity-log-card extra branches", () => {
     ["door_closed", "mdi:door-closed", "Door closed"],
     ["routine_executed", "mdi:robot", "Routine executed"],
     ["tag_or_remote_activated", "mdi:key-wireless", "Tag or remote activated"],
+    ["high_temperature", "mdi:thermometer-alert", "High temperature"],
   ])(
     "renders the %s category with its own icon, label, and no unknown prompt",
     (category, icon, label) => {

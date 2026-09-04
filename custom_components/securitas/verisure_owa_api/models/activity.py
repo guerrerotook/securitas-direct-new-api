@@ -81,6 +81,10 @@ class ActivityCategory(StrEnum):
     # Verisure app. Administrative device-management event, not an alarm-state
     # change — users keep unused tags deactivated and enable them on demand.
     TAG_OR_REMOTE_ACTIVATED = "tag_or_remote_activated"
+    # Panel-emitted environmental warning that the ambient temperature has
+    # risen above a threshold. Seen on a Spanish panel as "Temperatura
+    # elevada". Distinct from an intrusion ALARM — an environmental event.
+    HIGH_TEMPERATURE = "high_temperature"
     UNKNOWN = "unknown"
 
 
@@ -166,6 +170,10 @@ _ACTIVITY_TYPE_TO_CATEGORY: dict[int, ActivityCategory] = {
     # Seen on a French panel as "Activation du badge ou de la télécommande",
     # with the tag's colour name in `device`. GitHub #579.
     41: ActivityCategory.TAG_OR_REMOTE_ACTIVATED,
+    # High-temperature environmental warning. Seen on a Spanish panel as
+    # "Temperatura elevada" (device/interface reported as "J2"). An
+    # environmental event, not an intrusion alarm. GitHub #594.
+    56: ActivityCategory.HIGH_TEMPERATURE,
 }
 
 

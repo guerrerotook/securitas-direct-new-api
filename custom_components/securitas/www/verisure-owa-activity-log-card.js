@@ -43,6 +43,7 @@ export const TRANSLATIONS = {
       door_closed: "Door closed",
       routine_executed: "Routine executed",
       tag_or_remote_activated: "Tag or remote activated",
+      high_temperature: "High temperature",
       unknown: "Unknown event",
     },
     exception_status: {
@@ -87,6 +88,7 @@ export const TRANSLATIONS = {
       door_closed: "Puerta cerrada",
       routine_executed: "Rutina ejecutada",
       tag_or_remote_activated: "Tag o mando activado",
+      high_temperature: "Temperatura elevada",
       unknown: "Evento desconocido",
     },
     exception_status: {
@@ -131,6 +133,7 @@ export const TRANSLATIONS = {
       door_closed: "Porta chiusa",
       routine_executed: "Routine eseguita",
       tag_or_remote_activated: "Tag o telecomando attivato",
+      high_temperature: "Temperatura elevata",
       unknown: "Evento sconosciuto",
     },
     exception_status: {
@@ -175,6 +178,7 @@ export const TRANSLATIONS = {
       door_closed: "Porte fermée",
       routine_executed: "Routine exécutée",
       tag_or_remote_activated: "Badge ou télécommande activé",
+      high_temperature: "Température élevée",
       unknown: "Événement inconnu",
     },
     exception_status: {
@@ -219,6 +223,7 @@ export const TRANSLATIONS = {
       door_closed: "Porta fechada",
       routine_executed: "Rotina executada",
       tag_or_remote_activated: "Tag ou comando ativado",
+      high_temperature: "Temperatura elevada",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -263,6 +268,7 @@ export const TRANSLATIONS = {
       door_closed: "Porta fechada",
       routine_executed: "Rotina executada",
       tag_or_remote_activated: "Tag ou controle ativado",
+      high_temperature: "Temperatura elevada",
       unknown: "Evento desconhecido",
     },
     exception_status: {
@@ -307,6 +313,7 @@ export const TRANSLATIONS = {
       door_closed: "Porta tancada",
       routine_executed: "Rutina executada",
       tag_or_remote_activated: "Tag o comandament activat",
+      high_temperature: "Temperatura elevada",
       unknown: "Esdeveniment desconegut",
     },
     exception_status: {
@@ -356,6 +363,7 @@ const CATEGORY_ICONS = {
   door_closed: "mdi:door-closed",
   routine_executed: "mdi:robot",
   tag_or_remote_activated: "mdi:key-wireless",
+  high_temperature: "mdi:thermometer-alert",
   unknown: "mdi:help-circle",
 };
 
@@ -382,6 +390,8 @@ const CATEGORY_COLORS = {
   routine_executed: "var(--secondary-text-color)",
   // Tag/remote enabled from the app — administrative, neutral.
   tag_or_remote_activated: "var(--secondary-text-color)",
+  // High-temperature environmental warning — warning-orange, not intrusion-red.
+  high_temperature: "var(--warning-color, #ff9800)",
   unknown: "var(--secondary-text-color)",
 };
 

@@ -997,6 +997,7 @@ class TestActivityEvent:
             (701, ActivityCategory.ARMED),
             (823, ActivityCategory.ARMED),
             (13, ActivityCategory.ALARM),
+            (56, ActivityCategory.HIGH_TEMPERATURE),
             (850, ActivityCategory.ARMED_WITH_EXCEPTIONS),
         ):
             data = self._minimal()
@@ -1162,6 +1163,13 @@ class TestActivityEventCategory:
         with the tag's colour name in `device`. An administrative event, not
         an alarm-state change. GitHub #579."""
         assert self._ev(41).category == ActivityCategory.TAG_OR_REMOTE_ACTIVATED
+
+    def test_high_temperature(self):
+        """56 is a high-temperature environmental warning from the panel.
+
+        Seen on a Spanish panel as "Temperatura elevada". Not an intrusion
+        alarm — a distinct environmental category. GitHub #594."""
+        assert self._ev(56).category == ActivityCategory.HIGH_TEMPERATURE
 
     def test_unknown_codes(self):
         """Codes we haven't seen fall through to UNKNOWN — future-proofing."""
