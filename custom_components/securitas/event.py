@@ -103,7 +103,11 @@ class ActivityLogEvent(  # type: ignore[override]
         """
         data = self.coordinator.data
         if data is not None and data.new_events:
-            for event in data.new_events:
+            # new_events is newest-first (the coordinator sorts reverse=True).
+            # Fire oldest→newest so each event still gets its own state change
+            # (Logbook / automation visibility) AND the NEWEST event wins the
+            # entity's resting state.
+            for event in reversed(data.new_events):
                 self._trigger_event(event.category.value, _event_attributes(event))
                 self.async_write_ha_state()
         else:

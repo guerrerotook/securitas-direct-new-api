@@ -75,17 +75,23 @@ class TestActivityLogEvent:
         assert entity.state is None
         entity.async_write_ha_state.assert_called_once()
 
-    def test_triggers_for_each_new_event_in_order(self):
-        # Set `category` explicitly — the model validator honours it and skips
-        # numeric type→category derivation, keeping the assertion deterministic.
-        e1 = _make_event("1", alias="Armed", category="armed")
-        e2 = _make_event("2", alias="Disarmed", category="disarmed")
-        entity = _entity(ActivityData(events=[e2, e1], new_events=[e1, e2]))
+    def test_newest_batched_event_wins_resting_state(self):
+        # The coordinator emits new_events NEWEST-FIRST (coordinators.py sorts
+        # reverse=True). The entity must still fire each event's own state
+        # change, but its resting state must be the NEWEST event, not the
+        # oldest of the batch.
+        newest = _make_event(
+            "2", alias="Disarmed", category="disarmed", time="2026-05-05 15:05:00"
+        )
+        oldest = _make_event(
+            "1", alias="Armed", category="armed", time="2026-05-05 15:00:00"
+        )
+        entity = _entity(
+            ActivityData(events=[newest, oldest], new_events=[newest, oldest])
+        )
         entity._handle_coordinator_update()
-        # Each new event publishes its own state change — not just the last.
         assert entity.async_write_ha_state.call_count == 2
-        # Last triggered wins the exposed event_type; state is a timestamp.
-        assert entity.state_attributes[ATTR_EVENT_TYPE] == "disarmed"
+        assert entity.state_attributes[ATTR_EVENT_TYPE] == "disarmed"  # newest wins
         assert entity.state is not None
 
     def test_image_request_carries_id_signal_and_signal_type(self):
