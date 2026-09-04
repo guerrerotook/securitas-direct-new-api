@@ -18,6 +18,8 @@ The headline is a new optional tick box that arms past open doors and windows fo
 
 **A clear heads-up for a rare restart problem ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  A few accounts still hit a server-side error on every restart that leaves the alarm unavailable until it is removed and set up again. This release adds optional detailed logging to help track down the cause, and now shows a single plain warning — with steps to help — the first time it happens, so affected users know what is going on instead of seeing an unexplained failure. Thanks to [@amullr](https://github.com/amullr) for the report.
 
+**A native activity event entity ([#593](https://github.com/guerrerotook/securitas-direct-new-api/pull/593)).**  The panel's activity timeline — arms, disarms, intrusions, image requests, power events — is now also exposed as a Home Assistant `event` entity (`event.<alias>_activity`), so it appears in the built-in Logbook and can trigger automations directly, with no custom card. Each entry carries its category as the event type, translated in every supported language, and the newest event is always the one shown. The existing activity-log sensor, card and event bus are unchanged.
+
 ### Fixed
 
 **Blocked arming showed a confusing internal message.**  With a door or window open, some arm attempts showed a raw internal error instead of naming the open sensors. It now lists the sensors to close — on the card, in notifications and in the activity log.

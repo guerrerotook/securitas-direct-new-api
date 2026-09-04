@@ -261,5 +261,37 @@
             "title": "Leftover verisure_owa folder",
             "description": "An obsolete `verisure_owa` directory was left at `{path}` by an earlier (broken) upgrade. It does nothing now and can be safely deleted. Remove the directory and restart Home Assistant to clear this notice."
         }
+    },
+    "entity": {
+        "event": {
+            "activity": {
+                "name": "Activity",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "armed": "Armed",
+                            "armed_with_exceptions": "Armed with exceptions",
+                            "arming_failed": "Arming failed",
+                            "disarmed": "Disarmed",
+                            "alarm": "Alarm",
+                            "alarm_resolved": "Alarm resolved",
+                            "tampering": "Tampering",
+                            "sabotage": "Sabotage",
+                            "image_request": "Image request",
+                            "power_cut": "Power cut",
+                            "power_restored": "Power restored",
+                            "status_check": "Status check",
+                            "communication_failed": "Communication failed",
+                            "communication_restored": "Communication restored",
+                            "door_opened": "Door opened",
+                            "door_closed": "Door closed",
+                            "routine_executed": "Routine executed",
+                            "tag_or_remote_activated": "Tag or remote activated",
+                            "unknown": "Unknown"
+                        }
+                    }
+                }
+            }
+        }
     }
 }

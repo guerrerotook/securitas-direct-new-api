@@ -17,7 +17,7 @@ Smart locks, with optional auto-lock when you arm and auto-disarm when you unloc
 
 Bundled Lovelace UI: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, Tile open-sensor feature, camera card, activity-log card.
 
-The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
+The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as an event entity, a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
 
 Multiple installations per account work out of the box. 2FA is handled at setup. Your password isn't stored on disk — it gets used once to mint a refresh token, then discarded.
 
@@ -456,8 +456,9 @@ The Activity Log mirrors the history shown in the Verisure app: arm/disarm event
 
 ![Activity Log](docs/images/activity-log.png)
 
-The integration surfaces this history in three places:
+The integration surfaces this history in four places:
 
+- **An event entity** — `event.<alias>_activity` shows each new entry in the built-in **Logbook** and more-info, with the event's [category](#activity-log) as its `event_type` and the event's details in its attributes. Trigger automations on it directly — it's the Home Assistant-native way to consume the timeline, and needs no custom card.
 - **A Lovelace card** — Add Card → "Verisure OWA Activity Log Card". Click any row for details (including images for image-request entries); the refresh button is top-right.
 - **A sensor** — `sensor.<alias>_activity_log` exposes the most recent event as state, with the last 30 entries in its `events` attribute for templates and custom cards.
 - **The event bus** — each new entry fires a `verisure_owa_activity` event you can trigger automations on.
@@ -469,7 +470,7 @@ By default the integration **doesn't poll the activity log on a timer** — fetc
 - The **card** pulls the latest entries while it's on screen — once on open, then once a minute. Close the dashboard and the polling stops.
 - The **refresh button** (top-right of the card) and the **`verisure_owa.refresh_activity_log`** service fetch immediately.
 
-There's a side effect on the **`verisure_owa_activity` event bus**: with on-demand refresh, remote events don't fire on the bus (otherwise you'd get a burst of stale events the next time you open a dashboard — the sensor and card update silently instead). The exception is actions **you take from HA** — those fire as they happen, regardless of the polling setting. So with polling off, automations catch HA-originated activity but miss events from elsewhere (someone arming at the physical panel, an intrusion, a power cut).
+There's a side effect on the **`event.<alias>_activity` entity and the `verisure_owa_activity` event bus** (both fire from the same new-event feed): with on-demand refresh, remote events don't fire (otherwise you'd get a burst of stale events the next time you open a dashboard — the sensor and card update silently instead). The exception is actions **you take from HA** — those fire as they happen, regardless of the polling setting. So with polling off, automations catch HA-originated activity but miss events from elsewhere (someone arming at the physical panel, an intrusion, a power cut).
 
 If you want every event to fire on the bus, turn on continuous polling under **Settings → Integrations → Verisure OWA → Configure → Activity Log and Events**.
 

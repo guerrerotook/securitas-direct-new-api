@@ -261,5 +261,37 @@
             "title": "Carpeta verisure_owa sobrant",
             "description": "S'ha trobat una carpeta obsoleta `verisure_owa` a `{path}` d'una actualització anterior. Ja no fa res i es pot esborrar amb seguretat. Elimina-la i reinicia Home Assistant per amagar aquest avís."
         }
+    },
+    "entity": {
+        "event": {
+            "activity": {
+                "name": "Activitat",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "armed": "Armat",
+                            "armed_with_exceptions": "Armat amb excepcions",
+                            "arming_failed": "Armament fallit",
+                            "disarmed": "Desarmat",
+                            "alarm": "Alarma",
+                            "alarm_resolved": "Alarma resolta",
+                            "tampering": "Manipulació",
+                            "sabotage": "Sabotatge",
+                            "image_request": "Petició d'imatge",
+                            "power_cut": "Tall de corrent",
+                            "power_restored": "Corrent restablert",
+                            "status_check": "Comprovació d'estat",
+                            "communication_failed": "Error de comunicació",
+                            "communication_restored": "Comunicació restablerta",
+                            "door_opened": "Porta oberta",
+                            "door_closed": "Porta tancada",
+                            "routine_executed": "Rutina executada",
+                            "tag_or_remote_activated": "Tag o comandament activat",
+                            "unknown": "Esdeveniment desconegut"
+                        }
+                    }
+                }
+            }
+        }
     }
 }
