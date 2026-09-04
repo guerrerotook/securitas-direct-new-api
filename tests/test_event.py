@@ -79,6 +79,8 @@ class TestActivityLogEvent:
         e2 = _make_event("2", alias="Disarmed", category="disarmed")
         entity = _entity(ActivityData(events=[e2, e1], new_events=[e1, e2]))
         entity._handle_coordinator_update()
+        # Each new event publishes its own state change — not just the last.
+        assert entity.async_write_ha_state.call_count == 2
         # Last triggered wins the exposed event_type; state is a timestamp.
         assert entity.state_attributes[ATTR_EVENT_TYPE] == "disarmed"
         assert entity.state is not None

@@ -91,9 +91,20 @@ class ActivityLogEvent(  # type: ignore[override]
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Trigger one HA event per just-arrived timeline entry, in order."""
+        """Publish one state change per just-arrived timeline entry, in order.
+
+        A single poll can surface several new events (e.g. arm-then-disarm
+        within the poll interval). ``_trigger_event`` only mutates the pending
+        event fields — the *state change* is what reaches the Logbook and
+        event-based automation triggers — so each event needs its own
+        ``async_write_ha_state()`` or only the last would be observable. The
+        empty path still writes once (keeps availability fresh; the first-poll
+        baseline carries no ``new_events`` so nothing is replayed).
+        """
         data = self.coordinator.data
         if data is not None and data.new_events:
             for event in data.new_events:
                 self._trigger_event(event.category.value, _event_attributes(event))
-        self.async_write_ha_state()
+                self.async_write_ha_state()
+        else:
+            self.async_write_ha_state()
