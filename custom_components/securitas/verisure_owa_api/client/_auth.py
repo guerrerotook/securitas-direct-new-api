@@ -161,9 +161,19 @@ class _AuthMixin(_ClientBase):
             },
             "query": REFRESH_LOGIN_MUTATION,
         }
-        response = await self._execute_raw(content, "RefreshLogin")
-
-        refresh_data = self._extract_response_data(response, "xSRefreshLogin")
+        try:
+            response = await self._execute_raw(content, "RefreshLogin")
+            refresh_data = self._extract_response_data(response, "xSRefreshLogin")
+        except VerisureOwaError as err:
+            # The recruitment hook lives here, at the RefreshLogin chokepoint,
+            # NOT on the steady-state transient-recovery path
+            # (``record_auth_recovery_failure``): the #568 crash is hit on the
+            # setup/login path (``hub.login`` -> ``refresh_token``), which
+            # re-raises transient failures without ever reaching that recovery
+            # funnel. Detecting here catches the crash whichever caller drove it,
+            # then re-raises so the existing transient retry handling runs on.
+            self.warn_once_on_refresh_login_crash(err)
+            raise
 
         if refresh_data.get("res") != "OK":
             return False

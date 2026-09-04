@@ -142,6 +142,22 @@ class UnexpectedStateError(VerisureOwaError):
 _GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset({"60052", "60067"})
 
 
+def _first_error(body: object) -> dict[str, Any] | None:
+    """Return ``body["errors"][0]`` if it is a dict, else ``None``.
+
+    Centralises the defensive walk into a GraphQL response's error envelope so
+    the several predicates that inspect the first error (``_error_code_from_body``
+    for its ``data.err`` code, ``is_refresh_login_crash`` for its ``path`` and
+    ``message``) share one shape guard instead of each re-implementing it.
+    """
+    if not isinstance(body, dict):
+        return None
+    errors = body.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        return errors[0]
+    return None
+
+
 def _error_code_from_body(body: object) -> str | None:
     """Extract the vendor ``err`` code from a GraphQL response-body dict.
 
@@ -150,11 +166,9 @@ def _error_code_from_body(body: object) -> str | None:
     Shared by ``_error_code`` (error-object form) and the auth client's
     account-blocked check (raw-response form).
     """
-    if not isinstance(body, dict):
-        return None
-    errors = body.get("errors")
-    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
-        data = errors[0].get("data")
+    first = _first_error(body)
+    if first is not None:
+        data = first.get("data")
         if isinstance(data, dict):
             code = data.get("err")
             return str(code) if code is not None else None
@@ -180,3 +194,27 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
     if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
         return True
     return _error_code(err) in _GENUINE_AUTH_ERROR_CODES
+
+
+def is_refresh_login_crash(err: VerisureOwaError) -> bool:
+    """True for the specific server-side ``xSRefreshLogin`` resolver crash (#568).
+
+    The signature is a GraphQL error on the ``xSRefreshLogin`` path whose message
+    is a JavaScript null-dereference — the canonical form is
+    ``Cannot read properties of undefined (reading 'fr')`` (#557), but the same
+    server fault can dereference a sibling property, so match the null-deref
+    class rather than the exact property. This is deliberately narrower than
+    ``is_genuine_auth_failure``'s catch-all transient bucket: a genuine token
+    rejection (err 60067) carries a real message, not a null-deref, so it does
+    not match here.
+    """
+    first = _first_error(err.response_body)
+    if first is None:
+        return False
+    path = first.get("path")
+    message = first.get("message")
+    on_refresh_login = isinstance(path, list) and "xSRefreshLogin" in path
+    is_null_deref = (
+        isinstance(message, str) and "Cannot read properties of undefined" in message
+    )
+    return on_refresh_login and is_null_deref
