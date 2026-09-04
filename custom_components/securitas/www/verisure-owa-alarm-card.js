@@ -21,12 +21,12 @@
  *   name: My Alarm          # optional — overrides friendly_name
  */
 
-import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
+import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-rc.1";
 import {
   autoForceActive,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
+} from "./verisure-owa-arm-exception.js?v=5.8.0-rc.1";
 import {
   _t,
   STATE_CFG,
@@ -42,7 +42,7 @@ import {
   TRANSLATIONS,
   alarmEntitySuggestion,
   _makeLegacyShim,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
+} from "./verisure-owa-alarm-shared.js?v=5.8.0-rc.1";
 
 // Re-export the public helper API so existing imports of these names from
 // this module keep working.
@@ -52,7 +52,7 @@ export {
   ARM_ACTIONS,
   defaultArmState,
   alarmEntitySuggestion,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
+} from "./verisure-owa-alarm-shared.js?v=5.8.0-rc.1";
 
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the

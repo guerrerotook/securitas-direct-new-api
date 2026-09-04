@@ -4,66 +4,29 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.8.0
 
-A new opt-in auto-force-arm tick box on the alarm card and opt-in DEBUG diagnostics to help pin down a refresh-login crash that a few accounts still hit on every restart after the v5.7.0 fix — plus fixes for cleared alarm-state mappings reappearing on their own and a badge or remote-control activation that showed as an unknown event in the activity log.
+The headline is a new optional tick box that arms past open doors and windows for you, so a forgotten open window no longer quietly stops the alarm from arming. The alarm also now works through Home Assistant's own alarm dialog throughout, plus a handful of fixes.
 
 ### Added
 
-**Force Arm inside Home Assistant's native alarm More Info dialog.**  Every
-alarm panel created by the integration now keeps Home Assistant's standard
-alarm modes, PIN handling, state header, history and settings UI.  When an arm
-attempt is rejected, an integration-wide More Info extension adds the affected
-sensor list and **Force Arm** / **Cancel** actions directly below those native
-controls.  Availability is capability-driven rather than country-specific:
-panels that permit forcing get the button, while Spanish and any other
-non-forceable panels still get the useful sensor warning and Cancel action.
-Badge and chip taps now open this native dialog instead of a separate custom
-popup.  The standalone Verisure OWA Alarm Card remains available for dashboards
-that explicitly use it.
+**Arm past open doors and windows automatically ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  A new tick box, off by default, arms straight past any open sensor instead of stopping to ask you to confirm each time. Your choice is remembered per device and works from both the alarm card and Home Assistant's alarm dialog. Thanks to [@WSorban](https://github.com/WSorban) for the request.
 
-**Native Badge preview and Content settings.**  The Verisure OWA Alarm Badge
-now uses Home Assistant's native `ha-badge` and `state-display` components, so
-it appears as a live preview in the badge picker and can display the alarm state
-directly in the badges row.  Its visual editor now has the standard **Content**
-controls for name, icon, displayed elements, state attributes and timestamp
-format.  The Verisure warning behaviour remains intact: a blocked arm attempt
-temporarily switches the badge to the amber alert icon, and tapping it opens
-the native More Info dialog with the affected sensors and any available Force
-Arm action.  Legacy Badge and Chip `arm_or_disarm` gestures are migrated to
-More Info at runtime, allowing the duplicate custom PIN dialog and its alarm
-control logic to be removed; the standalone Alarm Card keeps its existing
-integration-specific gestures.
+**Force Arm built into Home Assistant's own alarm dialog.**  When an open door or window blocks arming, the standard alarm dialog now lists the open sensors and offers Force Arm and Cancel right there, keeping all the familiar Home Assistant controls. Panels that don't allow forcing (such as in Spain) still get the list and a note to close the sensors first.
 
-**Open sensors directly in the Home Assistant Tile Card.**  A new
-**Verisure OWA Open Sensors** custom Tile feature can sit below HA's native
-**Alarm modes** controls.  It stays hidden during normal operation and, when
-an arm attempt is rejected, expands inline to list every affected door/window.
-Panels that allow forcing also get a compact **Force Arm** action; Spanish
-panels that prohibit it get the sensor list and a close-and-retry warning only.
-The feature is registered with the visual Tile editor and can also be added as
-`type: custom:verisure-owa-arm-exception` in YAML.
+**Live badge preview and content settings.**  The alarm badge now shows a live preview when you add it and can display the alarm state in the badges row, with the usual settings for its name, icon and what it shows.
 
-**Auto-force-arm past open sensors, from the card or the native More Info dialog ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  When you arm with a door or window left open, the alarm blocks and waits for you to tap **Force Arm** — easy to miss, and until you do the alarm never arms.  A new opt-in setting, **"Offer an auto-force-arm tick box on the alarm card"**, adds a *force-arm past open sensors* tick box below the arm buttons on the alarm card **and in Home Assistant's native alarm More Info dialog**; the tick is remembered per device and shared between the two, so ticking it in either place enables it for the other.  With it ticked, arming and hitting an open sensor force-arms past the open zones automatically instead of waiting for you to confirm.  When you arm from the card, the "arm blocked — force arm?" prompt is skipped entirely; when you arm from the native More Info dialog it may flash for a beat before the auto-force takes over — either way you get a single **"force-armed"** confirmation naming the sensors it bypassed (a manual **Force Arm** tap is unchanged).  The bypassed zones are still recorded in the activity log as *Armed with exceptions*.  It is off by default — force-arming silently bypasses open doors and windows, and some panels (Spain has been observed) don't support it at all.  Arming from the card only ever auto-forces the card's own arm; the More Info dialog auto-forces any arm that runs into an open sensor while that dialog is open (it can't tell who started it) — with the dialog closed nothing is auto-forced, so automations and the stock alarm card are untouched in normal use.  Thanks to [@WSorban](https://github.com/WSorban) for the request.
+**Open sensors shown in the Tile card.**  A new tile option stays hidden until arming is blocked, then lists the open doors and windows below the alarm controls — with a Force Arm button where the panel allows it.
 
-**Opt-in diagnostics for the refresh-login crash that persists after v5.7.0 ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  v5.7.0 fixed one cause of the `xSRefreshLogin failed: Cannot read properties of undefined (reading 'fr')` crash that leaves the integration stuck until it is deleted and re-added, but a few accounts still hit it.  This release re-adds DEBUG-level logging — off by default and with no behaviour change — that fingerprints the refresh token across a restart, records each rotation and whether it was persisted, and tags the raw server response for the refresh call.  Together these tell apart the two remaining possibilities: a stale token loaded from disk (something our side still isn't persisting) versus the server crashing on a token that is actually current (a server-side fault, which re-authenticating would not fix).  If you are affected, enable debug logging for `custom_components.securitas` — a `logs:` entry under `logger:` in `configuration.yaml` — then leave Home Assistant running for half an hour, restart it, and share the log on the issue.  To reach everyone who hits this without needing debug logging on first, the integration now also emits a single **WARNING** the first time it detects this specific crash in a session — naming the issue and spelling out those same steps — so affected users are pointed at the fix rather than left staring at an opaque failure.  The warning fires once per restart and only for this exact server crash, so a healthy installation never sees it and a retry loop doesn't repeat it.  Thanks to [@amullr](https://github.com/amullr) for the report.
+**A clear heads-up for a rare restart problem ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  A few accounts still hit a server-side error on every restart that leaves the alarm unavailable until it is removed and set up again. This release adds optional detailed logging to help track down the cause, and now shows a single plain warning — with steps to help — the first time it happens, so affected users know what is going on instead of seeing an unexplained failure. Thanks to [@amullr](https://github.com/amullr) for the report.
 
 ### Fixed
 
-**Some open-window arm attempts showed the raw `error_mpj_exception` message.**
-The integration now recognises the backend's canonical arming-exception
-response independently of country-specific error types and fetches the
-affected sensor names instead of reporting the opaque backend message.  This
-also covers Spanish panels that report the open sensors but set
-`allowForcing: false`: the alarm card, persistent notification, mobile
-notification and activity entry now list those sensors and tell the user to
-close them before retrying, without offering an unsafe Force Arm action.  When
-the panel explicitly sets `allowForcing: true`, the existing Force Arm / Cancel
-flow remains available.
+**Blocked arming showed a confusing internal message.**  With a door or window open, some arm attempts showed a raw internal error instead of naming the open sensors. It now lists the sensors to close — on the card, in notifications and in the activity log.
 
-**Force-arm past open zones never offered on French installations ([#583](https://github.com/guerrerotook/securitas-direct-new-api/issues/583)).**  When you armed with a door or window open, the alarm was supposed to block, list the open zones, and let you force-arm past them — the same flow the auto-force-arm tick box builds on.  On French (SDVFAST) panels it never did: the arm just failed with *Open zone (…)*, no `verisure_owa_arming_exception` event fired, and force-arming was a silent no-op because the force context was never populated.  The cause was the panel's error type — French panels report an open-zone rejection as `ZONE` where Spanish panels report `NON_BLOCKING`, and only the latter was recognised as force-armable, so the French case fell through to a generic failure.  Both types are now recognised, so a French arm blocked by open zones raises the arming exception, fires the event with the full zone list, and populates the force-arm context just like everywhere else.  A `ZONE` rejection that genuinely cannot be forced still fails as before.  Thanks to [@rpouetpouet](https://github.com/rpouetpouet) for the detailed report and live testing on a French SDVFAST panel.
+**Force Arm was never offered on French systems ([#583](https://github.com/guerrerotook/securitas-direct-new-api/issues/583)).**  On French installations a blocked arm simply failed, with no way to force past the open sensors. It now lists them and offers Force Arm, just like everywhere else. Thanks to [@rpouetpouet](https://github.com/rpouetpouet) for the report and testing.
 
-**A cleared alarm-state mapping came back on its own ([#575](https://github.com/guerrerotook/securitas-direct-new-api/pull/575)).**  Clearing one of the alarm-state mappings in the integration's options — setting a button to *not used* — didn't stick: reopen the options dialog and the field had reverted to its default, and saving again silently restored it.  It was most visible on perimeter-capable installations, where a cleared *custom* mapping reappeared as *perimeter only* every time.  The cleared state (recorded internally as an explicit empty value) is now honoured on redisplay, so cleared mappings stay cleared.
+**A cleared alarm-mode setting came back by itself ([#575](https://github.com/guerrerotook/securitas-direct-new-api/pull/575)).**  Setting one of the alarm modes to "not used" didn't stick — it quietly reappeared the next time you opened the settings. Cleared modes now stay cleared.
 
-**A badge or remote-control activation showed as "Unknown event" in the activity log ([#579](https://github.com/guerrerotook/securitas-direct-new-api/issues/579)).**  When you activate an RFID tag or remote control from the Verisure app — turning on one you normally keep deactivated — the panel emits event code `41`, which the integration did not recognise, so the activity log listed it as an *Unknown event*.  Code `41` is now catalogued under its own **tag or remote activated** category, so the entry appears with its own icon, colour and label — localised in all seven languages — instead of an unknown row.  Thanks to [@philippemezzadri](https://github.com/philippemezzadri) for reporting it with the event details.
+**A tag or remote showed as "Unknown event" ([#579](https://github.com/guerrerotook/securitas-direct-new-api/issues/579)).**  Turning on an RFID tag or remote control from the Verisure app now appears as its own entry in the activity log instead of an unknown one. Thanks to [@philippemezzadri](https://github.com/philippemezzadri) for reporting it.
 
 ## v5.7.0
 

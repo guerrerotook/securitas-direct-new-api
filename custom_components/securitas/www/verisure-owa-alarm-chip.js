@@ -13,8 +13,8 @@ import {
   attachGesture,
   _makeLegacyShim,
   migrateCompactAlarmConfig,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-beta.2";
-import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
+} from "./verisure-owa-alarm-shared.js?v=5.8.0-rc.1";
+import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.8.0-rc.1";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
