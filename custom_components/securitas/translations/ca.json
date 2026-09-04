@@ -287,6 +287,7 @@
                             "door_closed": "Porta tancada",
                             "routine_executed": "Rutina executada",
                             "tag_or_remote_activated": "Tag o comandament activat",
+                            "high_temperature": "Temperatura elevada",
                             "unknown": "Esdeveniment desconegut"
                         }
                     }

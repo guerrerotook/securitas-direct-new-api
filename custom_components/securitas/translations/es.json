@@ -287,6 +287,7 @@
                             "door_closed": "Puerta cerrada",
                             "routine_executed": "Rutina ejecutada",
                             "tag_or_remote_activated": "Tag o mando activado",
+                            "high_temperature": "Temperatura elevada",
                             "unknown": "Evento desconocido"
                         }
                     }
