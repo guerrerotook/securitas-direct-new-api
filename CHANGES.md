@@ -4,17 +4,15 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.8.0
 
-The headline is a new optional tick box that arms past open doors and windows for you, so a forgotten open window no longer quietly stops the alarm from arming. The alarm also now works through Home Assistant's own alarm dialog throughout, plus a handful of fixes.
+The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes.
 
 ### Added
 
-**Arm past open doors and windows automatically ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  A new tick box, off by default, arms straight past any open sensor instead of stopping to ask you to confirm each time. Your choice is remembered per device and works from both the alarm card and Home Assistant's alarm dialog. Thanks to [@WSorban](https://github.com/WSorban) for the request.
+**Force Arm across Home Assistant's native UI ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)).**  When an open door or window blocks arming, the standard alarm **More Info dialog** and the **Tile card** now list the open sensors and offer Force Arm and Cancel right there — the familiar Home Assistant controls, with no custom card required. Panels that don't allow forcing (such as in Spain) still get the list and a note to close the sensors first. Contributed by [@foxdalas](https://github.com/foxdalas).
 
-**Force Arm built into Home Assistant's own alarm dialog.**  When an open door or window blocks arming, the standard alarm dialog now lists the open sensors and offers Force Arm and Cancel right there, keeping all the familiar Home Assistant controls. Panels that don't allow forcing (such as in Spain) still get the list and a note to close the sensors first.
+**A first-class alarm badge ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)).**  The Verisure alarm badge is now a proper native Home Assistant badge: a live preview when you add it, content settings for its name and icon, and the option to show the alarm state in the badges row. Contributed by [@foxdalas](https://github.com/foxdalas).
 
-**Live badge preview and content settings.**  The alarm badge now shows a live preview when you add it and can display the alarm state in the badges row, with the usual settings for its name, icon and what it shows.
-
-**Open sensors shown in the Tile card.**  A new tile option stays hidden until arming is blocked, then lists the open doors and windows below the alarm controls — with a Force Arm button where the panel allows it.
+**Arm past open doors and windows automatically ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  A new tick box, off by default, arms straight past any open sensor instead of stopping to ask you to confirm each time. Your choice is remembered per device and works from both the alarm card and Home Assistant's native UI. Thanks to [@WSorban](https://github.com/WSorban) for the request.
 
 **A clear heads-up for a rare restart problem ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  A few accounts still hit a server-side error on every restart that leaves the alarm unavailable until it is removed and set up again. This release adds optional detailed logging to help track down the cause, and now shows a single plain warning — with steps to help — the first time it happens, so affected users know what is going on instead of seeing an unexplained failure. Thanks to [@amullr](https://github.com/amullr) for the report.
 
