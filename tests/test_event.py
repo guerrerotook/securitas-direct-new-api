@@ -68,6 +68,16 @@ class TestActivityLogEvent:
         entity = _entity()
         assert entity._attr_unique_id == "v4_securitas_direct.123456_activity_event"
 
+    def test_naming_matches_the_activity_sensor(self):
+        # has_entity_name=False + an explicit name so the entity_id derives
+        # from the alias alone (like sensor.<alias>_activity_log), never
+        # picking up the device's area as a prefix. translation_key is kept so
+        # the event_type state labels stay translated.
+        entity = _entity()
+        assert entity._attr_has_entity_name is False
+        assert entity.name == "Home Activity"
+        assert entity._attr_translation_key == "activity"
+
     def test_no_trigger_when_new_events_empty(self):
         """First-poll baseline / no-new: state stays None, nothing fired."""
         entity = _entity(ActivityData(events=[_make_event("1")], new_events=[]))
