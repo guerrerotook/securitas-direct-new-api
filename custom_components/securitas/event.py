@@ -65,14 +65,7 @@ class ActivityLogEvent(  # type: ignore[override]
 ):
     """The alarm panel's activity timeline as an ``event`` entity."""
 
-    # has_entity_name is False (like the sibling ActivityLogSensor) so the
-    # entity_id derives from the explicit name below — `event.<alias>_activity`
-    # — rather than HA's has_entity_name path, which prefixes the device's area
-    # (e.g. `event.kitchen_<alias>_activity` when the alarm device sits in an
-    # area). translation_key is still set so the event_type STATE labels stay
-    # translated; it drives state-attribute translations regardless of
-    # has_entity_name (the entity name comes from `_attr_name`).
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_translation_key = "activity"
     _attr_icon = "mdi:format-list-bulleted"
     # EventEntity declares `_attr_event_types` as an instance var (not
@@ -88,7 +81,6 @@ class ActivityLogEvent(  # type: ignore[override]
         """Initialise the activity event entity."""
         super().__init__(coordinator)
         self._installation = installation
-        self._attr_name = f"{installation.alias} Activity"
         self._attr_device_info = securitas_device_info(installation)
         self._attr_unique_id = (
             f"v4_securitas_direct.{installation.number}_activity_event"
