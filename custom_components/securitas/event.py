@@ -11,7 +11,6 @@ injected arm/disarm events.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.event import EventEntity
@@ -25,8 +24,6 @@ from .coordinators import ActivityCoordinator
 from .entity import securitas_device_info
 from .verisure_owa_api import Installation
 from .verisure_owa_api.models import ActivityCategory, ActivityEvent
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
