@@ -261,5 +261,37 @@
             "title": "Dossier verisure_owa obsolète",
             "description": "Un dossier obsolète `verisure_owa` a été laissé dans `{path}` par une mise à jour précédente. Il ne sert plus à rien et peut être supprimé sans risque. Supprimez le dossier et redémarrez Home Assistant pour effacer cette notification."
         }
+    },
+    "entity": {
+        "event": {
+            "activity": {
+                "name": "Activité",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "armed": "Armé",
+                            "armed_with_exceptions": "Armé avec exceptions",
+                            "arming_failed": "Échec de l'armement",
+                            "disarmed": "Désarmé",
+                            "alarm": "Alarme",
+                            "alarm_resolved": "Alarme résolue",
+                            "tampering": "Manipulation",
+                            "sabotage": "Sabotage",
+                            "image_request": "Demande d'image",
+                            "power_cut": "Coupure de courant",
+                            "power_restored": "Courant rétabli",
+                            "status_check": "Vérification de l'état",
+                            "communication_failed": "Échec de communication",
+                            "communication_restored": "Communication rétablie",
+                            "door_opened": "Porte ouverte",
+                            "door_closed": "Porte fermée",
+                            "routine_executed": "Routine exécutée",
+                            "tag_or_remote_activated": "Badge ou télécommande activé",
+                            "unknown": "Événement inconnu"
+                        }
+                    }
+                }
+            }
+        }
     }
 }

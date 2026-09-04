@@ -261,5 +261,37 @@
             "title": "Cartella verisure_owa obsoleta",
             "description": "Una cartella obsoleta `verisure_owa` è rimasta in `{path}` da un precedente aggiornamento. Non fa più nulla e può essere eliminata in sicurezza. Eliminala e riavvia Home Assistant per rimuovere questo avviso."
         }
+    },
+    "entity": {
+        "event": {
+            "activity": {
+                "name": "Attività",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "armed": "Armato",
+                            "armed_with_exceptions": "Armato con eccezioni",
+                            "arming_failed": "Armamento fallito",
+                            "disarmed": "Disarmato",
+                            "alarm": "Allarme",
+                            "alarm_resolved": "Allarme risolto",
+                            "tampering": "Manomissione",
+                            "sabotage": "Sabotaggio",
+                            "image_request": "Richiesta immagine",
+                            "power_cut": "Interruzione di corrente",
+                            "power_restored": "Corrente ripristinata",
+                            "status_check": "Verifica di stato",
+                            "communication_failed": "Errore di comunicazione",
+                            "communication_restored": "Comunicazione ripristinata",
+                            "door_opened": "Porta aperta",
+                            "door_closed": "Porta chiusa",
+                            "routine_executed": "Routine eseguita",
+                            "tag_or_remote_activated": "Tag o telecomando attivato",
+                            "unknown": "Evento sconosciuto"
+                        }
+                    }
+                }
+            }
+        }
     }
 }

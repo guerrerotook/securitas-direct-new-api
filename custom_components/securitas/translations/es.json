@@ -261,5 +261,37 @@
             "title": "Carpeta verisure_owa obsoleta",
             "description": "Una carpeta obsoleta `verisure_owa` quedó en `{path}` tras una actualización anterior. No hace nada y se puede eliminar sin problemas. Elimina la carpeta y reinicia Home Assistant para borrar este aviso."
         }
+    },
+    "entity": {
+        "event": {
+            "activity": {
+                "name": "Actividad",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "armed": "Armado",
+                            "armed_with_exceptions": "Armado con excepciones",
+                            "arming_failed": "Armado fallido",
+                            "disarmed": "Desarmado",
+                            "alarm": "Alarma",
+                            "alarm_resolved": "Alarma resuelta",
+                            "tampering": "Manipulación",
+                            "sabotage": "Sabotaje",
+                            "image_request": "Petición de imagen",
+                            "power_cut": "Corte de energía",
+                            "power_restored": "Energía restablecida",
+                            "status_check": "Comprobación de estado",
+                            "communication_failed": "Fallo de comunicación",
+                            "communication_restored": "Comunicación restablecida",
+                            "door_opened": "Puerta abierta",
+                            "door_closed": "Puerta cerrada",
+                            "routine_executed": "Rutina ejecutada",
+                            "tag_or_remote_activated": "Tag o mando activado",
+                            "unknown": "Evento desconocido"
+                        }
+                    }
+                }
+            }
+        }
     }
 }

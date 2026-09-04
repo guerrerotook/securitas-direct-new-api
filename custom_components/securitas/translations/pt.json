@@ -261,5 +261,37 @@
             "title": "Pasta verisure_owa obsoleta",
             "description": "Uma pasta obsoleta `verisure_owa` ficou em `{path}` de uma atualização anterior. Já não faz nada e pode ser apagada com segurança. Apague a pasta e reinicie o Home Assistant para limpar este aviso."
         }
+    },
+    "entity": {
+        "event": {
+            "activity": {
+                "name": "Atividade",
+                "state_attributes": {
+                    "event_type": {
+                        "state": {
+                            "armed": "Armado",
+                            "armed_with_exceptions": "Armado com exceções",
+                            "arming_failed": "Falha ao armar",
+                            "disarmed": "Desarmado",
+                            "alarm": "Alarme",
+                            "alarm_resolved": "Alarme resolvido",
+                            "tampering": "Adulteração",
+                            "sabotage": "Sabotagem",
+                            "image_request": "Pedido de imagem",
+                            "power_cut": "Corte de energia",
+                            "power_restored": "Energia restaurada",
+                            "status_check": "Verificação de estado",
+                            "communication_failed": "Falha de comunicação",
+                            "communication_restored": "Comunicação restaurada",
+                            "door_opened": "Porta aberta",
+                            "door_closed": "Porta fechada",
+                            "routine_executed": "Rotina executada",
+                            "tag_or_remote_activated": "Tag ou comando ativado",
+                            "unknown": "Evento desconhecido"
+                        }
+                    }
+                }
+            }
+        }
     }
 }

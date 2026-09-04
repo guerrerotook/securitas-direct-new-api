@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -137,3 +139,30 @@ async def test_setup_adds_nothing_without_activity_coordinator():
     added: list = []
     await async_setup_entry(hass, entry, lambda ents: added.extend(ents))
     assert added == []
+
+
+_COMPONENT = Path("custom_components/securitas")
+_LOCALES = ["ca", "en", "es", "fr", "it", "pt", "pt-BR"]
+
+
+def _all_translation_files() -> list[Path]:
+    return [_COMPONENT / "strings.json"] + [
+        _COMPONENT / "translations" / f"{loc}.json" for loc in _LOCALES
+    ]
+
+
+class TestActivityEventTranslations:
+    def test_every_file_has_activity_event_name(self):
+        for path in _all_translation_files():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            name = data["entity"]["event"]["activity"]["name"]
+            assert name, f"missing entity.event.activity.name in {path}"
+
+    def test_every_file_translates_every_event_type(self):
+        expected = {c.value for c in ActivityCategory}
+        for path in _all_translation_files():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            states = data["entity"]["event"]["activity"]["state_attributes"][
+                "event_type"
+            ]["state"]
+            assert set(states) == expected, f"event_type states drift in {path}"
