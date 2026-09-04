@@ -15,6 +15,16 @@ describe("arming-exception shared helpers", () => {
     );
   });
 
+  it("provides the auto-force label in every supported locale", () => {
+    // More Info imports only this lightweight module, so the auto-force tick
+    // box label must live here rather than in the dashboard bundle.
+    for (const lang of ["en", "es", "fr", "it", "pt", "pt-BR"]) {
+      const value = armExceptionTranslation(lang, "auto_force_arm");
+      expect(value).not.toBe("auto_force_arm");
+      expect(value.length).toBeGreaterThan(0);
+    }
+  });
+
   it("normalizes missing, malformed and forceable entity state", () => {
     expect(armExceptionState()).toEqual({
       active: false,

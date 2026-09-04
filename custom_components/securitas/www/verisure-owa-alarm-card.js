@@ -22,7 +22,11 @@
  */
 
 import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-beta.2";
-import "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
+import {
+  autoForceActive,
+  readAutoForce,
+  writeAutoForce,
+} from "./verisure-owa-arm-exception.js?v=5.8.0-beta.2";
 import {
   _t,
   STATE_CFG,
@@ -100,33 +104,19 @@ class VerisureOwaAlarmCard extends HTMLElement {
   }
 
   // ── Auto-force-arm (per-device) ──────────────────────────────────────────────
-  _autoForceKey() {
-    return `verisure-owa:auto-force-arm:${this._config?.entity}`;
-  }
-
+  // Storage and the capability gate live in the shared arm-exception module so
+  // this card and the native More Info dialog can never drift apart on the
+  // key: the tick is remembered per device and shared between the two.
   _readAutoForce() {
-    try {
-      return globalThis.localStorage?.getItem(this._autoForceKey()) === "true";
-    } catch {
-      return false;
-    }
+    return readAutoForce(this._config?.entity);
   }
 
   _writeAutoForce(on) {
-    try {
-      globalThis.localStorage?.setItem(this._autoForceKey(), on ? "true" : "false");
-    } catch {
-      /* private mode / storage disabled — the tick box just won't persist */
-    }
+    writeAutoForce(this._config?.entity, on);
   }
 
-  // Auto-force only ever acts when BOTH the integration capability gate is on
-  // AND this device's tick box is ticked. The gate is authoritative: a
-  // remembered localStorage tick from when the gate was enabled must not keep
-  // auto-forcing after an admin turns the option off.
   _autoForceActive() {
-    const st = this._hass?.states?.[this._config?.entity];
-    return this._autoForceArm && st?.attributes?.auto_force_arm_enabled === true;
+    return autoForceActive(this._hass?.states?.[this._config?.entity], this._autoForceArm);
   }
 
   // When this dispatch will auto-force, ask the backend to skip the transient

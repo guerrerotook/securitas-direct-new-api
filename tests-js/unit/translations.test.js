@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { TRANSLATIONS as ALARM } from "../../custom_components/securitas/www/verisure-owa-alarm-card.js";
 import { TRANSLATIONS as CAMERA } from "../../custom_components/securitas/www/verisure-owa-camera-card.js";
 import { TRANSLATIONS as ACTIVITY } from "../../custom_components/securitas/www/verisure-owa-activity-log-card.js";
+import { ARM_EXCEPTION_TRANSLATIONS as ARM_EXCEPTION } from "../../custom_components/securitas/www/verisure-owa-arm-exception.js";
 
 function flatKeys(obj, prefix = "") {
   const out = [];
@@ -26,6 +27,7 @@ describe.each([
   ["alarm card", ALARM],
   ["camera card", CAMERA],
   ["activity-log card", ACTIVITY],
+  ["arm-exception", ARM_EXCEPTION],
 ])("%s translations", (_label, table) => {
   const enKeys = flatKeys(table.en);
   const locales = Object.keys(table).filter((l) => l !== "en");
