@@ -8,8 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.components.event.const import ATTR_EVENT_TYPE
+from homeassistant.const import Platform
 
-from custom_components.securitas.const import DOMAIN
+from custom_components.securitas.const import DOMAIN, PLATFORMS
 from custom_components.securitas.coordinators import ActivityData
 from custom_components.securitas.event import (
     ActivityLogEvent,
@@ -166,3 +167,7 @@ class TestActivityEventTranslations:
                 "event_type"
             ]["state"]
             assert set(states) == expected, f"event_type states drift in {path}"
+
+
+def test_event_platform_is_registered():
+    assert Platform.EVENT in PLATFORMS
