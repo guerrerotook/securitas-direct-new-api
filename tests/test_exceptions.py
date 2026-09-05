@@ -13,6 +13,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     ImageCaptureError,
     OperationFailedError,
     OperationTimeoutError,
+    RefreshTokenDeadError,
     SessionExpiredError,
     TwoFactorRequiredError,
     UnexpectedStateError,
@@ -343,3 +344,16 @@ def test_error_code_from_body_extracts_and_stringifies():
     assert _error_code_from_body({"errors": []}) is None
     assert _error_code_from_body("nope") is None
     assert _error_code_from_body({"errors": [{"message": "x"}]}) is None
+
+
+# ── RefreshTokenDeadError ────────────────────────────────────────────────────
+
+
+class TestRefreshTokenDeadError:
+    """A refresh-crash streak that has exhausted its retries is a genuine auth failure."""
+
+    def test_is_an_authentication_error(self):
+        assert issubclass(RefreshTokenDeadError, AuthenticationError)
+
+    def test_is_genuine(self):
+        assert is_genuine_auth_failure(RefreshTokenDeadError("dead")) is True

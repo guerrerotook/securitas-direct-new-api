@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 from ..exceptions import (
     APIConnectionError,
     OperationTimeoutError,
+    RefreshTokenDeadError,
     SessionExpiredError,
     VerisureOwaError,
     _error_code_from_body,
@@ -92,12 +93,21 @@ ALARM_STATUS_SERVICE_ID = "11"
 # UpdateFailed repeat-suppression.
 _AUTH_ESCALATION_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
+# Counted xSRefreshLogin crashes, with no successful renewal in between, after
+# which the stored refresh token is treated as dead and reauth is requested
+# (#568). One crash can be a server wobble; a token that keeps crashing across
+# polls has never been seen to recover. Crashes closer together than the
+# spacing are one renewal window — the coordinators sharing this client each
+# take a turn behind the auth lock seconds apart — and count once.
+_REFRESH_CRASH_REAUTH_THRESHOLD = 3
+_REFRESH_CRASH_MIN_SPACING = timedelta(seconds=60)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
 # The open issue tracking the xSRefreshLogin server crash; the recruitment
 # WARNING points affected users straight at it.
 _ISSUE_568_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues/568"
 
-# Operations that ARE the authentication — never require auth before calling
+# Operations that ARE the authentication: they never require auth before
+# calling, and the transport never re-sends them after a 403 (see _send).
 _AUTH_OPERATIONS = frozenset(
     {
         "mkLoginToken",
@@ -170,6 +180,15 @@ class _ClientBase:
         # crash re-presents the same token every poll, and repeating the recruit
         # line on each retry would become the log spam it avoids.
         self._refresh_crash_reported: bool = False
+        # Consecutive xSRefreshLogin crashes on the current refresh token; reset
+        # only by a successful renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
+        self._refresh_crash_streak: int = 0
+        self._last_counted_refresh_crash: datetime | None = None
+        # Latched once the streak trips: the client is shared by every
+        # coordinator (and user command) on the account, and each would
+        # otherwise spend a doomed RefreshLogin round-trip against the
+        # rate-limited endpoint before hitting the same conclusion.
+        self._refresh_token_dead: bool = False
 
         # Device configuration
         self.device_id: str = device_id
@@ -501,7 +520,7 @@ class _ClientBase:
             # already minted a fresh token while we were waiting.
             if not self._token_needs_renewal():
                 return
-            if self.refresh_token_value:
+            if self.refresh_token_value and not self._refresh_token_dead:
                 _LOGGER.debug("[auth] Auth token expired, refreshing")
                 try:
                     # pylint: disable=no-member  # provided by _AuthMixin
@@ -520,18 +539,82 @@ class _ClientBase:
                     # server error (5xx, the xSRefreshLogin crash, a timeout):
                     # the token is probably fine -> do NOT burn a login attempt;
                     # record it and propagate so the coordinator retries.
-                    if not is_genuine_auth_failure(owa_err):
+                    if is_genuine_auth_failure(owa_err):
+                        _LOGGER.warning(
+                            "Refresh token genuinely rejected, falling back to "
+                            "login: %s",
+                            err,
+                        )
+                    elif not self._note_refresh_crash(owa_err):
                         self.record_auth_recovery_failure(owa_err)
                         if isinstance(err, VerisureOwaError):
                             raise
                         raise owa_err from err
-                    _LOGGER.warning(
-                        "Refresh token genuinely rejected, falling back to login: %s",
-                        err,
-                    )
+                    elif not self.password:
+                        # Not recorded as a transient failure: that WARNING says
+                        # reauth is being withheld, which this raise contradicts.
+                        raise RefreshTokenDeadError(
+                            f"Stored refresh token rejected {self._refresh_crash_streak} "
+                            "times by the Verisure refresh-login crash; "
+                            "re-authentication required"
+                        ) from err
+                    else:
+                        _LOGGER.warning(
+                            "Refresh token found dead after %d refresh-login "
+                            "crashes, falling back to login",
+                            self._refresh_crash_streak,
+                        )
+            elif self._refresh_token_dead and not self.password:
+                raise RefreshTokenDeadError(
+                    "Stored refresh token already found dead; "
+                    "re-authentication required"
+                )
             _LOGGER.debug("[auth] Auth token expired, logging in again")
             # pylint: disable=no-member  # provided by _AuthMixin
             await self.login()  # type: ignore[attr-defined]
+
+    def _note_refresh_crash(self, err: VerisureOwaError) -> bool:
+        """Count a refresh-login crash; True once the stored token is dead.
+
+        Only the crash signature counts, other transient failures neither count
+        nor reset (a successful renewal does, via note_auth_success). Crashes
+        within ``_REFRESH_CRASH_MIN_SPACING`` of the last counted one are the
+        same renewal window and count once. Reaching
+        ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches ``refresh_token_is_dead``
+        so every later renewal on this shared client concludes the same
+        without another round-trip.
+        """
+        if self._refresh_token_dead:
+            return True
+        if not is_refresh_login_crash(err):
+            return False
+        now = datetime.now()
+        last = self._last_counted_refresh_crash
+        if last is not None and now - last < _REFRESH_CRASH_MIN_SPACING:
+            return False
+        self._last_counted_refresh_crash = now
+        self._refresh_crash_streak += 1
+        if self._refresh_crash_streak < _REFRESH_CRASH_REAUTH_THRESHOLD:
+            return False
+        self._refresh_token_dead = True
+        return True
+
+    @property
+    def refresh_token_is_dead(self) -> bool:
+        """True once a crash streak has condemned the stored refresh token."""
+        return self._refresh_token_dead
+
+    def adopt_refresh_token(self, value: str) -> None:
+        """Replace the refresh token with one obtained elsewhere (e.g. reauth).
+
+        Clears the dead-token verdict so the next renewal actually tries it.
+        The token is not persisted here: it came from the caller's own entry.
+        """
+        self.refresh_token_value = value
+        self._register_secret("refresh_token", value)
+        self._refresh_crash_streak = 0
+        self._last_counted_refresh_crash = None
+        self._refresh_token_dead = False
 
     def note_auth_success(self) -> None:
         """Reset the auth-recovery streak after a successful authentication."""
@@ -544,6 +627,9 @@ class _ClientBase:
         self._auth_streak_started = None
         self._last_auth_escalation = None
         self._last_auth_failure = None
+        self._refresh_crash_streak = 0
+        self._last_counted_refresh_crash = None
+        self._refresh_token_dead = False
 
     def record_auth_recovery_failure(self, err: VerisureOwaError) -> None:
         """Record a transient auth-recovery failure and log it.
@@ -616,10 +702,11 @@ class _ClientBase:
             return
         self._refresh_crash_reported = True
         _LOGGER.warning(
-            "Verisure hit the known refresh-login server crash (issue #568): %s. "
-            "This is under investigation and does NOT mean your credentials are "
-            "wrong — the integration keeps retrying. If it leaves your devices "
-            "unavailable and you can help pin it down: enable debug logging for "
+            "Verisure rejected the stored refresh token with the known "
+            "refresh-login server crash (issue #568): %s. The integration retries "
+            "briefly and, if it persists, asks you to re-authenticate — enter "
+            "your password once and a fresh token is issued. If you can help pin "
+            "down how the token went stale: enable debug logging for "
             "'custom_components.securitas' (a logs: entry under logger: in "
             "configuration.yaml), restart Home Assistant, let it run ~30 minutes, "
             "then share the log at %s.",
@@ -673,8 +760,7 @@ class _ClientBase:
         if operation not in _AUTH_OPERATIONS:
             await self._ensure_auth(installation)
 
-        headers = self._build_headers(operation, installation=installation)
-        response_dict = await self._transport.execute(content, headers)
+        response_dict = await self._send(content, operation, installation=installation)
 
         # Check for GraphQL errors — raises SessionExpiredError for 403
         try:
@@ -718,8 +804,27 @@ class _ClientBase:
         Used for auth operations (login, refresh, validate_device, send_otp)
         that need to inspect the raw response structure.
         """
+        return await self._send(content, operation, installation=installation)
+
+    async def _send(
+        self,
+        content: dict[str, Any],
+        operation: str,
+        *,
+        installation: Installation | None = None,
+    ) -> dict[str, Any]:
+        """Build headers and hand the request to the transport.
+
+        The single place the transport's retry policy is decided, so both the
+        typed and raw paths agree: an auth mutation is never re-sent blindly.
+        RefreshLogin rotates a one-time refresh token and the OTP calls consume
+        a one-time code on the first send; the password login is kept with
+        them so no credential-bearing request is ever repeated by the transport.
+        """
         headers = self._build_headers(operation, installation=installation)
-        return await self._transport.execute(content, headers)
+        return await self._transport.execute(
+            content, headers, retry_on_403=operation not in _AUTH_OPERATIONS
+        )
 
     # ── Poll operation ───────────────────────────────────────────────────
 

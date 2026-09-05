@@ -3,11 +3,13 @@
 The root cause of #557 — a rotated refresh token that was never persisted to
 the config entry, so a restart reloaded a stale token — is fixed in the setup
 path (``_get_or_create_session`` now attaches the entry to a reused config-flow
-hub). These tests characterise the *client-side* handling of the server crash
-itself, which is independent of that fix: the crash is classified transient
+hub). These tests characterise the *client-side* handling of a single server
+crash, which is independent of that fix: one crash is classified transient
 (retryable), not a genuine auth failure, and it leaves the stored refresh token
-untouched. They guard against a future change silently turning the crash into a
-reauth trigger or corrupting the stored token.
+untouched. Escalation to reauth happens only on a *streak* of crashes (see
+RefreshTokenDeadError and the setup-path threshold in __init__); these tests
+guard against a lone crash being turned into a reauth trigger or corrupting
+the stored token.
 """
 
 from __future__ import annotations
@@ -20,20 +22,9 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     is_genuine_auth_failure,
 )
 
-# The exact server crash from issue #557: xSRefreshLogin resolver throws a
-# JS TypeError and returns a null field.
-FR_CRASH_RESPONSE = {
-    "errors": [
-        {
-            "message": "Cannot read properties of undefined (reading 'fr')",
-            "path": ["xSRefreshLogin"],
-            "locations": [{"line": 2, "column": 3}],
-            "extensions": {},
-            "data": {},
-        }
-    ],
-    "data": {"xSRefreshLogin": None},
-}
+from .conftest import refresh_crash_response
+
+FR_CRASH_RESPONSE = refresh_crash_response()
 
 
 def _make_client(mock_transport, *, refresh_token: str) -> VerisureOwaClient:
@@ -60,9 +51,9 @@ class TestRefreshCrashHandling:
 
     The #557 *trap* — the entry stuck until deleted — arose from the setup path
     feeding a stale refresh token, now fixed. Independently, the client's
-    handling of the crash response itself must stay safe: it is classified
-    transient (so the coordinator retries rather than forcing reauth) and it
-    leaves the stored refresh token untouched (so nothing is corrupted).
+    handling of a single crash response must stay safe: it is classified
+    transient (so the coordinator retries; only a streak escalates to reauth)
+    and it leaves the stored refresh token untouched (so nothing is corrupted).
     """
 
     async def test_crash_leaves_the_on_disk_token_unchanged(
@@ -80,7 +71,7 @@ class TestRefreshCrashHandling:
     async def test_crash_is_classified_transient_not_a_reauth_signal(
         self, mock_transport
     ) -> None:
-        """The crash is NOT a genuine auth failure, so it retries, never reauths."""
+        """One crash is NOT a genuine auth failure: it retries; only a streak reauths."""
         mock_transport.execute.return_value = FR_CRASH_RESPONSE
         client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
 

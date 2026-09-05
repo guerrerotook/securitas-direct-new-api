@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -360,3 +361,81 @@ class TestSanitizeResponseForLog:
 
         raw = "not json"
         assert _sanitize_response_for_log(raw) == "not json"
+
+
+class TestRetryOn403Option:
+    """Callers can opt a one-shot request out of the blind HTTP 403 retry.
+
+    A non-WAF 403 is re-sent once by default (rate limiting). That is unsafe
+    for auth mutations such as RefreshLogin, which consume a one-time refresh
+    token on the first attempt: re-sending presents an already-rotated token
+    and kills the session. ``retry_on_403=False`` surfaces the 403 instead.
+    """
+
+    async def test_403_is_not_resent_when_retry_disabled(self, transport, session):
+        fail = _make_response(
+            status=403, text="<html>rate limited</html>", headers={"Retry-After": "2"}
+        )
+        ok = _make_response(text='{"retried": true}')
+        _mock_post(session, [fail, ok])
+
+        with (
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            pytest.raises(VerisureOwaError) as exc_info,
+        ):
+            await transport.execute(content={}, headers={}, retry_on_403=False)
+
+        assert exc_info.value.http_status == 403
+        mock_sleep.assert_not_awaited()
+        assert session.post.call_count == 1
+
+    async def test_waf_block_on_the_retry_attempt_is_detected(self, transport, session):
+        """A rate-limit 403 followed by a WAF page on the re-send must surface
+        as WAFBlockedError, not a bare 403, or callers back off too briefly."""
+        rate_limited = _make_response(status=403, text="<html>slow down</html>")
+        waf = _make_response(
+            status=403, text="<html>_Incapsula_Resource blocked</html>"
+        )
+        _mock_post(session, [rate_limited, waf])
+
+        with (
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(WAFBlockedError),
+        ):
+            await transport.execute(content={}, headers={})
+
+    async def test_waf_block_still_detected_when_retry_disabled(
+        self, transport, session
+    ):
+        waf_html = "<html><body>_Incapsula_Resource blocked</body></html>"
+        _mock_post(session, [_make_response(status=403, text=waf_html)])
+
+        with pytest.raises(WAFBlockedError):
+            await transport.execute(content={}, headers={}, retry_on_403=False)
+
+
+class TestDebugLogCost:
+    """The per-response debug line must not do its JSON work when DEBUG is off."""
+
+    async def test_response_is_not_sanitised_unless_debug_enabled(
+        self, transport, session, caplog
+    ):
+        _mock_post(session, [_make_response(text='{"ok": true}')])
+        logger_name = "custom_components.securitas.verisure_owa_api.http_transport"
+
+        with (
+            caplog.at_level(logging.INFO, logger=logger_name),
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport"
+                "._sanitize_response_for_log"
+            ) as sanitize,
+        ):
+            await transport.execute(content={}, headers={})
+
+        sanitize.assert_not_called()

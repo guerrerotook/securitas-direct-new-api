@@ -2,6 +2,14 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.9.0
+
+### Fixed
+
+**A dead refresh token now asks you to sign in again instead of leaving the alarm unavailable ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  The integration keeps its session alive with a refresh token that the Verisure server rotates every fifteen minutes. When the token stored on disk is no longer valid, most commonly because it was written by a release before v5.7.0 and never updated, the server answers every refresh with the same server-side crash. That crash carries no error code, so earlier releases treated it as a passing glitch and retried it forever; the only way out was to delete the integration and set it up again. Now a token that keeps crashing is treated as dead: on the second failed attempt at startup, or the third failed renewal in a row while running, Home Assistant shows the normal re-authentication prompt. Enter your password once and a fresh token is issued, and if you have several installations on one account the others pick up the new token as well. A single crash is still retried, so a brief server wobble does not send you to the sign-in form. Thanks to [@amullr](https://github.com/amullr) and [@rencmbr](https://github.com/rencmbr) for the reports and logs.
+
+**Sign-in requests are no longer re-sent after a rate-limit response.**  When the server answered with an HTTP 403 rate limit, the integration re-sent the same request once after a short pause. That is harmless for a status poll, but a token refresh consumes its one-time refresh token on the first send, so re-sending it could present an already-used token and kill the session. Sign-in, token refresh and two-factor requests are no longer re-sent after a rate-limit response; everything else keeps the retry.
+
 ## v5.8.0
 
 The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes.

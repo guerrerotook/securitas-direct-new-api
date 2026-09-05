@@ -4,10 +4,12 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import BaseModel
 
 from custom_components.securitas.verisure_owa_api.exceptions import (
     AccountBlockedError,
     AuthenticationError,
+    RefreshTokenDeadError,
     SessionExpiredError,
     TwoFactorRequiredError,
     VerisureOwaError,
@@ -18,6 +20,7 @@ from .conftest import (
     FAKE_REFRESH_TOKEN,
     login_response,
     make_jwt,
+    refresh_login_crash_error,
     refresh_response,
     validate_device_response,
 )
@@ -621,3 +624,241 @@ class TestStreakResetOnSuccess:
         await api.login()
 
         assert api.consecutive_auth_recovery_failures == 0
+
+
+# ── Runtime escalation of the xSRefreshLogin crash to reauth (#568) ─────────
+
+
+class TestRefreshCrashEscalation:
+    """Three consecutive crashes with no successful renewal mean the token is dead.
+
+    A single crash stays transient (a backend wobble can crash the resolver
+    once). But a token that keeps crashing across polls, with no successful
+    refresh in between, is not coming back: surface it as an AuthenticationError
+    so the coordinators' existing classifier prompts reauth instead of retrying
+    forever with devices unavailable.
+    """
+
+    def _expire(self, api):
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.min
+        api.refresh_token_value = "has-refresh-token"
+        api.password = ""  # token-only account, the norm since v5.1.0
+        api.login = AsyncMock()
+
+    @staticmethod
+    def _age_last_crash(api):
+        """Pretend the last counted crash happened a poll cycle ago."""
+        api._last_counted_refresh_crash = datetime.now() - timedelta(minutes=5)
+
+    async def test_crashes_within_one_renewal_window_count_once(self, api):
+        """Several coordinators contending for one expired token each take a
+        turn behind the auth lock, seconds apart, and each sees the crash.
+        That is one renewal window, not a streak: it must not escalate."""
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(5):
+            with pytest.raises(VerisureOwaError) as exc_info:
+                await api._check_authentication_token()
+            assert not isinstance(exc_info.value, AuthenticationError)
+
+        assert api.refresh_token.await_count == 5
+
+    async def test_dead_token_with_a_password_falls_back_to_login(self, api):
+        """A stored password is the stronger credential: use it, as the
+        genuine-rejection path does, rather than prompting for it."""
+        self._expire(api)
+        api.password = "secret"
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        await api._check_authentication_token()
+
+        api.login.assert_awaited_once()
+
+    async def test_two_crashes_stay_transient(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError) as exc_info:
+                await api._check_authentication_token()
+            assert not isinstance(exc_info.value, AuthenticationError)
+
+        api.login.assert_not_called()
+
+    async def test_third_consecutive_crash_raises_refresh_token_dead(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        with pytest.raises(RefreshTokenDeadError) as exc_info:
+            await api._check_authentication_token()
+
+        # Chained to the server crash so the log still shows the real response.
+        assert isinstance(exc_info.value.__cause__, VerisureOwaError)
+        api.login.assert_not_called()
+
+    async def test_escalating_crash_does_not_log_the_not_forcing_reauth_warning(
+        self, api, caplog
+    ):
+        """The transient-streak WARNING says reauth is withheld; on the crash
+        that forces reauth it must not be emitted, or the log contradicts itself."""
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        with caplog.at_level("WARNING"):
+            for _ in range(2):
+                with pytest.raises(VerisureOwaError):
+                    await api._check_authentication_token()
+                self._age_last_crash(api)
+            caplog.clear()
+            with pytest.raises(RefreshTokenDeadError):
+                await api._check_authentication_token()
+
+        assert "NOT forcing reauthentication" not in caplog.text
+
+    async def test_dead_token_is_latched_without_another_round_trip(self, api):
+        """Once the streak trips, every later renewal attempt on this client
+        raises immediately: the other coordinators sharing the client must not
+        each burn a doomed RefreshLogin against the rate-limited endpoint."""
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        with pytest.raises(RefreshTokenDeadError):
+            await api._check_authentication_token()
+        calls_before = api.refresh_token.await_count
+
+        with pytest.raises(RefreshTokenDeadError):
+            await api._check_authentication_token()
+
+        assert api.refresh_token.await_count == calls_before
+        api.login.assert_not_called()
+
+    async def test_successful_auth_clears_the_latch(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        with pytest.raises(RefreshTokenDeadError):
+            await api._check_authentication_token()
+
+        api.note_auth_success()  # e.g. the reauth flow minted a new token
+        api.refresh_token = AsyncMock(return_value=True)
+
+        await api._check_authentication_token()
+
+        api.refresh_token.assert_awaited_once()
+
+    async def test_successful_refresh_resets_the_streak(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(
+            side_effect=[
+                refresh_login_crash_error(),
+                refresh_login_crash_error(),
+                True,
+                refresh_login_crash_error(),
+                refresh_login_crash_error(),
+            ]
+        )
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        await api._check_authentication_token()
+        api.note_auth_success()  # the real refresh_token() does this on success
+        api.authentication_token_exp = datetime.min
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError) as exc_info:
+                await api._check_authentication_token()
+            assert not isinstance(exc_info.value, AuthenticationError)
+            self._age_last_crash(api)
+
+    async def test_other_transient_failures_never_escalate(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(
+            side_effect=VerisureOwaError("boom", http_status=500)
+        )
+
+        for _ in range(5):
+            with pytest.raises(VerisureOwaError) as exc_info:
+                await api._check_authentication_token()
+            assert not isinstance(exc_info.value, AuthenticationError)
+
+    async def test_non_crash_failure_does_not_reset_the_streak(self, api):
+        """Crash, timeout, crash, crash: still no successful renewal."""
+        self._expire(api)
+        api.refresh_token = AsyncMock(
+            side_effect=[
+                refresh_login_crash_error(),
+                TimeoutError(),
+                refresh_login_crash_error(),
+                refresh_login_crash_error(),
+            ]
+        )
+
+        for _ in range(3):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        with pytest.raises(RefreshTokenDeadError):
+            await api._check_authentication_token()
+
+
+# ── Auth mutations opt out of the transport's blind 403 retry ──────────────
+
+
+class TestAuthMutationsSkip403Retry:
+    """RefreshLogin and friends consume one-time material on the first send."""
+
+    async def test_refresh_login_is_sent_without_403_retry(self, api, mock_execute):
+        api.refresh_token_value = FAKE_REFRESH_TOKEN
+        mock_execute.return_value = refresh_response()
+
+        assert await api.refresh_token() is True
+
+        assert mock_execute.await_args.kwargs.get("retry_on_403") is False
+
+    async def test_login_is_sent_without_403_retry(self, api, mock_execute):
+        mock_execute.return_value = login_response()
+
+        await api.login()
+
+        assert mock_execute.await_args.kwargs.get("retry_on_403") is False
+
+    async def test_typed_path_also_opts_auth_operations_out(self, api, mock_execute):
+        """Both transport call sites must agree, or a future auth mutation on
+        the typed path silently regains the blind retry."""
+        mock_execute.return_value = refresh_response()
+
+        class _Envelope(BaseModel):
+            data: dict
+
+        await api._execute_graphql(
+            {"operationName": "RefreshLogin"}, "RefreshLogin", _Envelope
+        )
+
+        assert mock_execute.await_args.kwargs.get("retry_on_403") is False
+
+    async def test_data_operations_keep_the_403_retry(self, api, mock_execute):
+        api.authentication_token = FAKE_JWT
+        api.authentication_token_exp = datetime.now() + timedelta(hours=1)
+        mock_execute.return_value = {"data": {"xSInstallations": {"installations": []}}}
+
+        await api.list_installations()
+
+        assert mock_execute.await_args.kwargs.get("retry_on_403", True) is True

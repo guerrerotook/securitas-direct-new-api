@@ -202,12 +202,13 @@ class VerisureHub:
         ConfigEntryAuthFailed — sending an empty password to the API would just
         waste a round trip.
 
-        A transient failure (network, 5xx, 409, WAF block, the xSRefreshLogin
-        server crash) is *not* a rejected token and must not take that path: it
-        propagates so setup maps it to ConfigEntryNotReady and retries, instead
-        of forcing a needless reauth on a token-only account. This mirrors the
-        transient-vs-genuine split the client and coordinators already use via
-        is_genuine_auth_failure().
+        A transient failure (network, 5xx, 409, WAF block, a single
+        xSRefreshLogin server crash) is *not* a rejected token and must not take
+        that path: it propagates so setup maps it to ConfigEntryNotReady and
+        retries, instead of forcing a needless reauth on a token-only account.
+        This mirrors the transient-vs-genuine split the client and coordinators
+        already use via is_genuine_auth_failure(). A *streak* of crashes is
+        setup's call: see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD in __init__.
 
         For an account that still has a stored password, this deliberately means
         a transient refresh failure retries rather than immediately burning a
@@ -520,6 +521,15 @@ class VerisureHub:
     def get_refresh_token(self) -> str:
         """Get the long-lived refresh token, or empty string if absent."""
         return self.client.refresh_token_value
+
+    @property
+    def refresh_token_is_dead(self) -> bool:
+        """True once the client has condemned its stored refresh token."""
+        return self.client.refresh_token_is_dead
+
+    def adopt_refresh_token(self, value: str) -> None:
+        """Hand the client a refresh token obtained elsewhere (e.g. reauth)."""
+        self.client.adopt_refresh_token(value)
 
     def _persist_refresh_token(self, value: str) -> None:
         """Write a rotated refresh token back to the config entry.

@@ -22,29 +22,15 @@ from custom_components.securitas.verisure_owa_api.client._base import (
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
-    is_genuine_auth_failure,
 )
 
-from .conftest import refresh_response
+from .conftest import refresh_crash_response, refresh_response
 
 _AUTH_LOGGER = "custom_components.securitas.verisure_owa_api.client._auth"
 _BASE_LOGGER = "custom_components.securitas.verisure_owa_api.client._base"
 
 
-# The exact server crash from issue #557: xSRefreshLogin resolver throws a
-# JS TypeError and returns a null field.
-FR_CRASH_RESPONSE = {
-    "errors": [
-        {
-            "message": "Cannot read properties of undefined (reading 'fr')",
-            "path": ["xSRefreshLogin"],
-            "locations": [{"line": 2, "column": 3}],
-            "extensions": {},
-            "data": {},
-        }
-    ],
-    "data": {"xSRefreshLogin": None},
-}
+FR_CRASH_RESPONSE = refresh_crash_response()
 
 
 def _make_client(mock_transport, *, refresh_token: str) -> VerisureOwaClient:
@@ -275,9 +261,9 @@ class TestRefreshCrashRecruitmentWarning:
     ) -> None:
         """A retry loop against a persistent crash logs the recruit line once.
 
-        The coordinator retries the failing refresh every poll; the recruitment
-        WARNING must not repeat on each retry or it becomes the very log spam it
-        was designed to avoid.
+        The coordinator retries the failing refresh on each poll until the
+        crash streak trips; the recruitment WARNING must not repeat on those
+        retries or it becomes the very log spam it was designed to avoid.
         """
         mock_transport.execute.return_value = FR_CRASH_RESPONSE
         client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
@@ -309,36 +295,3 @@ class TestRefreshCrashRecruitmentWarning:
             await client.refresh_token()
 
         assert "#568" not in caplog.text
-
-
-class TestRefreshCrashIsAnUnrecoverableTrap:
-    """Characterisation of *existing* behaviour (these pass as-is).
-
-    They pin down why the reporter must delete the entry: the #557 crash is
-    classified transient AND leaves the on-disk token untouched, so every retry
-    re-presents the exact same token and hits the exact same crash forever.
-    """
-
-    async def test_crash_leaves_the_on_disk_token_unchanged(
-        self, mock_transport
-    ) -> None:
-        """The failing refresh does not rotate the token — the retry reuses it."""
-        mock_transport.execute.return_value = FR_CRASH_RESPONSE
-        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
-
-        with pytest.raises(VerisureOwaError):
-            await client.refresh_token()
-
-        assert client.refresh_token_value == "on-disk-refresh-token"
-
-    async def test_crash_is_classified_transient_not_a_reauth_signal(
-        self, mock_transport
-    ) -> None:
-        """The crash is NOT a genuine auth failure, so it retries, never reauths."""
-        mock_transport.execute.return_value = FR_CRASH_RESPONSE
-        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
-
-        with pytest.raises(VerisureOwaError) as excinfo:
-            await client.refresh_token()
-
-        assert is_genuine_auth_failure(excinfo.value) is False

@@ -130,8 +130,9 @@ class ActivityData:
 def _raise_fetch_error(err: VerisureOwaError, label: str) -> NoReturn:
     """Map a data-fetch VerisureOwaError to reauth vs. retry.
 
-    A genuinely dead session — bad credentials, account blocked, 2FA, or an
-    explicitly invalid/revoked token (err 60067/60052) — reaching the fetch
+    A genuinely dead session — bad credentials, account blocked, 2FA, an
+    explicitly invalid/revoked token (err 60067/60052), or a refresh token
+    condemned by a crash streak (RefreshTokenDeadError) — reaching the fetch
     means the refresh-token chain is broken with no way to recover unattended:
     raise ConfigEntryAuthFailed so HA prompts reauth. Everything else is a
     transient backend wobble → UpdateFailed (retry next poll).
@@ -192,8 +193,9 @@ async def _fetch_with_session_recovery[T](
 
     On SessionExpiredError, recover (relogin for a password account; transient
     retry for a refresh-token-only one) then retry once. A genuine auth failure
-    surfacing from the fetch itself — e.g. a dead refresh token (err 60067)
-    raised out of the client's pre-request auth check — raises
+    surfacing from the fetch itself — e.g. a dead refresh token (err 60067, or
+    RefreshTokenDeadError) raised out of the client's pre-request auth check —
+    raises
     ConfigEntryAuthFailed for reauth; WAFBlockedError and any other
     VerisureOwaError become UpdateFailed keyed on *label*.
     """

@@ -49,7 +49,7 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 1. Merges caller-provided headers on top of defaults (`User-Agent`, `content-type`)
 2. POSTs the JSON body via `aiohttp.ClientSession.post()`
 3. Retries once on DNS errors (`ClientConnectorDNSError`)
-4. Retries once on HTTP 403 with `Retry-After` header (rate limiting)
+4. Retries once on HTTP 403 with `Retry-After` header (rate limiting) — unless the caller passes `retry_on_403=False`, which the client's single `_send()` does for the auth mutations (`RefreshLogin`, `mkLoginToken`, `mkValidateDevice`, `mkSendOTP`): `RefreshLogin` rotates a one-time refresh token and the OTP calls consume a one-time code on the first send, so a blind re-send would present already-used material; the password login is kept with them so no credential-bearing request is ever repeated by the transport
 5. Raises `WAFBlockedError` immediately if 403 response contains `_Incapsula_Resource` (WAF blocks require longer backoff — retrying would extend the block)
 6. Raises `VerisureOwaError` on HTTP >= 400
 7. Parses JSON and returns the dict
@@ -66,10 +66,9 @@ The class is split across per-domain mixins under the `client/` package — `_ba
 
 **Typed GraphQL execution:** `_execute_graphql()` is the central entry point for all installation-scoped operations. It:
 1. Calls `_ensure_auth()` (skipped for auth operations like `mkLoginToken`, `RefreshLogin`, `mkSendOTP`, `mkValidateDevice`)
-2. Builds headers via `_build_headers()`
-3. Sends the request via `self._transport.execute()`
-4. Checks for GraphQL-level errors via `_check_graphql_errors()`
-5. Validates the JSON response into a typed Pydantic envelope via `response_type.model_validate(response_dict)`
+2. Builds headers and posts via `_send()`, which also decides the transport's 403-retry policy (auth mutations are never re-sent)
+3. Checks for GraphQL-level errors via `_check_graphql_errors()`
+4. Validates the JSON response into a typed Pydantic envelope via `response_type.model_validate(response_dict)`
 6. Returns the typed Pydantic model
 
 Auth operations that need to inspect the raw response structure use `_execute_raw()` instead, which skips Pydantic validation and returns the raw dict.
@@ -84,7 +83,7 @@ Auth operations that need to inspect the raw response structure use `_execute_ra
 
 3. **2FA device validation** (`validate_device()`) — For new devices: calls `validate_device()` which returns a list of phone numbers. The user picks one, `send_otp()` sends the SMS, then `validate_device()` is called again with the OTP code to complete registration.
 
-**Token lifecycle:** Before every API operation, `_ensure_auth()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. Errors during refresh are caught with specific exception types (`VerisureOwaError`, `asyncio.TimeoutError`) rather than bare `except`. Similarly, `_ensure_capabilities()` checks a per-installation capabilities JWT that's obtained from `get_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
+**Token lifecycle:** Before every API operation, `_ensure_auth()` checks whether the JWT expires within the next minute. If so, it tries `refresh_token()` first, falling back to `login()`. A single `xSRefreshLogin` crash is transient, but the client counts them (`_note_refresh_crash`, at most one per renewal window) and on the third with no successful renewal in between condemns the token: `refresh_token_is_dead` is latched, every later renewal on the shared client raises `RefreshTokenDeadError` without a round-trip (or falls back to `login()` if a password is stored), and only `note_auth_success()` or `adopt_refresh_token()` clears it. Errors during refresh are caught with specific exception types (`VerisureOwaError`, `asyncio.TimeoutError`) rather than bare `except`. Similarly, `_ensure_capabilities()` checks a per-installation capabilities JWT that's obtained from `get_services()`. On `logout()`, all tokens are cleared (`authentication_token`, `refresh_token_value`, `authentication_token_exp`, `login_timestamp`) to prevent stale credentials from being reused.
 
 **Refresh-token persistence:** The auth token (~15 min TTL) is in-memory only, but the long-lived refresh token (~180 day TTL) is persisted to `entry.data[CONF_REFRESH_TOKEN]` so reloads don't need a password. The client accepts an `on_refresh_token_changed(new_token)` callback that fires whenever `login()`, `refresh_token()`, or `validate_device()` updates `refresh_token_value`. The hub registers `_persist_refresh_token` as that callback, which writes the new value to `entry.data` via `hass.config_entries.async_update_entry` and atomically scrubs any legacy `CONF_PASSWORD`. Same-token rotations on a clean entry are a no-op to avoid redundant store writes.
 
@@ -240,7 +239,8 @@ If the alarm is put into a state that is not mapped to any HA button (e.g. the p
 ```
 VerisureOwaError                  Base class (http_status, message, response_body, log_detail())
 ├── AuthenticationError           Credentials rejected
-│   └── AccountBlockedError       Account blocked by Verisure
+│   ├── AccountBlockedError       Account blocked by Verisure
+│   └── RefreshTokenDeadError     Refresh token condemned by a crash streak → reauth
 ├── TwoFactorRequiredError        2FA required
 ├── SessionExpiredError           JWT expired server-side (triggers re-auth in _execute_graphql)
 ├── APIResponseError              GraphQL-level error
@@ -322,7 +322,8 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 5. Login (refresh-first; falls back to password if available, else AuthenticationError)
    ├── TwoFactorRequiredError → raise ConfigEntryAuthFailed (triggers reauth flow)
    ├── AuthenticationError → raise ConfigEntryAuthFailed (triggers reauth flow)
-   └── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
+   ├── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
+   └── …except the xSRefreshLogin JS-crash on the 2nd consecutive attempt → ConfigEntryAuthFailed (the stored token is dead; #568)
 6. Assign shared ApiQueue (per domain/country)
 7. List installations, get_services() per installation
 8. Create coordinators:
@@ -878,7 +879,7 @@ Device IDs are generated during initial setup and stored in the config entry for
 
 **Reauth flow** (`async_step_reauth` / `async_step_reauth_confirm`):
 
-Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked or expired past its 180-day TTL. Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
+Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
@@ -1034,6 +1035,7 @@ tests/
 
 **Response factories:**
 - `login_response()`, `refresh_response()`, `validate_device_response()` — Build realistic API response dicts with sensible defaults and overridable fields.
+- `refresh_crash_response()` / `refresh_login_crash_error()` — The `xSRefreshLogin` server crash as a response dict / as the `VerisureOwaError` the client raises; the input contract for `is_refresh_login_crash`.
 
 **Integration fixtures:**
 - `make_installation(**overrides)` — Factory for `Installation` Pydantic model with defaults (number, panel, address, etc.).
