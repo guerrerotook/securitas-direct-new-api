@@ -360,3 +360,56 @@ class TestSanitizeResponseForLog:
 
         raw = "not json"
         assert _sanitize_response_for_log(raw) == "not json"
+
+
+class TestRetryOn403Option:
+    """Callers can opt a one-shot request out of the blind HTTP 403 retry.
+
+    A non-WAF 403 is re-sent once by default (rate limiting). That is unsafe
+    for auth mutations such as RefreshLogin, which consume a one-time refresh
+    token on the first attempt: re-sending presents an already-rotated token
+    and kills the session. ``retry_on_403=False`` surfaces the 403 instead.
+    """
+
+    async def test_403_is_not_resent_when_retry_disabled(self, transport, session):
+        fail = _make_response(
+            status=403, text="<html>rate limited</html>", headers={"Retry-After": "2"}
+        )
+        ok = _make_response(text='{"retried": true}')
+        _mock_post(session, [fail, ok])
+
+        with (
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
+                new_callable=AsyncMock,
+            ) as mock_sleep,
+            pytest.raises(VerisureOwaError) as exc_info,
+        ):
+            await transport.execute(content={}, headers={}, retry_on_403=False)
+
+        assert exc_info.value.http_status == 403
+        mock_sleep.assert_not_awaited()
+        assert session.post.call_count == 1
+
+    async def test_403_is_still_resent_by_default(self, transport, session):
+        fail = _make_response(status=403, text="<html>rate limited</html>", headers={})
+        ok = _make_response(text='{"retried": true}')
+        _mock_post(session, [fail, ok])
+
+        with patch(
+            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await transport.execute(content={}, headers={})
+
+        assert result == {"retried": True}
+        assert session.post.call_count == 2
+
+    async def test_waf_block_still_detected_when_retry_disabled(
+        self, transport, session
+    ):
+        waf_html = "<html><body>_Incapsula_Resource blocked</body></html>"
+        _mock_post(session, [_make_response(status=403, text=waf_html)])
+
+        with pytest.raises(WAFBlockedError):
+            await transport.execute(content={}, headers={}, retry_on_403=False)

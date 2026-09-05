@@ -144,6 +144,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
     generate_uuid,
 )
+from .verisure_owa_api.exceptions import is_refresh_login_crash
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -476,6 +477,27 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     return config, need_sign_in
 
 
+# Consecutive setup attempts whose stored refresh token crashed xSRefreshLogin
+# before the entry gives up retrying and asks for re-authentication (#568). At
+# setup the token comes straight off disk with no evidence it was ever valid,
+# and every diagnosed crash was a dead token; one retry (HA's first backoff,
+# ~10 s) absorbs a momentary server blip. Only a successful login resets the
+# count — other transient failures in between neither count nor reset.
+_SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
+
+
+def _note_setup_refresh_crash(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Bump and return this entry's consecutive setup-time crash count."""
+    streaks = hass.data[DOMAIN].setdefault("refresh_crash_streaks", {})
+    streaks[entry.entry_id] = streaks.get(entry.entry_id, 0) + 1
+    return streaks[entry.entry_id]
+
+
+def _clear_setup_refresh_crash(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Forget this entry's setup-time crash streak."""
+    hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(entry.entry_id, None)
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -530,9 +552,20 @@ async def _get_or_create_session(
                     "Unable to connect to Verisure: %s",
                     err.log_detail(),
                 )
+                if (
+                    is_refresh_login_crash(err)
+                    and _note_setup_refresh_crash(hass, entry)
+                    >= _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD
+                ):
+                    _clear_setup_refresh_crash(hass, entry)
+                    raise ConfigEntryAuthFailed(
+                        "Stored refresh token keeps crashing the Verisure "
+                        "refresh-login call; re-authentication required"
+                    ) from None
                 raise ConfigEntryNotReady(
                     f"Unable to connect to Verisure: {err.message}"
                 ) from None
+            _clear_setup_refresh_crash(hass, entry)
             sessions[username] = {"hub": client, "ref_count": 1}
 
     return client
@@ -1301,6 +1334,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
+    _clear_setup_refresh_crash(hass, config_entry)
 
     # Check if any sessions remain — if not, do full cleanup
     remaining_sessions = hass.data.get(DOMAIN, {}).get("sessions", {})

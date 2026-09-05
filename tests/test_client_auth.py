@@ -397,7 +397,7 @@ class TestConcurrentRenewal:
         new_jwt = make_jwt(exp_minutes=15)
         call_ops: list[str] = []
 
-        async def slow_execute(content, _headers):
+        async def slow_execute(content, _headers, **_kwargs):
             call_ops.append(content["operationName"])
             # Yield so the other gathered coroutines get a chance to interleave
             # before this refresh completes — reproduces the real race.

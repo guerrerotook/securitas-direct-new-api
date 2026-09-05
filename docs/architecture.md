@@ -49,7 +49,7 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 1. Merges caller-provided headers on top of defaults (`User-Agent`, `content-type`)
 2. POSTs the JSON body via `aiohttp.ClientSession.post()`
 3. Retries once on DNS errors (`ClientConnectorDNSError`)
-4. Retries once on HTTP 403 with `Retry-After` header (rate limiting)
+4. Retries once on HTTP 403 with `Retry-After` header (rate limiting) — unless the caller passes `retry_on_403=False`, which the client does for the auth mutations (`RefreshLogin`, `mkLoginToken`, `mkValidateDevice`, `mkSendOTP`): they consume one-time material on the first send, so a blind re-send would present an already-rotated refresh token
 5. Raises `WAFBlockedError` immediately if 403 response contains `_Incapsula_Resource` (WAF blocks require longer backoff — retrying would extend the block)
 6. Raises `VerisureOwaError` on HTTP >= 400
 7. Parses JSON and returns the dict
@@ -322,7 +322,8 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 5. Login (refresh-first; falls back to password if available, else AuthenticationError)
    ├── TwoFactorRequiredError → raise ConfigEntryAuthFailed (triggers reauth flow)
    ├── AuthenticationError → raise ConfigEntryAuthFailed (triggers reauth flow)
-   └── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
+   ├── VerisureOwaError → raise ConfigEntryNotReady (HA retries)
+   └── …except the xSRefreshLogin JS-crash on the 2nd consecutive attempt → ConfigEntryAuthFailed (the stored token is dead; #568)
 6. Assign shared ApiQueue (per domain/country)
 7. List installations, get_services() per installation
 8. Create coordinators:
@@ -878,7 +879,7 @@ Device IDs are generated during initial setup and stored in the config entry for
 
 **Reauth flow** (`async_step_reauth` / `async_step_reauth_confirm`):
 
-Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked or expired past its 180-day TTL. Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
+Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```

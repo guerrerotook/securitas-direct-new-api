@@ -61,6 +61,17 @@ class APIResponseError(VerisureOwaError):
     """
 
 
+class RefreshTokenDeadError(AuthenticationError):
+    """Raised when the stored refresh token keeps crashing xSRefreshLogin.
+
+    The crash carries no error code, so a single occurrence is classified
+    transient. A streak of them with no successful renewal in between means
+    the token is not coming back (every diagnosed case was a consumed or
+    lost token — #557, #568); subclassing AuthenticationError routes it to
+    the reauth prompt through ``is_genuine_auth_failure``.
+    """
+
+
 class AccountBlockedError(AuthenticationError):
     """Raised when the user account is blocked by Verisure."""
 

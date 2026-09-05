@@ -73,13 +73,22 @@ class HttpTransport:
         self._base_url = base_url
 
     async def execute(
-        self, content: dict[str, Any], headers: dict[str, str]
+        self,
+        content: dict[str, Any],
+        headers: dict[str, str],
+        *,
+        retry_on_403: bool = True,
     ) -> dict[str, Any]:
         """POST *content* as JSON to the base URL and return the parsed response.
 
         Args:
             content: Request body (serialised as JSON).
             headers: Caller-provided headers (merged on top of defaults).
+            retry_on_403: Re-send once after a non-WAF HTTP 403 (rate limit).
+                Pass False for requests that consume one-time material on
+                the first send — the auth mutations, whose RefreshLogin
+                rotates the refresh token — so a re-send can never present
+                an already-consumed token. WAF blocks are raised either way.
 
         Returns:
             The parsed JSON response as a dict.
@@ -129,18 +138,18 @@ class HttpTransport:
                 _sanitize_response_for_log(response_text),
             )
 
-            if http_status == 403 and attempt == 0:
-                # Incapsula WAF blocks return HTML — retrying just extends the
-                # block.  Raise immediately so callers can back off properly.
-                if "_Incapsula_Resource" in response_text:
-                    _LOGGER.warning(
-                        "HTTP 403 WAF block (not retrying — WAF blocks require longer backoff)"
-                    )
-                    raise WAFBlockedError(
-                        f"HTTP {http_status} WAF block from {self._base_url}",
-                        http_status=http_status,
-                    )
+            # Incapsula WAF blocks return HTML — retrying just extends the
+            # block.  Raise immediately so callers can back off properly.
+            if http_status == 403 and "_Incapsula_Resource" in response_text:
+                _LOGGER.warning(
+                    "HTTP 403 WAF block (not retrying — WAF blocks require longer backoff)"
+                )
+                raise WAFBlockedError(
+                    f"HTTP {http_status} WAF block from {self._base_url}",
+                    http_status=http_status,
+                )
 
+            if http_status == 403 and attempt == 0 and retry_on_403:
                 retry_after = response_headers.get("Retry-After")
                 try:
                     delay = int(retry_after) if retry_after else 2

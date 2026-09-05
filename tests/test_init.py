@@ -2817,3 +2817,135 @@ class TestServiceDescriptionTargets:
                         f"of strings so it survives async_set_service_schema's "
                         f"unvalidated copy; got {domain!r}"
                     )
+
+
+# ---------------------------------------------------------------------------
+# Setup-path escalation of the xSRefreshLogin crash to reauth (#568)
+# ---------------------------------------------------------------------------
+
+
+def _refresh_login_crash() -> VerisureOwaError:
+    """The exact server crash from #557/#568 as the client raises it."""
+    err = VerisureOwaError("Cannot read properties of undefined (reading 'fr')")
+    err.response_body = {
+        "errors": [
+            {
+                "message": "Cannot read properties of undefined (reading 'fr')",
+                "path": ["xSRefreshLogin"],
+                "locations": [{"line": 2, "column": 3}],
+                "extensions": {},
+                "data": {},
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+    return err
+
+
+class TestSetupRefreshCrashEscalation:
+    """A stored token that keeps crashing xSRefreshLogin prompts reauth.
+
+    At setup the token comes straight off disk with no in-process evidence it
+    was ever valid, and every diagnosed instance of the crash was a dead token
+    (#557, #568). One retry absorbs a momentary server blip; the second
+    consecutive crash must escalate to ConfigEntryAuthFailed so the user can
+    recover by re-entering the password instead of deleting the entry.
+    """
+
+    @pytest.fixture
+    def mock_hub(self):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    async def _attempt(self, hass, entry, mock_hub):
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            return await async_setup_entry(hass, entry)
+
+    async def test_first_crash_retries(self, hass, mock_hub):
+        mock_hub.login = AsyncMock(side_effect=_refresh_login_crash())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+    async def test_second_consecutive_crash_prompts_reauth(self, hass, mock_hub):
+        mock_hub.login = AsyncMock(side_effect=_refresh_login_crash())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await self._attempt(hass, entry, mock_hub)
+
+    async def test_streak_is_per_entry(self, hass, mock_hub):
+        """One entry's crash must not count against another."""
+        mock_hub.login = AsyncMock(side_effect=_refresh_login_crash())
+        data1 = make_config_entry_data(username="one@example.com")
+        data2 = make_config_entry_data(username="two@example.com")
+        entry1 = MockConfigEntry(domain=DOMAIN, data=data1)
+        entry2 = MockConfigEntry(domain=DOMAIN, data=data2)
+        entry1.add_to_hass(hass)
+        entry2.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry1, mock_hub)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry2, mock_hub)
+
+    async def test_successful_login_resets_the_streak(self, hass, mock_hub):
+        """Crash, success, crash: the later crash starts a fresh streak."""
+        mock_hub.login = AsyncMock(
+            side_effect=[_refresh_login_crash(), None, _refresh_login_crash()]
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        assert await self._attempt(hass, entry, mock_hub) is True
+        # Drop the shared session so the next attempt logs in again.
+        await async_unload_entry(hass, entry)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+    async def test_other_transient_failures_never_escalate(self, hass, mock_hub):
+        """A 5xx is not the crash: it retries forever, as before."""
+        mock_hub.login = AsyncMock(
+            side_effect=VerisureOwaError("boom", http_status=500)
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        for _ in range(3):
+            with pytest.raises(ConfigEntryNotReady):
+                await self._attempt(hass, entry, mock_hub)
+
+    async def test_non_crash_failure_does_not_reset_the_streak(self, hass, mock_hub):
+        """Crash, timeout, crash: still no successful renewal, so reauth."""
+        mock_hub.login = AsyncMock(
+            side_effect=[
+                _refresh_login_crash(),
+                APIConnectionError("timeout"),
+                _refresh_login_crash(),
+            ]
+        )
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await self._attempt(hass, entry, mock_hub)

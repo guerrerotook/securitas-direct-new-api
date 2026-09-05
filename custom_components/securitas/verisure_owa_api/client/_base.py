@@ -24,6 +24,7 @@ from pydantic import BaseModel, ValidationError
 from ..exceptions import (
     APIConnectionError,
     OperationTimeoutError,
+    RefreshTokenDeadError,
     SessionExpiredError,
     VerisureOwaError,
     _error_code_from_body,
@@ -91,6 +92,11 @@ ALARM_STATUS_SERVICE_ID = "11"
 # throttled WARNING so a misclassified dead session stays visible despite HA's
 # UpdateFailed repeat-suppression.
 _AUTH_ESCALATION_THRESHOLD = 3
+# Consecutive xSRefreshLogin crashes, with no successful renewal in between,
+# after which the stored refresh token is treated as dead and reauth is
+# requested (#568). One crash can be a server wobble; a token that keeps
+# crashing across polls has never been seen to recover.
+_REFRESH_CRASH_REAUTH_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
 # The open issue tracking the xSRefreshLogin server crash; the recruitment
@@ -170,6 +176,9 @@ class _ClientBase:
         # crash re-presents the same token every poll, and repeating the recruit
         # line on each retry would become the log spam it avoids.
         self._refresh_crash_reported: bool = False
+        # Consecutive xSRefreshLogin crashes on the current refresh token; reset
+        # only by a successful renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
+        self._refresh_crash_streak: int = 0
 
         # Device configuration
         self.device_id: str = device_id
@@ -522,6 +531,7 @@ class _ClientBase:
                     # record it and propagate so the coordinator retries.
                     if not is_genuine_auth_failure(owa_err):
                         self.record_auth_recovery_failure(owa_err)
+                        self._raise_if_refresh_token_dead(owa_err)
                         if isinstance(err, VerisureOwaError):
                             raise
                         raise owa_err from err
@@ -532,6 +542,25 @@ class _ClientBase:
             _LOGGER.debug("[auth] Auth token expired, logging in again")
             # pylint: disable=no-member  # provided by _AuthMixin
             await self.login()  # type: ignore[attr-defined]
+
+    def _raise_if_refresh_token_dead(self, err: VerisureOwaError) -> None:
+        """Escalate a persistent xSRefreshLogin crash to a reauth signal.
+
+        Counts consecutive crashes on the current token (other transient
+        failures neither count nor reset — only a successful renewal does)
+        and raises RefreshTokenDeadError once the streak reaches
+        ``_REFRESH_CRASH_REAUTH_THRESHOLD``.
+        """
+        if not is_refresh_login_crash(err):
+            return
+        self._refresh_crash_streak += 1
+        if self._refresh_crash_streak < _REFRESH_CRASH_REAUTH_THRESHOLD:
+            return
+        raise RefreshTokenDeadError(
+            f"Stored refresh token rejected {self._refresh_crash_streak} times "
+            "in a row by the Verisure refresh-login crash; re-authentication "
+            "required"
+        ) from err
 
     def note_auth_success(self) -> None:
         """Reset the auth-recovery streak after a successful authentication."""
@@ -544,6 +573,7 @@ class _ClientBase:
         self._auth_streak_started = None
         self._last_auth_escalation = None
         self._last_auth_failure = None
+        self._refresh_crash_streak = 0
 
     def record_auth_recovery_failure(self, err: VerisureOwaError) -> None:
         """Record a transient auth-recovery failure and log it.
@@ -616,10 +646,11 @@ class _ClientBase:
             return
         self._refresh_crash_reported = True
         _LOGGER.warning(
-            "Verisure hit the known refresh-login server crash (issue #568): %s. "
-            "This is under investigation and does NOT mean your credentials are "
-            "wrong — the integration keeps retrying. If it leaves your devices "
-            "unavailable and you can help pin it down: enable debug logging for "
+            "Verisure rejected the stored refresh token with the known "
+            "refresh-login server crash (issue #568): %s. The integration retries "
+            "briefly and, if it persists, asks you to re-authenticate — enter "
+            "your password once and a fresh token is issued. If you can help pin "
+            "down how the token went stale: enable debug logging for "
             "'custom_components.securitas' (a logs: entry under logger: in "
             "configuration.yaml), restart Home Assistant, let it run ~30 minutes, "
             "then share the log at %s.",
@@ -719,7 +750,13 @@ class _ClientBase:
         that need to inspect the raw response structure.
         """
         headers = self._build_headers(operation, installation=installation)
-        return await self._transport.execute(content, headers)
+        return await self._transport.execute(
+            content,
+            headers,
+            # Auth mutations consume one-time material (RefreshLogin rotates
+            # the refresh token) on the first send: never re-send them blindly.
+            retry_on_403=operation not in _AUTH_OPERATIONS,
+        )
 
     # ── Poll operation ───────────────────────────────────────────────────
 
