@@ -1,7 +1,8 @@
 """Pure HTTP transport layer for the Verisure OWA API.
 
-Sends POST requests with caller-provided headers, handles retries on DNS
-errors and rate-limit (403) responses, and detects Incapsula WAF blocks.
+Sends POST requests with caller-provided headers, retries once on DNS errors
+and, unless the caller opts out, on rate-limit (403) responses, and detects
+Incapsula WAF blocks.
 
 This module knows nothing about authentication tokens, GraphQL semantics,
 or Verisure OWA business logic.

@@ -135,8 +135,8 @@ def login_response(
     }
 
 
-def refresh_crash_response(lang: str = "fr") -> dict:
-    """The xSRefreshLogin server crash from #557/#568, exactly as returned.
+def refresh_crash_response(*, lang: str = "fr") -> dict:
+    """Build a mock xSRefreshLogin crash response (#557/#568), as returned.
 
     The resolver throws a JS TypeError (dereferencing an undefined record by
     the request's language) and GraphQL answers with a null field. This is the
@@ -157,9 +157,9 @@ def refresh_crash_response(lang: str = "fr") -> dict:
     }
 
 
-def refresh_login_crash_error(lang: str = "fr") -> VerisureOwaError:
-    """``refresh_crash_response`` as the client raises it from refresh_token()."""
-    body = refresh_crash_response(lang)
+def refresh_login_crash_error(*, lang: str = "fr") -> VerisureOwaError:
+    """Build the xSRefreshLogin crash as refresh_token() raises it."""
+    body = refresh_crash_response(lang=lang)
     err = VerisureOwaError(body["errors"][0]["message"])
     err.response_body = body
     return err

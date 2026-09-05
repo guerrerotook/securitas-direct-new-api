@@ -34,6 +34,7 @@ from custom_components.securitas import (
     CONF_MAP_NIGHT,
     CONF_MAP_VACATION,
     CONF_NOTIFY_GROUP,
+    CONF_REFRESH_TOKEN,
     CONFIG_SCHEMA,
     DOMAIN,
     PANEL_OPTION_KEYS,
@@ -2820,9 +2821,9 @@ class TestServiceDescriptionTargets:
                     )
 
 
-# ---------------------------------------------------------------------------
-# Setup-path escalation of the xSRefreshLogin crash to reauth (#568)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# TestSetupRefreshCrashEscalation
+# ===========================================================================
 
 
 class TestSetupRefreshCrashEscalation:
@@ -2837,6 +2838,7 @@ class TestSetupRefreshCrashEscalation:
 
     @pytest.fixture
     def mock_hub(self):
+        """Create a mock VerisureHub for setup tests."""
         hub = make_securitas_hub_mock()
         hub.client.list_installations = AsyncMock(return_value=[make_installation()])
         return hub
@@ -2922,17 +2924,28 @@ class TestSetupRefreshCrashEscalation:
             await self._attempt(hass, entry, mock_hub)
 
     async def test_successful_login_resets_the_streak(self, hass, mock_hub):
-        """Crash, success, crash: the later crash starts a fresh streak."""
+        """Crash, success, crash: the later crash starts a fresh streak.
+
+        Another account stays loaded throughout so the unload in the middle
+        does not tear down hass.data[DOMAIN] wholesale, which would hide a
+        missing reset.
+        """
         mock_hub.login = AsyncMock(
-            side_effect=[refresh_login_crash_error(), None, refresh_login_crash_error()]
+            side_effect=[
+                refresh_login_crash_error(),
+                None,
+                refresh_login_crash_error(),
+            ]
         )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            "other@example.com"
+        ] = {"hub": MagicMock(), "ref_count": 1}
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
         assert await self._attempt(hass, entry, mock_hub) is True
-        # Drop the shared session so the next attempt logs in again.
         await async_unload_entry(hass, entry)
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
@@ -2966,4 +2979,110 @@ class TestSetupRefreshCrashEscalation:
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
         with pytest.raises(ConfigEntryAuthFailed):
+            await self._attempt(hass, entry, mock_hub)
+
+
+# ===========================================================================
+# TestCoTenantReauthRecovery
+# ===========================================================================
+
+
+class TestCoTenantReauthRecovery:
+    """Two installations share one hub; reauth on one must revive the shared
+    session instead of reloading onto the client already found dead.
+
+    After the reauth flow writes a fresh token into one entry and reloads it,
+    the co-tenant still holds the session, so setup lands on the reuse branch.
+    A dead shared client whose token differs from this entry's stored one
+    means exactly that: adopt the stored token and log in with it.
+    """
+
+    @pytest.fixture
+    def mock_hub(self):
+        """Create a mock VerisureHub for setup tests."""
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    async def _attempt(self, hass, entry, mock_hub):
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            return await async_setup_entry(hass, entry)
+
+    def _shared_session(self, hass, mock_hub, entry):
+        username = entry.data[CONF_USERNAME]
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[username] = {
+            "hub": mock_hub,
+            "ref_count": 1,  # the co-tenant still holds it
+        }
+        mock_hub.config_entry = entry
+
+    async def test_reload_after_reauth_adopts_the_fresh_token(self, hass, mock_hub):
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = "fresh-from-reauth"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        self._shared_session(hass, mock_hub, entry)
+        mock_hub.refresh_token_is_dead = True
+        mock_hub.get_refresh_token.return_value = "dead-token"
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        mock_hub.adopt_refresh_token.assert_called_once_with("fresh-from-reauth")
+        mock_hub.login.assert_awaited_once()
+
+    async def test_reload_with_the_dead_token_itself_does_not_relogin(
+        self, hass, mock_hub
+    ):
+        """A co-tenant reloading with the very token found dead has nothing
+        new to offer: reuse as before, and let its own reauth prompt fire."""
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = "dead-token"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        self._shared_session(hass, mock_hub, entry)
+        mock_hub.refresh_token_is_dead = True
+        mock_hub.get_refresh_token.return_value = "dead-token"
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        mock_hub.adopt_refresh_token.assert_not_called()
+        mock_hub.login.assert_not_awaited()
+
+    async def test_live_shared_client_is_reused_untouched(self, hass, mock_hub):
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = "older-on-disk"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        self._shared_session(hass, mock_hub, entry)
+        mock_hub.refresh_token_is_dead = False
+        mock_hub.get_refresh_token.return_value = "live-token"
+
+        assert await self._attempt(hass, entry, mock_hub) is True
+
+        mock_hub.adopt_refresh_token.assert_not_called()
+        mock_hub.login.assert_not_awaited()
+
+    async def test_failed_relogin_on_the_adopted_token_maps_like_a_fresh_login(
+        self, hass, mock_hub
+    ):
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = "fresh-but-also-bad"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        self._shared_session(hass, mock_hub, entry)
+        mock_hub.refresh_token_is_dead = True
+        mock_hub.get_refresh_token.return_value = "dead-token"
+        mock_hub.login = AsyncMock(
+            side_effect=VerisureOwaError("boom", http_status=500)
+        )
+
+        with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)

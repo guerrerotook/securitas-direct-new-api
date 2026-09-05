@@ -1,6 +1,5 @@
 """Tests for VerisureOwaClient authentication flow."""
 
-import logging
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -644,7 +643,42 @@ class TestRefreshCrashEscalation:
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.min
         api.refresh_token_value = "has-refresh-token"
+        api.password = ""  # token-only account, the norm since v5.1.0
         api.login = AsyncMock()
+
+    @staticmethod
+    def _age_last_crash(api):
+        """Pretend the last counted crash happened a poll cycle ago."""
+        api._last_counted_refresh_crash = datetime.now() - timedelta(minutes=5)
+
+    async def test_crashes_within_one_renewal_window_count_once(self, api):
+        """Several coordinators contending for one expired token each take a
+        turn behind the auth lock, seconds apart, and each sees the crash.
+        That is one renewal window, not a streak: it must not escalate."""
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(5):
+            with pytest.raises(VerisureOwaError) as exc_info:
+                await api._check_authentication_token()
+            assert not isinstance(exc_info.value, AuthenticationError)
+
+        assert api.refresh_token.await_count == 5
+
+    async def test_dead_token_with_a_password_falls_back_to_login(self, api):
+        """A stored password is the stronger credential: use it, as the
+        genuine-rejection path does, rather than prompting for it."""
+        self._expire(api)
+        api.password = "secret"
+        api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        await api._check_authentication_token()
+
+        api.login.assert_awaited_once()
 
     async def test_two_crashes_stay_transient(self, api):
         self._expire(api)
@@ -664,6 +698,7 @@ class TestRefreshCrashEscalation:
         for _ in range(2):
             with pytest.raises(VerisureOwaError):
                 await api._check_authentication_token()
+            self._age_last_crash(api)
         with pytest.raises(RefreshTokenDeadError) as exc_info:
             await api._check_authentication_token()
 
@@ -679,10 +714,11 @@ class TestRefreshCrashEscalation:
         self._expire(api)
         api.refresh_token = AsyncMock(side_effect=refresh_login_crash_error())
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level("WARNING"):
             for _ in range(2):
                 with pytest.raises(VerisureOwaError):
                     await api._check_authentication_token()
+                self._age_last_crash(api)
             caplog.clear()
             with pytest.raises(RefreshTokenDeadError):
                 await api._check_authentication_token()
@@ -699,6 +735,7 @@ class TestRefreshCrashEscalation:
         for _ in range(2):
             with pytest.raises(VerisureOwaError):
                 await api._check_authentication_token()
+            self._age_last_crash(api)
         with pytest.raises(RefreshTokenDeadError):
             await api._check_authentication_token()
         calls_before = api.refresh_token.await_count
@@ -715,6 +752,7 @@ class TestRefreshCrashEscalation:
         for _ in range(2):
             with pytest.raises(VerisureOwaError):
                 await api._check_authentication_token()
+            self._age_last_crash(api)
         with pytest.raises(RefreshTokenDeadError):
             await api._check_authentication_token()
 
@@ -740,6 +778,7 @@ class TestRefreshCrashEscalation:
         for _ in range(2):
             with pytest.raises(VerisureOwaError):
                 await api._check_authentication_token()
+            self._age_last_crash(api)
         await api._check_authentication_token()
         api.note_auth_success()  # the real refresh_token() does this on success
         api.authentication_token_exp = datetime.min
@@ -747,6 +786,7 @@ class TestRefreshCrashEscalation:
             with pytest.raises(VerisureOwaError) as exc_info:
                 await api._check_authentication_token()
             assert not isinstance(exc_info.value, AuthenticationError)
+            self._age_last_crash(api)
 
     async def test_other_transient_failures_never_escalate(self, api):
         self._expire(api)
@@ -774,6 +814,7 @@ class TestRefreshCrashEscalation:
         for _ in range(3):
             with pytest.raises(VerisureOwaError):
                 await api._check_authentication_token()
+            self._age_last_crash(api)
         with pytest.raises(RefreshTokenDeadError):
             await api._check_authentication_token()
 
@@ -784,25 +825,25 @@ class TestRefreshCrashEscalation:
 class TestAuthMutationsSkip403Retry:
     """RefreshLogin and friends consume one-time material on the first send."""
 
-    async def test_refresh_login_is_sent_without_403_retry(self, api, mock_transport):
+    async def test_refresh_login_is_sent_without_403_retry(self, api, mock_execute):
         api.refresh_token_value = FAKE_REFRESH_TOKEN
-        mock_transport.execute.return_value = refresh_response()
+        mock_execute.return_value = refresh_response()
 
         assert await api.refresh_token() is True
 
-        assert mock_transport.execute.await_args.kwargs.get("retry_on_403") is False
+        assert mock_execute.await_args.kwargs.get("retry_on_403") is False
 
-    async def test_login_is_sent_without_403_retry(self, api, mock_transport):
-        mock_transport.execute.return_value = login_response()
+    async def test_login_is_sent_without_403_retry(self, api, mock_execute):
+        mock_execute.return_value = login_response()
 
         await api.login()
 
-        assert mock_transport.execute.await_args.kwargs.get("retry_on_403") is False
+        assert mock_execute.await_args.kwargs.get("retry_on_403") is False
 
-    async def test_typed_path_also_opts_auth_operations_out(self, api, mock_transport):
+    async def test_typed_path_also_opts_auth_operations_out(self, api, mock_execute):
         """Both transport call sites must agree, or a future auth mutation on
         the typed path silently regains the blind retry."""
-        mock_transport.execute.return_value = refresh_response()
+        mock_execute.return_value = refresh_response()
 
         class _Envelope(BaseModel):
             data: dict
@@ -811,17 +852,13 @@ class TestAuthMutationsSkip403Retry:
             {"operationName": "RefreshLogin"}, "RefreshLogin", _Envelope
         )
 
-        assert mock_transport.execute.await_args.kwargs.get("retry_on_403") is False
+        assert mock_execute.await_args.kwargs.get("retry_on_403") is False
 
-    async def test_data_operations_keep_the_403_retry(self, api, mock_transport):
+    async def test_data_operations_keep_the_403_retry(self, api, mock_execute):
         api.authentication_token = FAKE_JWT
         api.authentication_token_exp = datetime.now() + timedelta(hours=1)
-        mock_transport.execute.return_value = {
-            "data": {"xSInstallations": {"installations": []}}
-        }
+        mock_execute.return_value = {"data": {"xSInstallations": {"installations": []}}}
 
         await api.list_installations()
 
-        assert (
-            mock_transport.execute.await_args.kwargs.get("retry_on_403", True) is True
-        )
+        assert mock_execute.await_args.kwargs.get("retry_on_403", True) is True

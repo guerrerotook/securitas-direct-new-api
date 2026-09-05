@@ -61,6 +61,10 @@ class APIResponseError(VerisureOwaError):
     """
 
 
+class AccountBlockedError(AuthenticationError):
+    """Raised when the user account is blocked by Verisure."""
+
+
 class RefreshTokenDeadError(AuthenticationError):
     """Raised when the stored refresh token keeps crashing xSRefreshLogin.
 
@@ -70,10 +74,6 @@ class RefreshTokenDeadError(AuthenticationError):
     lost token — #557, #568); subclassing AuthenticationError routes it to
     the reauth prompt through ``is_genuine_auth_failure``.
     """
-
-
-class AccountBlockedError(AuthenticationError):
-    """Raised when the user account is blocked by Verisure."""
 
 
 class WAFBlockedError(VerisureOwaError):
@@ -199,8 +199,10 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
 
     Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
     "try again later" session error, and unrecognised null-data GraphQL errors
-    such as the xSRefreshLogin server crash -- is transient and must NOT trigger
-    a reauth prompt. Unknown failures default to transient (retry forever).
+    such as a single xSRefreshLogin server crash -- is transient and must NOT
+    trigger a reauth prompt. Unknown failures default to transient. A *streak*
+    of those crashes is raised as RefreshTokenDeadError, which this predicate
+    does classify as genuine.
     """
     if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
         return True

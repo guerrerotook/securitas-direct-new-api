@@ -392,6 +392,24 @@ class TestRetryOn403Option:
         mock_sleep.assert_not_awaited()
         assert session.post.call_count == 1
 
+    async def test_waf_block_on_the_retry_attempt_is_detected(self, transport, session):
+        """A rate-limit 403 followed by a WAF page on the re-send must surface
+        as WAFBlockedError, not a bare 403, or callers back off too briefly."""
+        rate_limited = _make_response(status=403, text="<html>slow down</html>")
+        waf = _make_response(
+            status=403, text="<html>_Incapsula_Resource blocked</html>"
+        )
+        _mock_post(session, [rate_limited, waf])
+
+        with (
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+            pytest.raises(WAFBlockedError),
+        ):
+            await transport.execute(content={}, headers={})
+
     async def test_waf_block_still_detected_when_retry_disabled(
         self, transport, session
     ):

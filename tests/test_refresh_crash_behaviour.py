@@ -71,7 +71,7 @@ class TestRefreshCrashHandling:
     async def test_crash_is_classified_transient_not_a_reauth_signal(
         self, mock_transport
     ) -> None:
-        """The crash is NOT a genuine auth failure, so it retries, never reauths."""
+        """One crash is NOT a genuine auth failure: it retries; only a streak reauths."""
         mock_transport.execute.return_value = FR_CRASH_RESPONSE
         client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
 

@@ -346,6 +346,9 @@ def test_error_code_from_body_extracts_and_stringifies():
     assert _error_code_from_body({"errors": [{"message": "x"}]}) is None
 
 
+# ── RefreshTokenDeadError ────────────────────────────────────────────────────
+
+
 class TestRefreshTokenDeadError:
     """A refresh-crash streak that has exhausted its retries is a genuine auth failure."""
 
