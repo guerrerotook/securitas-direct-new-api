@@ -44,6 +44,9 @@ from custom_components.securitas.verisure_owa_api.const import (
     PERI_DEFAULTS,
     STD_DEFAULTS,
 )
+from custom_components.securitas.verisure_owa_api.exceptions import (
+    VerisureOwaError,
+)
 from custom_components.securitas.verisure_owa_api.http_transport import (
     HttpTransport,
 )
@@ -130,6 +133,36 @@ def login_response(
             }
         }
     }
+
+
+def refresh_crash_response(lang: str = "fr") -> dict:
+    """The xSRefreshLogin server crash from #557/#568, exactly as returned.
+
+    The resolver throws a JS TypeError (dereferencing an undefined record by
+    the request's language) and GraphQL answers with a null field. This is the
+    input contract for ``is_refresh_login_crash``: an error on the
+    ``xSRefreshLogin`` path whose message is a null-dereference.
+    """
+    return {
+        "errors": [
+            {
+                "message": f"Cannot read properties of undefined (reading '{lang}')",
+                "path": ["xSRefreshLogin"],
+                "locations": [{"line": 2, "column": 3}],
+                "extensions": {},
+                "data": {},
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+
+
+def refresh_login_crash_error(lang: str = "fr") -> VerisureOwaError:
+    """``refresh_crash_response`` as the client raises it from refresh_token()."""
+    body = refresh_crash_response(lang)
+    err = VerisureOwaError(body["errors"][0]["message"])
+    err.response_body = body
+    return err
 
 
 def refresh_response(

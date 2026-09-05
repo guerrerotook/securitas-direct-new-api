@@ -25,26 +25,13 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     is_genuine_auth_failure,
 )
 
-from .conftest import refresh_response
+from .conftest import refresh_crash_response, refresh_response
 
 _AUTH_LOGGER = "custom_components.securitas.verisure_owa_api.client._auth"
 _BASE_LOGGER = "custom_components.securitas.verisure_owa_api.client._base"
 
 
-# The exact server crash from issue #557: xSRefreshLogin resolver throws a
-# JS TypeError and returns a null field.
-FR_CRASH_RESPONSE = {
-    "errors": [
-        {
-            "message": "Cannot read properties of undefined (reading 'fr')",
-            "path": ["xSRefreshLogin"],
-            "locations": [{"line": 2, "column": 3}],
-            "extensions": {},
-            "data": {},
-        }
-    ],
-    "data": {"xSRefreshLogin": None},
-}
+FR_CRASH_RESPONSE = refresh_crash_response()
 
 
 def _make_client(mock_transport, *, refresh_token: str) -> VerisureOwaClient:

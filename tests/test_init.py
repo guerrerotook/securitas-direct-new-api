@@ -67,6 +67,7 @@ from tests.conftest import (
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
+    refresh_login_crash_error,
 )
 
 # ---------------------------------------------------------------------------
@@ -2824,24 +2825,6 @@ class TestServiceDescriptionTargets:
 # ---------------------------------------------------------------------------
 
 
-def _refresh_login_crash() -> VerisureOwaError:
-    """The exact server crash from #557/#568 as the client raises it."""
-    err = VerisureOwaError("Cannot read properties of undefined (reading 'fr')")
-    err.response_body = {
-        "errors": [
-            {
-                "message": "Cannot read properties of undefined (reading 'fr')",
-                "path": ["xSRefreshLogin"],
-                "locations": [{"line": 2, "column": 3}],
-                "extensions": {},
-                "data": {},
-            }
-        ],
-        "data": {"xSRefreshLogin": None},
-    }
-    return err
-
-
 class TestSetupRefreshCrashEscalation:
     """A stored token that keeps crashing xSRefreshLogin prompts reauth.
 
@@ -2870,16 +2853,8 @@ class TestSetupRefreshCrashEscalation:
         ):
             return await async_setup_entry(hass, entry)
 
-    async def test_first_crash_retries(self, hass, mock_hub):
-        mock_hub.login = AsyncMock(side_effect=_refresh_login_crash())
-        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
-        entry.add_to_hass(hass)
-
-        with pytest.raises(ConfigEntryNotReady):
-            await self._attempt(hass, entry, mock_hub)
-
     async def test_second_consecutive_crash_prompts_reauth(self, hass, mock_hub):
-        mock_hub.login = AsyncMock(side_effect=_refresh_login_crash())
+        mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
@@ -2888,13 +2863,15 @@ class TestSetupRefreshCrashEscalation:
         with pytest.raises(ConfigEntryAuthFailed):
             await self._attempt(hass, entry, mock_hub)
 
-    async def test_streak_is_per_entry(self, hass, mock_hub):
-        """One entry's crash must not count against another."""
-        mock_hub.login = AsyncMock(side_effect=_refresh_login_crash())
-        data1 = make_config_entry_data(username="one@example.com")
-        data2 = make_config_entry_data(username="two@example.com")
-        entry1 = MockConfigEntry(domain=DOMAIN, data=data1)
-        entry2 = MockConfigEntry(domain=DOMAIN, data=data2)
+    async def test_streak_is_per_account(self, hass, mock_hub):
+        """Entries on different accounts retry different tokens: separate streaks."""
+        mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+        entry1 = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="one@example.com")
+        )
+        entry2 = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="two@example.com")
+        )
         entry1.add_to_hass(hass)
         entry2.add_to_hass(hass)
 
@@ -2903,10 +2880,51 @@ class TestSetupRefreshCrashEscalation:
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry2, mock_hub)
 
+    async def test_entries_on_one_account_share_the_streak(self, hass, mock_hub):
+        """Two installations on one account retry the same stored token, and
+        alternate as session creator; counting per entry would never reach the
+        threshold."""
+        mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+        data1 = make_config_entry_data()
+        data1[CONF_INSTALLATION] = "111"
+        data2 = make_config_entry_data()
+        data2[CONF_INSTALLATION] = "222"
+        entry1 = MockConfigEntry(domain=DOMAIN, data=data1)
+        entry2 = MockConfigEntry(domain=DOMAIN, data=data2)
+        entry1.add_to_hass(hass)
+        entry2.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry1, mock_hub)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await self._attempt(hass, entry2, mock_hub)
+
+    async def test_setup_via_a_shared_session_resets_the_streak(self, hass, mock_hub):
+        """A crash, then setup succeeding on a co-tenant's live session (the
+        reuse branch), must clear the count: a live session proves the token."""
+        mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
+        # A config-flow hub for the same account is registered detached.
+        username = entry.data[CONF_USERNAME]
+        mock_hub.config_entry = None
+        hass.data[DOMAIN].setdefault("sessions", {})[username] = {
+            "hub": mock_hub,
+            "ref_count": 0,
+        }
+        assert await self._attempt(hass, entry, mock_hub) is True
+        await async_unload_entry(hass, entry)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+
     async def test_successful_login_resets_the_streak(self, hass, mock_hub):
         """Crash, success, crash: the later crash starts a fresh streak."""
         mock_hub.login = AsyncMock(
-            side_effect=[_refresh_login_crash(), None, _refresh_login_crash()]
+            side_effect=[refresh_login_crash_error(), None, refresh_login_crash_error()]
         )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
@@ -2935,9 +2953,9 @@ class TestSetupRefreshCrashEscalation:
         """Crash, timeout, crash: still no successful renewal, so reauth."""
         mock_hub.login = AsyncMock(
             side_effect=[
-                _refresh_login_crash(),
+                refresh_login_crash_error(),
                 APIConnectionError("timeout"),
-                _refresh_login_crash(),
+                refresh_login_crash_error(),
             ]
         )
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())

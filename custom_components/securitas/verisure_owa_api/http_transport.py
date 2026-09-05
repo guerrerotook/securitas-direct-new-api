@@ -131,12 +131,15 @@ class HttpTransport:
             # (issue #557/#568). Secrets are scrubbed by the handler-level
             # SensitiveDataFilter; _sanitize_response_for_log only trims bulky
             # non-secret fields (images, schedules).
-            _LOGGER.debug(
-                "[http] op=%s status=%s response=%s",
-                content.get("operationName", "?"),
-                http_status,
-                _sanitize_response_for_log(response_text),
-            )
+            # Guarded: the sanitiser re-parses and re-serialises the whole body
+            # on every response, which is pure waste unless DEBUG is on.
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug(
+                    "[http] op=%s status=%s response=%s",
+                    content.get("operationName", "?"),
+                    http_status,
+                    _sanitize_response_for_log(response_text),
+                )
 
             # Incapsula WAF blocks return HTML — retrying just extends the
             # block.  Raise immediately so callers can back off properly.

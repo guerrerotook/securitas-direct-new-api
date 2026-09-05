@@ -49,7 +49,7 @@ The bottom transport layer. It has no knowledge of auth tokens, GraphQL structur
 1. Merges caller-provided headers on top of defaults (`User-Agent`, `content-type`)
 2. POSTs the JSON body via `aiohttp.ClientSession.post()`
 3. Retries once on DNS errors (`ClientConnectorDNSError`)
-4. Retries once on HTTP 403 with `Retry-After` header (rate limiting) — unless the caller passes `retry_on_403=False`, which the client does for the auth mutations (`RefreshLogin`, `mkLoginToken`, `mkValidateDevice`, `mkSendOTP`): they consume one-time material on the first send, so a blind re-send would present an already-rotated refresh token
+4. Retries once on HTTP 403 with `Retry-After` header (rate limiting) — unless the caller passes `retry_on_403=False`, which the client's single `_send()` does for the auth mutations (`RefreshLogin`, `mkLoginToken`, `mkValidateDevice`, `mkSendOTP`): `RefreshLogin` rotates a one-time refresh token and the OTP calls consume a one-time code on the first send, so a blind re-send would present already-used material; the password login is kept with them so no credential-bearing request is ever repeated by the transport
 5. Raises `WAFBlockedError` immediately if 403 response contains `_Incapsula_Resource` (WAF blocks require longer backoff — retrying would extend the block)
 6. Raises `VerisureOwaError` on HTTP >= 400
 7. Parses JSON and returns the dict

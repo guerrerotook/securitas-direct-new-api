@@ -179,6 +179,11 @@ class _ClientBase:
         # Consecutive xSRefreshLogin crashes on the current refresh token; reset
         # only by a successful renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
         self._refresh_crash_streak: int = 0
+        # Latched once the streak trips: the client is shared by every
+        # coordinator (and user command) on the account, and each would
+        # otherwise spend a doomed RefreshLogin round-trip against the
+        # rate-limited endpoint before hitting the same conclusion.
+        self._refresh_token_dead: bool = False
 
         # Device configuration
         self.device_id: str = device_id
@@ -511,6 +516,11 @@ class _ClientBase:
             if not self._token_needs_renewal():
                 return
             if self.refresh_token_value:
+                if self._refresh_token_dead:
+                    raise RefreshTokenDeadError(
+                        "Stored refresh token already found dead; "
+                        "re-authentication required"
+                    )
                 _LOGGER.debug("[auth] Auth token expired, refreshing")
                 try:
                     # pylint: disable=no-member  # provided by _AuthMixin
@@ -530,8 +540,11 @@ class _ClientBase:
                     # the token is probably fine -> do NOT burn a login attempt;
                     # record it and propagate so the coordinator retries.
                     if not is_genuine_auth_failure(owa_err):
-                        self.record_auth_recovery_failure(owa_err)
+                        # Escalate *before* recording: the streak WARNING says
+                        # reauth is being withheld, which would contradict the
+                        # reauth this raise forces.
                         self._raise_if_refresh_token_dead(owa_err)
+                        self.record_auth_recovery_failure(owa_err)
                         if isinstance(err, VerisureOwaError):
                             raise
                         raise owa_err from err
@@ -556,6 +569,7 @@ class _ClientBase:
         self._refresh_crash_streak += 1
         if self._refresh_crash_streak < _REFRESH_CRASH_REAUTH_THRESHOLD:
             return
+        self._refresh_token_dead = True
         raise RefreshTokenDeadError(
             f"Stored refresh token rejected {self._refresh_crash_streak} times "
             "in a row by the Verisure refresh-login crash; re-authentication "
@@ -574,6 +588,7 @@ class _ClientBase:
         self._last_auth_escalation = None
         self._last_auth_failure = None
         self._refresh_crash_streak = 0
+        self._refresh_token_dead = False
 
     def record_auth_recovery_failure(self, err: VerisureOwaError) -> None:
         """Record a transient auth-recovery failure and log it.
@@ -704,8 +719,7 @@ class _ClientBase:
         if operation not in _AUTH_OPERATIONS:
             await self._ensure_auth(installation)
 
-        headers = self._build_headers(operation, installation=installation)
-        response_dict = await self._transport.execute(content, headers)
+        response_dict = await self._send(content, operation, installation)
 
         # Check for GraphQL errors — raises SessionExpiredError for 403
         try:
@@ -749,13 +763,25 @@ class _ClientBase:
         Used for auth operations (login, refresh, validate_device, send_otp)
         that need to inspect the raw response structure.
         """
+        return await self._send(content, operation, installation)
+
+    async def _send(
+        self,
+        content: dict[str, Any],
+        operation: str,
+        installation: Installation | None,
+    ) -> dict[str, Any]:
+        """Build headers and hand the request to the transport.
+
+        The single place the transport's retry policy is decided, so both the
+        typed and raw paths agree: an auth mutation is never re-sent blindly.
+        RefreshLogin rotates a one-time refresh token and the OTP calls consume
+        a one-time code on the first send; the password login is kept with
+        them so no credential-bearing request is ever repeated by the transport.
+        """
         headers = self._build_headers(operation, installation=installation)
         return await self._transport.execute(
-            content,
-            headers,
-            # Auth mutations consume one-time material (RefreshLogin rotates
-            # the refresh token) on the first send: never re-send them blindly.
-            retry_on_403=operation not in _AUTH_OPERATIONS,
+            content, headers, retry_on_403=operation not in _AUTH_OPERATIONS
         )
 
     # ── Poll operation ───────────────────────────────────────────────────

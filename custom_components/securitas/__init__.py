@@ -478,24 +478,22 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
 
 
 # Consecutive setup attempts whose stored refresh token crashed xSRefreshLogin
-# before the entry gives up retrying and asks for re-authentication (#568). At
+# before setup gives up retrying and asks for re-authentication (#568). At
 # setup the token comes straight off disk with no evidence it was ever valid,
 # and every diagnosed crash was a dead token; one retry (HA's first backoff,
-# ~10 s) absorbs a momentary server blip. Only a successful login resets the
-# count — other transient failures in between neither count nor reset.
+# ~10 s) absorbs a momentary server blip. The count lives in hass.data because
+# each retry builds a fresh hub, and is keyed by username like ``sessions``:
+# co-tenant entries retry the same token and alternate as session creator.
+# Only handing back a live client resets it — other transient failures in
+# between neither count nor reset.
 _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
 
 
-def _note_setup_refresh_crash(hass: HomeAssistant, entry: ConfigEntry) -> int:
-    """Bump and return this entry's consecutive setup-time crash count."""
+def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
+    """Bump and return the account's consecutive setup-time crash count."""
     streaks = hass.data[DOMAIN].setdefault("refresh_crash_streaks", {})
-    streaks[entry.entry_id] = streaks.get(entry.entry_id, 0) + 1
-    return streaks[entry.entry_id]
-
-
-def _clear_setup_refresh_crash(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Forget this entry's setup-time crash streak."""
-    hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(entry.entry_id, None)
+    streaks[username] = streaks.get(username, 0) + 1
+    return streaks[username]
 
 
 async def _get_or_create_session(
@@ -554,10 +552,9 @@ async def _get_or_create_session(
                 )
                 if (
                     is_refresh_login_crash(err)
-                    and _note_setup_refresh_crash(hass, entry)
+                    and _note_setup_refresh_crash(hass, username)
                     >= _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD
                 ):
-                    _clear_setup_refresh_crash(hass, entry)
                     raise ConfigEntryAuthFailed(
                         "Stored refresh token keeps crashing the Verisure "
                         "refresh-login call; re-authentication required"
@@ -565,9 +562,10 @@ async def _get_or_create_session(
                 raise ConfigEntryNotReady(
                     f"Unable to connect to Verisure: {err.message}"
                 ) from None
-            _clear_setup_refresh_crash(hass, entry)
             sessions[username] = {"hub": client, "ref_count": 1}
 
+    # Either branch hands back a live session, which proves the stored token.
+    hass.data[DOMAIN].get("refresh_crash_streaks", {}).pop(username, None)
     return client
 
 
@@ -1334,7 +1332,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
-    _clear_setup_refresh_crash(hass, config_entry)
 
     # Check if any sessions remain — if not, do full cleanup
     remaining_sessions = hass.data.get(DOMAIN, {}).get("sessions", {})

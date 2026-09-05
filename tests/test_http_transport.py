@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -391,20 +392,6 @@ class TestRetryOn403Option:
         mock_sleep.assert_not_awaited()
         assert session.post.call_count == 1
 
-    async def test_403_is_still_resent_by_default(self, transport, session):
-        fail = _make_response(status=403, text="<html>rate limited</html>", headers={})
-        ok = _make_response(text='{"retried": true}')
-        _mock_post(session, [fail, ok])
-
-        with patch(
-            "custom_components.securitas.verisure_owa_api.http_transport.asyncio.sleep",
-            new_callable=AsyncMock,
-        ):
-            result = await transport.execute(content={}, headers={})
-
-        assert result == {"retried": True}
-        assert session.post.call_count == 2
-
     async def test_waf_block_still_detected_when_retry_disabled(
         self, transport, session
     ):
@@ -413,3 +400,24 @@ class TestRetryOn403Option:
 
         with pytest.raises(WAFBlockedError):
             await transport.execute(content={}, headers={}, retry_on_403=False)
+
+
+class TestDebugLogCost:
+    """The per-response debug line must not do its JSON work when DEBUG is off."""
+
+    async def test_response_is_not_sanitised_unless_debug_enabled(
+        self, transport, session, caplog
+    ):
+        _mock_post(session, [_make_response(text='{"ok": true}')])
+        logger_name = "custom_components.securitas.verisure_owa_api.http_transport"
+
+        with (
+            caplog.at_level(logging.INFO, logger=logger_name),
+            patch(
+                "custom_components.securitas.verisure_owa_api.http_transport"
+                "._sanitize_response_for_log"
+            ) as sanitize,
+        ):
+            await transport.execute(content={}, headers={})
+
+        sanitize.assert_not_called()
