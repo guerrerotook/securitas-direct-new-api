@@ -7,7 +7,7 @@
 import {
   GESTURE_KEYS,
   migrateCompactAlarmConfig,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0";
+} from "./verisure-owa-alarm-shared.js?v=5.9.0";
 
 const DEFAULT_CONFIG = {
   show_name: false,

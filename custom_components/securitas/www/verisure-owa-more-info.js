@@ -11,7 +11,7 @@ import {
   hassLanguage,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=5.8.0";
+} from "./verisure-owa-arm-exception.js?v=5.9.0";
 
 class VerisureOwaMoreInfo extends HTMLElement {
   constructor() {
