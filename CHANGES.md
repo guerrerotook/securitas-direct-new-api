@@ -2,17 +2,9 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
-## v5.9.0
-
-### Fixed
-
-**A dead refresh token now asks you to sign in again instead of leaving the alarm unavailable ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  The integration keeps its session alive with a refresh token that the Verisure server rotates every fifteen minutes. When the token stored on disk is no longer valid, most commonly because it was written by a release before v5.7.0 and never updated, the server answers every refresh with the same server-side crash. That crash carries no error code, so earlier releases treated it as a passing glitch and retried it forever; the only way out was to delete the integration and set it up again. Now a token that keeps crashing is treated as dead: on the second failed attempt at startup, or the third failed renewal in a row while running, Home Assistant shows the normal re-authentication prompt. Enter your password once and a fresh token is issued, and if you have several installations on one account the others pick up the new token as well. A single crash is still retried, so a brief server wobble does not send you to the sign-in form. Thanks to [@amullr](https://github.com/amullr) and [@rencmbr](https://github.com/rencmbr) for the reports and logs.
-
-**Sign-in requests are no longer re-sent after a rate-limit response.**  When the server answered with an HTTP 403 rate limit, the integration re-sent the same request once after a short pause. That is harmless for a status poll, but a token refresh consumes its one-time refresh token on the first send, so re-sending it could present an already-used token and kill the session. Sign-in, token refresh and two-factor requests are no longer re-sent after a rate-limit response; everything else keeps the retry.
-
 ## v5.8.0
 
-The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes.
+The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.
 
 ### Added
 
@@ -27,6 +19,10 @@ The headline this release is that the integration now lives in Home Assistant's 
 **A native activity event entity ([#593](https://github.com/guerrerotook/securitas-direct-new-api/pull/593)).**  The panel's activity timeline — arms, disarms, intrusions, image requests, power events — is now also exposed as a Home Assistant `event` entity (`event.<alias>_activity`), so it appears in the built-in Logbook and can trigger automations directly, with no custom card. Each entry carries its category as the event type, translated in every supported language, and the newest event is always the one shown. The existing activity-log sensor, card and event bus are unchanged.
 
 ### Fixed
+
+**The alarm no longer gets stuck offline after a login problem ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  Some accounts — usually ones first set up before v5.7.0 — hit a repeating server error that left the alarm unavailable, and the only way out was to delete the integration and add it again. Now, when that keeps happening, Home Assistant simply asks you to sign in again: enter your password once and everything reconnects, including any other installations on the same account. A one-off error is still retried quietly, so a brief server hiccup won't send you to the sign-in screen. Thanks to [@amullr](https://github.com/amullr) and [@rencmbr](https://github.com/rencmbr) for the reports and logs.
+
+**Sign-in requests are no longer retried when the server is busy.**  When the server replied "too many requests", the integration used to resend the same request. For sign-in and two-factor steps, resending could end the session instead of recovering it, so those are no longer retried; ordinary status checks still are.
 
 **Blocked arming showed a confusing internal message.**  With a door or window open, some arm attempts showed a raw internal error instead of naming the open sensors. It now lists the sensors to close — on the card, in notifications and in the activity log.
 
