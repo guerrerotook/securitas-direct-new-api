@@ -155,10 +155,12 @@
                         "data": {
                             "scan_interval": "Update scan interval in seconds (0 disables auto-updates)",
                             "delay_check_operation": "Delay between API requests (sec)",
-                            "operation_poll_timeout": "Operation poll timeout (seconds)"
+                            "operation_poll_timeout": "Operation poll timeout (seconds)",
+                            "force_ipv4": "Force IPv4-only connections"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm action. Raise this if you get timeout warnings."
+                            "operation_poll_timeout": "How long to wait for the panel to confirm an arm/disarm action. Raise this if you get timeout warnings.",
+                            "force_ipv4": "Turn on only if the alarm keeps going unavailable with a DNS error such as 'DNS server returned answer with no data'. It makes the integration reach the Verisure server over IPv4 only, which avoids a failed IPv6 lookup on some networks. The server has no IPv6 address, so nothing is lost."
                         }
                     }
                 }

@@ -37,6 +37,7 @@ from . import (
     CONF_DEVICE_INDIGITALL,
     CONF_ENTRY_ID,
     CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_FORCE_IPV4,
     CONF_INSTALLATION,
     CONF_LOCK_CODE_REQUIRED,
     CONF_MAP_AWAY,
@@ -52,6 +53,7 @@ from . import (
     DEFAULT_CODE_ARM_REQUIRED,
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_FORCE_IPV4,
     DEFAULT_LOCK_CODE_REQUIRED,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
@@ -333,6 +335,7 @@ def _build_settings_schema(
     *,
     use_suggested: bool = False,
     extra_fields: dict[Any, Any] | None = None,
+    include_force_ipv4: bool = True,
 ) -> vol.Schema:
     """Build the shared sectioned settings schema for config and options flows.
 
@@ -429,29 +432,38 @@ def _build_settings_schema(
         {"collapsed": False},
     )
 
+    advanced_fields: dict[Any, Any] = {
+        vol.Optional(
+            CONF_SCAN_INTERVAL,
+            default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        ): int,
+        vol.Optional(
+            CONF_DELAY_CHECK_OPERATION,
+            default=defaults.get(
+                CONF_DELAY_CHECK_OPERATION,
+                DEFAULT_DELAY_CHECK_OPERATION,
+            ),
+        ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
+        vol.Optional(
+            CONF_OPERATION_POLL_TIMEOUT,
+            default=defaults.get(
+                CONF_OPERATION_POLL_TIMEOUT,
+                DEFAULT_OPERATION_POLL_TIMEOUT,
+            ),
+        ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
+    }
+    # Only offered in the post-setup options flow: at initial setup the login
+    # has already run on the shared client, so toggling it there is inert
+    # (issue #606). See ``FlowHandler.async_step_options``.
+    if include_force_ipv4:
+        advanced_fields[
+            vol.Optional(
+                CONF_FORCE_IPV4,
+                default=defaults.get(CONF_FORCE_IPV4, DEFAULT_FORCE_IPV4),
+            )
+        ] = bool
     advanced_section = section(
-        vol.Schema(
-            {
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): int,
-                vol.Optional(
-                    CONF_DELAY_CHECK_OPERATION,
-                    default=defaults.get(
-                        CONF_DELAY_CHECK_OPERATION,
-                        DEFAULT_DELAY_CHECK_OPERATION,
-                    ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
-                vol.Optional(
-                    CONF_OPERATION_POLL_TIMEOUT,
-                    default=defaults.get(
-                        CONF_OPERATION_POLL_TIMEOUT,
-                        DEFAULT_OPERATION_POLL_TIMEOUT,
-                    ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
-            }
-        ),
+        vol.Schema(advanced_fields),
         {"collapsed": True},
     )
 
@@ -986,6 +998,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             },
             notify_options,
             extra_fields=extra_fields,
+            # The IPv4-only toggle is post-setup only — it can't help a login
+            # that has already run on the shared client (issue #606).
+            include_force_ipv4=False,
         )
         install_name = (
             self._selected_installation.alias if self._selected_installation else ""
@@ -1139,6 +1154,7 @@ class VerisureOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_OPERATION_POLL_TIMEOUT: self._get(
                     CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
                 ),
+                CONF_FORCE_IPV4: self._get(CONF_FORCE_IPV4, DEFAULT_FORCE_IPV4),
                 CONF_ENABLE_ACTIVITY_POLLING: self._get(
                     CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING
                 ),

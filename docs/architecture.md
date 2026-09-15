@@ -858,7 +858,9 @@ Step 5 (options): Three sections + collapsed Advanced
   - Additional sub-panels (capability-gated Interior / Perimeter / Annex toggles —
     only shown when peri or annex is detected; Interior offered as soon as
     any sibling axis is supported)
-  - Advanced (collapsed): scan interval, delay between API requests
+  - Advanced (collapsed): scan interval, delay between API requests,
+    operation poll timeout (the Force IPv4-only toggle is NOT offered here —
+    see the options flow below)
   → Title shows installation name ("Options for {installation_name}")
   → Section payloads are flattened back to flat top-level keys before storage
 Step 6 (mappings): Map HA alarm buttons to Verisure OWA states
@@ -883,11 +885,15 @@ Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactor
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
-Step 1 (init): General settings — same three-section + Advanced layout as
+Step 1 (init): General settings — the same three-section + Advanced layout as
   the initial flow's Step 5 above (PIN section, Force-arm notifications
-  section, capability-gated Sub-panels section, collapsed Advanced section).
-  Sub-panel toggles are gated on detected capabilities; the Interior toggle
-  is offered whenever any sibling axis is supported.
+  section, capability-gated Sub-panels section, collapsed Advanced section),
+  with one difference: this Advanced section also carries the "Force IPv4-only
+  connections" toggle (`CONF_FORCE_IPV4`, issue #606), which the setup step
+  omits via `include_force_ipv4=False` because a login has already run on the
+  shared client by then and the toggle would be inert. Sub-panel toggles are
+  gated on detected capabilities; the Interior toggle is offered whenever any
+  sibling axis is supported.
 
 Step 2 (mappings): Alarm state mappings — same five mapping dropdowns as
   initial flow, with the same conditional {subpanels_note} placeholder.

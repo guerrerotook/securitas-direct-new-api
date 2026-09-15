@@ -2,6 +2,12 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.9.0
+
+### Added
+
+**Option to force IPv4-only connections ([#606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606)).**  On some networks the alarm kept dropping to _unavailable_ with a DNS error like `DNS server returned answer with no data`. This happens because the integration looks the Verisure server up over IPv4 and IPv6 at the same time; the server has no IPv6 address, and some networks treat the empty IPv6 answer as a hard failure instead of falling back to the IPv4 address that resolved fine. A new **Force IPv4-only connections** tick box under **Configure → Advanced** (off by default) makes the integration look the server up over IPv4 only, skipping the IPv6 query that was failing — and since the server has no IPv6 address, nothing is lost. Thanks to [@Teuqol](https://github.com/Teuqol) for the detailed diagnosis.
+
 ## v5.8.0
 
 The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.

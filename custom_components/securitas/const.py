@@ -111,8 +111,14 @@ CONF_ENABLE_ACTIVITY_POLLING = "enable_activity_polling"
 # HA restarts — otherwise the user would re-encounter the same failure
 # until they manually edited storage.
 CONF_UNSUPPORTED_COMMANDS = "unsupported_commands"
+# Force IPv4-only DNS resolution for this integration's HTTP requests. Some
+# networks fail the default combined IPv4+IPv6 lookup when the Verisure
+# endpoint (fronted by a CDN that publishes no IPv6 record) returns an empty
+# IPv6 answer that the resolver treats as a hard failure (issue #606).
+CONF_FORCE_IPV4 = "force_ipv4"
 
 DEFAULT_SCAN_INTERVAL = 120
+DEFAULT_FORCE_IPV4 = False
 DEFAULT_CODE_ARM_REQUIRED = False
 DEFAULT_ENABLE_ACTIVITY_POLLING = False
 DEFAULT_FORCE_ARM_NOTIFICATIONS = True

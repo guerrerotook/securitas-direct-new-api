@@ -1116,6 +1116,62 @@ async def test_options_init_prefills_saved_auto_force_arm(hass):
     )
 
 
+def test_settings_schema_includes_force_ipv4_by_default():
+    """The shared schema carries the IPv4 toggle for the post-setup options flow."""
+    from custom_components.securitas.config_flow import _build_settings_schema
+    from custom_components.securitas.const import CONF_FORCE_IPV4
+
+    schema = _build_settings_schema({}, [])
+
+    assert _section_inner_marker(schema, CONF_ADVANCED, CONF_FORCE_IPV4) is not None
+
+
+def test_settings_schema_omits_force_ipv4_when_disabled():
+    """Initial setup opts out: enabling it there is inert (login already ran)."""
+    from custom_components.securitas.config_flow import _build_settings_schema
+    from custom_components.securitas.const import CONF_FORCE_IPV4
+
+    schema = _build_settings_schema({}, [], include_force_ipv4=False)
+
+    assert _section_inner_marker(schema, CONF_ADVANCED, CONF_FORCE_IPV4) is None
+
+
+async def test_options_exposes_force_ipv4_in_advanced_section(hass):
+    """The Advanced section offers the IPv4-only toggle, off by default."""
+    from custom_components.securitas.const import CONF_FORCE_IPV4
+
+    entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data(), options={})
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    marker = _section_inner_marker(
+        result["data_schema"], CONF_ADVANCED, CONF_FORCE_IPV4
+    )
+    assert marker is not None, "force_ipv4 field not found in advanced section"
+    assert marker.default() is False
+
+
+async def test_options_prefills_saved_force_ipv4(hass):
+    """Reopening Options pre-fills a previously enabled IPv4-only toggle."""
+    from custom_components.securitas.const import CONF_FORCE_IPV4
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(),
+        options={CONF_FORCE_IPV4: True},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    marker = _section_inner_marker(
+        result["data_schema"], CONF_ADVANCED, CONF_FORCE_IPV4
+    )
+    assert marker is not None, "force_ipv4 field not found in advanced section"
+    assert marker.default() is True
+
+
 # ===================================================================
 # TestSubpanelsNote
 # ===================================================================

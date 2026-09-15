@@ -128,10 +128,12 @@
                         "data": {
                             "scan_interval": "Intervallo di aggiornamento in secondi (0 disattiva gli aggiornamenti automatici)",
                             "delay_check_operation": "Ritardo tra le richieste API (sec)",
-                            "operation_poll_timeout": "Timeout di conferma operazione (secondi)"
+                            "operation_poll_timeout": "Timeout di conferma operazione (secondi)",
+                            "force_ipv4": "Forza connessioni solo IPv4"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un'azione di inserimento/disinserimento. Aumentalo se ricevi avvisi di timeout."
+                            "operation_poll_timeout": "Per quanto tempo attendere che la centrale confermi un'azione di inserimento/disinserimento. Aumentalo se ricevi avvisi di timeout.",
+                            "force_ipv4": "Attiva solo se l'allarme diventa ripetutamente non disponibile con un errore DNS come 'DNS server returned answer with no data'. Fa sì che l'integrazione raggiunga il server Verisure solo tramite IPv4, evitando una risoluzione IPv6 fallita su alcune reti. Il server non ha un indirizzo IPv6, quindi non si perde nulla."
                         }
                     },
                     "pin": {

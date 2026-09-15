@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import socket
 import time
 from collections import OrderedDict
 from datetime import timedelta
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+import aiohttp
 import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
@@ -43,7 +45,10 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import (
+    async_create_clientsession,
+    async_get_clientsession,
+)
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.service import (
     async_extract_entity_ids,
@@ -79,6 +84,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     CONF_ENABLE_PERIMETER_PANEL,
     CONF_ENTRY_ID,
     CONF_FORCE_ARM_NOTIFICATIONS,
+    CONF_FORCE_IPV4,
     CONF_INSTALLATION,
     CONF_LOCK_AUTOMATIONS,
     CONF_LOCK_CODE_REQUIRED,
@@ -99,6 +105,7 @@ from .const import (  # noqa: F401 — re-exported for backwards compatibility
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_ENABLE_ACTIVITY_POLLING,
     DEFAULT_FORCE_ARM_NOTIFICATIONS,
+    DEFAULT_FORCE_IPV4,
     DEFAULT_LOCK_CODE_REQUIRED,
     DEFAULT_OPERATION_POLL_TIMEOUT,
     DEFAULT_SCAN_INTERVAL,
@@ -270,6 +277,7 @@ _OPTIONS_MANAGED_FIELDS: tuple[str, ...] = (
     CONF_ENABLE_ACTIVITY_POLLING,
     CONF_LOCK_AUTOMATIONS,
     CONF_OPERATION_POLL_TIMEOUT,
+    CONF_FORCE_IPV4,
 )
 
 
@@ -436,6 +444,7 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     config[CONF_ENABLE_ACTIVITY_POLLING] = _opt(
         CONF_ENABLE_ACTIVITY_POLLING, DEFAULT_ENABLE_ACTIVITY_POLLING
     )
+    config[CONF_FORCE_IPV4] = _opt(CONF_FORCE_IPV4, DEFAULT_FORCE_IPV4)
     config = add_device_information(config)
 
     # Read mapping config (options override data)
@@ -546,6 +555,46 @@ async def _login_or_raise(
         ) from None
 
 
+def _build_http_session(
+    hass: HomeAssistant, *, force_ipv4: bool
+) -> tuple[aiohttp.ClientSession, bool]:
+    """Return the HTTP client to use, and whether we own (must release) it.
+
+    Off (the default): borrow Home Assistant's shared client, which HA owns
+    and cleans up — we return ``owned=False`` so it is never released here.
+
+    On: build our own client whose connector only resolves IPv4 addresses.
+    That skips the IPv6 lookup entirely, so a network that fails the default
+    combined IPv4+IPv6 resolution for the Verisure endpoint (issue #606) no
+    longer breaks — the endpoint publishes no IPv6 record, so nothing is
+    lost. We own this client and return ``owned=True`` so it is detached when
+    the last config entry using it unloads.
+    """
+    if not force_ipv4:
+        return async_get_clientsession(hass), False
+    # Built by HA's helper so it keeps parity with the shared client every
+    # other request uses — SSRF-redirect middleware, the pooled connector, the
+    # managed SSL context. ``family=AF_INET`` makes that connector's resolver
+    # issue only the IPv4 (A) query, never the IPv6 (AAAA) one whose empty
+    # answer breaks the default lookup (issue #606).
+    #
+    # ``auto_cleanup=False`` because we own its lifecycle: HA's per-entry
+    # auto-cleanup would detach the client when the entry that built it
+    # unloads, and a co-tenant entry (a second config entry for the same
+    # account) shares one client by username — detaching it out from under a
+    # surviving co-tenant would break its requests. Instead we detach it in
+    # ``async_unload_entry`` once ``_release_shared_session`` reports the last
+    # reference has left. (One
+    # accepted limitation of that shared-by-username model: the client's
+    # address family is fixed by whichever entry created it, so toggling this
+    # option on one co-tenant entry takes effect only once every entry for the
+    # account has reloaded and the client is rebuilt.)
+    session = async_create_clientsession(
+        hass, family=socket.AF_INET, auto_cleanup=False
+    )
+    return session, True
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -591,9 +640,29 @@ async def _get_or_create_session(
             sessions[username]["ref_count"] += 1
         else:
             # Create new session and log in
-            client = VerisureHub(config, entry, async_get_clientsession(hass), hass)
-            await _login_or_raise(hass, client, username)
-            sessions[username] = {"hub": client, "ref_count": 1}
+            http_session, owned = _build_http_session(
+                hass, force_ipv4=config[CONF_FORCE_IPV4]
+            )
+            client = VerisureHub(config, entry, http_session, hass)
+            try:
+                await _login_or_raise(hass, client, username)
+            except BaseException:
+                # Login failed, so the session is never registered below and
+                # HA will retry setup with a fresh one. Detach the client we
+                # built for it now, or each retry would leak one (we own it —
+                # see ``_build_http_session``). Detach is a no-op safeguard for
+                # the borrowed shared client (owned is False there).
+                if owned:
+                    http_session.detach()
+                raise
+            sessions[username] = {
+                "hub": client,
+                "ref_count": 1,
+                # Present only when we forced IPv4 and built our own client:
+                # it is detached on unload so reloads don't leak clients. The
+                # shared client is HA's to clean up, so this stays None then.
+                "owned_session": http_session if owned else None,
+            }
 
     # Either branch hands back a live session, which proves the stored token.
     _clear_setup_refresh_crash(hass, username)
@@ -1144,6 +1213,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             devices = await _fetch_and_cache_installations(hass, client, entry)
         except VerisureOwaError as err:
             _LOGGER.error("Unable to connect to Verisure: %s", err.log_detail())
+            # Setup failed after the session was registered; release this
+            # entry's reference so HA's retry doesn't inflate the ref-count and
+            # leak the owned IPv4 client (see _release_session_reference).
+            await _release_session_reference(hass, entry, config[CONF_USERNAME])
             raise ConfigEntryNotReady("Unable to connect to Verisure") from None
 
         # ── Create coordinators ──────────────────────────────────────
@@ -1313,8 +1386,12 @@ def _release_shared_session(
     sessions: dict[str, Any],
     username: str,
     leaving: ConfigEntry,
-) -> None:
+) -> aiohttp.ClientSession | None:
     """Drop one reference to a shared session, popping it when the last leaves.
+
+    Returns an owned HTTP client for the caller to detach when the popped
+    session was built with the IPv4-only option on (see ``_build_http_session``);
+    otherwise ``None``. The borrowed shared client is HA's to clean up.
 
     When the session survives but the entry being unloaded is the one the hub
     persists rotated refresh tokens to, hand that persistence off to a surviving
@@ -1326,12 +1403,12 @@ def _release_shared_session(
     session = sessions[username]
     session["ref_count"] -= 1
     if session["ref_count"] <= 0:
-        sessions.pop(username)
-        return
+        popped = sessions.pop(username)
+        return popped.get("owned_session")
 
     hub: VerisureHub = session["hub"]
     if hub.config_entry is not leaving:
-        return
+        return None
 
     # Re-attach persistence to a co-tenant entry that shares this hub.
     domain_data = hass.data.get(DOMAIN, {})
@@ -1341,7 +1418,38 @@ def _release_shared_session(
         if domain_data.get(entry.entry_id, {}).get("hub") is hub:
             hub.config_entry = entry
             hub.persist_current_refresh_token()
-            return
+            return None
+    return None
+
+
+async def _release_session_reference(
+    hass: HomeAssistant, entry: ConfigEntry, username: str
+) -> None:
+    """Release the shared-session reference held by *entry*, detaching an owned
+    IPv4 client if this was the last reference.
+
+    Home Assistant does not call ``async_unload_entry`` when setup raises
+    ``ConfigEntryNotReady``, so a setup failure that happens *after* the
+    session was registered (e.g. the post-login installation fetch) would
+    otherwise leave this entry's reference — and, for a forced-IPv4 account,
+    the owned client — behind. The retry would then take the reuse branch,
+    inflate ``ref_count``, and the client would never reach zero to be
+    detached. Call this on such a failure so the retry starts from a clean
+    session. A no-op when the session was never registered (login failed, or
+    the failure preceded registration).
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    sessions = domain_data.get("sessions", {})
+    if username not in sessions:
+        return
+    lock = domain_data.get("setup_locks", {}).get(username)
+    if lock:
+        async with lock:
+            owned_session = _release_shared_session(hass, sessions, username, entry)
+    else:
+        owned_session = _release_shared_session(hass, sessions, username, entry)
+    if owned_session is not None:
+        owned_session.detach()
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -1353,13 +1461,26 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     username = config_entry.data.get(CONF_USERNAME)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
     setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
+    owned_session: aiohttp.ClientSession | None = None
     if username and username in sessions:
         lock = setup_locks.get(username)
         if lock:
             async with lock:
-                _release_shared_session(hass, sessions, username, config_entry)
+                owned_session = _release_shared_session(
+                    hass, sessions, username, config_entry
+                )
         else:
-            _release_shared_session(hass, sessions, username, config_entry)
+            owned_session = _release_shared_session(
+                hass, sessions, username, config_entry
+            )
+
+    # Detach the IPv4-only client we built for this session (if any) now that
+    # its last reference is gone, so a reload doesn't leak clients. Detach (not
+    # close) is HA's documented release for an ``auto_cleanup=False`` client:
+    # it drops our reference to the pooled connector, which HA still owns. The
+    # borrowed shared client is HA's and is never returned here.
+    if owned_session is not None:
+        owned_session.detach()
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)

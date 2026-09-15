@@ -1,0 +1,229 @@
+"""Tests for the optional IPv4-only HTTP session (issue #606).
+
+Some networks cannot satisfy the combined IPv4+IPv6 lookup that aiohttp
+issues by default: the Verisure endpoint publishes no IPv6 address, and a
+resolver that treats the empty IPv6 half as a hard failure never falls back
+to the working IPv4 answer. The ``force_ipv4`` option lets an affected user
+switch this integration's requests to an IPv4-only lookup, which never asks
+the IPv6 question in the first place.
+"""
+
+import socket
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.securitas import (
+    CONF_FORCE_IPV4,
+    DEFAULT_FORCE_IPV4,
+    DOMAIN,
+    _build_http_session,
+    _release_shared_session,
+    async_unload_entry,
+)
+
+
+class TestBuildHttpSession:
+    """`_build_http_session` picks the connection strategy from the option."""
+
+    def test_default_is_off(self):
+        """The option ships disabled so behaviour is unchanged out of the box."""
+        assert DEFAULT_FORCE_IPV4 is False
+
+    async def test_off_reuses_home_assistant_shared_session(self, hass):
+        """With the option off we borrow HA's shared client, and don't own it."""
+        session, owned = _build_http_session(hass, force_ipv4=False)
+
+        assert session is async_get_clientsession(hass)
+        assert owned is False
+
+    async def test_on_builds_an_owned_ipv4_only_session(self, hass):
+        """With the option on we build our own client that only looks up IPv4."""
+        session, owned = _build_http_session(hass, force_ipv4=True)
+
+        try:
+            assert owned is True
+            assert session is not async_get_clientsession(hass)
+            # The connector is what carries the address-family restriction.
+            assert session.connector._family == socket.AF_INET
+        finally:
+            # Built with auto_cleanup off, so the owner releases it with
+            # detach(), never close() (which HA's helper guards against).
+            session.detach()
+
+
+class TestReleaseSharedSession:
+    """Releasing the last reference hands back an owned session to close."""
+
+    def _sessions(self, *, ref_count, owned_session):
+        hub = MagicMock()
+        # A config_entry that is never the one leaving keeps the survivor path
+        # from touching hass.config_entries in these unit tests.
+        hub.config_entry = MagicMock()
+        return {
+            "alice": {
+                "hub": hub,
+                "ref_count": ref_count,
+                "owned_session": owned_session,
+            }
+        }
+
+    def test_returns_owned_session_when_last_reference_leaves(self, hass):
+        """When the session is popped, its owned client is handed back to close."""
+        owned = MagicMock()
+        sessions = self._sessions(ref_count=1, owned_session=owned)
+        leaving = MagicMock()
+
+        returned = _release_shared_session(hass, sessions, "alice", leaving)
+
+        assert returned is owned
+        assert "alice" not in sessions
+
+    def test_returns_none_while_references_remain(self, hass):
+        """A surviving session must not be closed, so nothing is handed back."""
+        owned = MagicMock()
+        sessions = self._sessions(ref_count=2, owned_session=owned)
+        leaving = MagicMock()
+
+        returned = _release_shared_session(hass, sessions, "alice", leaving)
+
+        assert returned is None
+        assert "alice" in sessions
+
+    def test_returns_none_when_shared_session_is_not_owned(self, hass):
+        """The default (borrowed) shared client has no owned session to close."""
+        sessions = self._sessions(ref_count=1, owned_session=None)
+        leaving = MagicMock()
+
+        returned = _release_shared_session(hass, sessions, "alice", leaving)
+
+        assert returned is None
+
+
+class TestUnloadReleasesOwnedSession:
+    """Unloading the entry detaches the owned IPv4 client so reloads don't leak."""
+
+    async def test_unload_detaches_the_owned_session(self, hass):
+        """Whatever `_release_shared_session` hands back is detached on unload."""
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={"username": "alice"},
+            options={CONF_FORCE_IPV4: True},
+        )
+        entry.add_to_hass(hass)
+        hass.data.setdefault(DOMAIN, {})
+        hass.data[DOMAIN]["sessions"] = {
+            "alice": {"hub": MagicMock(), "ref_count": 1, "owned_session": None}
+        }
+        hass.data[DOMAIN][entry.entry_id] = {"hub": MagicMock()}
+
+        owned_session = MagicMock()
+
+        with (
+            patch.object(
+                hass.config_entries,
+                "async_unload_platforms",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "custom_components.securitas._release_shared_session",
+                return_value=owned_session,
+            ),
+            patch(
+                "custom_components.securitas._unregister_card_resource",
+                new=AsyncMock(),
+            ),
+        ):
+            result = await async_unload_entry(hass, entry)
+
+        assert result is True
+        owned_session.detach.assert_called_once()
+
+
+class TestFailedLoginReleasesOwnedSession:
+    """A login failure must not leak the owned client we built for it."""
+
+    async def test_failed_login_detaches_owned_session(self, hass):
+        """When login raises, the owned IPv4 client is detached, not left open."""
+        from homeassistant.const import CONF_USERNAME
+
+        from custom_components.securitas import _get_or_create_session
+
+        hass.data.setdefault(DOMAIN, {})
+        config = {CONF_USERNAME: "alice", CONF_FORCE_IPV4: True}
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={CONF_USERNAME: "alice"},
+            options={CONF_FORCE_IPV4: True},
+        )
+        entry.add_to_hass(hass)
+
+        owned_session = MagicMock()
+
+        with (
+            patch(
+                "custom_components.securitas._build_http_session",
+                return_value=(owned_session, True),
+            ),
+            patch("custom_components.securitas.VerisureHub"),
+            patch(
+                "custom_components.securitas._login_or_raise",
+                new=AsyncMock(side_effect=RuntimeError("login boom")),
+            ),
+            pytest.raises(RuntimeError, match="login boom"),
+        ):
+            await _get_or_create_session(hass, config, entry)
+
+        owned_session.detach.assert_called_once()
+        assert "alice" not in hass.data[DOMAIN].get("sessions", {})
+
+
+class TestSetupFailureAfterLoginReleasesOwnedSession:
+    """A setup failure AFTER login must release the owned client, not leak it.
+
+    HA does not call async_unload_entry on ConfigEntryNotReady, so a retry
+    would otherwise reuse an inflated ref-count and never detach the client.
+    """
+
+    async def test_fetch_failure_detaches_owned_session(self, hass):
+        """When post-login install fetch fails, the owned client is detached."""
+        from homeassistant.const import CONF_USERNAME
+        from homeassistant.exceptions import ConfigEntryNotReady
+
+        from custom_components.securitas import async_setup_entry
+        from custom_components.securitas.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+        from tests.conftest import make_config_entry_data, make_securitas_hub_mock
+
+        hub = make_securitas_hub_mock()
+        owned_session = MagicMock()
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=make_config_entry_data(),
+            options={CONF_FORCE_IPV4: True},
+        )
+        entry.add_to_hass(hass)
+
+        hub_cls = MagicMock(return_value=hub)
+        hub_cls.__name__ = "VerisureHub"
+
+        with (
+            patch(
+                "custom_components.securitas._build_http_session",
+                return_value=(owned_session, True),
+            ),
+            patch("custom_components.securitas.VerisureHub", hub_cls),
+            patch(
+                "custom_components.securitas._fetch_and_cache_installations",
+                new=AsyncMock(side_effect=VerisureOwaError("boom")),
+            ),
+            pytest.raises(ConfigEntryNotReady),
+        ):
+            await async_setup_entry(hass, entry)
+
+        owned_session.detach.assert_called_once()
+        assert entry.data[CONF_USERNAME] not in hass.data[DOMAIN].get("sessions", {})

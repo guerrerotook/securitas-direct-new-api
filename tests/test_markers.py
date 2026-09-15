@@ -26,6 +26,7 @@ EXPECTED_INTEGRATION_FILES = frozenset(
         "test_coordinators.py",
         "test_entity.py",
         "test_event.py",
+        "test_force_ipv4.py",
         "test_ha_platforms.py",
         "test_hub.py",
         "test_init.py",

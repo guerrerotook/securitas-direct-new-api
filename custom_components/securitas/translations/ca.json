@@ -128,10 +128,12 @@
                         "data": {
                             "scan_interval": "Interval d'actualització en segons (0 desactiva les actualitzacions automàtiques)",
                             "delay_check_operation": "Retard entre sol·licituds de l'API (s)",
-                            "operation_poll_timeout": "Temps d'espera de confirmació (segons)"
+                            "operation_poll_timeout": "Temps d'espera de confirmació (segons)",
+                            "force_ipv4": "Força connexions només IPv4"
                         },
                         "data_description": {
-                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi una acció d'armat/desarmat. Augmenta'l si reps avisos de temps d'espera esgotat."
+                            "operation_poll_timeout": "Quant de temps esperar que el panell confirmi una acció d'armat/desarmat. Augmenta'l si reps avisos de temps d'espera esgotat.",
+                            "force_ipv4": "Activa-ho només si l'alarma queda repetidament no disponible amb un error de DNS com ara 'DNS server returned answer with no data'. Fa que la integració arribi al servidor de Verisure només per IPv4, evitant una resolució IPv6 fallida en algunes xarxes. El servidor no té adreça IPv6, així que no es perd res."
                         }
                     },
                     "pin": {

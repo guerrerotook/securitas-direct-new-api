@@ -84,6 +84,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | **Advanced** _(collapsed)_ | Update scan interval | 120s | How often the integration checks the alarm status. Set to 0 to disable automatic polling. |
 | | Delay between API requests | 2s | Minimum gap between consecutive API requests. Higher values reduce the risk of WAF rate limiting. |
 | | Operation poll timeout | 120s | How long to wait for the panel to confirm an arm/disarm action before treating it as accepted-but-unconfirmed (range 60–300s). Raise this if arm/disarm operations log `not confirmed within timeout` warnings. |
+| | Force IPv4-only connections | Off | Makes the integration reach the Verisure server over IPv4 only. Leave off unless the alarm keeps dropping to _unavailable_ with a DNS error — see [Alarm goes unavailable with a DNS error](#alarm-goes-unavailable-with-a-dns-error). |
 
 ### How the PIN is stored
 
@@ -671,6 +672,20 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
 - **2FA issues** — If 2FA fails, remove and re-add the integration; you'll be prompted for a new SMS code. If that doesn't work, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.
+
+### Alarm goes unavailable with a DNS error
+
+If the alarm keeps flipping to **unavailable** and the log shows a connection error like:
+
+```
+Refresh failed: Connection error with URL https://customers.securitasdirect.fr/owa-api/graphql: [Errno None] DNS server returned answer with no data
+```
+
+the cause is usually how your network resolves the server's address. By default the integration looks the Verisure server up over IPv4 **and** IPv6 at the same time. The Verisure server has no IPv6 address, and on some networks the empty IPv6 answer makes the whole lookup fail instead of falling back to the IPv4 address that _did_ resolve.
+
+**When to try it:** if you see that specific `DNS server returned answer with no data` error (or a similar IPv6/AAAA lookup failure), go to **Settings → Integrations → Verisure OWA → Configure**, expand the **Advanced** section, and turn on **Force IPv4-only connections**. The integration then looks the server up over IPv4 only, skipping the IPv6 query that was failing. The server has no IPv6 address, so you lose nothing by turning this on. It applies straight away — the integration reloads itself.
+
+If the log error names a different host, or isn't about DNS, this setting won't help — check the other items above instead. Background: [issue #606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606).
 
 ## Reporting Issues
 
