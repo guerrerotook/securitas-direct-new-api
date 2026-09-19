@@ -574,8 +574,8 @@ async def _login_or_raise(
 def _connection_never_established(err: APIConnectionError) -> bool:
     """True when the failure was in establishing a connection, not using one.
 
-    Two shapes qualify, and both mean this attempt never got as far as sending
-    a request, so trying again on another address family is safe:
+    Two shapes qualify, and in both the connection that failed never opened, so
+    trying again on another address family is safe:
 
     * ``ClientConnectorError`` — the name did not resolve, or the connection
       was refused or unreachable. (TLS failures land here too. Retrying those
