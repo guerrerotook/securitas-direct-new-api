@@ -110,7 +110,7 @@ MOCK_PHONES = [
 ]
 
 PATCH_HUB = "custom_components.securitas.config_flow.VerisureHub"
-PATCH_SESSION = "custom_components.securitas.async_get_clientsession"
+PATCH_SESSION = "custom_components.securitas.config_flow.async_get_clientsession"
 PATCH_UUID = "custom_components.securitas.config_flow.generate_uuid"
 
 

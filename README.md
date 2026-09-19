@@ -671,24 +671,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
 - **2FA issues** — If 2FA fails, remove and re-add the integration; you'll be prompted for a new SMS code. If that doesn't work, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.
-
-### Alarm goes unavailable with a DNS error
-
-If the alarm keeps flipping to **unavailable** and the log shows a connection error like:
-
-```
-Refresh failed: Connection error with URL https://customers.securitasdirect.fr/owa-api/graphql: [Errno None] DNS server returned answer with no data
-```
-
-the cause is how your network resolves the server's address, and recent versions handle it for you — there is nothing to configure.
-
-Verisure's server has no IPv6 address in any country this integration supports. Asking for one is therefore pointless, and on some networks it is worse than pointless: the empty IPv6 answer makes the whole lookup fail instead of falling back to the IPv4 address that _did_ resolve. So the integration asks for IPv4 only, and never asks the question that was failing.
-
-If your Home Assistant is on an IPv6-only network and has no IPv4 address of its own, the integration finds it cannot connect and tries again the ordinary way, which asks for both. Usually that happens at once. If your network drops the attempt silently rather than refusing it, the retry waits up to 30 seconds first — once when the integration starts, not on every request. Either way you do not need to tell it which kind of network you are on.
-
-**Still seeing this error?** You are on a version from before this change — update the integration. If it persists after updating, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. If the error names a different host, or isn't about DNS, check the other items above instead.
-
-Background: [issue #606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606).
+- **Switching from IPv4 to IPv6** — The address family is chosen once, when the integration signs in. If Home Assistant switches from IPv4 to IPv6 afterwards, restart Home Assistant so Verisure reconnects.
 
 ## Reporting Issues
 

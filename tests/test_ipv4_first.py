@@ -1,9 +1,10 @@
 """Tests for connecting over IPv4 first, with a fallback (issue #606).
 
-The reasoning lives with the code, in `_login_ipv4_first` and
-`_connection_never_established` — briefly, Verisure has no IPv6 address in any
-supported country, so asking for one can only ever come back empty, and on some
-resolvers that empty answer fails the whole lookup.
+The reasoning lives with the code, in `_login_ipv4_then_any` — briefly, Verisure
+has no IPv6 address in any supported country, so asking for one can only ever
+come back empty, and on some resolvers that empty answer fails the whole lookup.
+Whether a failure may be retried is decided once, in the transport, which sets
+`APIConnectionError.connection_never_established`; the fallback only reads it.
 
 Unlike the other setup tests in this suite, these deliberately do NOT patch
 `async_get_clientsession`: which client each attempt was handed is the thing
@@ -20,7 +21,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.securitas import DOMAIN, _connection_never_established
+from custom_components.securitas import DOMAIN
 from custom_components.securitas.verisure_owa_api.exceptions import (
     APIConnectionError,
     AuthenticationError,
@@ -38,38 +39,35 @@ def _ipv4_session(hass):
     return async_get_clientsession(hass, family=socket.AF_INET)
 
 
-def _transport_error(cause):
-    """Build the error the transport raises, with its cause attached as it does.
-
-    `http_transport` wraps whatever aiohttp raised with `raise ... from err`, and
-    that original is what says whether the request ever left this machine.
-    """
-    try:
-        raise cause
-    except Exception as err:
-        try:
-            raise APIConnectionError("Connection error with URL x") from err
-        except APIConnectionError as wrapped:
-            return wrapped
-
-
 def _could_not_connect():
-    """A DNS or TCP failure: the connection was never established."""
-    return _transport_error(
-        aiohttp.ClientConnectorDNSError(
-            MagicMock(), OSError(None, "DNS server returned answer with no data")
-        )
+    """A DNS or TCP failure: the connection was never established.
+
+    The transport tags this ``connection_never_established=True`` (see
+    ``TestTheTransportClassifiesConnectionFailures`` for that mapping); here we
+    build the already-classified error the fallback actually receives.
+    """
+    return APIConnectionError(
+        "Connection error with URL x", connection_never_established=True
     )
 
 
 def _timed_out():
     """A read timeout: the request was sent and may still be in flight."""
-    return _transport_error(aiohttp.SocketTimeoutError("timed out reading"))
+    return APIConnectionError(
+        "Connection error with URL x", connection_never_established=False
+    )
 
 
 def _connect_timed_out():
-    """A connect timeout: the connection was never established, so nothing was sent."""
-    return _transport_error(aiohttp.ConnectionTimeoutError("timed out connecting"))
+    """A connect timeout: the connection never opened, so nothing was sent.
+
+    Identical to _could_not_connect once the error reaches the fallback — both
+    are already tagged connection_never_established=True. The aiohttp-class
+    distinction between them (a DNS/TCP failure vs a connect timeout) is what the
+    transport classifies, and that mapping is tested in
+    TestTheTransportClassifiesConnectionFailures, not here.
+    """
+    return _could_not_connect()
 
 
 class TestSetupPrefersIpv4:
@@ -97,6 +95,10 @@ class TestSetupPrefersIpv4:
         def _build_hub(config, config_entry, http_session, hass_):
             sessions_used.append(http_session)
             hub = make_securitas_hub_mock()
+            # Tag the hub with the client it was built on, so a test can tell
+            # which hub was kept for reuse after a fallback, not just which
+            # clients were tried.
+            hub._test_session = http_session
             effect = effects.pop(0) if effects else None
 
             async def _login():
@@ -125,8 +127,10 @@ class TestSetupPrefersIpv4:
         """The first login goes out on the IPv4-only client."""
         used = await self._run_setup(hass, login_effects=[None])
 
+        # async_get_clientsession returns a per-family singleton, so identity
+        # with the AF_INET session is proof of the address family — no need to
+        # read aiohttp's private connector._family.
         assert used == [_ipv4_session(hass)]
-        assert used[0].connector._family == socket.AF_INET
 
     async def test_a_network_failure_falls_back_to_both_families(self, hass):
         """No IPv4 route: retry once on the client that also asks for IPv6."""
@@ -134,8 +138,23 @@ class TestSetupPrefersIpv4:
 
         assert len(used) == 2, "expected a fallback attempt"
         assert used[0] is _ipv4_session(hass)
+        # The default (AF_UNSPEC) session is again identified by identity, not by
+        # reaching into the connector's private address-family field.
         assert used[1] is async_get_clientsession(hass)
-        assert used[1].connector._family == socket.AF_UNSPEC
+
+    async def test_the_fallback_hub_is_the_one_kept_for_reuse(self, hass):
+        """After a fallback the session registered for reuse is the AF_UNSPEC hub.
+
+        Returning the first (IPv4-only) hub would strand every future entry for
+        this account on the family that could not connect (issue #606).
+        """
+        await self._run_setup(hass, login_effects=[_could_not_connect(), None])
+
+        sessions = hass.data[DOMAIN]["sessions"]
+        (registered,) = sessions.values()
+        assert registered["hub"]._test_session is async_get_clientsession(hass), (
+            "the kept hub must be the AF_UNSPEC fallback, not the IPv4 attempt"
+        )
 
     async def test_a_timeout_is_not_retried(self, hass):
         """A slow server is not a wrong address family.
@@ -214,6 +233,7 @@ class TestConfigFlowPrefersIpv4:
         def _build_hub(config, config_entry, http_session, hass_):
             sessions_used.append(http_session)
             hub = MagicMock()
+            hub._test_session = http_session
             effect = effects.pop(0) if effects else None
 
             async def _login():
@@ -234,6 +254,7 @@ class TestConfigFlowPrefersIpv4:
             else:
                 await handler._login_with_family_fallback()
 
+        self._handler = handler
         return sessions_used
 
     async def test_first_attempt_asks_for_ipv4_only(self, hass):
@@ -262,6 +283,114 @@ class TestConfigFlowPrefersIpv4:
         )
 
         assert len(used) == 1, "a timeout must not trigger a second sign-in"
+
+    async def test_the_fallback_hub_becomes_the_flows_hub(self, hass):
+        """After a fallback the flow carries the AF_UNSPEC hub forward.
+
+        finish_setup/reauth act on ``self.hub`` after this returns; if it were
+        left pointing at the IPv4 attempt that could not connect, the rest of
+        the flow would run against a dead hub.
+        """
+        await self._run_login(hass, login_effects=[_could_not_connect(), None])
+
+        assert self._handler.hub._test_session is async_get_clientsession(hass)
+
+
+class TestConfigFlowDoesNotSwapABorrowedHub:
+    """A hub borrowed from a running session is shared with the live entries.
+
+    The IPv4 fallback rebuilds by making a fresh hub and signing it in with the
+    password — the very login ``async_step_user`` reuses the session to avoid.
+    So when the hub is borrowed rather than built by this flow, a connection
+    failure must propagate untouched: no new hub, no second sign-in, and the
+    shared hub left in place for its owners. Rebuilding it would wire the new
+    entry to a hub the running entries never see, and lose its rotated token
+    (issue #606, on top of the session reuse from issue #557).
+    """
+
+    async def test_a_borrowed_hub_is_not_rebuilt_on_a_connect_failure(self, hass):
+        """Owning nothing, the flow lets the connection error surface as-is."""
+        from custom_components.securitas.config_flow import FlowHandler
+
+        handler = FlowHandler()
+        handler.hass = hass
+        handler.config = {"username": "alice", "password": "secret"}
+
+        # Stand in for the shared, running hub that async_step_user borrows.
+        borrowed = MagicMock()
+        borrowed.login = AsyncMock(side_effect=_could_not_connect())
+        handler.hub = borrowed
+        handler._owns_hub = False
+
+        built: list[int] = []
+        hub_cls = MagicMock(side_effect=lambda *a, **k: built.append(1))
+        hub_cls.__name__ = "VerisureHub"
+
+        with (
+            patch("custom_components.securitas.config_flow.VerisureHub", hub_cls),
+            pytest.raises(APIConnectionError),
+        ):
+            await handler._login_with_family_fallback()
+
+        assert built == [], "a borrowed hub must not be rebuilt on the fallback"
+        assert handler.hub is borrowed, "the shared hub must be left in place"
+        assert borrowed.login.await_count == 1, "no second sign-in on the shared hub"
+
+
+class TestConfigFlowReauthFallsBack:
+    """Reauth reaches the fallback the same way a fresh install does.
+
+    Reauth always builds its own hub, so it owns it and may rebuild it. This
+    drives the real ``async_step_reauth_confirm`` and checks the hub that reaches
+    ``_finish_reauth`` after a fallback is the AF_UNSPEC one, not the IPv4 attempt.
+    """
+
+    async def test_reauth_confirm_carries_the_fallback_hub_forward(self, hass):
+        from custom_components.securitas.config_flow import FlowHandler
+        from tests.conftest import make_config_entry_data
+
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        handler = FlowHandler()
+        handler.hass = hass
+        handler._reauth_entry = entry
+        handler.config = {}
+
+        effects = [_could_not_connect(), None]
+
+        def _build_hub(config, config_entry, http_session, hass_):
+            hub = MagicMock()
+            hub._test_session = http_session
+            effect = effects.pop(0) if effects else None
+
+            async def _login():
+                if effect is not None:
+                    raise effect
+
+            hub.login = AsyncMock(side_effect=_login)
+            return hub
+
+        hub_cls = MagicMock(side_effect=_build_hub)
+        hub_cls.__name__ = "VerisureHub"
+
+        captured = {}
+
+        async def _capture():
+            captured["hub"] = handler.hub
+            return handler.async_abort(reason="reauth_successful")
+
+        with (
+            patch("custom_components.securitas.config_flow.VerisureHub", hub_cls),
+            patch.object(handler, "_finish_reauth", new=_capture),
+        ):
+            await handler.async_step_reauth_confirm(
+                {"username": "alice", "password": "secret"}
+            )
+
+        assert captured["hub"]._test_session is async_get_clientsession(hass), (
+            "reauth must finish on the AF_UNSPEC fallback hub"
+        )
 
 
 class TestHomeAssistantsClientsAreLeftAlone:
@@ -318,12 +447,12 @@ class TestHomeAssistantsClientsAreLeftAlone:
             assert session.connector is not None, f"the {name} client was detached"
 
 
-class TestTheGateMatchesWhatTheTransportRaises:
-    """The fallback reads `__cause__`, so the transport has to keep setting it.
-
-    `http_transport` wraps aiohttp's error with `raise ... from err`. Drop that
-    `from err` and every other test in this file still passes while the fallback
-    silently stops working, because the cause it inspects would be gone.
+class TestTheTransportClassifiesConnectionFailures:
+    """The transport is the one layer that still holds aiohttp's own error, so
+    it decides whether the connection ever opened and tags the APIConnectionError
+    it raises. The fallback then only reads that flag — this is where the
+    aiohttp-class-to-flag mapping is pinned, so a change to it fails here rather
+    than silently disabling the fallback with every fallback test still green.
     """
 
     async def _execute_against(self, error):
@@ -340,23 +469,29 @@ class TestTheGateMatchesWhatTheTransportRaises:
             await transport.execute({"operationName": "x"}, {})
         return caught.value
 
-    async def test_a_connector_error_survives_as_the_cause(self, hass):
-        """An unreachable host reaches the gate as something it recognises."""
+    async def test_a_connector_error_is_tagged_never_established(self, hass):
+        """An unreachable host never opened the socket, so nothing was sent."""
         cause = aiohttp.ClientConnectorError(MagicMock(), OSError(51, "unreachable"))
 
         err = await self._execute_against(cause)
 
-        assert err.__cause__ is cause
-        assert _connection_never_established(err) is True
+        assert err.connection_never_established is True
 
-    async def test_a_read_timeout_survives_as_the_cause(self, hass):
-        """And a sent-but-slow request reaches it as something it refuses."""
+    async def test_a_connect_timeout_is_tagged_never_established(self, hass):
+        """A connect timeout is silence before the socket opened — safe to retry."""
+        cause = aiohttp.ConnectionTimeoutError("timed out connecting")
+
+        err = await self._execute_against(cause)
+
+        assert err.connection_never_established is True
+
+    async def test_a_read_timeout_is_not_tagged_never_established(self, hass):
+        """A sent-but-slow request may have arrived; it must not be retried."""
         cause = aiohttp.SocketTimeoutError("timed out reading")
 
         err = await self._execute_against(cause)
 
-        assert err.__cause__ is cause
-        assert _connection_never_established(err) is False
+        assert err.connection_never_established is False
 
 
 class TestBothFamiliesFailing:

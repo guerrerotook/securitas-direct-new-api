@@ -20,6 +20,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
     CountrySelectorConfig,
@@ -57,8 +58,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
-    _client_session,
-    _connection_never_established,
+    _login_ipv4_then_any,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -92,7 +92,6 @@ from .verisure_owa_api import (
     dropdown_options,
 )
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
-from .verisure_owa_api.exceptions import APIConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -481,6 +480,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the flow handler."""
         self.config: dict[str, Any] = {}
         self.hub: VerisureHub | None = None
+        # True only while self.hub is a hub this flow built (via _create_client)
+        # and may therefore rebuild on the IPv4 fallback. False when self.hub is
+        # borrowed from a running session shared with other entries — rebuilding
+        # that one would strand the co-tenants on the old hub (issue #606).
+        self._owns_hub: bool = False
         self.otp_challenge: tuple[str | None, list[OtpPhone] | None] | None = None
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
@@ -528,7 +532,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> VerisureHub:
         """Create client (VerisureHub) on Home Assistant's client for *family*.
 
-        IPv4 by default, for the reason given in ``_login_ipv4_first``: no
+        IPv4 by default, for the reason given in ``_login_ipv4_then_any``: no
         supported country's endpoint has an IPv6 address, so the IPv6 half of
         the default lookup can only ever come back empty, and on some networks
         it fails the whole lookup (issue #606). ``_login_with_family_fallback``
@@ -544,36 +548,39 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         self.hub = VerisureHub(
-            self.config, None, _client_session(self.hass, family=family), self.hass
+            self.config,
+            None,
+            async_get_clientsession(self.hass, family=family),
+            self.hass,
         )
-
+        # This flow built the hub, so the IPv4 fallback may rebuild it; borrowing
+        # a shared hub (async_step_user) clears this flag again.
+        self._owns_hub = True
         return self.hub
 
     async def _login_with_family_fallback(self) -> None:
         """Log the flow's hub in over IPv4, falling back to both families.
 
-        Same reasoning and same gate as ``_login_ipv4_first``; the flow needs
-        it as much as setup does, because this login is what stands between an
-        affected user and having an entry at all (issue #606).
+        Shares setup's ``_login_ipv4_then_any``; the flow needs the fallback as
+        much as setup does, because this login is what stands between an affected
+        user and having an entry at all (issue #606). The fallback rebuilds only
+        a hub this flow owns: a hub borrowed from a running session is shared
+        with other entries, so it is signed in on its existing family and never
+        swapped out (``rebuild=None``, so the connection error just propagates).
         """
         assert self.hub is not None
-        try:
-            await self.hub.login()
-        except APIConnectionError as err:
-            # The same narrow gate setup uses, and for the same reason: only
-            # a failure to establish the connection may be retried. A request
-            # that was sent may have arrived and been acted on, and resending a
-            # sign-in can invalidate the first — on a 2FA account it also means
-            # a second code for a challenge the user can no longer answer.
-            if not _connection_never_established(err):
-                raise
-            _LOGGER.info(
-                "Could not reach Verisure over IPv4 (%s); retrying with the "
-                "default lookup, which also asks for IPv6",
-                err,
-            )
-            self._create_client(family=socket.AF_UNSPEC)
-            await self.hub.login()
+
+        # The shared helper passes which attempt this is; the flow signs in the
+        # same way either way (it maps no errors), so it is intentionally unused.
+        async def login(hub: VerisureHub, _first: bool) -> None:
+            await hub.login()
+
+        rebuild = (
+            (lambda: self._create_client(family=socket.AF_UNSPEC))
+            if self._owns_hub
+            else None
+        )
+        self.hub = await _login_ipv4_then_any(self.hub, login, rebuild)
 
     async def async_step_phone_list(
         self, user_input: dict[str, Any] | None = None
@@ -690,6 +697,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if username in sessions:
             existing_hub = sessions[username]["hub"]
             self.hub = existing_hub
+            # Borrowed, not built here: the fallback must not rebuild it (it is
+            # shared with the running entries), so leave _owns_hub False.
+            self._owns_hub = False
             self.config[CONF_DEVICE_ID] = existing_hub.config[CONF_DEVICE_ID]
             self.config[CONF_UNIQUE_ID] = existing_hub.config[CONF_UNIQUE_ID]
             self.config[CONF_DEVICE_INDIGITALL] = existing_hub.config.get(

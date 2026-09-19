@@ -8,12 +8,12 @@ import logging
 import socket
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
-import aiohttp
 import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
@@ -538,15 +538,17 @@ async def _login_or_raise(
         )
         raise
     except VerisureOwaError as err:
-        # A connection that was never established, on an attempt the caller is
-        # about to repeat on another address family, belongs to the caller:
-        # re-raise it untouched so this attempt neither notifies the user nor
-        # counts towards the refresh-crash streak. Every other caller and every
-        # other error, timeouts included, takes the mapping path below.
+        # On the first of two family attempts (retry_other_family), re-raise a
+        # connection that never opened untouched: the caller is about to repeat
+        # it on another address family, so it must not notify, log, or count
+        # towards the refresh-crash streak. Every other error — timeouts waiting
+        # for a reply included — takes the mapping path below. (The isinstance
+        # guard narrows err for pyright; pylint doesn't narrow across `and`, so
+        # its no-member on the guarded attribute is a false positive.)
         if (
             retry_other_family
             and isinstance(err, APIConnectionError)
-            and _connection_never_established(err)
+            and err.connection_never_established  # pylint: disable=no-member
         ):
             raise
         # Log the full detail — the SensitiveDataFilter scrubs known
@@ -571,57 +573,18 @@ async def _login_or_raise(
         ) from None
 
 
-def _connection_never_established(err: APIConnectionError) -> bool:
-    """True when the failure was in establishing a connection, not using one.
-
-    Two shapes qualify, and in both the connection that failed never opened, so
-    trying again on another address family is safe:
-
-    * ``ClientConnectorError`` — the name did not resolve, or the connection
-      was refused or unreachable. (TLS failures land here too. Retrying those
-      is pointless rather than harmful, and they are rare enough not to be
-      worth a third branch.)
-    * ``ConnectionTimeoutError`` — the connection never opened, so no request
-      was written to it. This is the host whose IPv4 packets are dropped rather
-      than refused: silence, not an error. Without it, such a host would never
-      reach the fallback.
-
-    A timeout waiting for a *reply* is excluded: the request was sent, so it may
-    have arrived and been acted on, and this integration does not resend a
-    sign-in to a busy server because resending can end the session rather than
-    recover it. ``ConnectionTimeoutError`` and ``SocketTimeoutError`` both
-    subclass ``ServerTimeoutError`` and neither subclasses the other, so the two
-    are separable.
-
-    One gap, inherited from the transport posting with redirects enabled: if the
-    request is delivered, answered with a redirect, and the redirect target then
-    fails to connect, that is indistinguishable from here. The endpoint is not
-    known to redirect, so this is a limit on the guarantee rather than a live
-    hazard — but the guarantee is "the connection was never established", not
-    "the server never saw it".
-    """
-    return isinstance(
-        err.__cause__, (aiohttp.ClientConnectorError, aiohttp.ConnectionTimeoutError)
-    )
+_IPV4_FALLBACK_LOG = (
+    "Could not reach Verisure over IPv4 (%s); retrying with the default lookup, "
+    "which also asks for IPv6"
+)
 
 
-def _client_session(
-    hass: HomeAssistant, *, family: socket.AddressFamily
-) -> aiohttp.ClientSession:
-    """Home Assistant's own HTTP client for one address family.
-
-    HA caches one client (and one connector) per family and closes them at
-    shutdown, so this is never ours to detach or close. Every family gets the
-    same SSRF-redirect middleware, SSL context and shared resolver as the
-    default client, because they are all built by the same helper.
-    """
-    return async_get_clientsession(hass, family=family)
-
-
-async def _login_ipv4_first(
-    hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry, username: str
+async def _login_ipv4_then_any(
+    initial: VerisureHub,
+    login: Callable[[VerisureHub, bool], Awaitable[None]],
+    rebuild: Callable[[], VerisureHub] | None,
 ) -> VerisureHub:
-    """Log in over IPv4, falling back to a lookup that also asks for IPv6.
+    """Log ``initial`` in over IPv4, falling back to the default IPv4+IPv6 lookup.
 
     Verisure's customer endpoint publishes no IPv6 address in any country this
     integration supports, so the IPv6 half of the combined lookup aiohttp issues
@@ -632,26 +595,55 @@ async def _login_ipv4_first(
 
     The fallback covers the opposite network: a host with no IPv4 route of its
     own, which reaches IPv4-only servers through NAT64/DNS64 and so needs the
-    IPv6 address its resolver synthesises. Only a failure to establish the
-    connection is retried — a rejected password must fail once and reach the
-    user, and a slow reply must not turn into a second sign-in.
+    IPv6 address its resolver synthesises. ``rebuild`` makes the fallback hub on
+    ``AF_UNSPEC``; it is None when the caller must not swap its hub out — a shared
+    hub other entries hold a reference to — and the connection error then
+    propagates unchanged.
+
+    Only a connection that never opened is retried: a rejected password must fail
+    once and reach the user, and a slow reply must not become a second sign-in
+    that could end the session. ``login`` is told which attempt it is (True for
+    the first) so a caller that maps errors can leave the first attempt's
+    connection error untouched for the check below to read.
     """
-    client = VerisureHub(
-        config, entry, _client_session(hass, family=socket.AF_INET), hass
-    )
     try:
-        await _login_or_raise(hass, client, username, retry_other_family=True)
+        await login(initial, True)
+        return initial
     except APIConnectionError as err:
-        _LOGGER.info(
-            "Could not reach Verisure over IPv4 (%s); retrying with the default "
-            "lookup, which also asks for IPv6",
-            err,
+        # Re-checked here, never merely trusted from ``login`` (which may be
+        # tightened independently): only a connection that never opened may be
+        # retried, and only when the caller owns the hub we are about to swap.
+        if not err.connection_never_established or rebuild is None:
+            raise
+        _LOGGER.info(_IPV4_FALLBACK_LOG, err)
+        hub = rebuild()
+        await login(hub, False)
+        return hub
+
+
+async def _login_ipv4_first(
+    hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry, username: str
+) -> VerisureHub:
+    """Log a fresh setup hub in over IPv4, falling back to both families.
+
+    See ``_login_ipv4_then_any`` for the why. Each hub is built on Home
+    Assistant's per-family client, which HA caches and closes at shutdown, so
+    setup never releases it.
+    """
+
+    def build(family: socket.AddressFamily) -> VerisureHub:
+        return VerisureHub(
+            config, entry, async_get_clientsession(hass, family=family), hass
         )
-        client = VerisureHub(
-            config, entry, _client_session(hass, family=socket.AF_UNSPEC), hass
-        )
-        await _login_or_raise(hass, client, username)
-    return client
+
+    async def login(hub: VerisureHub, first: bool) -> None:
+        # retry_other_family leaves the first attempt's never-established
+        # connection error unmapped, so _login_ipv4_then_any can read the flag.
+        await _login_or_raise(hass, hub, username, retry_other_family=first)
+
+    return await _login_ipv4_then_any(
+        build(socket.AF_INET), login, lambda: build(socket.AF_UNSPEC)
+    )
 
 
 async def _get_or_create_session(

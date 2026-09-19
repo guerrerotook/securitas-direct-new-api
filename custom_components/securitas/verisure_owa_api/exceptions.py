@@ -81,7 +81,26 @@ class WAFBlockedError(VerisureOwaError):
 
 
 class APIConnectionError(VerisureOwaError):
-    """Raised on network-level failures (DNS, TCP, TLS)."""
+    """Raised on network-level failures (DNS, TCP, TLS).
+
+    ``connection_never_established`` is set by the transport, the one layer that
+    still holds the original aiohttp exception and so can tell the two cases
+    apart. It is True only when the socket never opened — a DNS/TCP failure or a
+    *connect* timeout — so no request was written and retrying (e.g. on another
+    address family) cannot re-send a sign-in. A timeout waiting for a *reply*
+    leaves it False: the request may have arrived and been acted on. Callers
+    read the flag; they never re-derive it from ``__cause__``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        connection_never_established: bool = False,
+    ) -> None:
+        super().__init__(message, http_status=http_status)
+        self.connection_never_established = connection_never_established
 
 
 class OperationTimeoutError(VerisureOwaError):
