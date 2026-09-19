@@ -58,7 +58,7 @@ from . import (
     DOMAIN,
     VerisureHub,
     _client_session,
-    _never_reached_the_server,
+    _connection_never_established,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -552,20 +552,20 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _login_with_family_fallback(self) -> None:
         """Log the flow's hub in over IPv4, falling back to both families.
 
-        The flow needs this as much as setup does: this login is what stands
-        between an affected user and having an entry at all, so there is no
-        later screen that could offer them a choice (issue #606).
+        Same reasoning and same gate as ``_login_ipv4_first``; the flow needs
+        it as much as setup does, because this login is what stands between an
+        affected user and having an entry at all (issue #606).
         """
         assert self.hub is not None
         try:
             await self.hub.login()
         except APIConnectionError as err:
-            # The same narrow gate setup uses, and for the same reason: only a
-            # failure that never reached the server may be retried. A timeout
-            # may have arrived and been acted on, and resending a sign-in can
-            # invalidate the first one — on a 2FA account it also means a second
-            # code for a challenge the user can no longer answer.
-            if not _never_reached_the_server(err):
+            # The same narrow gate setup uses, and for the same reason: only
+            # a failure to establish the connection may be retried. A request
+            # that was sent may have arrived and been acted on, and resending a
+            # sign-in can invalidate the first — on a 2FA account it also means
+            # a second code for a challenge the user can no longer answer.
+            if not _connection_never_established(err):
                 raise
             _LOGGER.info(
                 "Could not reach Verisure over IPv4 (%s); retrying with the "

@@ -277,7 +277,7 @@ The central coordinator between the HA layer and the API client. It owns a `Veri
 
   `_login_ipv4_first` (setup) and `FlowHandler._login_with_family_fallback` (config flow) both attempt the login on the `AF_INET` client first. Verisure's customer endpoint publishes no AAAA record in any supported country — all ten are CNAMEs into the same Imperva edge — so the IPv6 half of the default combined lookup can only ever come back empty, and on some resolvers that empty answer fails the whole lookup instead of falling back to the IPv4 address that resolved (#606).
 
-  The fallback serves the opposite network: a host with no IPv4 route of its own, reaching IPv4-only servers through NAT64/DNS64. A host with no IPv4 address at all fails instantly (the OS has no route), so the fallback is immediate; a host whose IPv4 packets are silently dropped instead waits out aiohttp's 30-second `sock_connect` first, because HA's session passes no timeout of its own. That is once per setup or reload, not per request. It fires only when `_never_reached_the_server` is true: the wrapped cause is an `aiohttp.ClientConnectorError` (the name did not resolve, or the connection was refused or unreachable) or an `aiohttp.ConnectionTimeoutError` (the connection never opened, so nothing was written to it — the host whose IPv4 packets are dropped rather than refused). A **read timeout is deliberately excluded**: `SocketTimeoutError` means the request was sent and the reply is late, so it may have arrived and been acted on, and this integration does not resend a sign-in to a busy server, because resending can end the session rather than recover it. Both timeout classes subclass `ServerTimeoutError` and neither subclasses the other, so they are genuinely separable. `_login_or_raise(..., retry_other_family=True)` re-raises exactly that narrow case untouched, so a first attempt about to be retried neither notifies the user nor counts towards the refresh-crash streak; every other failure takes the unchanged path.
+  The fallback serves the opposite network: a host with no IPv4 route of its own, reaching IPv4-only servers through NAT64/DNS64. A host with no IPv4 address at all fails instantly (the OS has no route), so the fallback is immediate; a host whose IPv4 packets are silently dropped instead waits out aiohttp's 30-second `sock_connect` first, because HA's session passes no timeout of its own. That is once per setup or reload, not per request. It fires only when `_connection_never_established` is true: the wrapped cause is an `aiohttp.ClientConnectorError` (the name did not resolve, or the connection was refused or unreachable) or an `aiohttp.ConnectionTimeoutError` (the connection never opened, so nothing was written to it — the host whose IPv4 packets are dropped rather than refused). A **read timeout is deliberately excluded**: `SocketTimeoutError` means the request was sent and the reply is late, so it may have arrived and been acted on, and this integration does not resend a sign-in to a busy server, because resending can end the session rather than recover it. Both timeout classes subclass `ServerTimeoutError` and neither subclasses the other, so they are genuinely separable. `_login_or_raise(..., retry_other_family=True)` re-raises exactly that narrow case untouched, so a first attempt about to be retried neither notifies the user nor counts towards the refresh-crash streak; every other failure takes the unchanged path.
 
 
 ### Coordinators (`coordinators.py`)
@@ -893,9 +893,10 @@ Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactor
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
-Step 1 (init): General settings — the same three-section + Advanced layout as
+Step 1 (init): General settings — the same four-section + Advanced layout as
   the initial flow's Step 5 above (PIN section, Force-arm notifications
-  section, capability-gated Sub-panels section, collapsed Advanced section).
+  section, capability-gated Sub-panels section, Activity Log and Events
+  section, collapsed Advanced section).
   Sub-panel toggles are gated on detected capabilities; the Interior toggle is
   offered whenever any sibling axis is supported.
 

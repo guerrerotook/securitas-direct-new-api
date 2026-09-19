@@ -546,7 +546,7 @@ async def _login_or_raise(
         if (
             retry_other_family
             and isinstance(err, APIConnectionError)
-            and _never_reached_the_server(err)
+            and _connection_never_established(err)
         ):
             raise
         # Log the full detail — the SensitiveDataFilter scrubs known
@@ -571,7 +571,7 @@ async def _login_or_raise(
         ) from None
 
 
-def _never_reached_the_server(err: APIConnectionError) -> bool:
+def _connection_never_established(err: APIConnectionError) -> bool:
     """True when the failure was in establishing a connection, not using one.
 
     Two shapes qualify, and both mean this attempt never got as far as sending
@@ -632,9 +632,9 @@ async def _login_ipv4_first(
 
     The fallback covers the opposite network: a host with no IPv4 route of its
     own, which reaches IPv4-only servers through NAT64/DNS64 and so needs the
-    IPv6 address its resolver synthesises. Only a failure that never reached the
-    server is retried — a rejected password must fail once and reach the user,
-    and a timeout must not turn into a second sign-in.
+    IPv6 address its resolver synthesises. Only a failure to establish the
+    connection is retried — a rejected password must fail once and reach the
+    user, and a slow reply must not turn into a second sign-in.
     """
     client = VerisureHub(
         config, entry, _client_session(hass, family=socket.AF_INET), hass
