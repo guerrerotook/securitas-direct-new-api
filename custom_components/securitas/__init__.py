@@ -712,15 +712,12 @@ async def _get_or_create_session(
             ):
                 client.adopt_refresh_token(stored_token)
                 await _login_or_raise(hass, client, username)
-            _hold_session_reference(sessions[username], entry.entry_id)
         else:
             # Create new session and log in
             client = await _login_ipv4_first(hass, config, entry, username)
-            sessions[username] = {
-                "hub": client,
-                "ref_count": 1,
-                "holders": {entry.entry_id},
-            }
+            sessions[username] = {"hub": client, "ref_count": 0, "holders": set()}
+
+        _hold_session_reference(sessions[username], entry.entry_id)
 
     # Either branch hands back a live session, which proves the stored token.
     _clear_setup_refresh_crash(hass, username)
