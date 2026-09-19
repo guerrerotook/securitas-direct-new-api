@@ -197,7 +197,6 @@ class TestSetupFailureAfterLoginReleasesOwnedSession:
     async def test_fetch_failure_detaches_owned_session(self, hass):
         """When post-login install fetch fails, the owned client is detached."""
         from homeassistant.const import CONF_USERNAME
-        from homeassistant.exceptions import ConfigEntryNotReady
 
         from custom_components.securitas import async_setup_entry
         from custom_components.securitas.verisure_owa_api.exceptions import (
