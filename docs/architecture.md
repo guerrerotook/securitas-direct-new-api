@@ -893,7 +893,7 @@ Device IDs are generated during initial setup and stored in the config entry for
 
 Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing. Every login this flow runs — initial setup, reauth and the 2FA completion — goes through `_login_with_family_fallback`, so the flow reaches the server the same way setup does (#606).
 
-**Options flow** (`VerisureOwaOptionsFlowHandler`):
+**Options flow** (`VerisureOptionsFlowHandler`):
 ```
 Step 1 (init): General settings — the same four-section + Advanced layout as
   the initial flow's Step 5 above (PIN section, Force-arm notifications
