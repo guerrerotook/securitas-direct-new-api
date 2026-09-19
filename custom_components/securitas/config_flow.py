@@ -59,6 +59,7 @@ from . import (
     DOMAIN,
     VerisureHub,
     _login_ipv4_then_any,
+    _new_session_record,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -905,10 +906,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
         if username not in sessions:
-            # No holder and no count: the config entry does not exist yet, so
-            # nothing can hold this session. ``async_setup_entry`` adopts it as
-            # the first holder once HA creates and sets up the entry.
-            sessions[username] = {"hub": self.hub, "ref_count": 0, "holders": set()}
+            # No holder yet: the config entry does not exist, so nothing can
+            # hold this session. ``async_setup_entry`` adopts it as the first
+            # holder once HA creates and sets up the entry.
+            sessions[username] = _new_session_record(self.hub)
 
         try:
             installations = await self.hub.client.list_installations()
@@ -1108,7 +1109,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        if username in sessions and sessions[username]["ref_count"] <= 0:
+        if username in sessions and not sessions[username]["holders"]:
             sessions.pop(username)
 
     @staticmethod

@@ -1886,7 +1886,7 @@ class TestSharedSession:
         sessions = hass.data[DOMAIN]["sessions"]
         assert sessions[username]["ref_count"] == 1
         assert sessions[username]["holders"] == {entry.entry_id}
-        assert mock_hub.login.await_count == 1
+        mock_hub.login.assert_awaited_once()
 
     async def test_reused_config_flow_hub_gets_config_entry_attached(
         self, hass, mock_hub

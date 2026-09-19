@@ -2047,6 +2047,60 @@ async def test_full_flow_select_installation_creates_entry(hass):
 # ===================================================================
 
 
+async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
+    """Abandoning the flow must not strand the hub it signed in with.
+
+    The flow registers its hub before its config entry exists, so that record
+    has no holders. If the user walks away, nothing will ever adopt it.
+    """
+    from custom_components.securitas.config_flow import FlowHandler
+
+    hub = _hub_factory()
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN]["sessions"] = {
+        "test@example.com": {"hub": hub, "ref_count": 0, "holders": set()}
+    }
+
+    flow = FlowHandler()
+    flow.hass = hass
+    flow.config = {CONF_USERNAME: "test@example.com"}
+
+    await flow.async_step_abort()
+
+    assert "test@example.com" not in hass.data[DOMAIN]["sessions"]
+
+
+async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
+    """Abandoning a second-installation flow must not cut off the first.
+
+    Adding another installation to an account that already has one reuses the
+    running session rather than signing in again, so the record the flow would
+    clean up is the one a loaded entry is using. Popping it would leave that
+    entry's rotated tokens with nowhere to go.
+    """
+    from custom_components.securitas.config_flow import FlowHandler
+
+    hub = _hub_factory()
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN]["sessions"] = {
+        "test@example.com": {
+            "hub": hub,
+            "ref_count": 1,
+            "holders": {"loaded-entry-id"},
+        }
+    }
+
+    flow = FlowHandler()
+    flow.hass = hass
+    flow.config = {CONF_USERNAME: "test@example.com"}
+
+    await flow.async_step_abort()
+
+    session = hass.data[DOMAIN]["sessions"]["test@example.com"]
+    assert session["hub"] is hub
+    assert session["holders"] == {"loaded-entry-id"}
+
+
 async def test_existing_session_reused_no_new_login(hass):
     """When a session already exists for this username, reuse it without login."""
     existing_hub = _hub_factory()

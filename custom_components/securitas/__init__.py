@@ -646,6 +646,26 @@ async def _login_ipv4_first(
     )
 
 
+def _sync_ref_count(session: dict[str, Any]) -> None:
+    """Re-derive ``ref_count`` from ``holders``.
+
+    The one place ``ref_count`` is ever assigned, so the two cannot drift apart.
+    """
+    session["ref_count"] = len(session["holders"])
+
+
+def _new_session_record(hub: VerisureHub) -> dict[str, Any]:
+    """Build a shared-session record that nobody holds yet.
+
+    Both places a session is created start here — this module, and the config
+    flow, which builds its hub before its config entry exists and so has no
+    holder to record yet.
+    """
+    session: dict[str, Any] = {"hub": hub, "holders": set()}
+    _sync_ref_count(session)
+    return session
+
+
 def _hold_session_reference(session: dict[str, Any], entry_id: str) -> None:
     """Record ``entry_id`` as a holder of the shared session.
 
@@ -654,20 +674,15 @@ def _hold_session_reference(session: dict[str, Any], entry_id: str) -> None:
     without unloading first, so the same entry reaches ``_get_or_create_session``
     again and must not take a second reference. Holding the entry ids rather
     than a bare tally is what makes that idempotent.
-
-    Invariant: ``ref_count`` is always ``len(holders)``. It is written here and
-    in ``_drop_session_reference``, and nowhere else.
     """
-    holders: set[str] = session["holders"]
-    holders.add(entry_id)
-    session["ref_count"] = len(holders)
+    session["holders"].add(entry_id)
+    _sync_ref_count(session)
 
 
 def _drop_session_reference(session: dict[str, Any], entry_id: str) -> None:
     """Forget ``entry_id``'s reference; an entry that held none is untouched."""
-    holders: set[str] = session["holders"]
-    holders.discard(entry_id)
-    session["ref_count"] = len(holders)
+    session["holders"].discard(entry_id)
+    _sync_ref_count(session)
 
 
 async def _get_or_create_session(
@@ -715,7 +730,7 @@ async def _get_or_create_session(
         else:
             # Create new session and log in
             client = await _login_ipv4_first(hass, config, entry, username)
-            sessions[username] = {"hub": client, "ref_count": 0, "holders": set()}
+            sessions[username] = _new_session_record(client)
 
         _hold_session_reference(sessions[username], entry.entry_id)
 
@@ -1440,7 +1455,9 @@ def _release_shared_session(
 ) -> None:
     """Drop one reference to a shared session, popping it when the last leaves.
 
-    Releasing for an entry that never acquired a reference is a no-op.
+    Dropping a reference an entry never took cannot take one away from an
+    entry that did — that is what stops a co-tenant's session being pulled out
+    from under it. A record no entry holds at all is still dropped, as before.
 
     When the session survives but the entry being unloaded is the one the hub
     persists rotated refresh tokens to, hand that persistence off to a surviving
@@ -1450,9 +1467,9 @@ def _release_shared_session(
     recur on the survivor's next restart.
     """
     session = sessions[username]
-    # An entry whose setup never completed holds no reference, so this changes
-    # nothing for it. Counting the leaver out regardless would pop the session
-    # out from under a co-tenant that is still using it.
+    # An entry whose setup never completed holds no reference, so this leaves
+    # the holders alone. Counting the leaver out regardless would pop the
+    # session out from under a co-tenant that is still using it.
     _drop_session_reference(session, leaving.entry_id)
     if not session["holders"]:
         sessions.pop(username)
@@ -1478,7 +1495,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
         return False
 
-    # Decrement shared session ref count (under the same lock used for creation)
+    # Release this entry's reference (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
     setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
