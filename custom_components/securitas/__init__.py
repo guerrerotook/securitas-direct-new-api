@@ -574,16 +574,29 @@ async def _login_or_raise(
 def _never_reached_the_server(err: APIConnectionError) -> bool:
     """True when the failed request provably never left this machine.
 
-    A DNS or TCP-connect failure delivered nothing, so trying again on another
-    address family costs the server nothing and cannot disturb a session.
+    Two shapes qualify, and both mean nothing was delivered, so trying again on
+    another address family costs the server nothing and cannot disturb a
+    session in progress:
 
-    A timeout is deliberately excluded: the request may have arrived and still
-    be in flight, and this integration does not resend a sign-in to a busy
-    server, because resending can end the session instead of recovering it.
-    ``ServerTimeoutError`` is not a ``ClientConnectorError``, so the two are
-    genuinely distinguishable here.
+    * ``ClientConnectorError`` — the name did not resolve, or the connection
+      was refused or unreachable. (TLS failures land here too. Retrying those
+      is pointless rather than harmful, and they are rare enough not to be
+      worth a third branch.)
+    * ``ConnectionTimeoutError`` — the connection never opened, so no request
+      was written to it. This is the host whose IPv4 packets are dropped rather
+      than refused: silence, not an error. Without it, such a host would never
+      reach the fallback.
+
+    A *read* timeout is deliberately excluded. ``SocketTimeoutError`` means the
+    request was sent and the reply is late, so it may have arrived and been
+    acted on — and this integration does not resend a sign-in to a busy server,
+    because resending can end the session rather than recover it. The two are
+    genuinely separable: both subclass ``ServerTimeoutError``, but neither is a
+    subclass of the other.
     """
-    return isinstance(err.__cause__, aiohttp.ClientConnectorError)
+    return isinstance(
+        err.__cause__, (aiohttp.ClientConnectorError, aiohttp.ConnectionTimeoutError)
+    )
 
 
 def _client_session(
@@ -1230,16 +1243,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         try:
             devices = await _fetch_and_cache_installations(hass, client, entry)
-        except BaseException as err:
-            # The session is registered by now, and HA does not unload an entry
-            # whose setup failed, so this reference has to go back by hand or
-            # the retry inflates the count for good (see
-            # _release_session_reference). BaseException, not VerisureOwaError:
-            # a restart or a reload cancels setup mid-fetch, and a cancelled
-            # attempt holds its reference just as firmly as a failed one.
-            await _release_session_reference(hass, entry, config[CONF_USERNAME])
-            if not isinstance(err, VerisureOwaError):
-                raise
+        except VerisureOwaError as err:
             _LOGGER.error("Unable to connect to Verisure: %s", err.log_detail())
             raise ConfigEntryNotReady("Unable to connect to Verisure") from None
 
@@ -1448,20 +1452,12 @@ def _release_shared_session(
 async def _release_session_reference(
     hass: HomeAssistant, entry: ConfigEntry, username: str
 ) -> None:
-    """Release the shared-session reference held by *entry*.
+    """Release the shared-session reference held by *entry*, under its lock.
 
-    Home Assistant does not call ``async_unload_entry`` when setup raises
-    ``ConfigEntryNotReady``, so a setup failure that happens *after* the session
-    was registered (the post-login installation fetch, or a cancellation during
-    it) would otherwise leave this entry's reference behind. The retry would
-    then take the reuse branch and inflate ``ref_count``, which never returns to
-    zero, so the shared hub outlives the last entry using it. Call this on such
-    a failure so the retry starts from a clean session.
-
-    A no-op when the session was never registered — login failed, or the failure
-    preceded registration. It must stay a no-op in that case: a co-tenant entry
-    may be holding the only reference, and releasing it here on behalf of an
-    entry that never took one would pull the session out from under them.
+    A no-op when the session was never registered. It must stay one: a
+    co-tenant entry may be holding the only reference, and releasing it on
+    behalf of an entry that never took one would pull the session out from
+    under them.
     """
     domain_data = hass.data.get(DOMAIN, {})
     sessions = domain_data.get("sessions", {})

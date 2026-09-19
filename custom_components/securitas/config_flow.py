@@ -58,6 +58,7 @@ from . import (
     DOMAIN,
     VerisureHub,
     _client_session,
+    _never_reached_the_server,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -431,28 +432,29 @@ def _build_settings_schema(
         {"collapsed": False},
     )
 
-    advanced_fields: dict[Any, Any] = {
-        vol.Optional(
-            CONF_SCAN_INTERVAL,
-            default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        ): int,
-        vol.Optional(
-            CONF_DELAY_CHECK_OPERATION,
-            default=defaults.get(
-                CONF_DELAY_CHECK_OPERATION,
-                DEFAULT_DELAY_CHECK_OPERATION,
-            ),
-        ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
-        vol.Optional(
-            CONF_OPERATION_POLL_TIMEOUT,
-            default=defaults.get(
-                CONF_OPERATION_POLL_TIMEOUT,
-                DEFAULT_OPERATION_POLL_TIMEOUT,
-            ),
-        ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
-    }
     advanced_section = section(
-        vol.Schema(advanced_fields),
+        vol.Schema(
+            {
+                vol.Optional(
+                    CONF_SCAN_INTERVAL,
+                    default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                ): int,
+                vol.Optional(
+                    CONF_DELAY_CHECK_OPERATION,
+                    default=defaults.get(
+                        CONF_DELAY_CHECK_OPERATION,
+                        DEFAULT_DELAY_CHECK_OPERATION,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
+                vol.Optional(
+                    CONF_OPERATION_POLL_TIMEOUT,
+                    default=defaults.get(
+                        CONF_OPERATION_POLL_TIMEOUT,
+                        DEFAULT_OPERATION_POLL_TIMEOUT,
+                    ),
+                ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
+            }
+        ),
         {"collapsed": True},
     )
 
@@ -560,13 +562,27 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         try:
             await self.hub.login()
         except APIConnectionError as err:
+            # The same narrow gate setup uses, and for the same reason: only a
+            # failure that never reached the server may be retried. A timeout
+            # may have arrived and been acted on, and resending a sign-in can
+            # invalidate the first one — on a 2FA account it also means a second
+            # code for a challenge the user can no longer answer.
+            if not _never_reached_the_server(err):
+                raise
             _LOGGER.info(
                 "Could not reach Verisure over IPv4 (%s); retrying with the "
                 "default lookup, which also asks for IPv6",
                 err,
             )
+            replaced = self.hub
             self.hub = self._create_client(family=socket.AF_UNSPEC)
             await self.hub.login()
+            # Entries for one account share a hub by username. If the hub just
+            # replaced was the registered one, the registry has to follow, or a
+            # later setup reuses a hub that was never signed in.
+            for record in self.hass.data.get(DOMAIN, {}).get("sessions", {}).values():
+                if record.get("hub") is replaced:
+                    record["hub"] = self.hub
 
     async def async_step_phone_list(
         self, user_input: dict[str, Any] | None = None

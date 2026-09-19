@@ -272,12 +272,14 @@ The central coordinator between the HA layer and the API client. It owns a `Veri
 - **Camera management** — `get_camera_devices()` discovers cameras (cached), `capture_image()` requests new captures via the client and stores results. The hub handles HA-specific concerns: dispatcher signals (`SIGNAL_CAMERA_STATE`), image validation/storage, full-image background fetch, and coordinator data updates. After a capture completes, it pushes the new thumbnail and full image into the `CameraCoordinator` via `async_set_updated_data()`.
 - **Lock management** — `get_lock_modes()` discovers locks (thin pass-through to the client), `change_lock_mode()` performs lock/unlock via queue, `get_lock_config()` fetches per-lock configuration (auto-detects Smartlock vs Danalock API).
 - **Alarm operations** — `arm_alarm()`, `disarm_alarm()`, `refresh_alarm_status()` submit commands through the queue. `refresh_alarm_status()` uses the authoritative `CheckAlarm` round-trip (not just `xSStatus`).
-- **Session sharing** — Multiple config entries for the same username share a single `VerisureHub` instance via reference counting in `hass.data[DOMAIN]["sessions"]`. This prevents duplicate logins and reduces WAF pressure. The reference is also released when setup fails *after* the session was registered (`_release_session_reference`), because HA does not call `async_unload_entry` on `ConfigEntryNotReady` and the retry would otherwise inflate the count so it never returned to zero.
+- **Session sharing** — Multiple config entries for the same username share a single `VerisureHub` instance via reference counting in `hass.data[DOMAIN]["sessions"]`. This prevents duplicate logins and reduces WAF pressure.
+
+  Known gap: a setup that fails *after* the session is registered keeps its reference, because HA does not call `async_unload_entry` on `ConfigEntryNotReady`, so the retry takes the reuse branch and increments the count again. Releasing it on failure is not the fix — the release pops the last reference, and the retry then performs a fresh login and rotates the refresh token every time (measured: three failed attempts cost three logins instead of one). Making a reference idempotent per entry would fix both, and is its own change.
 - **Address family** — Every HTTP client this integration uses is one Home Assistant owns: `_client_session` is a thin wrapper over `async_get_clientsession(hass, family=...)`, which caches one session *and one connector* per address family and closes them at shutdown. Nothing here is ever detached or closed.
 
   `_login_ipv4_first` (setup) and `FlowHandler._login_with_family_fallback` (config flow) both attempt the login on the `AF_INET` client first. Verisure's customer endpoint publishes no AAAA record in any supported country — all ten are CNAMEs into the same Imperva edge — so the IPv6 half of the default combined lookup can only ever come back empty, and on some resolvers that empty answer fails the whole lookup instead of falling back to the IPv4 address that resolved (#606).
 
-  The fallback serves the opposite network: a host with no IPv4 route of its own, reaching IPv4-only servers through NAT64/DNS64. It fires only when `_never_reached_the_server` is true — the wrapped cause is an `aiohttp.ClientConnectorError`, meaning DNS or TCP-connect failed and nothing was delivered. A **timeout is deliberately excluded** (`ServerTimeoutError` is not a `ClientConnectorError`): the request may have arrived, and this integration does not resend a sign-in to a busy server, because resending can end the session rather than recover it. `_login_or_raise(..., retry_other_family=True)` re-raises exactly that narrow case untouched, so a first attempt about to be retried neither notifies the user nor counts towards the refresh-crash streak; every other failure takes the unchanged path.
+  The fallback serves the opposite network: a host with no IPv4 route of its own, reaching IPv4-only servers through NAT64/DNS64. It fires only when `_never_reached_the_server` is true: the wrapped cause is an `aiohttp.ClientConnectorError` (the name did not resolve, or the connection was refused or unreachable) or an `aiohttp.ConnectionTimeoutError` (the connection never opened, so nothing was written to it — the host whose IPv4 packets are dropped rather than refused). A **read timeout is deliberately excluded**: `SocketTimeoutError` means the request was sent and the reply is late, so it may have arrived and been acted on, and this integration does not resend a sign-in to a busy server, because resending can end the session rather than recover it. Both timeout classes subclass `ServerTimeoutError` and neither subclasses the other, so they are genuinely separable. `_login_or_raise(..., retry_other_family=True)` re-raises exactly that narrow case untouched, so a first attempt about to be retried neither notifies the user nor counts towards the refresh-crash streak; every other failure takes the unchanged path.
 
 
 ### Coordinators (`coordinators.py`)
@@ -334,8 +336,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
    └── …except the xSRefreshLogin JS-crash on the 2nd consecutive attempt → ConfigEntryAuthFailed (the stored token is dead; #568)
 6. Assign shared ApiQueue (per domain/country)
 7. List installations, get_services() per installation
-   :  VerisureOwaError → release this entry's session reference, then raise
-      ConfigEntryNotReady (HA retries)
+   :  VerisureOwaError → raise ConfigEntryNotReady (HA retries)
 8. Create coordinators:
    ├── AlarmCoordinator (always)
    ├── SentinelCoordinator (if sentinel service found)
@@ -896,10 +897,9 @@ Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactor
 ```
 Step 1 (init): General settings — the same three-section + Advanced layout as
   the initial flow's Step 5 above (PIN section, Force-arm notifications
-  section, capability-gated Sub-panels section, collapsed Advanced section),
-  Sub-panel toggles are
-  gated on detected capabilities; the Interior toggle is offered whenever any
-  sibling axis is supported.
+  section, capability-gated Sub-panels section, collapsed Advanced section).
+  Sub-panel toggles are gated on detected capabilities; the Interior toggle is
+  offered whenever any sibling axis is supported.
 
 Step 2 (mappings): Alarm state mappings — same five mapping dropdowns as
   initial flow, with the same conditional {subpanels_note} placeholder.
