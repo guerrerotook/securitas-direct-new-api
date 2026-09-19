@@ -334,6 +334,9 @@ class TestReauthHonoursForceIpv4:
 
         # detach() unbinds the connector without closing HA's shared one.
         assert session.connector is None
+        # And it releases only its own client: everything else on this
+        # Home Assistant still connects through the shared one.
+        assert async_get_clientsession(hass).connector is not None
 
     async def test_reauth_borrows_the_shared_client_when_the_option_is_off(self, hass):
         """The default is unchanged: reauth uses Home Assistant's own client."""
