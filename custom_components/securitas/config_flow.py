@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
 from typing import Any
 
@@ -19,7 +20,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
     CountrySelectorConfig,
@@ -57,6 +57,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _client_session,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -90,6 +91,7 @@ from .verisure_owa_api import (
     dropdown_options,
 )
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
+from .verisure_owa_api.exceptions import APIConnectionError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -429,29 +431,28 @@ def _build_settings_schema(
         {"collapsed": False},
     )
 
+    advanced_fields: dict[Any, Any] = {
+        vol.Optional(
+            CONF_SCAN_INTERVAL,
+            default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        ): int,
+        vol.Optional(
+            CONF_DELAY_CHECK_OPERATION,
+            default=defaults.get(
+                CONF_DELAY_CHECK_OPERATION,
+                DEFAULT_DELAY_CHECK_OPERATION,
+            ),
+        ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
+        vol.Optional(
+            CONF_OPERATION_POLL_TIMEOUT,
+            default=defaults.get(
+                CONF_OPERATION_POLL_TIMEOUT,
+                DEFAULT_OPERATION_POLL_TIMEOUT,
+            ),
+        ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
+    }
     advanced_section = section(
-        vol.Schema(
-            {
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): int,
-                vol.Optional(
-                    CONF_DELAY_CHECK_OPERATION,
-                    default=defaults.get(
-                        CONF_DELAY_CHECK_OPERATION,
-                        DEFAULT_DELAY_CHECK_OPERATION,
-                    ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=2.0, max=15.0)),
-                vol.Optional(
-                    CONF_OPERATION_POLL_TIMEOUT,
-                    default=defaults.get(
-                        CONF_OPERATION_POLL_TIMEOUT,
-                        DEFAULT_OPERATION_POLL_TIMEOUT,
-                    ),
-                ): vol.All(vol.Coerce(float), vol.Range(min=60.0, max=300.0)),
-            }
-        ),
+        vol.Schema(advanced_fields),
         {"collapsed": True},
     )
 
@@ -521,9 +522,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _create_client(
-        self,
+        self, *, family: socket.AddressFamily = socket.AF_INET
     ) -> VerisureHub:
-        """Create client (VerisureHub)."""
+        """Create client (VerisureHub) on Home Assistant's client for *family*.
+
+        IPv4 by default, for the reason given in ``_login_ipv4_first``: no
+        supported country's endpoint has an IPv6 address, so the IPv6 half of
+        the default lookup can only ever come back empty, and on some networks
+        it fails the whole lookup (issue #606). ``_login_with_family_fallback``
+        rebuilds on ``AF_UNSPEC`` if that attempt cannot reach the network.
+
+        The client belongs to Home Assistant, which caches one per family and
+        closes them at shutdown, so this flow never releases it.
+        """
 
         if self.config[CONF_PASSWORD] is None:
             raise ValueError(
@@ -531,10 +542,31 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         self.hub = VerisureHub(
-            self.config, None, async_get_clientsession(self.hass), self.hass
+            self.config, None, _client_session(self.hass, family=family), self.hass
         )
 
         return self.hub
+
+    async def _login_with_family_fallback(self) -> None:
+        """Log the flow's hub in over IPv4, falling back to both families.
+
+        The same two networks setup has to serve, and the reason the address
+        family is decided here rather than by a setting: a user whose resolver
+        fails the combined lookup cannot reach a post-setup options screen,
+        because this login is what stands between them and having an entry at
+        all (issue #606).
+        """
+        assert self.hub is not None
+        try:
+            await self.hub.login()
+        except APIConnectionError as err:
+            _LOGGER.info(
+                "Could not reach Verisure over IPv4 (%s); retrying with the "
+                "default lookup, which also asks for IPv6",
+                err,
+            )
+            self.hub = self._create_client(family=socket.AF_UNSPEC)
+            await self.hub.login()
 
     async def async_step_phone_list(
         self, user_input: dict[str, Any] | None = None
@@ -666,7 +698,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Login — catches credential errors and network failures
         try:
-            await self.hub.login()
+            await self._login_with_family_fallback()
         except TwoFactorRequiredError:
             # 2FA required — proceed to device validation for phone list
             return await self._start_2fa_flow()
@@ -735,7 +767,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.hub = self._create_client()
 
             try:
-                await self.hub.login()
+                await self._login_with_family_fallback()
             except TwoFactorRequiredError:
                 return await self._start_2fa_flow()
             except AccountBlockedError:
@@ -829,7 +861,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         assert self.hub is not None
         try:
             if self.hub.get_authentication_token() is None:
-                await self.hub.login()
+                await self._login_with_family_fallback()
         except TwoFactorRequiredError:
             return await self._start_2fa_flow()
         except AccountBlockedError:

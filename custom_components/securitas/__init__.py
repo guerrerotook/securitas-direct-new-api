@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import socket
 import time
 from collections import OrderedDict
 from datetime import timedelta
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
 
+import aiohttp
 import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
@@ -137,6 +139,7 @@ from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
 from .pin_crypto import encode_pin
 from .verisure_owa_api import (
+    APIConnectionError,
     ApiDomains,
     AuthenticationError,
     Installation,
@@ -502,7 +505,11 @@ def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
 
 
 async def _login_or_raise(
-    hass: HomeAssistant, client: VerisureHub, username: str
+    hass: HomeAssistant,
+    client: VerisureHub,
+    username: str,
+    *,
+    retry_other_family: bool = False,
 ) -> None:
     """Log the hub in, mapping failures to HA's setup exceptions.
 
@@ -510,6 +517,13 @@ async def _login_or_raise(
     becomes ConfigEntryAuthFailed like a credential rejection; HA's own reauth
     card is the user-facing notice for that path, so unlike the credential
     branches it raises no persistent notification of its own.
+
+    ``retry_other_family`` marks a first attempt the caller will repeat on
+    another address family. A failure that never reached the server is then
+    re-raised as-is rather than mapped, so the attempt about to be retried does
+    not notify the user, log an error or count towards the crash streak. Every
+    other failure — including a timeout, which may have arrived — is handled
+    here exactly as it is for every other caller.
     """
     try:
         await client.login()
@@ -524,6 +538,17 @@ async def _login_or_raise(
         )
         raise
     except VerisureOwaError as err:
+        # A failure that never reached the server, on an attempt the caller is
+        # about to repeat on another address family, belongs to the caller:
+        # re-raise it untouched so this attempt neither notifies the user nor
+        # counts towards the refresh-crash streak. Everything below is unchanged
+        # for every other caller and every other error, timeouts included.
+        if (
+            retry_other_family
+            and isinstance(err, APIConnectionError)
+            and _never_reached_the_server(err)
+        ):
+            raise
         # Log the full detail — the SensitiveDataFilter scrubs known
         # secrets — but never embed the raw response body in the
         # user-facing ConfigEntryNotReady text, which doesn't go
@@ -544,6 +569,70 @@ async def _login_or_raise(
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"
         ) from None
+
+
+def _never_reached_the_server(err: APIConnectionError) -> bool:
+    """True when the failed request provably never left this machine.
+
+    A DNS or TCP-connect failure delivered nothing, so trying again on another
+    address family costs the server nothing and cannot disturb a session.
+
+    A timeout is deliberately excluded: the request may have arrived and still
+    be in flight, and this integration does not resend a sign-in to a busy
+    server, because resending can end the session instead of recovering it.
+    ``ServerTimeoutError`` is not a ``ClientConnectorError``, so the two are
+    genuinely distinguishable here.
+    """
+    return isinstance(err.__cause__, aiohttp.ClientConnectorError)
+
+
+def _client_session(
+    hass: HomeAssistant, *, family: socket.AddressFamily
+) -> aiohttp.ClientSession:
+    """Home Assistant's own HTTP client for one address family.
+
+    HA caches one client (and one connector) per family and closes them at
+    shutdown, so this is never ours to detach or close. Every family gets the
+    same SSRF-redirect middleware, SSL context and shared resolver as the
+    default client, because they are all built by the same helper.
+    """
+    return async_get_clientsession(hass, family=family)
+
+
+async def _login_ipv4_first(
+    hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry, username: str
+) -> VerisureHub:
+    """Log in over IPv4, falling back to a lookup that also asks for IPv6.
+
+    Verisure's customer endpoint publishes no IPv6 address in any country this
+    integration supports, so the IPv6 half of the combined lookup aiohttp issues
+    by default can only ever come back empty here. On some networks that empty
+    answer fails the whole lookup instead of falling back to the IPv4 address
+    that resolved fine, and the alarm sits at unavailable (issue #606). Asking
+    for IPv4 only skips a question with no useful answer.
+
+    The fallback covers the opposite network: a host with no IPv4 route of its
+    own, which reaches IPv4-only servers through NAT64/DNS64 and so needs the
+    IPv6 address its resolver synthesises. Only a failure that never reached the
+    server is retried — a rejected password must fail once and reach the user,
+    and a timeout must not turn into a second sign-in.
+    """
+    client = VerisureHub(
+        config, entry, _client_session(hass, family=socket.AF_INET), hass
+    )
+    try:
+        await _login_or_raise(hass, client, username, retry_other_family=True)
+    except APIConnectionError as err:
+        _LOGGER.info(
+            "Could not reach Verisure over IPv4 (%s); retrying with the default "
+            "lookup, which also asks for IPv6",
+            err,
+        )
+        client = VerisureHub(
+            config, entry, _client_session(hass, family=socket.AF_UNSPEC), hass
+        )
+        await _login_or_raise(hass, client, username)
+    return client
 
 
 async def _get_or_create_session(
@@ -591,8 +680,7 @@ async def _get_or_create_session(
             sessions[username]["ref_count"] += 1
         else:
             # Create new session and log in
-            client = VerisureHub(config, entry, async_get_clientsession(hass), hass)
-            await _login_or_raise(hass, client, username)
+            client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = {"hub": client, "ref_count": 1}
 
     # Either branch hands back a live session, which proves the stored token.
@@ -1142,7 +1230,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         try:
             devices = await _fetch_and_cache_installations(hass, client, entry)
-        except VerisureOwaError as err:
+        except BaseException as err:
+            # The session is registered by now, and HA does not unload an entry
+            # whose setup failed, so this reference has to go back by hand or
+            # the retry inflates the count for good (see
+            # _release_session_reference). BaseException, not VerisureOwaError:
+            # a restart or a reload cancels setup mid-fetch, and a cancelled
+            # attempt holds its reference just as firmly as a failed one.
+            await _release_session_reference(hass, entry, config[CONF_USERNAME])
+            if not isinstance(err, VerisureOwaError):
+                raise
             _LOGGER.error("Unable to connect to Verisure: %s", err.log_detail())
             raise ConfigEntryNotReady("Unable to connect to Verisure") from None
 
@@ -1316,6 +1413,10 @@ def _release_shared_session(
 ) -> None:
     """Drop one reference to a shared session, popping it when the last leaves.
 
+    The HTTP client itself is never released here: every client this integration
+    uses is one Home Assistant caches and closes at shutdown (see
+    ``_client_session``).
+
     When the session survives but the entry being unloaded is the one the hub
     persists rotated refresh tokens to, hand that persistence off to a surviving
     co-tenant entry and write the current token there immediately. Otherwise
@@ -1344,6 +1445,36 @@ def _release_shared_session(
             return
 
 
+async def _release_session_reference(
+    hass: HomeAssistant, entry: ConfigEntry, username: str
+) -> None:
+    """Release the shared-session reference held by *entry*.
+
+    Home Assistant does not call ``async_unload_entry`` when setup raises
+    ``ConfigEntryNotReady``, so a setup failure that happens *after* the session
+    was registered (the post-login installation fetch, or a cancellation during
+    it) would otherwise leave this entry's reference behind. The retry would
+    then take the reuse branch and inflate ``ref_count``, which never returns to
+    zero, so the shared hub outlives the last entry using it. Call this on such
+    a failure so the retry starts from a clean session.
+
+    A no-op when the session was never registered — login failed, or the failure
+    preceded registration. It must stay a no-op in that case: a co-tenant entry
+    may be holding the only reference, and releasing it here on behalf of an
+    entry that never took one would pull the session out from under them.
+    """
+    domain_data = hass.data.get(DOMAIN, {})
+    sessions = domain_data.get("sessions", {})
+    if username not in sessions:
+        return
+    lock = domain_data.get("setup_locks", {}).get(username)
+    if lock:
+        async with lock:
+            _release_shared_session(hass, sessions, username, entry)
+    else:
+        _release_shared_session(hass, sessions, username, entry)
+
+
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
@@ -1351,15 +1482,8 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
     # Decrement shared session ref count (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
-    sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
-    setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
-    if username and username in sessions:
-        lock = setup_locks.get(username)
-        if lock:
-            async with lock:
-                _release_shared_session(hass, sessions, username, config_entry)
-        else:
-            _release_shared_session(hass, sessions, username, config_entry)
+    if username:
+        await _release_session_reference(hass, config_entry, username)
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
