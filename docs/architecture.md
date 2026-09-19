@@ -272,7 +272,13 @@ The central coordinator between the HA layer and the API client. It owns a `Veri
 - **Camera management** — `get_camera_devices()` discovers cameras (cached), `capture_image()` requests new captures via the client and stores results. The hub handles HA-specific concerns: dispatcher signals (`SIGNAL_CAMERA_STATE`), image validation/storage, full-image background fetch, and coordinator data updates. After a capture completes, it pushes the new thumbnail and full image into the `CameraCoordinator` via `async_set_updated_data()`.
 - **Lock management** — `get_lock_modes()` discovers locks (thin pass-through to the client), `change_lock_mode()` performs lock/unlock via queue, `get_lock_config()` fetches per-lock configuration (auto-detects Smartlock vs Danalock API).
 - **Alarm operations** — `arm_alarm()`, `disarm_alarm()`, `refresh_alarm_status()` submit commands through the queue. `refresh_alarm_status()` uses the authoritative `CheckAlarm` round-trip (not just `xSStatus`).
-- **Session sharing** — Multiple config entries for the same username share a single `VerisureHub` instance via reference counting in `hass.data[DOMAIN]["sessions"]`. This prevents duplicate logins and reduces WAF pressure.
+- **Session sharing** — Multiple config entries for the same username share a single `VerisureHub` instance via reference counting in `hass.data[DOMAIN]["sessions"]`. This prevents duplicate logins and reduces WAF pressure. The reference is also released when setup fails *after* the session was registered (`_release_session_reference`), because HA does not call `async_unload_entry` on `ConfigEntryNotReady` and the retry would otherwise inflate the count so it never returned to zero.
+- **Address family** — Every HTTP client this integration uses is one Home Assistant owns: `_client_session` is a thin wrapper over `async_get_clientsession(hass, family=...)`, which caches one session *and one connector* per address family and closes them at shutdown. Nothing here is ever detached or closed.
+
+  `_login_ipv4_first` (setup) and `FlowHandler._login_with_family_fallback` (config flow) both attempt the login on the `AF_INET` client first. Verisure's customer endpoint publishes no AAAA record in any supported country — all ten are CNAMEs into the same Imperva edge — so the IPv6 half of the default combined lookup can only ever come back empty, and on some resolvers that empty answer fails the whole lookup instead of falling back to the IPv4 address that resolved (#606).
+
+  The fallback serves the opposite network: a host with no IPv4 route of its own, reaching IPv4-only servers through NAT64/DNS64. It fires only when `_never_reached_the_server` is true — the wrapped cause is an `aiohttp.ClientConnectorError`, meaning DNS or TCP-connect failed and nothing was delivered. A **timeout is deliberately excluded** (`ServerTimeoutError` is not a `ClientConnectorError`): the request may have arrived, and this integration does not resend a sign-in to a busy server, because resending can end the session rather than recover it. `_login_or_raise(..., retry_other_family=True)` re-raises exactly that narrow case untouched, so a first attempt about to be retried neither notifies the user nor counts towards the refresh-crash streak; every other failure takes the unchanged path.
+
 
 ### Coordinators (`coordinators.py`)
 
@@ -317,7 +323,9 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 2. Migrate old config: if no per-button mappings exist, derive from PERI_alarm checkbox
 3. Check for device IDs (device_id, unique_id, id_device_indigitall)
    └── Missing? → raise ConfigEntryNotReady
-4. Create VerisureHub with aiohttp session + HttpTransport + VerisureOwaClient
+4. Create VerisureHub via `_login_ipv4_first`: HA's IPv4-only client, falling
+   back to its default (both families) if the connection never reached the
+   server (#606) — see "Address family" below
    └── Refresh token (if any) is plumbed into the client; persist callback wired up
 5. Login (refresh-first; falls back to password if available, else AuthenticationError)
    ├── TwoFactorRequiredError → raise ConfigEntryAuthFailed (triggers reauth flow)
@@ -326,6 +334,8 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
    └── …except the xSRefreshLogin JS-crash on the 2nd consecutive attempt → ConfigEntryAuthFailed (the stored token is dead; #568)
 6. Assign shared ApiQueue (per domain/country)
 7. List installations, get_services() per installation
+   :  VerisureOwaError → release this entry's session reference, then raise
+      ConfigEntryNotReady (HA retries)
 8. Create coordinators:
    ├── AlarmCoordinator (always)
    ├── SentinelCoordinator (if sentinel service found)
@@ -858,7 +868,8 @@ Step 5 (options): Three sections + collapsed Advanced
   - Additional sub-panels (capability-gated Interior / Perimeter / Annex toggles —
     only shown when peri or annex is detected; Interior offered as soon as
     any sibling axis is supported)
-  - Advanced (collapsed): scan interval, delay between API requests
+  - Advanced (collapsed): scan interval, delay between API requests,
+    operation poll timeout
   → Title shows installation name ("Options for {installation_name}")
   → Section payloads are flattened back to flat top-level keys before storage
 Step 6 (mappings): Map HA alarm buttons to Verisure OWA states
@@ -879,15 +890,16 @@ Device IDs are generated during initial setup and stored in the config entry for
 
 **Reauth flow** (`async_step_reauth` / `async_step_reauth_confirm`):
 
-Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing.
+Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing. Every login this flow runs — initial setup, reauth and the 2FA completion — goes through `_login_with_family_fallback`, so the flow reaches the server the same way setup does (#606).
 
 **Options flow** (`VerisureOwaOptionsFlowHandler`):
 ```
-Step 1 (init): General settings — same three-section + Advanced layout as
+Step 1 (init): General settings — the same three-section + Advanced layout as
   the initial flow's Step 5 above (PIN section, Force-arm notifications
-  section, capability-gated Sub-panels section, collapsed Advanced section).
-  Sub-panel toggles are gated on detected capabilities; the Interior toggle
-  is offered whenever any sibling axis is supported.
+  section, capability-gated Sub-panels section, collapsed Advanced section),
+  Sub-panel toggles are
+  gated on detected capabilities; the Interior toggle is offered whenever any
+  sibling axis is supported.
 
 Step 2 (mappings): Alarm state mappings — same five mapping dropdowns as
   initial flow, with the same conditional {subpanels_note} placeholder.

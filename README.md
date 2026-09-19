@@ -672,6 +672,24 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
 - **2FA issues** — If 2FA fails, remove and re-add the integration; you'll be prompted for a new SMS code. If that doesn't work, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.
 
+### Alarm goes unavailable with a DNS error
+
+If the alarm keeps flipping to **unavailable** and the log shows a connection error like:
+
+```
+Refresh failed: Connection error with URL https://customers.securitasdirect.fr/owa-api/graphql: [Errno None] DNS server returned answer with no data
+```
+
+the cause is how your network resolves the server's address, and recent versions handle it for you — there is nothing to configure.
+
+Verisure's server has no IPv6 address in any country this integration supports. Asking for one is therefore pointless, and on some networks it is worse than pointless: the empty IPv6 answer makes the whole lookup fail instead of falling back to the IPv4 address that _did_ resolve. So the integration asks for IPv4 only, and never asks the question that was failing.
+
+If your Home Assistant has no IPv4 address of its own — an IPv6-only network that reaches the rest of the internet through NAT64 — the integration notices it cannot connect and immediately tries again the ordinary way, which asks for both. You do not need to tell it which kind of network you are on.
+
+**If you are still seeing this error,** you are running a version from before this change. Update the integration. If it persists after updating, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs — the remaining causes are worth knowing about.
+
+If the log error names a different host, or isn't about DNS, this isn't the problem — check the other items above instead. Background: [issue #606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606).
+
 ## Reporting Issues
 
 If you encounter a bug or unexpected behavior, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) and include the following:
