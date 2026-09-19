@@ -905,7 +905,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
         if username not in sessions:
-            sessions[username] = {"hub": self.hub, "ref_count": 0}
+            # No holder and no count: the config entry does not exist yet, so
+            # nothing can hold this session. ``async_setup_entry`` adopts it as
+            # the first holder once HA creates and sets up the entry.
+            sessions[username] = {"hub": self.hub, "ref_count": 0, "holders": set()}
 
         try:
             installations = await self.hub.client.list_installations()

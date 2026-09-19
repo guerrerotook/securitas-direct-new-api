@@ -2062,7 +2062,11 @@ async def test_existing_session_reused_no_new_login(hass):
     # Simulate an already-running session
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["sessions"] = {
-        "test@example.com": {"hub": existing_hub, "ref_count": 1}
+        "test@example.com": {
+            "hub": existing_hub,
+            "ref_count": 1,
+            "holders": {"loaded-entry-id"},
+        }
     }
 
     with _patches(existing_hub):
@@ -2089,7 +2093,11 @@ async def test_existing_session_copies_device_ids(hass):
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["sessions"] = {
-        "test@example.com": {"hub": existing_hub, "ref_count": 1}
+        "test@example.com": {
+            "hub": existing_hub,
+            "ref_count": 1,
+            "holders": {"loaded-entry-id"},
+        }
     }
 
     result = await _complete_full_flow(hass, existing_hub)
@@ -2118,7 +2126,11 @@ async def test_existing_session_reused_regardless_of_password(hass):
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["sessions"] = {
-        "test@example.com": {"hub": existing_hub, "ref_count": 1}
+        "test@example.com": {
+            "hub": existing_hub,
+            "ref_count": 1,
+            "holders": {"loaded-entry-id"},
+        }
     }
 
     # If session reuse fails and a fresh hub gets constructed, the patch will
