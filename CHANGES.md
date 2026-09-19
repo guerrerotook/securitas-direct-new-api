@@ -4,11 +4,13 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.9.0
 
-One fix, for anyone whose alarm kept dropping to _unavailable_ with a DNS error. It needs nothing from you.
+Two fixes, and neither needs anything from you: one for anyone whose alarm kept dropping to _unavailable_ with a DNS error, and one for accounts that run more than one installation, covering what the integration leaves behind when the Verisure servers are briefly unreachable.
 
 ### Fixed
 
 **The alarm no longer goes unavailable because of an IPv6 lookup ([#606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606)).**  On some networks the alarm repeatedly went _unavailable_ with a DNS error such as `DNS server returned answer with no data`. Verisure's server has no IPv6 address in any supported country, so asking for one can only ever come back empty — and on those networks the empty answer made the whole lookup fail instead of using the IPv4 address that resolved perfectly well. The integration now asks for IPv4 only, so it never asks the question that was failing. If your Home Assistant is on an IPv6-only network and has no IPv4 address of its own, it finds it cannot connect and tries again the ordinary way, so that setup keeps working too — usually at once, or after up to 30 seconds if your network drops the attempt silently instead of refusing it. Thanks to [@Teuqol](https://github.com/Teuqol) for the detailed diagnosis that found the cause.
+
+**A failed connection attempt left the shared sign-in behind ([#615](https://github.com/guerrerotook/securitas-direct-new-api/pull/615)).**  Installations on the same account share one sign-in, and the integration keeps track of how many are using it so it can close it when the last one goes. That tally was wrong in two ways. An installation that got as far as signing in but then failed — usually because the Verisure servers were unreachable — was counted, and counted again on every retry, so the tally could never fall back to zero and the shared sign-in was never closed. And if you run more than one installation on one account, unloading one that had failed to start took the shared sign-in away from a working installation, which then had to sign in again from scratch. That mattered more than it sounds: every extra sign-in issues a new access token, and a burst of them is what left some accounts stuck on a stale token after a restart ([#557](https://github.com/guerrerotook/securitas-direct-new-api/issues/557), [#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)). Each installation is now counted once however many times it retries, and unloading one that was never using the shared sign-in leaves it alone.
 
 ## v5.8.0
 
