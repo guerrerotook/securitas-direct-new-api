@@ -662,7 +662,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 
 ## Troubleshooting
 
-- **HTTP 403 errors / rate limiting** — Verisure uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries ordinary requests once automatically. Sign-in and token-refresh requests are never re-sent, so a 403 on those surfaces straight away. If you see repeated 403 errors in the logs:
+- **HTTP 403 errors / rate limiting** — Verisure uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries ordinary requests once automatically. Sign-in and token-refresh requests are never re-sent to a server that answered, so a 403 on those surfaces straight away. If you see repeated 403 errors in the logs:
   - **Increase the update interval** — Go to **Settings → Integrations → Verisure OWA → Configure**, expand the **Advanced** section, and increase the **Update scan interval** (default: 120 seconds). Try 180 or 300 seconds.
   - **Increase the API request delay** — The **Delay between API requests** (default: 2 seconds) controls the minimum gap between consecutive API calls. Increasing this to 4–5 seconds reduces request bursts.
   - If you have **multiple installations** on one account, each one polls independently, multiplying the request rate. All API requests to the same country domain are serialized through a shared queue, which helps, but the total volume still increases with each installation.
@@ -684,11 +684,11 @@ the cause is how your network resolves the server's address, and recent versions
 
 Verisure's server has no IPv6 address in any country this integration supports. Asking for one is therefore pointless, and on some networks it is worse than pointless: the empty IPv6 answer makes the whole lookup fail instead of falling back to the IPv4 address that _did_ resolve. So the integration asks for IPv4 only, and never asks the question that was failing.
 
-If your Home Assistant has no IPv4 address of its own — an IPv6-only network that reaches the rest of the internet through NAT64 — the integration notices it cannot connect and immediately tries again the ordinary way, which asks for both. You do not need to tell it which kind of network you are on.
+If your Home Assistant is on an IPv6-only network and has no IPv4 address of its own, the integration finds it cannot connect and tries again the ordinary way, which asks for both. Usually that happens at once. If your network drops the attempt silently rather than refusing it, the retry waits up to 30 seconds first — once when the integration starts, not on every request. Either way you do not need to tell it which kind of network you are on.
 
-**If you are still seeing this error,** you are running a version from before this change. Update the integration. If it persists after updating, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs — the remaining causes are worth knowing about.
+**Still seeing this error?** You are on a version from before this change — update the integration. If it persists after updating, please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. If the error names a different host, or isn't about DNS, check the other items above instead.
 
-If the log error names a different host, or isn't about DNS, this isn't the problem — check the other items above instead. Background: [issue #606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606).
+Background: [issue #606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606).
 
 ## Reporting Issues
 

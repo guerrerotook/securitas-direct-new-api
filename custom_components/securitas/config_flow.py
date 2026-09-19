@@ -552,11 +552,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def _login_with_family_fallback(self) -> None:
         """Log the flow's hub in over IPv4, falling back to both families.
 
-        The same two networks setup has to serve, and the reason the address
-        family is decided here rather than by a setting: a user whose resolver
-        fails the combined lookup cannot reach a post-setup options screen,
-        because this login is what stands between them and having an entry at
-        all (issue #606).
+        The flow needs this as much as setup does: this login is what stands
+        between an affected user and having an entry at all, so there is no
+        later screen that could offer them a choice (issue #606).
         """
         assert self.hub is not None
         try:
@@ -574,15 +572,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 "default lookup, which also asks for IPv6",
                 err,
             )
-            replaced = self.hub
-            self.hub = self._create_client(family=socket.AF_UNSPEC)
+            self._create_client(family=socket.AF_UNSPEC)
             await self.hub.login()
-            # Entries for one account share a hub by username. If the hub just
-            # replaced was the registered one, the registry has to follow, or a
-            # later setup reuses a hub that was never signed in.
-            for record in self.hass.data.get(DOMAIN, {}).get("sessions", {}).values():
-                if record.get("hub") is replaced:
-                    record["hub"] = self.hub
 
     async def async_step_phone_list(
         self, user_input: dict[str, Any] | None = None

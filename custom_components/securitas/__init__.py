@@ -519,11 +519,11 @@ async def _login_or_raise(
     branches it raises no persistent notification of its own.
 
     ``retry_other_family`` marks a first attempt the caller will repeat on
-    another address family. A failure that never reached the server is then
+    another address family. A failure to establish the connection is then
     re-raised as-is rather than mapped, so the attempt about to be retried does
     not notify the user, log an error or count towards the crash streak. Every
-    other failure — including a timeout, which may have arrived — is handled
-    here exactly as it is for every other caller.
+    other failure — including a timeout waiting for a reply — takes the mapping
+    path, as it does for every other caller.
     """
     try:
         await client.login()
@@ -538,11 +538,11 @@ async def _login_or_raise(
         )
         raise
     except VerisureOwaError as err:
-        # A failure that never reached the server, on an attempt the caller is
+        # A connection that was never established, on an attempt the caller is
         # about to repeat on another address family, belongs to the caller:
         # re-raise it untouched so this attempt neither notifies the user nor
-        # counts towards the refresh-crash streak. Everything below is unchanged
-        # for every other caller and every other error, timeouts included.
+        # counts towards the refresh-crash streak. Every other caller and every
+        # other error, timeouts included, takes the mapping path below.
         if (
             retry_other_family
             and isinstance(err, APIConnectionError)
@@ -572,11 +572,10 @@ async def _login_or_raise(
 
 
 def _never_reached_the_server(err: APIConnectionError) -> bool:
-    """True when the failed request provably never left this machine.
+    """True when the failure was in establishing a connection, not using one.
 
-    Two shapes qualify, and both mean nothing was delivered, so trying again on
-    another address family costs the server nothing and cannot disturb a
-    session in progress:
+    Two shapes qualify, and both mean this attempt never got as far as sending
+    a request, so trying again on another address family is safe:
 
     * ``ClientConnectorError`` — the name did not resolve, or the connection
       was refused or unreachable. (TLS failures land here too. Retrying those
@@ -587,12 +586,19 @@ def _never_reached_the_server(err: APIConnectionError) -> bool:
       than refused: silence, not an error. Without it, such a host would never
       reach the fallback.
 
-    A *read* timeout is deliberately excluded. ``SocketTimeoutError`` means the
-    request was sent and the reply is late, so it may have arrived and been
-    acted on — and this integration does not resend a sign-in to a busy server,
-    because resending can end the session rather than recover it. The two are
-    genuinely separable: both subclass ``ServerTimeoutError``, but neither is a
-    subclass of the other.
+    A timeout waiting for a *reply* is excluded: the request was sent, so it may
+    have arrived and been acted on, and this integration does not resend a
+    sign-in to a busy server because resending can end the session rather than
+    recover it. ``ConnectionTimeoutError`` and ``SocketTimeoutError`` both
+    subclass ``ServerTimeoutError`` and neither subclasses the other, so the two
+    are separable.
+
+    One gap, inherited from the transport posting with redirects enabled: if the
+    request is delivered, answered with a redirect, and the redirect target then
+    fails to connect, that is indistinguishable from here. The endpoint is not
+    known to redirect, so this is a limit on the guarantee rather than a live
+    hazard — but the guarantee is "the connection was never established", not
+    "the server never saw it".
     """
     return isinstance(
         err.__cause__, (aiohttp.ClientConnectorError, aiohttp.ConnectionTimeoutError)
@@ -1417,10 +1423,6 @@ def _release_shared_session(
 ) -> None:
     """Drop one reference to a shared session, popping it when the last leaves.
 
-    The HTTP client itself is never released here: every client this integration
-    uses is one Home Assistant caches and closes at shutdown (see
-    ``_client_session``).
-
     When the session survives but the entry being unloaded is the one the hub
     persists rotated refresh tokens to, hand that persistence off to a surviving
     co-tenant entry and write the current token there immediately. Otherwise
@@ -1449,28 +1451,6 @@ def _release_shared_session(
             return
 
 
-async def _release_session_reference(
-    hass: HomeAssistant, entry: ConfigEntry, username: str
-) -> None:
-    """Release the shared-session reference held by *entry*, under its lock.
-
-    A no-op when the session was never registered. It must stay one: a
-    co-tenant entry may be holding the only reference, and releasing it on
-    behalf of an entry that never took one would pull the session out from
-    under them.
-    """
-    domain_data = hass.data.get(DOMAIN, {})
-    sessions = domain_data.get("sessions", {})
-    if username not in sessions:
-        return
-    lock = domain_data.get("setup_locks", {}).get(username)
-    if lock:
-        async with lock:
-            _release_shared_session(hass, sessions, username, entry)
-    else:
-        _release_shared_session(hass, sessions, username, entry)
-
-
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
@@ -1478,8 +1458,15 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
     # Decrement shared session ref count (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
-    if username:
-        await _release_session_reference(hass, config_entry, username)
+    sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
+    setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
+    if username and username in sessions:
+        lock = setup_locks.get(username)
+        if lock:
+            async with lock:
+                _release_shared_session(hass, sessions, username, config_entry)
+        else:
+            _release_shared_session(hass, sessions, username, config_entry)
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)

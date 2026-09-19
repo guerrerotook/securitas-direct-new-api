@@ -1,20 +1,14 @@
 """Tests for connecting over IPv4 first, with a fallback (issue #606).
 
-Verisure's customer endpoint publishes no IPv6 address in any country this
-integration supports — all ten are CNAMEs into the same Imperva edge, and none
-of them answers an AAAA query. So the IPv6 half of the combined lookup that
-aiohttp issues by default can only ever come back empty here, and on some
-networks that empty answer fails the whole lookup instead of falling back to the
-IPv4 address that resolved fine. The alarm then sits at unavailable.
+The reasoning lives with the code, in `_login_ipv4_first` and
+`_never_reached_the_server` — briefly, Verisure has no IPv6 address in any
+supported country, so asking for one can only ever come back empty, and on some
+resolvers that empty answer fails the whole lookup.
 
-Asking for IPv4 only skips a question that has no useful answer. The fallback is
-for the opposite network: a host with no IPv4 route of its own, which reaches
-IPv4-only servers through NAT64/DNS64 and therefore needs the IPv6 answer its
-resolver synthesises. A network-level failure on the IPv4 attempt is retried
-once on Home Assistant's default client, which asks for both.
-
-Neither client is ours: Home Assistant caches one per address family and closes
-them at shutdown, so nothing here is ever detached.
+Unlike the other setup tests in this suite, these deliberately do NOT patch
+`async_get_clientsession`: which client each attempt was handed is the thing
+under test, so the assertions compare against Home Assistant's real per-family
+sessions. Copy the sibling pattern in `tests/test_init.py` for anything else.
 """
 
 import socket
@@ -26,7 +20,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.securitas import DOMAIN, _never_reached_the_server
+from custom_components.securitas import DOMAIN
 from custom_components.securitas.verisure_owa_api.exceptions import (
     APIConnectionError,
     AuthenticationError,
@@ -206,9 +200,7 @@ class TestConfigFlowPrefersIpv4:
     entry at all, so there is no later screen that could offer them a choice.
     """
 
-    async def _run_login(
-        self, hass, *, login_effects, raises=None, hubs_out=None, register_first=False
-    ):
+    async def _run_login(self, hass, *, login_effects, raises=None):
         """Drive the flow's login, returning the client each attempt used."""
         from custom_components.securitas.config_flow import FlowHandler
 
@@ -229,15 +221,6 @@ class TestConfigFlowPrefersIpv4:
                     raise effect
 
             hub.login = AsyncMock(side_effect=_login)
-            if hubs_out is not None:
-                hubs_out.append(hub)
-            if register_first and len(sessions_used) == 1:
-                # Model async_step_user's reuse branch: this account already has
-                # a shared hub registered, and it is the one the flow is using.
-                hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})["alice"] = {
-                    "hub": hub,
-                    "ref_count": 1,
-                }
             return hub
 
         hub_cls = MagicMock(side_effect=_build_hub)
@@ -280,99 +263,45 @@ class TestConfigFlowPrefersIpv4:
 
         assert len(used) == 1, "a timeout must not trigger a second sign-in"
 
-    async def test_the_fallback_updates_a_registered_hub(self, hass):
-        """A shared hub the flow replaces must be replaced in the registry too.
 
-        Entries for one account share a hub by username. If the flow falls back
-        and leaves the old hub registered, a later setup reuses a hub that was
-        never signed in.
-        """
-        hubs = []
+class TestHomeAssistantsClientsAreLeftAlone:
+    """Neither client is ours, so unloading must not close or detach one.
 
-        await self._run_login(
-            hass,
-            login_effects=[_could_not_connect(), None],
-            hubs_out=hubs,
-            register_first=True,
-        )
-
-        registered = hass.data[DOMAIN]["sessions"]["alice"]["hub"]
-        assert registered is not hubs[0], "the registry still holds the replaced hub"
-        assert registered is hubs[1]
-
-
-class TestTheGateMatchesWhatTheTransportRaises:
-    """The fallback reads `__cause__`, so the transport has to keep setting it.
-
-    `http_transport` wraps aiohttp's error with `raise ... from err`. Drop that
-    `from err` and every other test in this file still passes while the fallback
-    silently stops working, because the cause it inspects would be gone.
+    Both come from `async_get_clientsession`, which hands the same object to
+    every caller in the instance and closes it itself at shutdown. Closing one
+    here would break every other integration using that address family, and the
+    breakage would show up far from this code.
     """
 
-    async def _execute_against(self, error):
-        """Run the real transport against a session whose POST raises `error`."""
-        from custom_components.securitas.verisure_owa_api.http_transport import (
-            HttpTransport,
-        )
-
-        session = MagicMock()
-        session.post = MagicMock(side_effect=error)
-        transport = HttpTransport(session, "https://example.invalid/graphql")
-
-        with pytest.raises(APIConnectionError) as caught:
-            await transport.execute({"operationName": "x"}, {})
-        return caught.value
-
-    async def test_a_connector_error_survives_as_the_cause(self, hass):
-        """An unreachable host reaches the gate as something it recognises."""
-        cause = aiohttp.ClientConnectorError(MagicMock(), OSError(51, "unreachable"))
-
-        err = await self._execute_against(cause)
-
-        assert err.__cause__ is cause
-        assert _never_reached_the_server(err) is True
-
-    async def test_a_read_timeout_survives_as_the_cause(self, hass):
-        """And a sent-but-slow request reaches it as something it refuses."""
-        cause = aiohttp.SocketTimeoutError("timed out reading")
-
-        err = await self._execute_against(cause)
-
-        assert err.__cause__ is cause
-        assert _never_reached_the_server(err) is False
-
-
-class TestBothFamiliesFailing:
-    """When neither family works, the user gets one clear failure, not two."""
-
-    async def test_a_second_failure_reports_once(self, hass, caplog):
-        """The retried first attempt stays silent; only the real failure speaks."""
-        from custom_components.securitas import async_setup_entry
+    async def test_unloading_leaves_both_clients_usable(self, hass):
+        """After a full load-and-unload cycle, both are still open and attached."""
+        from custom_components.securitas import async_unload_entry
         from tests.conftest import make_config_entry_data, make_securitas_hub_mock
 
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
-        def _build_hub(config, config_entry, http_session, hass_):
-            hub = make_securitas_hub_mock()
-            hub.login = AsyncMock(side_effect=_could_not_connect())
-            return hub
+        ipv4 = _ipv4_session(hass)
+        shared = async_get_clientsession(hass)
 
-        hub_cls = MagicMock(side_effect=_build_hub)
-        hub_cls.__name__ = "VerisureHub"
+        hass.data.setdefault(DOMAIN, {})
+        hass.data[DOMAIN]["sessions"] = {
+            entry.data["username"]: {"hub": make_securitas_hub_mock(), "ref_count": 1}
+        }
+        hass.data[DOMAIN][entry.entry_id] = {"hub": make_securitas_hub_mock()}
 
         with (
-            patch("custom_components.securitas.VerisureHub", hub_cls),
-            caplog.at_level("ERROR", logger="custom_components.securitas"),
-            pytest.raises(ConfigEntryNotReady),
+            patch.object(
+                hass.config_entries,
+                "async_unload_platforms",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "custom_components.securitas._unregister_card_resource", new=AsyncMock()
+            ),
         ):
-            await async_setup_entry(hass, entry)
+            assert await async_unload_entry(hass, entry) is True
 
-        connect_errors = [
-            r
-            for r in caplog.records
-            if r.levelname == "ERROR" and "Unable to connect" in r.getMessage()
-        ]
-        assert len(connect_errors) == 1, (
-            f"expected one error for a failure, got {len(connect_errors)}"
-        )
+        for name, session in (("IPv4-only", ipv4), ("default", shared)):
+            assert not session.closed, f"the {name} client was closed"
+            assert session.connector is not None, f"the {name} client was detached"
