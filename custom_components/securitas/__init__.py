@@ -646,24 +646,16 @@ async def _login_ipv4_first(
     )
 
 
-def _sync_ref_count(session: dict[str, Any]) -> None:
-    """Re-derive ``ref_count`` from ``holders``.
-
-    The one place ``ref_count`` is ever assigned, so the two cannot drift apart.
-    """
-    session["ref_count"] = len(session["holders"])
-
-
 def _new_session_record(hub: VerisureHub) -> dict[str, Any]:
     """Build a shared-session record that nobody holds yet.
 
     Both places a session is created start here — this module, and the config
     flow, which builds its hub before its config entry exists and so has no
-    holder to record yet.
+    holder to record yet. ``holders`` is the whole of the bookkeeping: how many
+    entries are using the hub is ``len(holders)``, never a separate tally that
+    could drift away from it.
     """
-    session: dict[str, Any] = {"hub": hub, "holders": set()}
-    _sync_ref_count(session)
-    return session
+    return {"hub": hub, "holders": set()}
 
 
 def _hold_session_reference(session: dict[str, Any], entry_id: str) -> None:
@@ -676,13 +668,11 @@ def _hold_session_reference(session: dict[str, Any], entry_id: str) -> None:
     than a bare tally is what makes that idempotent.
     """
     session["holders"].add(entry_id)
-    _sync_ref_count(session)
 
 
 def _drop_session_reference(session: dict[str, Any], entry_id: str) -> None:
     """Forget ``entry_id``'s reference; an entry that held none is untouched."""
     session["holders"].discard(entry_id)
-    _sync_ref_count(session)
 
 
 async def _get_or_create_session(

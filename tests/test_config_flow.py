@@ -2043,7 +2043,7 @@ async def test_full_flow_select_installation_creates_entry(hass):
 
 
 # ===================================================================
-# TestSessionReuse (~2 tests)
+# TestFlowAbortCleanup (~2 tests)
 # ===================================================================
 
 
@@ -2057,9 +2057,7 @@ async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
 
     hub = _hub_factory()
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["sessions"] = {
-        "test@example.com": {"hub": hub, "ref_count": 0, "holders": set()}
-    }
+    hass.data[DOMAIN]["sessions"] = {"test@example.com": {"hub": hub, "holders": set()}}
 
     flow = FlowHandler()
     flow.hass = hass
@@ -2085,7 +2083,6 @@ async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
     hass.data[DOMAIN]["sessions"] = {
         "test@example.com": {
             "hub": hub,
-            "ref_count": 1,
             "holders": {"loaded-entry-id"},
         }
     }
@@ -2099,6 +2096,11 @@ async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
     session = hass.data[DOMAIN]["sessions"]["test@example.com"]
     assert session["hub"] is hub
     assert session["holders"] == {"loaded-entry-id"}
+
+
+# ===================================================================
+# TestSessionReuse (~3 tests)
+# ===================================================================
 
 
 async def test_existing_session_reused_no_new_login(hass):
@@ -2118,7 +2120,6 @@ async def test_existing_session_reused_no_new_login(hass):
     hass.data[DOMAIN]["sessions"] = {
         "test@example.com": {
             "hub": existing_hub,
-            "ref_count": 1,
             "holders": {"loaded-entry-id"},
         }
     }
@@ -2149,7 +2150,6 @@ async def test_existing_session_copies_device_ids(hass):
     hass.data[DOMAIN]["sessions"] = {
         "test@example.com": {
             "hub": existing_hub,
-            "ref_count": 1,
             "holders": {"loaded-entry-id"},
         }
     }
@@ -2182,7 +2182,6 @@ async def test_existing_session_reused_regardless_of_password(hass):
     hass.data[DOMAIN]["sessions"] = {
         "test@example.com": {
             "hub": existing_hub,
-            "ref_count": 1,
             "holders": {"loaded-entry-id"},
         }
     }
