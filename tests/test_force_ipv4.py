@@ -12,6 +12,7 @@ import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -23,6 +24,12 @@ from custom_components.securitas import (
     _release_shared_session,
     async_unload_entry,
 )
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Let the config-flow tests below load this custom integration."""
+    yield
 
 
 class TestBuildHttpSession:
@@ -227,3 +234,184 @@ class TestSetupFailureAfterLoginReleasesOwnedSession:
 
         owned_session.detach.assert_called_once()
         assert entry.data[CONF_USERNAME] not in hass.data[DOMAIN].get("sessions", {})
+
+
+REAUTH_DATA = {
+    "username": "alice",
+    "password": "old-password",
+    "country": "ES",
+    "instalation": "123456",
+    "device_id": "test-device-id",
+    "uniqueid": "test-uuid",
+    "device_indigitall": "test-indigitall",
+}
+
+
+def _reauth_entry(hass, *, force_ipv4):
+    """An entry that already has the IPv4-only option saved (or not)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="alice_123456",
+        data=dict(REAUTH_DATA),
+        options={CONF_FORCE_IPV4: force_ipv4},
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def _run_reauth(hass, entry):
+    """Drive the reauth flow to completion.
+
+    Returns the client the hub was given, plus the connector it held while the
+    flow was running — the flow detaches its own client on the way out, so the
+    address family can only be read from a connector captured at that moment.
+    """
+    from homeassistant.config_entries import SOURCE_REAUTH
+
+    from tests.conftest import make_securitas_hub_mock
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+        data=dict(entry.data),
+    )
+
+    hub = make_securitas_hub_mock()
+    hub.login = AsyncMock()
+    hub.get_refresh_token = MagicMock(return_value="fresh-refresh-token")
+
+    captured = {}
+
+    def _build_hub(config, config_entry, http_session, hass_):
+        captured["session"] = http_session
+        captured["connector"] = http_session.connector
+        return hub
+
+    hub_cls = MagicMock(side_effect=_build_hub)
+    hub_cls.__name__ = "VerisureHub"
+
+    with (
+        patch("custom_components.securitas.config_flow.VerisureHub", hub_cls),
+        patch.object(hass.config_entries, "async_reload", new=AsyncMock()),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={"username": "alice", "password": "new-password"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reauth_successful", result
+    return captured["session"], captured["connector"]
+
+
+class TestReauthHonoursForceIpv4:
+    """Reauth must connect the same way the entry is configured to connect.
+
+    A user turns this option on because the IPv6 lookup fails on their network.
+    Reauth is exactly where they land when that failure locks them out, so a
+    reauth login on the default dual-stack client would ask the very question
+    the option exists to avoid, and the sign-in they were prompted for could
+    not succeed.
+    """
+
+    async def test_reauth_looks_the_server_up_over_ipv4_only_when_the_option_is_on(
+        self, hass
+    ):
+        """The hub built for reauth gets an IPv4-only client, not the shared one."""
+        entry = _reauth_entry(hass, force_ipv4=True)
+
+        session, connector = await _run_reauth(hass, entry)
+
+        assert session is not async_get_clientsession(hass)
+        assert connector._family == socket.AF_INET
+
+    async def test_reauth_releases_the_client_it_built(self, hass):
+        """The temporary IPv4 client is detached when the flow ends, not leaked."""
+        entry = _reauth_entry(hass, force_ipv4=True)
+
+        session, _connector = await _run_reauth(hass, entry)
+
+        # detach() unbinds the connector without closing HA's shared one.
+        assert session.connector is None
+
+    async def test_reauth_borrows_the_shared_client_when_the_option_is_off(self, hass):
+        """The default is unchanged: reauth uses Home Assistant's own client."""
+        entry = _reauth_entry(hass, force_ipv4=False)
+
+        session, _connector = await _run_reauth(hass, entry)
+
+        assert session is async_get_clientsession(hass)
+        assert session.connector is not None
+
+
+class TestSavedOptionReachesTheConnection:
+    """The saved checkbox must actually change how setup connects.
+
+    The option is read in one place during setup and handed to the client
+    builder in another. Nothing else proves that join, so without these the
+    checkbox could read as on while every request still went out on the
+    default shared resolver.
+    """
+
+    async def _session_setup_built(self, hass, *, saved_option):
+        """Run setup far enough to see which client the hub was handed.
+
+        Setup is stopped at the first post-login network call, which is the
+        earliest point after the client has been chosen; the failure path
+        detaches the client, so the connector is captured while it is live.
+        """
+        from custom_components.securitas import async_setup_entry
+        from custom_components.securitas.verisure_owa_api.exceptions import (
+            VerisureOwaError,
+        )
+        from tests.conftest import make_config_entry_data, make_securitas_hub_mock
+
+        options = {} if saved_option is None else {CONF_FORCE_IPV4: saved_option}
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data=make_config_entry_data(),
+            options=options,
+        )
+        entry.add_to_hass(hass)
+
+        captured = {}
+
+        def _build_hub(config, config_entry, http_session, hass_):
+            captured["session"] = http_session
+            captured["connector"] = http_session.connector
+            return make_securitas_hub_mock()
+
+        hub_cls = MagicMock(side_effect=_build_hub)
+        hub_cls.__name__ = "VerisureHub"
+
+        with (
+            patch("custom_components.securitas.VerisureHub", hub_cls),
+            patch(
+                "custom_components.securitas._fetch_and_cache_installations",
+                new=AsyncMock(side_effect=VerisureOwaError("stop here")),
+            ),
+            pytest.raises(ConfigEntryNotReady),
+        ):
+            await async_setup_entry(hass, entry)
+
+        return captured
+
+    async def test_option_saved_on_returns_an_ipv4_only_connection(self, hass):
+        """A saved `force_ipv4: True` reaches setup and picks the IPv4 client."""
+        captured = await self._session_setup_built(hass, saved_option=True)
+
+        assert captured["session"] is not async_get_clientsession(hass)
+        assert captured["connector"]._family == socket.AF_INET
+
+    async def test_option_saved_off_keeps_the_shared_connection(self, hass):
+        """A saved `force_ipv4: False` leaves the shared client in place."""
+        captured = await self._session_setup_built(hass, saved_option=False)
+
+        assert captured["session"] is async_get_clientsession(hass)
+
+    async def test_unset_option_keeps_the_shared_connection(self, hass):
+        """An entry saved before this option existed connects as it always did."""
+        captured = await self._session_setup_built(hass, saved_option=None)
+
+        assert captured["session"] is async_get_clientsession(hass)

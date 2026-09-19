@@ -133,7 +133,7 @@
                         },
                         "data_description": {
                             "operation_poll_timeout": "Cuánto tiempo esperar a que el panel confirme una acción de armado/desarmado. Auméntalo si recibes avisos de tiempo de espera agotado.",
-                            "force_ipv4": "Actívalo solo si la alarma queda repetidamente no disponible con un error de DNS como 'DNS server returned answer with no data'. Hace que la integración use solo IPv4 para conectar con el servidor de Verisure, evitando una resolución IPv6 fallida en algunas redes. El servidor no tiene dirección IPv6, así que no se pierde nada."
+                            "force_ipv4": "Actívalo solo si la alarma queda repetidamente no disponible con un error de DNS como 'DNS server returned answer with no data'. Hace que la integración use solo IPv4 para conectar con el servidor de Verisure, evitando una resolución IPv6 fallida en algunas redes. El servidor no tiene dirección IPv6, así que no se pierde nada. Si hay más de una alarma con esta cuenta, actívalo en todas ellas y luego reinicia Home Assistant."
                         }
                     },
                     "pin": {

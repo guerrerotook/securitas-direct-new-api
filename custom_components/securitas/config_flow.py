@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any
 
+import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import (
@@ -19,7 +20,6 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     CountrySelector,
     CountrySelectorConfig,
@@ -59,6 +59,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _build_http_session,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -500,6 +501,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._has_peri: bool = False
         self._has_annex: bool = False
         self._reauth_entry: config_entries.ConfigEntry | None = None
+        # Set only when this flow built its own IPv4-only client; detached in
+        # ``async_remove`` because nothing else owns it.
+        self._owned_session: aiohttp.ClientSession | None = None
 
     async def _create_entry_for_installation(
         self, installation: Installation
@@ -532,21 +536,47 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             options=dict(self._panel_options) if self._panel_options else None,
         )
 
-    def _create_client(
-        self,
-    ) -> VerisureHub:
-        """Create client (VerisureHub)."""
+    def _create_client(self, *, force_ipv4: bool = False) -> VerisureHub:
+        """Create client (VerisureHub).
+
+        ``force_ipv4`` reproduces the entry's saved connection mode, so a login
+        run from this flow reaches the server the same way the integration will
+        (issue #606). Off — the default, and what initial setup always uses,
+        since the toggle is only offered after setup — borrows Home Assistant's
+        shared client.
+        """
 
         if self.config[CONF_PASSWORD] is None:
             raise ValueError(
                 "Invalid internal state. Called without either password or token"
             )
 
-        self.hub = VerisureHub(
-            self.config, None, async_get_clientsession(self.hass), self.hass
-        )
+        # A retried step builds a second client; release the first one now
+        # rather than waiting for the flow to end, or the retries pile up.
+        self._release_owned_session()
+        http_session, owned = _build_http_session(self.hass, force_ipv4=force_ipv4)
+        if owned:
+            self._owned_session = http_session
+
+        self.hub = VerisureHub(self.config, None, http_session, self.hass)
 
         return self.hub
+
+    def _release_owned_session(self) -> None:
+        """Detach the client this flow built, if it built one.
+
+        ``detach`` and never ``close``: the client was made by Home Assistant's
+        helper around HA's shared connector, which closing would tear down for
+        every other caller (see ``_build_http_session``).
+        """
+        if self._owned_session is not None:
+            self._owned_session.detach()
+            self._owned_session = None
+
+    @callback
+    def async_remove(self) -> None:
+        """Release the flow's own client once the flow is finished or abandoned."""
+        self._release_owned_session()
 
     async def async_step_phone_list(
         self, user_input: dict[str, Any] | None = None
@@ -744,7 +774,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
             self.config.setdefault(CONF_ENTRY_ID, "")
 
-            self.hub = self._create_client()
+            # Reauth is where a user lands when the failing IPv6 lookup this
+            # option exists to avoid has locked them out, so the login this
+            # flow runs must skip that lookup too (issue #606).
+            self.hub = self._create_client(
+                force_ipv4=self._reauth_entry.options.get(
+                    CONF_FORCE_IPV4,
+                    self._reauth_entry.data.get(CONF_FORCE_IPV4, DEFAULT_FORCE_IPV4),
+                )
+            )
 
             try:
                 await self.hub.login()
