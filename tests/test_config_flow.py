@@ -2399,7 +2399,7 @@ async def test_a_flow_outliving_the_entry_it_borrowed_from_hands_its_entry_the_h
 
 
 # ===================================================================
-# TestSessionRelease (~9 tests)
+# TestSessionRelease (~15 tests)
 # ===================================================================
 
 
@@ -2450,6 +2450,20 @@ def _record_persistence_target(hub) -> list:
         hub.config_entry
     )
     return written_to
+
+
+def _add_other_account_entry(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(username="other@example.com"),
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _crash_streaks(hass) -> dict:
+    return hass.data[DOMAIN].get("refresh_crash_streaks", {})
 
 
 async def test_deleting_an_entry_whose_token_recovery_failed_releases_it(hass):
@@ -2687,16 +2701,6 @@ async def test_closing_a_flow_while_another_account_signs_in_keeps_the_integrati
     assert _alias_services(hass)
 
 
-def _add_other_account_entry(hass):
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data=make_config_entry_data(username="other@example.com"),
-        version=FlowHandler.VERSION,
-    )
-    entry.add_to_hass(hass)
-    return entry
-
-
 async def _other_account_retrying_after_a_refresh_crash(hass):
     """Set another account's entry up to fail before taking any hold.
 
@@ -2717,10 +2721,6 @@ async def _other_account_retrying_after_a_refresh_crash(hass):
     assert other.state is ConfigEntryState.SETUP_RETRY
     assert "other@example.com" not in _flow_sessions(hass)
     return other
-
-
-def _crash_streaks(hass) -> dict:
-    return hass.data[DOMAIN].get("refresh_crash_streaks", {})
 
 
 async def test_closing_a_flow_keeps_the_integration_for_an_entry_waiting_to_retry(
