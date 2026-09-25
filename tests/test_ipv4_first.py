@@ -426,7 +426,7 @@ class TestHomeAssistantsClientsAreLeftAlone:
 
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN]["sessions"] = {
-            entry.data["username"]: {"hub": hub, "ref_count": 1}
+            entry.data["username"]: {"hub": hub, "holders": {entry.entry_id}}
         }
         hass.data[DOMAIN][entry.entry_id] = {"hub": hub}
 

@@ -1560,7 +1560,12 @@ class TestAsyncUnloadEntry:
         hass.data[DOMAIN] = {
             entry.entry_id: {"hub": hub, "devices": []},
             entry2.entry_id: {"hub": hub, "devices": []},
-            "sessions": {username: {"hub": hub, "ref_count": 2}},
+            "sessions": {
+                username: {
+                    "hub": hub,
+                    "holders": {entry.entry_id, entry2.entry_id},
+                }
+            },
         }
 
         with patch.object(
@@ -1602,7 +1607,12 @@ class TestAsyncUnloadEntry:
         hass.data[DOMAIN] = {
             owner.entry_id: {"hub": hub, "devices": []},
             survivor.entry_id: {"hub": hub, "devices": []},
-            "sessions": {username: {"hub": hub, "ref_count": 2}},
+            "sessions": {
+                username: {
+                    "hub": hub,
+                    "holders": {owner.entry_id, survivor.entry_id},
+                }
+            },
         }
 
         with patch.object(
@@ -1617,7 +1627,7 @@ class TestAsyncUnloadEntry:
         # in-memory token must be written there immediately (not left stale).
         assert hub.config_entry is survivor
         hub.persist_current_refresh_token.assert_called_once_with()
-        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
+        assert hass.data[DOMAIN]["sessions"][username]["holders"] == {survivor.entry_id}
 
     async def test_unload_non_owner_entry_leaves_persistence_target(self, hass):
         """Unloading a co-tenant that does NOT own persistence must not reattach."""
@@ -1632,7 +1642,12 @@ class TestAsyncUnloadEntry:
         hass.data[DOMAIN] = {
             owner.entry_id: {"hub": hub, "devices": []},
             other.entry_id: {"hub": hub, "devices": []},
-            "sessions": {username: {"hub": hub, "ref_count": 2}},
+            "sessions": {
+                username: {
+                    "hub": hub,
+                    "holders": {owner.entry_id, other.entry_id},
+                }
+            },
         }
 
         with patch.object(
@@ -1647,6 +1662,47 @@ class TestAsyncUnloadEntry:
         assert hub.config_entry is owner
         hub.persist_current_refresh_token.assert_not_called()
 
+    async def test_unload_entry_that_never_held_keeps_cotenant_session(self, hass):
+        """Unloading a non-holder must not drop the hold a holder still has.
+
+        An entry that never took a hold must, when unloaded, leave the
+        holders alone rather than pop the shared session out
+        from under the co-tenant that is still using it.
+        """
+        hub = make_securitas_hub_mock()
+        holder = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        holder.add_to_hass(hass)
+        never_held = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        never_held.add_to_hass(hass)
+        username = holder.data[CONF_USERNAME]
+
+        hub.config_entry = holder
+        hass.data[DOMAIN] = {
+            holder.entry_id: {"hub": hub, "devices": []},
+            "sessions": {
+                username: {
+                    "hub": hub,
+                    "holders": {holder.entry_id},
+                }
+            },
+        }
+
+        with patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = await async_unload_entry(hass, never_held)
+
+        assert result is True
+        session = hass.data[DOMAIN]["sessions"][username]
+        assert session["hub"] is hub
+        assert session["holders"] == {holder.entry_id}
+        # The holder still owns persistence — no handoff was triggered.
+        assert hub.config_entry is holder
+        hub.persist_current_refresh_token.assert_not_called()
+
     async def test_failed_platform_unload_preserves_runtime_data(self, hass):
         """A failed platform unload must leave the loaded entry intact."""
         hub = make_securitas_hub_mock()
@@ -1659,7 +1715,7 @@ class TestAsyncUnloadEntry:
                 "hub": hub,
                 "devices": [],
             },
-            "sessions": {username: {"hub": hub, "ref_count": 1}},
+            "sessions": {username: {"hub": hub, "holders": {entry.entry_id}}},
         }
 
         with patch.object(
@@ -1672,7 +1728,7 @@ class TestAsyncUnloadEntry:
 
         assert result is False
         assert hass.data[DOMAIN][entry.entry_id]["hub"] is hub
-        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
+        assert len(hass.data[DOMAIN]["sessions"][username]["holders"]) == 1
 
     async def test_unload_removes_domain_when_empty(self, hass):
         """When the last entry is unloaded, DOMAIN should be removed from hass.data."""
@@ -1683,7 +1739,7 @@ class TestAsyncUnloadEntry:
         username = entry.data[CONF_USERNAME]
         hass.data[DOMAIN] = {
             entry.entry_id: {"hub": hub, "devices": []},
-            "sessions": {username: {"hub": hub, "ref_count": 1}},
+            "sessions": {username: {"hub": hub, "holders": {entry.entry_id}}},
         }
 
         with patch.object(
@@ -1698,12 +1754,12 @@ class TestAsyncUnloadEntry:
 
 
 # ===========================================================================
-# 8. TestSharedSession - Shared API session with reference counting
+# 8. TestSharedSession - Shared API session tracked by holder set
 # ===========================================================================
 
 
 class TestSharedSession:
-    """Tests for shared API session with reference counting."""
+    """Tests for shared API session tracked by holder set."""
 
     @pytest.fixture
     def mock_hub(self):
@@ -1724,8 +1780,8 @@ class TestSharedSession:
             patch("custom_components.securitas.async_get_clientsession"),
         )
 
-    async def test_first_entry_creates_session_with_ref_count_1(self, hass, mock_hub):
-        """First entry for a username should create a new session with ref_count=1."""
+    async def test_first_entry_creates_session_with_one_holder(self, hass, mock_hub):
+        """First entry for a username should create a session it alone holds."""
         data = make_config_entry_data()
         data[CONF_INSTALLATION] = "111"
         entry = MockConfigEntry(domain=DOMAIN, data=data)
@@ -1747,11 +1803,11 @@ class TestSharedSession:
         username = data[CONF_USERNAME]
         sessions = hass.data[DOMAIN]["sessions"]
         assert username in sessions
-        assert sessions[username]["ref_count"] == 1
+        assert sessions[username]["holders"] == {entry.entry_id}
         assert sessions[username]["hub"] is mock_hub
 
-    async def test_second_entry_reuses_session_ref_count_2(self, hass, mock_hub):
-        """Second entry for the same username should reuse the session, ref_count=2."""
+    async def test_second_entry_reuses_session_with_two_holders(self, hass, mock_hub):
+        """Second entry for the same username should reuse the session and join it."""
         data1 = make_config_entry_data()
         data1[CONF_INSTALLATION] = "111"
         entry1 = MockConfigEntry(domain=DOMAIN, data=data1)
@@ -1780,7 +1836,47 @@ class TestSharedSession:
         mock_hub.login.assert_awaited_once()
         username = data1[CONF_USERNAME]
         sessions = hass.data[DOMAIN]["sessions"]
-        assert sessions[username]["ref_count"] == 2
+        assert sessions[username]["holders"] == {entry1.entry_id, entry2.entry_id}
+
+    async def test_failed_setup_retries_keep_one_hold_and_one_sign_in(
+        self, hass, mock_hub
+    ):
+        """A setup that fails after registering must not take a second hold.
+
+        ``_get_or_create_session`` registers the session and setup carries on.
+        When a later step fails — ``_fetch_and_cache_installations`` is the
+        usual one — HA raises ConfigEntryNotReady and never calls
+        ``async_unload_entry``, so the hold stays. HA then retries setup,
+        which must recognise the entry as an existing holder: no second
+        hold, and no second sign-in (each login rotates the refresh token
+        and the WAF rate-limits by IP).
+        """
+        data = make_config_entry_data()
+        data[CONF_INSTALLATION] = "111"
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch(
+                "custom_components.securitas._fetch_and_cache_installations",
+                side_effect=VerisureOwaError("backend unavailable"),
+            ),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            for _ in range(3):
+                with pytest.raises(ConfigEntryNotReady):
+                    await async_setup_entry(hass, entry)
+
+        username = data[CONF_USERNAME]
+        sessions = hass.data[DOMAIN]["sessions"]
+        assert sessions[username]["holders"] == {entry.entry_id}
+        mock_hub.login.assert_awaited_once()
 
     async def test_reused_config_flow_hub_gets_config_entry_attached(
         self, hass, mock_hub
@@ -1788,8 +1884,8 @@ class TestSharedSession:
         """Regression test for issue #557 — attach the entry to a reused hub.
 
         The config flow builds a VerisureHub with ``config_entry=None`` (the
-        entry does not exist yet) and registers it in ``sessions`` with
-        ref_count=0.  When HA then sets up the freshly-created entry,
+        entry does not exist yet) and registers it in ``sessions``, held only
+        by the flow.  When HA then sets up the freshly-created entry,
         ``_get_or_create_session`` reuses that detached hub.  It MUST attach
         the entry, otherwise ``_persist_refresh_token`` reports
         ``no-config-entry``, rotated refresh tokens are never written to the
@@ -1807,7 +1903,7 @@ class TestSharedSession:
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN].setdefault("sessions", {})[username] = {
             "hub": mock_hub,
-            "ref_count": 0,
+            "holders": {"config_flow:flow-id"},
         }
 
         with (
@@ -1825,9 +1921,66 @@ class TestSharedSession:
         # The reused config-flow hub must now own the config entry so that
         # rotated refresh tokens are persisted rather than dropped.
         assert mock_hub.config_entry is entry
-        # Reuse path: no fresh login, ref_count bumped from 0 to 1.
+        # Reuse path: no fresh login, and the entry holds the flow's hub too.
         mock_hub.login.assert_not_awaited()
-        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
+        assert hass.data[DOMAIN]["sessions"][username]["holders"] == {
+            "config_flow:flow-id",
+            entry.entry_id,
+        }
+
+    async def _set_up_on_detached_hub(self, hass, mock_hub, stored_token):
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = stored_token
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        mock_hub.config_entry = None
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            data[CONF_USERNAME]
+        ] = {"hub": mock_hub, "holders": {"config_flow:flow-id"}}
+        written_to: list = []
+        mock_hub.persist_current_refresh_token.side_effect = lambda: written_to.append(
+            mock_hub.config_entry
+        )
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.securitas._login_or_raise", AsyncMock()),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+        return entry, written_to
+
+    async def test_attaching_a_reused_hub_writes_its_current_token(
+        self, hass, mock_hub
+    ):
+        """The hub's token may have rotated past the one the entry stored; the
+        entry must hold the current one at once, not after the next rotation."""
+        mock_hub.get_refresh_token.return_value = "current-token"
+
+        entry, written_to = await self._set_up_on_detached_hub(
+            hass, mock_hub, stored_token="older-token"
+        )
+
+        assert mock_hub.config_entry is entry
+        assert written_to == [entry]
+
+    async def test_attaching_a_reused_hub_keeps_the_entry_token_over_a_dead_one(
+        self, hass, mock_hub
+    ):
+        mock_hub.refresh_token_is_dead = True
+        mock_hub.get_refresh_token.return_value = "dead-token"
+
+        entry, written_to = await self._set_up_on_detached_hub(
+            hass, mock_hub, stored_token="fresh-from-reauth"
+        )
+
+        assert mock_hub.config_entry is entry
+        mock_hub.adopt_refresh_token.assert_called_once_with("fresh-from-reauth")
+        assert written_to == []
 
     async def test_per_entry_data_stored(self, hass, mock_hub):
         """Each entry should have its own per-entry data with hub and devices."""
@@ -1900,13 +2053,13 @@ class TestSharedSession:
         mock_hub.login.assert_awaited_once()
         username = data1[CONF_USERNAME]
         sessions = hass.data[DOMAIN]["sessions"]
-        assert sessions[username]["ref_count"] == 2
+        assert sessions[username]["holders"] == {entry1.entry_id, entry2.entry_id}
         # Both entries should reference the same hub
         assert hass.data[DOMAIN][entry1.entry_id]["hub"] is mock_hub
         assert hass.data[DOMAIN][entry2.entry_id]["hub"] is mock_hub
 
-    async def test_unload_one_entry_decrements_ref_count(self, hass, mock_hub):
-        """Unloading one entry should decrement ref count but keep the session."""
+    async def test_unload_one_entry_drops_only_its_own_holder(self, hass, mock_hub):
+        """Unloading one entry should drop its holder but keep the session."""
         data1 = make_config_entry_data()
         data1[CONF_INSTALLATION] = "111"
         entry1 = MockConfigEntry(domain=DOMAIN, data=data1)
@@ -1930,7 +2083,8 @@ class TestSharedSession:
             await async_setup_entry(hass, entry2)
 
         username = data1[CONF_USERNAME]
-        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 2
+        holders = hass.data[DOMAIN]["sessions"][username]["holders"]
+        assert holders == {entry1.entry_id, entry2.entry_id}
 
         # Unload entry1
         with patch.object(
@@ -1942,9 +2096,9 @@ class TestSharedSession:
             result = await async_unload_entry(hass, entry1)
 
         assert result is True
-        # Session should still exist with ref_count=1
+        # Session should still exist, held by the entry that did not unload
         assert username in hass.data[DOMAIN]["sessions"]
-        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
+        assert hass.data[DOMAIN]["sessions"][username]["holders"] == {entry2.entry_id}
         # entry1 data removed, entry2 data remains
         assert entry1.entry_id not in hass.data[DOMAIN]
         assert entry2.entry_id in hass.data[DOMAIN]
@@ -1968,7 +2122,7 @@ class TestSharedSession:
             await async_setup_entry(hass, entry)
 
         username = data[CONF_USERNAME]
-        assert hass.data[DOMAIN]["sessions"][username]["ref_count"] == 1
+        assert len(hass.data[DOMAIN]["sessions"][username]["holders"]) == 1
 
         with patch.object(
             hass.config_entries,
@@ -2915,9 +3069,13 @@ class TestSetupRefreshCrashEscalation:
         mock_hub.config_entry = None
         hass.data[DOMAIN].setdefault("sessions", {})[username] = {
             "hub": mock_hub,
-            "ref_count": 0,
+            "holders": {"config_flow:flow-id"},
         }
         assert await self._attempt(hass, entry, mock_hub) is True
+        # HA removes the flow once its entry is set up, releasing its hold.
+        hass.data[DOMAIN]["sessions"][username]["holders"].discard(
+            "config_flow:flow-id"
+        )
         await async_unload_entry(hass, entry)
 
         with pytest.raises(ConfigEntryNotReady):
@@ -2941,7 +3099,10 @@ class TestSetupRefreshCrashEscalation:
         entry.add_to_hass(hass)
         hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
             "other@example.com"
-        ] = {"hub": MagicMock(), "ref_count": 1}
+        ] = {
+            "hub": MagicMock(),
+            "holders": {"other-account-entry-id"},
+        }
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
@@ -3020,7 +3181,7 @@ class TestCoTenantReauthRecovery:
         username = entry.data[CONF_USERNAME]
         hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[username] = {
             "hub": mock_hub,
-            "ref_count": 1,  # the co-tenant still holds it
+            "holders": {"co-tenant-entry-id"},  # the co-tenant still holds it
         }
         mock_hub.config_entry = entry
 
