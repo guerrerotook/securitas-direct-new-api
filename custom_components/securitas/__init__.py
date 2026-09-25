@@ -1526,7 +1526,13 @@ _ENTRY_STATES_IN_USE = (
     ConfigEntryState.LOADED,
     ConfigEntryState.SETUP_IN_PROGRESS,
     ConfigEntryState.SETUP_RETRY,
-    ConfigEntryState.UNLOAD_IN_PROGRESS,
+    # Home Assistant before 2025.3 has no such state: an entry being unloaded
+    # stays LOADED, which is already listed.
+    *(
+        [ConfigEntryState.UNLOAD_IN_PROGRESS]
+        if hasattr(ConfigEntryState, "UNLOAD_IN_PROGRESS")
+        else []
+    ),
 )
 
 
