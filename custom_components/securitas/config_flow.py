@@ -1110,8 +1110,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     def _hold_flow_session(self, username: str, session: dict[str, Any]) -> None:
         """Hold ``session``, first releasing any other one this flow holds.
 
-        The user can go back to the first step and sign in to another account,
-        so the earlier account's session is let go here rather than stranded.
+        The user can go back to the first step and sign in to another account;
+        the earlier account's session is let go once the flow has signed in to
+        the other one, rather than stranded.
         """
         if self._held_session is not None and self._held_session[1] is not session:
             self._release_flow_session()

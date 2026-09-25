@@ -1663,9 +1663,9 @@ class TestAsyncUnloadEntry:
         hub.persist_current_refresh_token.assert_not_called()
 
     async def test_unload_entry_that_never_held_keeps_cotenant_session(self, hass):
-        """Unloading a non-holder must not drop the reference a holder still owns.
+        """Unloading a non-holder must not drop the hold a holder still has.
 
-        An entry that never took a reference must, when unloaded, leave the
+        An entry that never took a hold must, when unloaded, leave the
         holders alone rather than pop the shared session out
         from under the co-tenant that is still using it.
         """
@@ -1841,14 +1841,14 @@ class TestSharedSession:
     async def test_failed_setup_retries_keep_one_reference_and_one_sign_in(
         self, hass, mock_hub
     ):
-        """A setup that fails after registering must not take a second reference.
+        """A setup that fails after registering must not take a second hold.
 
         ``_get_or_create_session`` registers the session and setup carries on.
         When a later step fails — ``_fetch_and_cache_installations`` is the
         usual one — HA raises ConfigEntryNotReady and never calls
-        ``async_unload_entry``, so the reference stays. HA then retries setup,
+        ``async_unload_entry``, so the hold stays. HA then retries setup,
         which must recognise the entry as an existing holder: no second
-        reference, and no second sign-in (each login rotates the refresh token
+        hold, and no second sign-in (each login rotates the refresh token
         and the WAF rate-limits by IP).
         """
         data = make_config_entry_data()

@@ -597,7 +597,7 @@ async def _login_ipv4_then_any(
     own, which reaches IPv4-only servers through NAT64/DNS64 and so needs the
     IPv6 address its resolver synthesises. ``rebuild`` makes the fallback hub on
     ``AF_UNSPEC``; it is None when the caller must not swap its hub out — a shared
-    hub other entries hold a reference to — and the connection error then
+    hub other entries hold — and the connection error then
     propagates unchanged.
 
     Only a connection that never opened is retried: a rejected password must fail
@@ -1484,7 +1484,7 @@ def _release_shared_session(
     next entry set up on it attaches itself.
     """
     session = sessions[username]
-    # An entry that never took a reference leaves the holders alone. Counting
+    # An entry that never took a hold leaves the holders alone. Counting
     # the leaver out regardless would pop the session out from under a
     # co-tenant that is still using it.
     if _release_session_hold(sessions, username, session, leaving.entry_id):
@@ -1597,7 +1597,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     if not await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS):
         return False
 
-    # Release this entry's reference (under the same lock used for creation)
+    # Release this entry's hold (under the same lock used for creation)
     username = config_entry.data.get(CONF_USERNAME)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
     setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})

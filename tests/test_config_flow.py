@@ -2048,7 +2048,7 @@ async def test_full_flow_select_installation_creates_entry(hass):
 
 
 # ===================================================================
-# TestFlowSessionCleanup (13 tests)
+# TestFlowSessionCleanup (~13 tests)
 # ===================================================================
 
 
@@ -2056,11 +2056,30 @@ def _flow_sessions(hass) -> dict:
     return hass.data.get(DOMAIN, {}).get("sessions", {})
 
 
-async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
+async def _start_user_flow(hass, hub, credentials=USER_INPUT_CREDENTIALS):
+    with _patches(hub):
+        return await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=credentials
+        )
+
+
+async def _finish_from_options(hass, result):
+    assert result["step_id"] == "options"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_fill_optional_sections(result, USER_INPUT_OPTIONS),
+    )
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=USER_INPUT_MAPPINGS_STD
+    )
+
+
+async def test_aborted_flow_drops_a_session_only_the_flow_holds(hass):
     """Abandoning the flow must not strand the hub it signed in with.
 
     The flow registers its hub before its config entry exists, so the flow is
-    its only holder. If the user walks away, nothing will ever adopt it.
+    its only holder. If the user walks away, nothing holds it once the flow
+    lets go.
     """
     from custom_components.securitas.config_flow import FlowHandler
 
@@ -2127,10 +2146,7 @@ async def test_all_configured_abort_drops_the_flow_session(hass):
         return_value=[make_installation(number="111", alias="Home")]
     )
 
-    with _patches(mock_hub):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
-        )
+    result = await _start_user_flow(hass, mock_hub)
 
     assert result["reason"] == "already_configured"
     assert "test@example.com" not in _flow_sessions(hass)
@@ -2150,10 +2166,7 @@ async def test_unique_id_abort_drops_the_flow_session(hass):
     """``_abort_if_unique_id_configured`` aborts by raising, so a cleanup that
     only runs on a returned abort would miss it."""
     mock_hub = _hub_factory()
-    with _patches(mock_hub):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
-        )
+    result = await _start_user_flow(hass, mock_hub)
     assert result["step_id"] == "options"
     # The same installation gets configured by another route while this flow
     # waits on its options form.
@@ -2179,10 +2192,7 @@ async def test_unique_id_abort_drops_the_flow_session(hass):
 
 async def test_closing_the_dialog_drops_the_flow_session(hass):
     mock_hub = _hub_factory()
-    with _patches(mock_hub):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
-        )
+    result = await _start_user_flow(hass, mock_hub)
     assert "test@example.com" in _flow_sessions(hass)
 
     hass.config_entries.flow.async_abort(result["flow_id"])
@@ -2202,24 +2212,6 @@ async def test_completed_flow_leaves_the_session_to_its_new_entry(hass):
     session = _flow_sessions(hass)["test@example.com"]
     assert session["hub"] is mock_hub
     assert session["holders"] == {entry.entry_id}
-
-
-async def _start_user_flow(hass, hub, credentials=USER_INPUT_CREDENTIALS):
-    with _patches(hub):
-        return await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": SOURCE_USER}, data=credentials
-        )
-
-
-async def _finish_from_options(hass, result):
-    assert result["step_id"] == "options"
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input=_fill_optional_sections(result, USER_INPUT_OPTIONS),
-    )
-    return await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=USER_INPUT_MAPPINGS_STD
-    )
 
 
 async def test_closing_a_flow_that_borrowed_a_loaded_entrys_session_keeps_it(hass):
@@ -2405,7 +2397,7 @@ async def test_a_flow_outliving_the_entry_it_borrowed_from_hands_its_entry_the_h
 
 
 # ===================================================================
-# TestSessionRelease (9 tests): removing entries and closing flows
+# TestSessionRelease (~9 tests)
 # ===================================================================
 
 
