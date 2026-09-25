@@ -1,6 +1,7 @@
 """Tests for the Verisure OWA config flow."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -2451,7 +2452,7 @@ async def test_unloading_the_last_entry_while_a_flow_signs_its_session_in_keeps_
 
 
 # ===================================================================
-# TestSessionRelease (~16 tests)
+# TestSessionRelease (~18 tests)
 # ===================================================================
 
 
@@ -2751,6 +2752,134 @@ async def test_closing_a_flow_while_another_account_signs_in_keeps_the_integrati
     assert other.state is ConfigEntryState.LOADED
     assert _flow_sessions(hass)["other@example.com"]["holders"] == {other.entry_id}
     assert _alias_services(hass)
+
+
+def _other_account_hub_signing_in_slowly():
+    """A hub for another account whose sign-in waits for ``finish_login``."""
+    hub = _hub_factory()
+    hub.config = make_config_entry_data(username="other@example.com")
+    hub.get_authentication_token.side_effect = None
+    hub.get_authentication_token.return_value = None
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def slow_login():
+        login_started.set()
+        await finish_login.wait()
+        hub.get_authentication_token.return_value = FAKE_JWT
+
+    hub.login.side_effect = slow_login
+    return hub, login_started, finish_login
+
+
+async def test_closing_the_last_flow_holding_a_session_keeps_a_dialog_signing_in(
+    hass,
+):
+    """A setup dialog signing in to another account afresh holds no session
+    until its sign-in finishes; the last dialog holding one closing meanwhile
+    must not tear the integration down under it."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    first = await _start_user_flow(hass, hub)
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+    domain_data = hass.data[DOMAIN]
+    other_hub, login_started, finish_login = _other_account_hub_signing_in_slowly()
+    second = asyncio.create_task(
+        _start_user_flow(
+            hass,
+            other_hub,
+            credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "other@example.com"},
+        )
+    )
+    await asyncio.wait_for(login_started.wait(), 2)
+
+    hass.config_entries.flow.async_abort(first["flow_id"])
+    await hass.async_block_till_done()
+
+    assert hass.data.get(DOMAIN) is domain_data
+    assert _alias_services(hass)
+    finish_login.set()
+    result = await second
+    result = await _finish_from_options(hass, result)
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.data[DOMAIN] is domain_data
+    session = _flow_sessions(hass)["other@example.com"]
+    assert session["hub"] is other_hub
+    assert session["holders"] == {entry.entry_id}
+    assert _alias_services(hass)
+
+
+async def test_a_dialog_opened_while_the_integration_tears_down_keeps_it(hass):
+    """The clean-up awaits the removal of each dashboard card. A setup dialog
+    opened meanwhile registers its session, so the clean-up must not then
+    discard it, and what it did remove must be set up again for the dialog's
+    entry."""
+    handler = logging.NullHandler()
+    logging.getLogger().addHandler(handler)
+    removing_card, finish_removing = asyncio.Event(), asyncio.Event()
+
+    async def slow_card_removal(*_args):
+        removing_card.set()
+        await finish_removing.wait()
+
+    other_hub = _hub_factory()
+    other_hub.config = make_config_entry_data(username="other@example.com")
+    listing, finish_listing = asyncio.Event(), asyncio.Event()
+
+    async def slow_listing():
+        listing.set()
+        await finish_listing.wait()
+        return [make_installation()]
+
+    other_hub.client.list_installations = AsyncMock(side_effect=slow_listing)
+    try:
+        with patch(
+            "custom_components.securitas._register_card_resource", AsyncMock()
+        ) as register_card:
+            home = await _load_home_entry(hass, _two_installation_hub())
+            assert register_card.await_count == 5
+            with patch(
+                "custom_components.securitas._unregister_card_resource",
+                side_effect=slow_card_removal,
+            ):
+                unload = asyncio.create_task(
+                    hass.config_entries.async_unload(home.entry_id)
+                )
+                await asyncio.wait_for(removing_card.wait(), 2)
+                flow = asyncio.create_task(
+                    _start_user_flow(
+                        hass,
+                        other_hub,
+                        credentials={
+                            **USER_INPUT_CREDENTIALS,
+                            CONF_USERNAME: "other@example.com",
+                        },
+                    )
+                )
+                await asyncio.wait_for(listing.wait(), 2)
+                finish_removing.set()
+                assert await unload
+            finish_listing.set()
+            result = await flow
+
+            assert result["step_id"] == "options"
+            assert _flow_sessions(hass)["other@example.com"]["holders"] == {
+                f"config_flow:{result['flow_id']}"
+            }
+            assert _alias_services(hass)
+            result = await _finish_from_options(hass, result)
+            assert result["type"] == FlowResultType.CREATE_ENTRY
+            entry = result["result"]
+            assert entry.state is ConfigEntryState.LOADED
+            assert _flow_sessions(hass)["other@example.com"]["holders"] == {
+                entry.entry_id
+            }
+            assert hass.data[DOMAIN]["log_filter"] in handler.filters
+            assert register_card.await_count == 10
+    finally:
+        logging.getLogger().removeHandler(handler)
 
 
 async def _other_account_retrying_after_a_refresh_crash(hass):

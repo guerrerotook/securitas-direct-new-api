@@ -29,7 +29,7 @@ except ImportError:
     from homeassistant.components.http import (
         StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
     )
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigEntryState
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -1536,31 +1536,60 @@ _ENTRY_STATES_IN_USE = (
 )
 
 
-async def _async_teardown_domain_if_unused(
-    hass: HomeAssistant, exclude: ConfigEntry | None = None
-) -> None:
-    """Tear the integration down once no session is held and no entry uses it.
+def _integration_in_use(hass: HomeAssistant, exclude: ConfigEntry | None) -> bool:
+    """Whether a session is held, an entry uses the integration, or a setup
+    dialog is open.
 
-    ``exclude`` is the entry being unloaded, which does not count as using it.
+    A dialog signing in afresh holds no session until its sign-in finishes.
+    Reauth dialogs do not count: their steps sign in on a hub of their own and
+    never touch the shared data (the entry's reload sets it up again), and HA
+    aborts them only after the entry's ``async_remove_entry`` has run, so
+    counting them would leave the integration set up once that entry is
+    deleted. Options dialogs live in another manager and read the shared data
+    only through ``get``.
     """
-    if DOMAIN not in hass.data or hass.data[DOMAIN].get("sessions"):
-        return
+    if hass.data.get(DOMAIN, {}).get("sessions"):
+        return True
     if any(
         entry.state in _ENTRY_STATES_IN_USE
         for entry in hass.config_entries.async_entries(DOMAIN)
         if entry is not exclude
     ):
+        return True
+    # HA drops a closing flow from its progress before calling the flow's
+    # async_remove, so that flow never counts itself.
+    return any(
+        flow.get("context", {}).get("source") != SOURCE_REAUTH
+        for flow in hass.config_entries.flow.async_progress_by_handler(
+            DOMAIN, include_uninitialized=True
+        )
+    )
+
+
+async def _async_teardown_domain_if_unused(
+    hass: HomeAssistant, exclude: ConfigEntry | None = None
+) -> None:
+    """Tear the integration down once nothing uses it.
+
+    ``exclude`` is the entry being unloaded, which does not count as using it.
+    """
+    if DOMAIN not in hass.data or _integration_in_use(hass, exclude):
         return
-    await _async_teardown_domain(hass)
+    await _async_teardown_domain(hass, exclude)
 
 
-async def _async_teardown_domain(hass: HomeAssistant) -> None:
+async def _async_teardown_domain(
+    hass: HomeAssistant, exclude: ConfigEntry | None = None
+) -> None:
     """Undo the integration-wide setup: log filters, cards, service aliases."""
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
-    log_filter = domain_data.get("log_filter")
-    transient_log_filter = domain_data.get("transient_log_filter")
+    # Forgotten as they are removed, so anything that sets up during the
+    # awaits below adds its own instead of counting on these.
+    log_filter = domain_data.pop("log_filter", None)
+    transient_log_filter = domain_data.pop("transient_log_filter", None)
+    domain_data.pop("card_registered", None)
     for handler in logging.getLogger().handlers:
         if log_filter:
             handler.removeFilter(log_filter)
@@ -1574,6 +1603,11 @@ async def _async_teardown_domain(hass: HomeAssistant) -> None:
         hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
     )
     await _unregister_card_resource(hass, MORE_INFO_MODULE_URL, "more_info_resource_id")
+
+    # A setup dialog or entry may have started using the integration while
+    # the cards were being removed.
+    if _integration_in_use(hass, exclude):
+        return
 
     # Left registered, a call to verisure_owa.force_arm would proxy to a
     # securitas service that no longer exists.
