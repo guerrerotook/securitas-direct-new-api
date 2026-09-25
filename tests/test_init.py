@@ -1662,7 +1662,7 @@ class TestAsyncUnloadEntry:
         assert hub.config_entry is owner
         hub.persist_current_refresh_token.assert_not_called()
 
-    async def test_unload_entry_that_never_acquired_keeps_cotenant_session(self, hass):
+    async def test_unload_entry_that_never_held_keeps_cotenant_session(self, hass):
         """Unloading a non-holder must not drop the reference a holder still owns.
 
         An entry that never took a reference must, when unloaded, leave the

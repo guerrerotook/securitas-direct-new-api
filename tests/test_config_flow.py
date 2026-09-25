@@ -2045,8 +2045,12 @@ async def test_full_flow_select_installation_creates_entry(hass):
 
 
 # ===================================================================
-# TestFlowAbortCleanup (~2 tests)
+# TestFlowSessionCleanup (13 tests)
 # ===================================================================
+
+
+def _flow_sessions(hass) -> dict:
+    return hass.data.get(DOMAIN, {}).get("sessions", {})
 
 
 async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
@@ -2070,7 +2074,7 @@ async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
 
     flow.async_remove()
 
-    assert "test@example.com" not in hass.data[DOMAIN]["sessions"]
+    assert "test@example.com" not in _flow_sessions(hass)
 
 
 async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
@@ -2097,18 +2101,14 @@ async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
     flow.flow_id = "flow-id"
     flow.config = {CONF_USERNAME: "test@example.com"}
     flow._hold_flow_session(
-        "test@example.com", hass.data[DOMAIN]["sessions"]["test@example.com"]
+        "test@example.com", _flow_sessions(hass)["test@example.com"]
     )
 
     flow.async_remove()
 
-    session = hass.data[DOMAIN]["sessions"]["test@example.com"]
+    session = _flow_sessions(hass)["test@example.com"]
     assert session["hub"] is hub
     assert session["holders"] == {"loaded-entry-id"}
-
-
-def _flow_sessions(hass) -> dict:
-    return hass.data.get(DOMAIN, {}).get("sessions", {})
 
 
 async def test_all_configured_abort_drops_the_flow_session(hass):
