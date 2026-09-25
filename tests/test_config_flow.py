@@ -15,9 +15,12 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
+    _ALIASED_SERVICES,
+    ALIAS_DOMAIN,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
     CONF_COUNTRY,
@@ -35,7 +38,7 @@ from custom_components.securitas import (
     DOMAIN,
     _get_or_create_session,
 )
-from custom_components.securitas.config_flow import SECTION_PIN
+from custom_components.securitas.config_flow import SECTION_PIN, FlowHandler
 from custom_components.securitas.const import (
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
@@ -2399,6 +2402,295 @@ async def test_a_flow_outliving_the_entry_it_borrowed_from_hands_its_entry_the_h
     assert result["type"] == FlowResultType.CREATE_ENTRY
     fresh_login.assert_not_awaited()
     assert hub.config_entry is result["result"]
+
+
+# ===================================================================
+# TestSessionRelease (9 tests): removing entries and closing flows
+# ===================================================================
+
+
+def _two_installation_hub():
+    hub = _hub_factory()
+    hub.config = make_config_entry_data()
+    hub.client.list_installations = AsyncMock(
+        return_value=[
+            make_installation(number="111", alias="Home"),
+            make_installation(number="222", alias="Office"),
+        ]
+    )
+    return hub
+
+
+async def _load_home_entry(hass, hub):
+    result = await _start_user_flow(hass, hub)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={CONF_INSTALLATION: "111"}
+    )
+    result = await _finish_from_options(hass, result)
+    entry = result["result"]
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+def _add_office_entry(hass, **data):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_222",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "222", **data},
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _alias_services(hass) -> set[str]:
+    """The ``verisure_owa.*`` aliases of ``securitas.*`` services still registered."""
+    registered = hass.services.async_services().get(ALIAS_DOMAIN, {})
+    return {name for name, _, _ in _ALIASED_SERVICES} & set(registered)
+
+
+def _record_persistence_target(hub) -> list:
+    """Collect the entry the hub's current token is written to, per write."""
+    written_to: list = []
+    hub.persist_current_refresh_token.side_effect = lambda: written_to.append(
+        hub.config_entry
+    )
+    return written_to
+
+
+async def test_deleting_an_entry_whose_token_recovery_failed_releases_it(hass):
+    """An entry that took its hold and then failed setup is never unloaded, so
+    deleting it is the only chance to release the hold; the last one out also
+    tears the integration down."""
+    hub = _hub_factory()
+    hub.config = make_config_entry_data()
+    flow = await _start_user_flow(hass, hub)
+    hub.refresh_token_is_dead = True
+    hub.get_refresh_token.return_value = "dead-token"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**make_config_entry_data(), CONF_REFRESH_TOKEN: "fresh-token"},
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.securitas._login_or_raise",
+        AsyncMock(side_effect=ConfigEntryAuthFailed("rejected")),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {entry.entry_id}
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert DOMAIN not in hass.data
+    assert not _alias_services(hass)
+
+
+async def test_deleting_an_entry_waiting_to_retry_setup_releases_it(hass):
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = _add_office_entry(hass)
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations",
+        AsyncMock(side_effect=VerisureOwaError("offline")),
+    ):
+        assert not await hass.config_entries.async_setup(office.entry_id)
+    assert office.state is ConfigEntryState.SETUP_RETRY
+    holders = _flow_sessions(hass)["test@example.com"]["holders"]
+    assert holders == {home.entry_id, office.entry_id}
+
+    await hass.config_entries.async_remove(office.entry_id)
+    await hass.async_block_till_done()
+
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {home.entry_id}
+    assert hub.config_entry is home
+
+
+async def test_deleting_a_loaded_entry_leaves_its_co_tenant_set_up(hass):
+    """Unloading already released a loaded entry's hold; deleting it must not
+    release anything more or tear down what the co-tenant still uses."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    result = await _start_user_flow(hass, hub)
+    office = (await _finish_from_options(hass, result))["result"]
+    assert office.state is ConfigEntryState.LOADED
+    written_to = _record_persistence_target(hub)
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {office.entry_id}
+    assert hub.config_entry is office
+    assert written_to == [office]
+    assert _alias_services(hass)
+
+
+async def test_closing_the_last_flow_after_the_last_entry_went_tears_down(hass):
+    """Removing the last entry while a setup dialog for the same account still
+    holds its session keeps the integration up for that dialog; closing the
+    dialog afterwards must then tear it down."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    assert _alias_services(hass)
+    flow = await _start_user_flow(hass, hub)
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+    assert _flow_sessions(hass)["test@example.com"]["hub"] is hub
+
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+    await hass.async_block_till_done()
+
+    assert DOMAIN not in hass.data
+    assert not _alias_services(hass)
+
+
+async def test_removing_the_token_owner_hands_off_to_a_co_tenant_mid_setup(hass):
+    """A co-tenant still setting up already holds the session; it must take
+    over saving the hub's tokens rather than leave the hub saving nowhere."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = _add_office_entry(hass)
+    fetch_started, finish_fetch = asyncio.Event(), asyncio.Event()
+
+    async def slow_fetch(*_args, **_kwargs):
+        fetch_started.set()
+        await finish_fetch.wait()
+        return []
+
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations", slow_fetch
+    ):
+        setup = hass.async_create_task(hass.config_entries.async_setup(office.entry_id))
+        await asyncio.wait_for(fetch_started.wait(), 2)
+        written_to = _record_persistence_target(hub)
+        await hass.config_entries.async_remove(home.entry_id)
+        finish_fetch.set()
+        await setup
+
+    assert office.state is ConfigEntryState.LOADED
+    assert hub.config_entry is office
+    assert written_to == [office]
+
+
+async def test_removing_the_token_owner_hands_off_to_a_co_tenant_retrying(hass):
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = _add_office_entry(hass, **{CONF_REFRESH_TOKEN: "older-token"})
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations",
+        AsyncMock(side_effect=VerisureOwaError("offline")),
+    ):
+        await hass.config_entries.async_setup(office.entry_id)
+    assert office.state is ConfigEntryState.SETUP_RETRY
+    written_to = _record_persistence_target(hub)
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert hub.config_entry is office
+    assert written_to == [office]
+
+
+async def test_removing_the_token_owner_prefers_a_loaded_co_tenant(hass):
+    """A loaded co-tenant is refreshing the hub's tokens right now, so it takes
+    over saving them even when a retrying co-tenant's id sorts first."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="zz-loaded-office",
+        unique_id="test@example.com_222",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "222"},
+        version=FlowHandler.VERSION,
+    )
+    office.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(office.entry_id)
+    cabin = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="aa-retrying-cabin",
+        unique_id="test@example.com_333",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "333"},
+        version=FlowHandler.VERSION,
+    )
+    cabin.add_to_hass(hass)
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations",
+        AsyncMock(side_effect=VerisureOwaError("offline")),
+    ):
+        await hass.config_entries.async_setup(cabin.entry_id)
+    assert office.state is ConfigEntryState.LOADED
+    assert cabin.state is ConfigEntryState.SETUP_RETRY
+    holders = _flow_sessions(hass)["test@example.com"]["holders"]
+    assert holders == {home.entry_id, office.entry_id, cabin.entry_id}
+    written_to = _record_persistence_target(hub)
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert hub.config_entry is office
+    assert written_to == [office]
+
+
+async def test_a_dead_token_is_not_handed_to_the_co_tenant(hass):
+    """A condemned token written over the co-tenant's own would stop setup from
+    trying the co-tenant's token, which may be a fresh one from reauth."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = _add_office_entry(hass)
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations",
+        AsyncMock(side_effect=VerisureOwaError("offline")),
+    ):
+        await hass.config_entries.async_setup(office.entry_id)
+    hub.refresh_token_is_dead = True
+    written_to = _record_persistence_target(hub)
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert hub.config_entry is office
+    assert written_to == []
+
+
+async def test_closing_a_flow_while_another_account_signs_in_keeps_the_integration(
+    hass,
+):
+    """An entry signing in afresh holds nothing yet; a flow for another account
+    closing meanwhile must not tear down the integration it is setting up in."""
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(username="other@example.com"),
+        version=FlowHandler.VERSION,
+    )
+    other.add_to_hass(hass)
+    flow = await _start_user_flow(hass, _hub_factory())
+    other_hub = _hub_factory()
+    other_hub.config = make_config_entry_data(username="other@example.com")
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def fresh_login(*_args, **_kwargs):
+        login_started.set()
+        await finish_login.wait()
+        return other_hub
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=fresh_login
+    ):
+        setup = hass.async_create_task(hass.config_entries.async_setup(other.entry_id))
+        await asyncio.wait_for(login_started.wait(), 2)
+        hass.config_entries.flow.async_abort(flow["flow_id"])
+        await asyncio.sleep(0)
+        finish_login.set()
+        await setup
+    await hass.async_block_till_done()
+
+    assert other.state is ConfigEntryState.LOADED
+    assert _flow_sessions(hass)["other@example.com"]["holders"] == {other.entry_id}
+    assert _alias_services(hass)
 
 
 # ===================================================================

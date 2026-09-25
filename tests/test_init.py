@@ -1928,6 +1928,60 @@ class TestSharedSession:
             entry.entry_id,
         }
 
+    async def _set_up_on_detached_hub(self, hass, mock_hub, stored_token):
+        data = make_config_entry_data()
+        data[CONF_REFRESH_TOKEN] = stored_token
+        entry = MockConfigEntry(domain=DOMAIN, data=data)
+        entry.add_to_hass(hass)
+        mock_hub.config_entry = None
+        hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})[
+            data[CONF_USERNAME]
+        ] = {"hub": mock_hub, "holders": {"config_flow:flow-id"}}
+        written_to: list = []
+        mock_hub.persist_current_refresh_token.side_effect = lambda: written_to.append(
+            mock_hub.config_entry
+        )
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch("custom_components.securitas._login_or_raise", AsyncMock()),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+        return entry, written_to
+
+    async def test_attaching_a_reused_hub_writes_its_current_token(
+        self, hass, mock_hub
+    ):
+        """The hub's token may have rotated past the one the entry stored; the
+        entry must hold the current one at once, not after the next rotation."""
+        mock_hub.get_refresh_token.return_value = "current-token"
+
+        entry, written_to = await self._set_up_on_detached_hub(
+            hass, mock_hub, stored_token="older-token"
+        )
+
+        assert mock_hub.config_entry is entry
+        assert written_to == [entry]
+
+    async def test_attaching_a_reused_hub_keeps_the_entry_token_over_a_dead_one(
+        self, hass, mock_hub
+    ):
+        mock_hub.refresh_token_is_dead = True
+        mock_hub.get_refresh_token.return_value = "dead-token"
+
+        entry, written_to = await self._set_up_on_detached_hub(
+            hass, mock_hub, stored_token="fresh-from-reauth"
+        )
+
+        assert mock_hub.config_entry is entry
+        mock_hub.adopt_refresh_token.assert_called_once_with("fresh-from-reauth")
+        assert written_to == []
+
     async def test_per_entry_data_stored(self, hass, mock_hub):
         """Each entry should have its own per-entry data with hub and devices."""
         data1 = make_config_entry_data()

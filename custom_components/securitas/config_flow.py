@@ -58,6 +58,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _async_teardown_domain_if_unused,
     _hold_session_reference,
     _login_ipv4_then_any,
     _new_session_record,
@@ -1118,13 +1119,22 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._held_session = (username, session)
 
     def _release_flow_session(self) -> None:
-        """Release this flow's hold; the session goes once nobody holds it."""
+        """Release this flow's hold; the session goes once nobody holds it.
+
+        A flow can be the last thing using the integration (its entry was
+        deleted while the dialog stayed open), so letting go of the last
+        session also tears the integration down.
+        """
         if self._held_session is None:
             return
         username, session = self._held_session
         self._held_session = None
         sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        _release_session_hold(sessions, username, session, self._session_holder)
+        if (
+            _release_session_hold(sessions, username, session, self._session_holder)
+            and not sessions
+        ):
+            self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
 
     @callback
     def async_remove(self) -> None:

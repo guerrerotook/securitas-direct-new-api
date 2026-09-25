@@ -29,7 +29,7 @@ except ImportError:
     from homeassistant.components.http import (
         StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
     )
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -689,6 +689,19 @@ def _release_session_hold(
     return True
 
 
+def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
+    """Save the hub's rotated refresh tokens to ``entry``, starting now.
+
+    The current token is written at once, since it may have rotated past the
+    one ``entry`` stored. A condemned token is not written: it would replace
+    the entry's own token, which may be a fresh one from reauth that setup
+    still has to try.
+    """
+    hub.config_entry = entry
+    if not hub.refresh_token_is_dead:
+        hub.persist_current_refresh_token()
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -720,7 +733,7 @@ async def _get_or_create_session(
             # reports ``no-config-entry`` and the stale on-disk token triggers
             # the xSRefreshLogin 'fr' crash on the next restart.
             if client.config_entry is None:
-                client.config_entry = entry
+                _attach_token_persistence(client, entry)
             # A shared client condemned by a crash streak, reached with a token
             # that is not the one it condemned: the reauth flow wrote a fresh
             # token into this entry and reloaded it, but the co-tenant kept
@@ -1463,14 +1476,12 @@ def _release_shared_session(
     Releasing a hold an entry never took cannot take one away from an entry
     that did, which stops a co-tenant's session being pulled out from under it.
 
-    When the session survives but the entry being unloaded is the one the hub
-    persists rotated refresh tokens to, hand that persistence off to a surviving
-    co-tenant entry and write the current token there immediately. Otherwise
-    rotations would keep targeting the removed entry, the survivor's on-disk
-    token would go stale, and the xSRefreshLogin 'fr' crash (issue #557) would
-    recur on the survivor's next restart. When no loaded co-tenant is left (a
-    config flow, or an entry whose setup is being retried, still holds it),
-    detach the hub instead, so the next entry set up on it attaches itself.
+    When the session survives but the entry being released is the one the hub
+    saves rotated refresh tokens to, hand that over to another entry holding
+    the session, even one still setting up or waiting to retry, so its stored
+    token does not go stale and hit the xSRefreshLogin 'fr' crash (issue #557)
+    on its next restart. When only config flows hold it, detach the hub, so the
+    next entry set up on it attaches itself.
     """
     session = sessions[username]
     # An entry that never took a reference leaves the holders alone. Counting
@@ -1482,17 +1493,103 @@ def _release_shared_session(
     hub: VerisureHub = session["hub"]
     if hub.config_entry is not leaving:
         return
+    successor = _token_successor(hass, session)
+    if successor is None:
+        hub.config_entry = None
+    else:
+        _attach_token_persistence(hub, successor)
 
-    # Re-attach persistence to a co-tenant entry that shares this hub.
-    domain_data = hass.data.get(DOMAIN, {})
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.entry_id == leaving.entry_id:
-            continue
-        if domain_data.get(entry.entry_id, {}).get("hub") is hub:
-            hub.config_entry = entry
-            hub.persist_current_refresh_token()
-            return
-    hub.config_entry = None
+
+def _token_successor(
+    hass: HomeAssistant, session: dict[str, Any]
+) -> ConfigEntry | None:
+    """Pick the holding entry to save tokens to, a loaded one first.
+
+    Flow keys resolve to no entry and are skipped.
+    """
+    holding = [
+        entry
+        for holder in session["holders"]
+        if (entry := hass.config_entries.async_get_entry(holder)) is not None
+    ]
+    return min(
+        holding,
+        key=lambda entry: (entry.state is not ConfigEntryState.LOADED, entry.entry_id),
+        default=None,
+    )
+
+
+_ENTRY_STATES_IN_USE = (
+    ConfigEntryState.LOADED,
+    ConfigEntryState.SETUP_IN_PROGRESS,
+    ConfigEntryState.UNLOAD_IN_PROGRESS,
+)
+
+
+async def _async_teardown_domain_if_unused(hass: HomeAssistant) -> None:
+    """Tear the integration down once no session is held and no entry is up.
+
+    Runs where something other than an unload lets go last: deleting an entry
+    that was never loaded, and a config flow ending.
+    """
+    if DOMAIN not in hass.data or hass.data[DOMAIN].get("sessions"):
+        return
+    if any(
+        entry.state in _ENTRY_STATES_IN_USE
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    ):
+        return
+    await _async_teardown_domain(hass)
+
+
+async def _async_teardown_domain(hass: HomeAssistant) -> None:
+    """Undo the integration-wide setup: log filters, cards, service aliases."""
+    domain_data = hass.data.get(DOMAIN)
+    if domain_data is None:
+        return
+    log_filter = domain_data.get("log_filter")
+    transient_log_filter = domain_data.get("transient_log_filter")
+    for handler in logging.getLogger().handlers:
+        if log_filter:
+            handler.removeFilter(log_filter)
+        if transient_log_filter:
+            handler.removeFilter(transient_log_filter)
+
+    await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
+    await _unregister_card_resource(hass, CHIP_CARD_URL, "chip_card_resource_id")
+    await _unregister_card_resource(hass, CAMERA_CARD_URL, "camera_card_resource_id")
+    await _unregister_card_resource(
+        hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
+    )
+    await _unregister_card_resource(hass, MORE_INFO_MODULE_URL, "more_info_resource_id")
+
+    # Left registered, a call to verisure_owa.force_arm would proxy to a
+    # securitas service that no longer exists.
+    for service_name, _supports_response, _schema in _ALIASED_SERVICES:
+        if hass.services.has_service(ALIAS_DOMAIN, service_name):
+            hass.services.async_remove(ALIAS_DOMAIN, service_name)
+
+    hass.data.pop(DOMAIN, None)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Release a deleted entry's hold on its session if unloading did not.
+
+    Home Assistant unloads only a loaded entry before deleting it. An entry
+    whose setup failed after taking its hold (waiting to retry, or needing
+    reauth) still holds the session here.
+    """
+    domain_data = hass.data.get(DOMAIN)
+    username = entry.data.get(CONF_USERNAME)
+    if domain_data is None or not username:
+        return
+    lock = domain_data.get("setup_locks", {}).get(username) or asyncio.Lock()
+    async with lock:
+        sessions = domain_data.get("sessions", {})
+        session = sessions.get(username)
+        if session is not None and entry.entry_id in session["holders"]:
+            _release_shared_session(hass, sessions, username, entry)
+    await _async_teardown_domain_if_unused(hass)
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -1515,38 +1612,7 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
 
-    # Check if any sessions remain — if not, do full cleanup
-    remaining_sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
-    if not remaining_sessions:
-        # Last entry unloaded — full cleanup
-        log_filter = hass.data[DOMAIN].get("log_filter")
-        transient_log_filter = hass.data[DOMAIN].get("transient_log_filter")
-        for handler in logging.getLogger().handlers:
-            if log_filter:
-                handler.removeFilter(log_filter)
-            if transient_log_filter:
-                handler.removeFilter(transient_log_filter)
-
-        await _unregister_card_resource(hass, CARD_URL, "card_resource_id")
-        await _unregister_card_resource(hass, CHIP_CARD_URL, "chip_card_resource_id")
-        await _unregister_card_resource(
-            hass, CAMERA_CARD_URL, "camera_card_resource_id"
-        )
-        await _unregister_card_resource(
-            hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
-        )
-        await _unregister_card_resource(
-            hass, MORE_INFO_MODULE_URL, "more_info_resource_id"
-        )
-
-        # Tear down the verisure_owa.* service aliases on full unload —
-        # leaving them registered after the integration's last entry
-        # unloads would mean a service call to verisure_owa.force_arm
-        # proxies to a securitas service that no longer exists.
-        for service_name, _supports_response, _schema in _ALIASED_SERVICES:
-            if hass.services.has_service(ALIAS_DOMAIN, service_name):
-                hass.services.async_remove(ALIAS_DOMAIN, service_name)
-
-        hass.data.pop(DOMAIN, None)
+    if not hass.data.get(DOMAIN, {}).get("sessions"):
+        await _async_teardown_domain(hass)
 
     return True
