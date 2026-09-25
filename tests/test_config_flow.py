@@ -2063,7 +2063,7 @@ async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
     flow.hass = hass
     flow.config = {CONF_USERNAME: "test@example.com"}
 
-    await flow.async_step_abort()
+    flow.async_remove()
 
     assert "test@example.com" not in hass.data[DOMAIN]["sessions"]
 
@@ -2091,11 +2091,105 @@ async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
     flow.hass = hass
     flow.config = {CONF_USERNAME: "test@example.com"}
 
-    await flow.async_step_abort()
+    flow.async_remove()
 
     session = hass.data[DOMAIN]["sessions"]["test@example.com"]
     assert session["hub"] is hub
     assert session["holders"] == {"loaded-entry-id"}
+
+
+def _flow_sessions(hass) -> dict:
+    return hass.data.get(DOMAIN, {}).get("sessions", {})
+
+
+async def test_all_configured_abort_drops_the_flow_session(hass):
+    """The flow signs in and registers its hub before it learns there is
+    nothing left to set up; that abort must not strand the hub."""
+    existing_data = make_config_entry_data()
+    existing_data[CONF_INSTALLATION] = "111"
+    MockConfigEntry(
+        domain=DOMAIN, unique_id="test@example.com_111", data=existing_data, version=3
+    ).add_to_hass(hass)
+    mock_hub = _hub_factory()
+    mock_hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number="111", alias="Home")]
+    )
+
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+
+    assert result["reason"] == "already_configured"
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def test_no_refresh_token_abort_drops_the_flow_session(hass):
+    mock_hub = _hub_factory()
+    mock_hub.get_refresh_token = MagicMock(return_value="")
+
+    result = await _complete_full_flow(hass, mock_hub)
+
+    assert result["reason"] == "no_refresh_token"
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def test_unique_id_abort_drops_the_flow_session(hass):
+    """``_abort_if_unique_id_configured`` aborts by raising, so a cleanup that
+    only runs on a returned abort would miss it."""
+    mock_hub = _hub_factory()
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+    assert result["step_id"] == "options"
+    # The same installation gets configured by another route while this flow
+    # waits on its options form.
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_123456",
+        data=make_config_entry_data(),
+        version=3,
+    ).add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_fill_optional_sections(result, USER_INPUT_OPTIONS),
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=USER_INPUT_MAPPINGS_STD
+    )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def test_closing_the_dialog_drops_the_flow_session(hass):
+    mock_hub = _hub_factory()
+    with _patches(mock_hub):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=USER_INPUT_CREDENTIALS
+        )
+    assert "test@example.com" in _flow_sessions(hass)
+
+    hass.config_entries.flow.async_abort(result["flow_id"])
+
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def test_completed_flow_leaves_the_session_to_its_new_entry(hass):
+    """HA sets the new entry up before it removes the flow, so by the time the
+    flow's cleanup runs the entry already holds the session."""
+    mock_hub = _hub_factory()
+
+    result = await _complete_full_flow(hass, mock_hub)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is mock_hub
+    assert session["holders"] == {entry.entry_id}
 
 
 # ===================================================================

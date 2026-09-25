@@ -1096,12 +1096,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_abort(
-        self, reason: str | None = None
-    ) -> config_entries.ConfigFlowResult:
-        """Clean up session when flow is aborted."""
+    @callback
+    def async_remove(self) -> None:
+        """Drop the session this flow registered if no entry took it over.
+
+        HA calls this on every way out of the flow: a returned or raised abort,
+        the user closing the dialog, and a created entry. On the last, HA has
+        already set the new entry up, so it holds the session and it is kept.
+        """
         self._cleanup_flow_session()
-        return super().async_abort(reason=reason or "unknown")
 
     def _cleanup_flow_session(self) -> None:
         """Remove session stored by this flow if it has no active references."""
