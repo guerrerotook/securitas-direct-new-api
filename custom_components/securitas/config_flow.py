@@ -59,12 +59,12 @@ from . import (
     DOMAIN,
     VerisureHub,
     _async_teardown_domain_if_unused,
-    _hold_session_reference,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
     _release_session_hold,
     _resolve_flow_capabilities,
+    _take_session_hold,
     generate_uuid,
 )
 from .api_queue import ApiQueue
@@ -1119,7 +1119,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """
         if self._held_session is not None and self._held_session[1] is not session:
             self._release_flow_session()
-        _hold_session_reference(session, self._session_holder)
+        _take_session_hold(session, self._session_holder)
         self._held_session = (username, session)
 
     def _release_flow_session(self) -> None:

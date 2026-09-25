@@ -1838,7 +1838,7 @@ class TestSharedSession:
         sessions = hass.data[DOMAIN]["sessions"]
         assert sessions[username]["holders"] == {entry1.entry_id, entry2.entry_id}
 
-    async def test_failed_setup_retries_keep_one_reference_and_one_sign_in(
+    async def test_failed_setup_retries_keep_one_hold_and_one_sign_in(
         self, hass, mock_hub
     ):
         """A setup that fails after registering must not take a second hold.

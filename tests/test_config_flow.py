@@ -2339,7 +2339,7 @@ async def test_closing_a_flow_keeps_a_session_an_entry_registered_over_its_own(
 async def test_changing_username_releases_the_first_accounts_session(hass):
     """After a failed installation lookup the user may try another account.
 
-    The first account's session must go as soon as the flow moves on to the
+    The first account's session must go once the flow has signed in to the
     second, and closing the dialog must then leave nothing behind.
     """
     hub = _hub_factory()
@@ -2516,7 +2516,46 @@ def _add_other_account_entry(hass):
 
 
 def _crash_streaks(hass) -> dict:
-    return hass.data[DOMAIN].get("refresh_crash_streaks", {})
+    return hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {})
+
+
+def _other_account_hub_signing_in_slowly():
+    """A hub for another account whose sign-in waits for ``finish_login``."""
+    hub = _hub_factory()
+    hub.config = make_config_entry_data(username="other@example.com")
+    hub.get_authentication_token.side_effect = None
+    hub.get_authentication_token.return_value = None
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def slow_login():
+        login_started.set()
+        await finish_login.wait()
+        hub.get_authentication_token.return_value = FAKE_JWT
+
+    hub.login.side_effect = slow_login
+    return hub, login_started, finish_login
+
+
+async def _other_account_retrying_after_a_refresh_crash(hass):
+    """Set another account's entry up to fail before taking any hold.
+
+    Its stored token crashes xSRefreshLogin once, so it waits to retry with a
+    crash count of one towards asking for re-authentication.
+    """
+    other = _add_other_account_entry(hass)
+    other_hub = _hub_factory()
+    other_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+
+    async def crashing_login(hass, _config, _entry, username):
+        await _login_or_raise(hass, other_hub, username)
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=crashing_login
+    ):
+        assert not await hass.config_entries.async_setup(other.entry_id)
+    assert other.state is ConfigEntryState.SETUP_RETRY
+    assert "other@example.com" not in _flow_sessions(hass)
+    return other
 
 
 async def test_deleting_an_entry_whose_token_recovery_failed_releases_it(hass):
@@ -2722,12 +2761,7 @@ async def test_closing_a_flow_while_another_account_signs_in_keeps_the_integrati
 ):
     """An entry signing in afresh holds nothing yet; a flow for another account
     closing meanwhile must not tear down the integration it is setting up in."""
-    other = MockConfigEntry(
-        domain=DOMAIN,
-        data=make_config_entry_data(username="other@example.com"),
-        version=FlowHandler.VERSION,
-    )
-    other.add_to_hass(hass)
+    other = _add_other_account_entry(hass)
     flow = await _start_user_flow(hass, _hub_factory())
     other_hub = _hub_factory()
     other_hub.config = make_config_entry_data(username="other@example.com")
@@ -2752,23 +2786,6 @@ async def test_closing_a_flow_while_another_account_signs_in_keeps_the_integrati
     assert other.state is ConfigEntryState.LOADED
     assert _flow_sessions(hass)["other@example.com"]["holders"] == {other.entry_id}
     assert _alias_services(hass)
-
-
-def _other_account_hub_signing_in_slowly():
-    """A hub for another account whose sign-in waits for ``finish_login``."""
-    hub = _hub_factory()
-    hub.config = make_config_entry_data(username="other@example.com")
-    hub.get_authentication_token.side_effect = None
-    hub.get_authentication_token.return_value = None
-    login_started, finish_login = asyncio.Event(), asyncio.Event()
-
-    async def slow_login():
-        login_started.set()
-        await finish_login.wait()
-        hub.get_authentication_token.return_value = FAKE_JWT
-
-    hub.login.side_effect = slow_login
-    return hub, login_started, finish_login
 
 
 async def test_closing_the_last_flow_holding_a_session_keeps_a_dialog_signing_in(
@@ -2882,28 +2899,6 @@ async def test_a_dialog_opened_while_the_integration_tears_down_keeps_it(hass):
         logging.getLogger().removeHandler(handler)
 
 
-async def _other_account_retrying_after_a_refresh_crash(hass):
-    """Set another account's entry up to fail before taking any hold.
-
-    Its stored token crashes xSRefreshLogin once, so it waits to retry with a
-    crash count of one towards asking for re-authentication.
-    """
-    other = _add_other_account_entry(hass)
-    other_hub = _hub_factory()
-    other_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
-
-    async def crashing_login(hass, _config, _entry, username):
-        await _login_or_raise(hass, other_hub, username)
-
-    with patch(
-        "custom_components.securitas._login_ipv4_first", side_effect=crashing_login
-    ):
-        assert not await hass.config_entries.async_setup(other.entry_id)
-    assert other.state is ConfigEntryState.SETUP_RETRY
-    assert "other@example.com" not in _flow_sessions(hass)
-    return other
-
-
 async def test_closing_a_flow_keeps_the_integration_for_an_entry_waiting_to_retry(
     hass,
 ):
@@ -2960,7 +2955,9 @@ async def test_unloading_the_last_entry_tears_down(hass):
     assert not _alias_services(hass)
 
 
-async def test_unloading_an_entry_after_a_closing_flow_dropped_its_session(hass):
+async def test_unloading_an_entry_succeeds_after_a_closing_flow_dropped_its_session(
+    hass,
+):
     """A flow lets go of its session without the per-account lock, so an unload
     waiting on that lock can find the session already gone once it gets it."""
     flow = await _start_user_flow(hass, _hub_factory())
@@ -2968,8 +2965,10 @@ async def test_unloading_an_entry_after_a_closing_flow_dropped_its_session(hass)
         f"config_flow:{flow['flow_id']}"
     }
     office = _add_office_entry(hass)
-    # Home Assistant counts an entry being unloaded as still using the
-    # integration, so the flow closing does not tear it down.
+    # An entry mid-unload counts as using the integration
+    # (`_ENTRY_STATES_IN_USE`); LOADED stands in for that state on every
+    # supported Home Assistant version, so the flow closing does not tear the
+    # integration down.
     office.mock_state(hass, ConfigEntryState.LOADED)
     lock = hass.data[DOMAIN].setdefault("setup_locks", {})
     lock = lock.setdefault("test@example.com", asyncio.Lock())

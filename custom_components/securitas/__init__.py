@@ -656,7 +656,7 @@ def _new_session_record(hub: VerisureHub) -> dict[str, Any]:
     return {"hub": hub, "holders": set()}
 
 
-def _hold_session_reference(session: dict[str, Any], holder: str) -> None:
+def _take_session_hold(session: dict[str, Any], holder: str) -> None:
     """Record ``holder`` (an entry id or a flow's key) as using the session.
 
     A hold counts once per holder, however many times it is taken: Home
@@ -667,7 +667,7 @@ def _hold_session_reference(session: dict[str, Any], holder: str) -> None:
     session["holders"].add(holder)
 
 
-def _drop_session_reference(session: dict[str, Any], holder: str) -> None:
+def _drop_session_hold(session: dict[str, Any], holder: str) -> None:
     """Forget ``holder``'s hold; one that held nothing leaves the others alone."""
     session["holders"].discard(holder)
 
@@ -681,7 +681,7 @@ def _release_session_hold(
     only while it is still the record registered there, so a holder of a record
     that has since been replaced never removes its replacement.
     """
-    _drop_session_reference(session, holder)
+    _drop_session_hold(session, holder)
     if session["holders"]:
         return False
     if sessions.get(username) is session:
@@ -723,7 +723,7 @@ async def _get_or_create_session(
             session = sessions[username]
             # Hold it before anything below awaits: a config flow closing in
             # the meantime would otherwise unregister it as held by nobody.
-            _hold_session_reference(session, entry.entry_id)
+            _take_session_hold(session, entry.entry_id)
             client: VerisureHub = session["hub"]
             # The config-flow hub is built before the ConfigEntry exists, so it
             # starts detached (config_entry=None) and is registered in
@@ -750,7 +750,7 @@ async def _get_or_create_session(
         else:
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
-            _hold_session_reference(sessions[username], entry.entry_id)
+            _take_session_hold(sessions[username], entry.entry_id)
 
     # Either branch hands back a live session, which proves the stored token.
     _clear_setup_refresh_crash(hass, username)
