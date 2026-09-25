@@ -101,6 +101,12 @@ The mask is always eight characters regardless of how long your PIN really is. I
 
 Upgrading from an earlier version migrates any existing plain-text PIN to a hash automatically, with nothing for you to do.
 
+### If the built-in cards never ask for the PIN
+
+If you've set a PIN but Home Assistant's own alarm card, Tile, badge, Mushroom chip or More Info dialog arms or disarms without ever prompting for it, check the **Default code** field on the alarm entity (**Settings → Devices & services → Entities → _your alarm_ → ⚙️**) and leave it **empty**. If it's filled in, Home Assistant substitutes it on every arm/disarm call and never prompts you — so if it matches your PIN the prompt silently disappears, and if it doesn't match, every arm/disarm fails with an _invalid PIN_ error and no way to enter the right one. Clearing the field is the way back. (The [custom alarm card](#custom-alarm-card) is unaffected: it runs its own PIN keypad and ignores this setting.)
+
+This is the same Home Assistant setting that trips up smart locks — see [the equivalent lock note](#requiring-a-pin-for-lock-operations). Note also that arming only prompts when you've turned on **Require PIN to arm**; disarming prompts whenever a PIN is set.
+
 ## Alarm State Mappings
 
 Verisure supports several alarm modes, but Home Assistant's alarm panel only has five buttons: **Home**, **Away**, **Night**, **Vacation**, and **Custom Bypass**. This integration lets you choose which Verisure mode each button activates.
