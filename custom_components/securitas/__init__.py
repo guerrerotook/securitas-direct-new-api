@@ -678,7 +678,7 @@ def _drop_session_reference(session: dict[str, Any], entry_id: str) -> None:
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
-    """Get or create a shared VerisureHub session with reference counting.
+    """Get or create the shared VerisureHub and record this entry as a holder.
 
     Multiple config entries for the same username share a single
     VerisureHub / VerisureOwaClient session to avoid duplicate logins

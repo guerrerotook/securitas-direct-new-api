@@ -1665,9 +1665,9 @@ class TestAsyncUnloadEntry:
     async def test_unload_entry_that_never_acquired_keeps_cotenant_session(self, hass):
         """Unloading a non-holder must not drop the reference a holder still owns.
 
-        An entry whose setup never completed holds no reference. Unloading it
-        used to decrement unconditionally, popping the shared session out from
-        under the co-tenant that is still using it.
+        An entry whose setup never completed holds no reference, so unloading
+        it must leave the holders alone rather than pop the shared session out
+        from under the co-tenant that is still using it.
         """
         hub = make_securitas_hub_mock()
         holder = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
@@ -1754,12 +1754,12 @@ class TestAsyncUnloadEntry:
 
 
 # ===========================================================================
-# 8. TestSharedSession - Shared API session with reference counting
+# 8. TestSharedSession - Shared API session tracked by holder set
 # ===========================================================================
 
 
 class TestSharedSession:
-    """Tests for shared API session with reference counting."""
+    """Tests for shared API session tracked by holder set."""
 
     @pytest.fixture
     def mock_hub(self):
