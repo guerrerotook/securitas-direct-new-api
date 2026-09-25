@@ -1614,12 +1614,12 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
     setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
     if username and username in sessions:
-        lock = setup_locks.get(username)
-        if lock:
-            async with lock:
+        lock = setup_locks.get(username) or asyncio.Lock()
+        async with lock:
+            # A closing config flow lets go without this lock, so the session
+            # may be gone by the time the lock is ours.
+            if username in sessions:
                 _release_shared_session(hass, sessions, username, config_entry)
-        else:
-            _release_shared_session(hass, sessions, username, config_entry)
 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)

@@ -38,6 +38,7 @@ from custom_components.securitas import (
     DOMAIN,
     _get_or_create_session,
     _login_or_raise,
+    async_unload_entry,
 )
 from custom_components.securitas.config_flow import SECTION_PIN, FlowHandler
 from custom_components.securitas.const import (
@@ -2050,7 +2051,7 @@ async def test_full_flow_select_installation_creates_entry(hass):
 
 
 # ===================================================================
-# TestFlowSessionCleanup (~13 tests)
+# TestFlowSessionCleanup (~14 tests)
 # ===================================================================
 
 
@@ -2398,8 +2399,59 @@ async def test_a_flow_outliving_the_entry_it_borrowed_from_hands_its_entry_the_h
     assert hub.config_entry is result["result"]
 
 
+async def test_unloading_the_last_entry_while_a_flow_signs_its_session_in_keeps_it(
+    hass,
+):
+    """A flow borrowing an entry's session signs it in again first when its
+    token is gone; unloading that entry meanwhile must neither drop the session
+    from under the flow nor tear the integration down."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    record = _flow_sessions(hass)["test@example.com"]
+    hub.get_authentication_token.side_effect = None
+    hub.get_authentication_token.return_value = None
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def slow_login():
+        login_started.set()
+        await finish_login.wait()
+        hub.get_authentication_token.return_value = FAKE_JWT
+
+    hub.login.reset_mock()
+    hub.login.side_effect = slow_login
+
+    flow = asyncio.create_task(_start_user_flow(hass, hub))
+    await asyncio.wait_for(login_started.wait(), 2)
+    assert await hass.config_entries.async_unload(home.entry_id)
+    assert home.state is ConfigEntryState.NOT_LOADED
+    finish_login.set()
+    result = await flow
+
+    assert result["step_id"] == "options"
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["hub"] is hub
+    assert record["holders"] == {f"config_flow:{result['flow_id']}"}
+    assert _alias_services(hass)
+    assert hub.login.await_count == 1
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=_hub_factory()),
+    ) as fresh_login:
+        result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    office = result["result"]
+    assert office.state is ConfigEntryState.LOADED
+    fresh_login.assert_not_awaited()
+    assert _flow_sessions(hass)["test@example.com"] is record
+    assert record["holders"] == {office.entry_id}
+    assert hub.config_entry is office
+    assert _alias_services(hass)
+
+
 # ===================================================================
-# TestSessionRelease (~15 tests)
+# TestSessionRelease (~16 tests)
 # ===================================================================
 
 
@@ -2777,6 +2829,38 @@ async def test_unloading_the_last_entry_tears_down(hass):
     assert home.state is ConfigEntryState.NOT_LOADED
     assert DOMAIN not in hass.data
     assert not _alias_services(hass)
+
+
+async def test_unloading_an_entry_after_a_closing_flow_dropped_its_session(hass):
+    """A flow lets go of its session without the per-account lock, so an unload
+    waiting on that lock can find the session already gone once it gets it."""
+    flow = await _start_user_flow(hass, _hub_factory())
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {
+        f"config_flow:{flow['flow_id']}"
+    }
+    office = _add_office_entry(hass)
+    # Home Assistant counts an entry being unloaded as still using the
+    # integration, so the flow closing does not tear it down.
+    office.mock_state(hass, ConfigEntryState.LOADED)
+    lock = hass.data[DOMAIN].setdefault("setup_locks", {})
+    lock = lock.setdefault("test@example.com", asyncio.Lock())
+    platforms_unloaded = asyncio.Event()
+
+    async def unload_platforms(*_args):
+        platforms_unloaded.set()
+        return True
+
+    await lock.acquire()
+    with patch.object(
+        hass.config_entries, "async_unload_platforms", side_effect=unload_platforms
+    ):
+        unload = asyncio.create_task(async_unload_entry(hass, office))
+        await asyncio.wait_for(platforms_unloaded.wait(), 2)
+        hass.config_entries.flow.async_abort(flow["flow_id"])
+        assert "test@example.com" not in _flow_sessions(hass)
+        lock.release()
+
+        assert await unload is True
 
 
 async def test_unloading_an_entry_while_another_account_signs_in_keeps_the_integration(

@@ -701,6 +701,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
         if username in sessions:
+            # Held before finish_setup's sign-in awaits: the last entry
+            # unloading meanwhile would otherwise drop the session under us.
+            self._hold_flow_session(username, sessions[username])
             existing_hub = sessions[username]["hub"]
             self.hub = existing_hub
             # Borrowed, not built here: the fallback must not rebuild it (it is
@@ -912,9 +915,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
         if username not in sessions:
             sessions[username] = _new_session_record(self.hub)
-        # Registered here or borrowed in async_step_user, the flow holds the
-        # session until it ends; an entry it creates takes its own hold during
-        # setup, which HA runs before removing the flow.
+        # The flow holds the session until it ends (a borrowed one is already
+        # held; holding again changes nothing); an entry it creates takes its
+        # own hold during setup, which HA runs before removing the flow.
         self._hold_flow_session(username, sessions[username])
 
         try:
@@ -1112,7 +1115,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         The user can go back to the first step and sign in to another account;
         the earlier account's session is let go once the flow has signed in to
-        the other one, rather than stranded.
+        or borrowed the other one's, rather than stranded.
         """
         if self._held_session is not None and self._held_session[1] is not session:
             self._release_flow_session()
