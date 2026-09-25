@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CameraDevice(BaseModel):
-    """A camera device from xSDeviceList (QR, YR, YP, or QP cameras)."""
+    """A camera device from xSDeviceList (QR, YR, XR, YP, or QP cameras)."""
 
     model_config = ConfigDict(populate_by_name=True)
 

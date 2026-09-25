@@ -185,7 +185,7 @@ def client(transport):
 
 class TestGetCameraDevices:
     async def test_returns_filtered_camera_list(self, client, transport):
-        """Only QR, YR, YP, QP active devices are returned."""
+        """Only camera-type active devices are returned."""
         transport.execute.return_value = device_list_response(
             devices=[
                 {
@@ -236,6 +236,77 @@ class TestGetCameraDevices:
         assert result[0].device_type == "QR"
         assert result[1].name == "Back Camera"
         assert result[1].device_type == "YR"
+
+    async def test_includes_xr_cameras(self, client, transport):
+        """XR photo cameras are discovered alongside YR ones (#616)."""
+        # Device list from the issue #616 reporter's SDVFAST panel (Spain).
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {
+                    "id": "0",
+                    "code": "1",
+                    "zoneId": None,
+                    "name": "Home Salon",
+                    "type": "XR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "1",
+                    "code": "2",
+                    "zoneId": None,
+                    "name": "Home Pasillo 1 planta",
+                    "type": "XR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "2",
+                    "code": "3",
+                    "zoneId": None,
+                    "name": "Pl_Home_Buhardilla_3",
+                    "type": "YR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "3",
+                    "code": "1",
+                    "zoneId": None,
+                    "name": "Conexion de la unidad central",
+                    "type": "CENT",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "4",
+                    "code": "1",
+                    "zoneId": None,
+                    "name": "Home Puerta Entrada",
+                    "type": "TI",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "5",
+                    "code": "1",
+                    "zoneId": None,
+                    "name": "Home Pasillo 1 planta",
+                    "type": "ZR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+            ]
+        )
+
+        inst = _make_installation()
+        result = await client.get_camera_devices(inst)
+
+        assert [(c.device_type, c.code, c.zone_id) for c in result] == [
+            ("XR", 1, "XR01"),
+            ("XR", 2, "XR02"),
+            ("YR", 3, "YR03"),
+        ]
 
     async def test_empty_devices_list(self, client, transport):
         """Returns empty list when no devices match."""
@@ -983,7 +1054,7 @@ class TestCameraRequestContracts:
 
     async def test_capture_image_device_type_mapping(self, client, transport):
         """capture_image maps device types to correct integer codes."""
-        mapping = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
+        mapping = {"QR": 106, "YR": 106, "XR": 106, "YP": 103, "QP": 107}
 
         for device_type, expected_code in mapping.items():
             transport.execute.reset_mock()

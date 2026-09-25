@@ -29,10 +29,16 @@ from ._base import _ClientBase
 
 _LOGGER = logging.getLogger(__name__)
 
-CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
+CAMERA_DEVICE_TYPES = {"QR", "YR", "XR", "YP", "QP"}
 IMAGE_RESOLUTION = 0
 IMAGE_MEDIA_TYPE = 1
-IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
+IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {
+    "QR": 106,
+    "YR": 106,
+    "XR": 106,
+    "YP": 103,
+    "QP": 107,
+}
 
 
 class _CameraMixin(_ClientBase):
@@ -41,7 +47,7 @@ class _CameraMixin(_ClientBase):
     async def get_camera_devices(
         self, installation: Installation
     ) -> list[CameraDevice]:
-        """Get list of camera devices (QR, YR, YP, QP) for an installation.
+        """Get list of camera devices (QR, YR, XR, YP, QP) for an installation.
 
         Returns:
             A list of CameraDevice instances for active camera devices.
