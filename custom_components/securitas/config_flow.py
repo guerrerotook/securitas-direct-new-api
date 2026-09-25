@@ -1125,9 +1125,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     def _release_flow_session(self) -> None:
         """Release this flow's hold; the session goes once nobody holds it.
 
-        A flow can be the last thing using the integration (its entry was
-        deleted while the dialog stayed open), so letting go of the last
-        session also tears the integration down.
+        A flow can be the last thing using the integration (the entry whose
+        session it borrowed was deleted while the dialog stayed open), so
+        letting go of the last session also runs the clean-up, which tears the
+        integration down only if no entry or other setup dialog still uses it.
         """
         if self._held_session is None:
             return

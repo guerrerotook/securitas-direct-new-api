@@ -596,9 +596,9 @@ async def _login_ipv4_then_any(
     The fallback covers the opposite network: a host with no IPv4 route of its
     own, which reaches IPv4-only servers through NAT64/DNS64 and so needs the
     IPv6 address its resolver synthesises. ``rebuild`` makes the fallback hub on
-    ``AF_UNSPEC``; it is None when the caller must not swap its hub out — a shared
-    hub other entries hold — and the connection error then
-    propagates unchanged.
+    ``AF_UNSPEC``; it is None when the caller must not swap its hub out — a
+    shared hub that entries or other setup dialogs hold — and the connection
+    error then propagates unchanged.
 
     Only a connection that never opened is retried: a rejected password must fail
     once and reach the user, and a slow reply must not become a second sign-in
@@ -1581,7 +1581,12 @@ async def _async_teardown_domain_if_unused(
 async def _async_teardown_domain(
     hass: HomeAssistant, exclude: ConfigEntry | None = None
 ) -> None:
-    """Undo the integration-wide setup: log filters, cards, service aliases."""
+    """Undo the integration-wide setup: log filters, cards, service aliases.
+
+    Stops before the aliases and the shared data if something started using the
+    integration while the cards were being removed; ``exclude`` is the entry
+    being unloaded, which does not count.
+    """
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
