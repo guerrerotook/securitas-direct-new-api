@@ -486,8 +486,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.hub: VerisureHub | None = None
         # True only while self.hub is a hub this flow built (via _create_client)
         # and may therefore rebuild on the IPv4 fallback. False when self.hub is
-        # borrowed from a running session shared with other entries — rebuilding
-        # that one would strand the co-tenants on the old hub (issue #606).
+        # borrowed from a running session that entries or other setup dialogs
+        # hold — rebuilding that one would strand them on the old hub (issue #606).
         self._owns_hub: bool = False
         # The shared-session record this flow holds, as (username, record).
         self._held_session: tuple[str, dict[str, Any]] | None = None
@@ -571,8 +571,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         much as setup does, because this login is what stands between an affected
         user and having an entry at all (issue #606). The fallback rebuilds only
         a hub this flow owns: a hub borrowed from a running session is shared
-        with other entries, so it is signed in on its existing family and never
-        swapped out (``rebuild=None``, so the connection error just propagates).
+        with the entries or other setup dialogs holding it, so it is signed in on
+        its existing family and never swapped out (``rebuild=None``, so the
+        connection error just propagates).
         """
         assert self.hub is not None
 
@@ -706,8 +707,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self._hold_flow_session(username, sessions[username])
             existing_hub = sessions[username]["hub"]
             self.hub = existing_hub
-            # Borrowed, not built here: the fallback must not rebuild it (it is
-            # shared with the running entries), so leave _owns_hub False.
+            # Borrowed, not built here: the fallback must not rebuild it
+            # (entries or other setup dialogs hold it), so leave _owns_hub False.
             self._owns_hub = False
             self.config[CONF_DEVICE_ID] = existing_hub.config[CONF_DEVICE_ID]
             self.config[CONF_UNIQUE_ID] = existing_hub.config[CONF_UNIQUE_ID]
@@ -1125,8 +1126,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     def _release_flow_session(self) -> None:
         """Release this flow's hold; the session goes once nobody holds it.
 
-        A flow can be the last thing using the integration (the entry whose
-        session it borrowed was deleted while the dialog stayed open), so
+        A flow can be the last thing using the integration (no entry uses it
+        yet, or every entry was deleted while the dialog stayed open), so
         letting go of the last session also runs the clean-up, which tears the
         integration down only if no entry or other setup dialog still uses it.
         """
