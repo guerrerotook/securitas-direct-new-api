@@ -30,6 +30,7 @@ EXPECTED_INTEGRATION_FILES = frozenset(
         "test_hub.py",
         "test_init.py",
         "test_integration.py",
+        "test_ipv4_first.py",
         "test_migrate_unique_ids.py",
         "test_orphan_directory_repair.py",
         "test_services.py",

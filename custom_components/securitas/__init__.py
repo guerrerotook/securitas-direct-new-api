@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import socket
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -137,6 +139,7 @@ from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
 from .pin_crypto import encode_pin
 from .verisure_owa_api import (
+    APIConnectionError,
     ApiDomains,
     AuthenticationError,
     Installation,
@@ -502,7 +505,11 @@ def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
 
 
 async def _login_or_raise(
-    hass: HomeAssistant, client: VerisureHub, username: str
+    hass: HomeAssistant,
+    client: VerisureHub,
+    username: str,
+    *,
+    retry_other_family: bool = False,
 ) -> None:
     """Log the hub in, mapping failures to HA's setup exceptions.
 
@@ -510,6 +517,13 @@ async def _login_or_raise(
     becomes ConfigEntryAuthFailed like a credential rejection; HA's own reauth
     card is the user-facing notice for that path, so unlike the credential
     branches it raises no persistent notification of its own.
+
+    ``retry_other_family`` marks a first attempt the caller will repeat on
+    another address family. A failure to establish the connection is then
+    re-raised as-is rather than mapped, so the attempt about to be retried does
+    not notify the user, log an error or count towards the crash streak. Every
+    other failure — including a timeout waiting for a reply — takes the mapping
+    path, as it does for every other caller.
     """
     try:
         await client.login()
@@ -524,6 +538,19 @@ async def _login_or_raise(
         )
         raise
     except VerisureOwaError as err:
+        # On the first of two family attempts (retry_other_family), re-raise a
+        # connection that never opened untouched: the caller is about to repeat
+        # it on another address family, so it must not notify, log, or count
+        # towards the refresh-crash streak. Every other error — timeouts waiting
+        # for a reply included — takes the mapping path below. (The isinstance
+        # guard narrows err for pyright; pylint doesn't narrow across `and`, so
+        # its no-member on the guarded attribute is a false positive.)
+        if (
+            retry_other_family
+            and isinstance(err, APIConnectionError)
+            and err.connection_never_established  # pylint: disable=no-member
+        ):
+            raise
         # Log the full detail — the SensitiveDataFilter scrubs known
         # secrets — but never embed the raw response body in the
         # user-facing ConfigEntryNotReady text, which doesn't go
@@ -544,6 +571,79 @@ async def _login_or_raise(
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"
         ) from None
+
+
+_IPV4_FALLBACK_LOG = (
+    "Could not reach Verisure over IPv4 (%s); retrying with the default lookup, "
+    "which also asks for IPv6"
+)
+
+
+async def _login_ipv4_then_any(
+    initial: VerisureHub,
+    login: Callable[[VerisureHub, bool], Awaitable[None]],
+    rebuild: Callable[[], VerisureHub] | None,
+) -> VerisureHub:
+    """Log ``initial`` in over IPv4, falling back to the default IPv4+IPv6 lookup.
+
+    Verisure's customer endpoint publishes no IPv6 address in any country this
+    integration supports, so the IPv6 half of the combined lookup aiohttp issues
+    by default can only ever come back empty here. On some networks that empty
+    answer fails the whole lookup instead of falling back to the IPv4 address
+    that resolved fine, and the alarm sits at unavailable (issue #606). Asking
+    for IPv4 only skips a question with no useful answer.
+
+    The fallback covers the opposite network: a host with no IPv4 route of its
+    own, which reaches IPv4-only servers through NAT64/DNS64 and so needs the
+    IPv6 address its resolver synthesises. ``rebuild`` makes the fallback hub on
+    ``AF_UNSPEC``; it is None when the caller must not swap its hub out — a shared
+    hub other entries hold a reference to — and the connection error then
+    propagates unchanged.
+
+    Only a connection that never opened is retried: a rejected password must fail
+    once and reach the user, and a slow reply must not become a second sign-in
+    that could end the session. ``login`` is told which attempt it is (True for
+    the first) so a caller that maps errors can leave the first attempt's
+    connection error untouched for the check below to read.
+    """
+    try:
+        await login(initial, True)
+        return initial
+    except APIConnectionError as err:
+        # Re-checked here, never merely trusted from ``login`` (which may be
+        # tightened independently): only a connection that never opened may be
+        # retried, and only when the caller owns the hub we are about to swap.
+        if not err.connection_never_established or rebuild is None:
+            raise
+        _LOGGER.info(_IPV4_FALLBACK_LOG, err)
+        hub = rebuild()
+        await login(hub, False)
+        return hub
+
+
+async def _login_ipv4_first(
+    hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry, username: str
+) -> VerisureHub:
+    """Log a fresh setup hub in over IPv4, falling back to both families.
+
+    See ``_login_ipv4_then_any`` for the why. Each hub is built on Home
+    Assistant's per-family client, which HA caches and closes at shutdown, so
+    setup never releases it.
+    """
+
+    def build(family: socket.AddressFamily) -> VerisureHub:
+        return VerisureHub(
+            config, entry, async_get_clientsession(hass, family=family), hass
+        )
+
+    async def login(hub: VerisureHub, first: bool) -> None:
+        # retry_other_family leaves the first attempt's never-established
+        # connection error unmapped, so _login_ipv4_then_any can read the flag.
+        await _login_or_raise(hass, hub, username, retry_other_family=first)
+
+    return await _login_ipv4_then_any(
+        build(socket.AF_INET), login, lambda: build(socket.AF_UNSPEC)
+    )
 
 
 async def _get_or_create_session(
@@ -591,8 +691,7 @@ async def _get_or_create_session(
             sessions[username]["ref_count"] += 1
         else:
             # Create new session and log in
-            client = VerisureHub(config, entry, async_get_clientsession(hass), hass)
-            await _login_or_raise(hass, client, username)
+            client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = {"hub": client, "ref_count": 1}
 
     # Either branch hands back a live session, which proves the stored token.

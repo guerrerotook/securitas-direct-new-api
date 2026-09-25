@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
 from typing import Any
 
@@ -57,6 +58,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _login_ipv4_then_any,
     _publish_flow_capabilities,
     _resolve_flow_capabilities,
     generate_uuid,
@@ -478,6 +480,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the flow handler."""
         self.config: dict[str, Any] = {}
         self.hub: VerisureHub | None = None
+        # True only while self.hub is a hub this flow built (via _create_client)
+        # and may therefore rebuild on the IPv4 fallback. False when self.hub is
+        # borrowed from a running session shared with other entries — rebuilding
+        # that one would strand the co-tenants on the old hub (issue #606).
+        self._owns_hub: bool = False
         self.otp_challenge: tuple[str | None, list[OtpPhone] | None] | None = None
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
@@ -521,9 +528,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _create_client(
-        self,
+        self, *, family: socket.AddressFamily = socket.AF_INET
     ) -> VerisureHub:
-        """Create client (VerisureHub)."""
+        """Create client (VerisureHub) on Home Assistant's client for *family*.
+
+        IPv4 by default, for the reason given in ``_login_ipv4_then_any``: no
+        supported country's endpoint has an IPv6 address, so the IPv6 half of
+        the default lookup can only ever come back empty, and on some networks
+        it fails the whole lookup (issue #606). ``_login_with_family_fallback``
+        rebuilds on ``AF_UNSPEC`` if that attempt cannot reach the network.
+
+        The client belongs to Home Assistant, which caches one per family and
+        closes them at shutdown, so this flow never releases it.
+        """
 
         if self.config[CONF_PASSWORD] is None:
             raise ValueError(
@@ -531,10 +548,39 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         self.hub = VerisureHub(
-            self.config, None, async_get_clientsession(self.hass), self.hass
+            self.config,
+            None,
+            async_get_clientsession(self.hass, family=family),
+            self.hass,
         )
-
+        # This flow built the hub, so the IPv4 fallback may rebuild it; borrowing
+        # a shared hub (async_step_user) clears this flag again.
+        self._owns_hub = True
         return self.hub
+
+    async def _login_with_family_fallback(self) -> None:
+        """Log the flow's hub in over IPv4, falling back to both families.
+
+        Shares setup's ``_login_ipv4_then_any``; the flow needs the fallback as
+        much as setup does, because this login is what stands between an affected
+        user and having an entry at all (issue #606). The fallback rebuilds only
+        a hub this flow owns: a hub borrowed from a running session is shared
+        with other entries, so it is signed in on its existing family and never
+        swapped out (``rebuild=None``, so the connection error just propagates).
+        """
+        assert self.hub is not None
+
+        # The shared helper passes which attempt this is; the flow signs in the
+        # same way either way (it maps no errors), so it is intentionally unused.
+        async def login(hub: VerisureHub, _first: bool) -> None:
+            await hub.login()
+
+        rebuild = (
+            (lambda: self._create_client(family=socket.AF_UNSPEC))
+            if self._owns_hub
+            else None
+        )
+        self.hub = await _login_ipv4_then_any(self.hub, login, rebuild)
 
     async def async_step_phone_list(
         self, user_input: dict[str, Any] | None = None
@@ -651,6 +697,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if username in sessions:
             existing_hub = sessions[username]["hub"]
             self.hub = existing_hub
+            # Borrowed, not built here: the fallback must not rebuild it (it is
+            # shared with the running entries), so leave _owns_hub False.
+            self._owns_hub = False
             self.config[CONF_DEVICE_ID] = existing_hub.config[CONF_DEVICE_ID]
             self.config[CONF_UNIQUE_ID] = existing_hub.config[CONF_UNIQUE_ID]
             self.config[CONF_DEVICE_INDIGITALL] = existing_hub.config.get(
@@ -666,7 +715,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Login — catches credential errors and network failures
         try:
-            await self.hub.login()
+            await self._login_with_family_fallback()
         except TwoFactorRequiredError:
             # 2FA required — proceed to device validation for phone list
             return await self._start_2fa_flow()
@@ -735,7 +784,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.hub = self._create_client()
 
             try:
-                await self.hub.login()
+                await self._login_with_family_fallback()
             except TwoFactorRequiredError:
                 return await self._start_2fa_flow()
             except AccountBlockedError:
@@ -829,7 +878,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         assert self.hub is not None
         try:
             if self.hub.get_authentication_token() is None:
-                await self.hub.login()
+                await self._login_with_family_fallback()
         except TwoFactorRequiredError:
             return await self._start_2fa_flow()
         except AccountBlockedError:

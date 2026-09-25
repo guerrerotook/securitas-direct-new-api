@@ -2,6 +2,14 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.9.0
+
+One fix, for anyone whose alarm kept dropping to _unavailable_ with a DNS error. It needs nothing from you.
+
+### Fixed
+
+**The alarm no longer goes unavailable because of an IPv6 lookup ([#606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606)).**  On some networks the alarm repeatedly went _unavailable_ with a DNS error such as `DNS server returned answer with no data`. Verisure's server has no IPv6 address in any supported country, so asking for one can only ever come back empty — and on those networks the empty answer made the whole lookup fail instead of using the IPv4 address that resolved perfectly well. The integration now asks for IPv4 only, so it never asks the question that was failing. If your Home Assistant is on an IPv6-only network and has no IPv4 address of its own, it finds it cannot connect and tries again the ordinary way, so that setup keeps working too — usually at once, or after up to 30 seconds if your network drops the attempt silently instead of refusing it. Thanks to [@Teuqol](https://github.com/Teuqol) for the detailed diagnosis that found the cause.
+
 ## v5.8.0
 
 The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.

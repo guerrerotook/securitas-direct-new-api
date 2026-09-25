@@ -15,7 +15,13 @@ import json
 import logging
 from typing import Any
 
-from aiohttp import ClientConnectorDNSError, ClientError, ClientSession
+from aiohttp import (
+    ClientConnectorDNSError,
+    ClientConnectorError,
+    ClientError,
+    ClientSession,
+    ConnectionTimeoutError,
+)
 
 from .exceptions import APIConnectionError, VerisureOwaError, WAFBlockedError
 
@@ -122,8 +128,18 @@ class HttpTransport:
                     or getattr(err, "strerror", None)
                     or type(err).__name__
                 )
+                # Classify here, the one place that still holds the aiohttp
+                # class. ClientConnectorError covers DNS/refused/unreachable
+                # (its DNS subclass included); ConnectionTimeoutError is a
+                # connect timeout — in both the socket never opened, so nothing
+                # was sent. A ServerTimeoutError waiting for a reply (its sibling
+                # SocketTimeoutError) is excluded: the request may have arrived.
+                never_established = isinstance(
+                    err, (ClientConnectorError, ConnectionTimeoutError)
+                )
                 raise APIConnectionError(
                     f"Connection error with URL {self._base_url}: {os_err}",
+                    connection_never_established=never_established,
                 ) from err
 
             # Tag the raw response with the operation and HTTP status so a

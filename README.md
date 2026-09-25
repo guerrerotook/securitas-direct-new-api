@@ -668,7 +668,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 
 ## Troubleshooting
 
-- **HTTP 403 errors / rate limiting** — Verisure uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries ordinary requests once automatically. Sign-in and token-refresh requests are never re-sent, so a 403 on those surfaces straight away. If you see repeated 403 errors in the logs:
+- **HTTP 403 errors / rate limiting** — Verisure uses a web application firewall (WAF) that blocks requests if you poll too frequently. The integration retries ordinary requests once automatically. Sign-in and token-refresh requests are never re-sent to a server that answered, so a 403 on those surfaces straight away. If you see repeated 403 errors in the logs:
   - **Increase the update interval** — Go to **Settings → Integrations → Verisure OWA → Configure**, expand the **Advanced** section, and increase the **Update scan interval** (default: 120 seconds). Try 180 or 300 seconds.
   - **Increase the API request delay** — The **Delay between API requests** (default: 2 seconds) controls the minimum gap between consecutive API calls. Increasing this to 4–5 seconds reduces request bursts.
   - If you have **multiple installations** on one account, each one polls independently, multiplying the request rate. All API requests to the same country domain are serialized through a shared queue, which helps, but the total volume still increases with each installation.
@@ -677,6 +677,7 @@ After a restart, `notify.mobiles` shows up in the dropdown. The action buttons i
 - **Stale lock state after lock/unlock** — If the lock shows the old state after a lock or unlock command and only self-corrects after the next periodic poll (~2 minutes), please [open an issue](https://github.com/guerrerotook/securitas-direct-new-api/issues) with your debug logs. We are actively improving lock status polling and your logs will help.
 - **Cannot clear PIN code** — In the options flow, clear the PIN field and save. The PIN will be removed.
 - **2FA issues** — If 2FA fails, remove and re-add the integration; you'll be prompted for a new SMS code. If that doesn't work, create a new user in the Verisure mobile app, then log in to the customer web portal for your country to accept the terms of use before using those credentials in HA.
+- **Switching from IPv4 to IPv6** — The address family is chosen once, when the integration signs in. If Home Assistant switches from IPv4 to IPv6 afterwards, restart Home Assistant so Verisure reconnects.
 
 ## Reporting Issues
 
