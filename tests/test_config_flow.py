@@ -37,6 +37,7 @@ from custom_components.securitas import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     _get_or_create_session,
+    _login_or_raise,
 )
 from custom_components.securitas.config_flow import SECTION_PIN, FlowHandler
 from custom_components.securitas.const import (
@@ -66,6 +67,7 @@ from tests.conftest import (
     make_config_entry_data,
     make_installation,
     make_securitas_hub_mock,
+    refresh_login_crash_error,
 )
 
 
@@ -2682,6 +2684,145 @@ async def test_closing_a_flow_while_another_account_signs_in_keeps_the_integrati
 
     assert other.state is ConfigEntryState.LOADED
     assert _flow_sessions(hass)["other@example.com"]["holders"] == {other.entry_id}
+    assert _alias_services(hass)
+
+
+def _add_other_account_entry(hass):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=make_config_entry_data(username="other@example.com"),
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def _other_account_retrying_after_a_refresh_crash(hass):
+    """Set another account's entry up to fail before taking any hold.
+
+    Its stored token crashes xSRefreshLogin once, so it waits to retry with a
+    crash count of one towards asking for re-authentication.
+    """
+    other = _add_other_account_entry(hass)
+    other_hub = _hub_factory()
+    other_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+
+    async def crashing_login(hass, _config, _entry, username):
+        await _login_or_raise(hass, other_hub, username)
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=crashing_login
+    ):
+        assert not await hass.config_entries.async_setup(other.entry_id)
+    assert other.state is ConfigEntryState.SETUP_RETRY
+    assert "other@example.com" not in _flow_sessions(hass)
+    return other
+
+
+def _crash_streaks(hass) -> dict:
+    return hass.data[DOMAIN].get("refresh_crash_streaks", {})
+
+
+async def test_closing_a_flow_keeps_the_integration_for_an_entry_waiting_to_retry(
+    hass,
+):
+    """An entry that failed before taking a hold holds nothing while it waits
+    to retry; a flow for another account closing must not tear down the
+    integration under it or forget its crash count."""
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+    flow = await _start_user_flow(hass, _hub_factory())
+
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+    await hass.async_block_till_done()
+
+    assert other.state is ConfigEntryState.SETUP_RETRY
+    assert _alias_services(hass)
+    assert _crash_streaks(hass) == {"other@example.com": 1}
+
+
+async def test_deleting_an_entry_keeps_the_integration_for_one_waiting_to_retry(
+    hass,
+):
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert other.state is ConfigEntryState.SETUP_RETRY
+    assert _alias_services(hass)
+    assert _crash_streaks(hass) == {"other@example.com": 1}
+
+
+async def test_deleting_the_last_entry_waiting_to_retry_tears_down(hass):
+    """HA stops a retrying entry's retries before deleting it, so it no longer
+    counts as using the integration by then."""
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+
+    await hass.config_entries.async_remove(other.entry_id)
+    await hass.async_block_till_done()
+
+    assert DOMAIN not in hass.data
+    assert not _alias_services(hass)
+
+
+async def test_unloading_the_last_entry_tears_down(hass):
+    """The entry being unloaded is itself mid-unload, which must not count as
+    something still using the integration."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+
+    assert await hass.config_entries.async_unload(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert home.state is ConfigEntryState.NOT_LOADED
+    assert DOMAIN not in hass.data
+    assert not _alias_services(hass)
+
+
+async def test_unloading_an_entry_while_another_account_signs_in_keeps_the_integration(
+    hass,
+):
+    """An entry signing in afresh is not in the sessions table yet; the last
+    registered entry unloading meanwhile must not tear down the integration it
+    is setting up in."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    other = _add_other_account_entry(hass)
+    other_hub = _hub_factory()
+    other_hub.config = make_config_entry_data(username="other@example.com")
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def fresh_login(*_args, **_kwargs):
+        login_started.set()
+        await finish_login.wait()
+        return other_hub
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=fresh_login
+    ):
+        setup = hass.async_create_task(hass.config_entries.async_setup(other.entry_id))
+        await asyncio.wait_for(login_started.wait(), 2)
+        assert await hass.config_entries.async_unload(home.entry_id)
+        finish_login.set()
+        await setup
+    await hass.async_block_till_done()
+
+    assert other.state is ConfigEntryState.LOADED
+    assert _flow_sessions(hass)["other@example.com"]["holders"] == {other.entry_id}
+    assert _alias_services(hass)
+
+
+async def test_reloading_the_only_entry_sets_the_integration_up_again(hass):
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", AsyncMock(return_value=hub)
+    ):
+        assert await hass.config_entries.async_reload(home.entry_id)
+        await hass.async_block_till_done()
+
+    assert home.state is ConfigEntryState.LOADED
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {home.entry_id}
     assert _alias_services(hass)
 
 

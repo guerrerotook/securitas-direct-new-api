@@ -1478,10 +1478,11 @@ def _release_shared_session(
 
     When the session survives but the entry being released is the one the hub
     saves rotated refresh tokens to, hand that over to another entry holding
-    the session, even one still setting up or waiting to retry, so its stored
-    token does not go stale and hit the xSRefreshLogin 'fr' crash (issue #557)
-    on its next restart. When only config flows hold it, detach the hub, so the
-    next entry set up on it attaches itself.
+    the session, even one still setting up or waiting to retry, or one whose
+    setup failed while holding it, so its stored token does not go stale and
+    hit the xSRefreshLogin 'fr' crash (issue #557) on its next restart. When
+    only config flows hold it, detach the hub, so the next entry set up on it
+    attaches itself.
     """
     session = sessions[username]
     # An entry that never took a hold leaves the holders alone. Counting
@@ -1519,24 +1520,29 @@ def _token_successor(
     )
 
 
+# An entry setting up or waiting to retry may hold no session yet (it failed,
+# or is still signing in, before taking one) but still needs the integration.
 _ENTRY_STATES_IN_USE = (
     ConfigEntryState.LOADED,
     ConfigEntryState.SETUP_IN_PROGRESS,
+    ConfigEntryState.SETUP_RETRY,
     ConfigEntryState.UNLOAD_IN_PROGRESS,
 )
 
 
-async def _async_teardown_domain_if_unused(hass: HomeAssistant) -> None:
-    """Tear the integration down once no session is held and no entry is up.
+async def _async_teardown_domain_if_unused(
+    hass: HomeAssistant, exclude: ConfigEntry | None = None
+) -> None:
+    """Tear the integration down once no session is held and no entry uses it.
 
-    Runs where something other than an unload lets go last: deleting an entry
-    that was never loaded, and a config flow ending.
+    ``exclude`` is the entry being unloaded, which does not count as using it.
     """
     if DOMAIN not in hass.data or hass.data[DOMAIN].get("sessions"):
         return
     if any(
         entry.state in _ENTRY_STATES_IN_USE
         for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry is not exclude
     ):
         return
     await _async_teardown_domain(hass)
@@ -1612,7 +1618,6 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
     # Clean up per-entry data
     hass.data[DOMAIN].pop(config_entry.entry_id, None)
 
-    if not hass.data.get(DOMAIN, {}).get("sessions"):
-        await _async_teardown_domain(hass)
+    await _async_teardown_domain_if_unused(hass, exclude=config_entry)
 
     return True
