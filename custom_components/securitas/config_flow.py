@@ -58,9 +58,11 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _hold_session_reference,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
+    _release_session_hold,
     _resolve_flow_capabilities,
     generate_uuid,
 )
@@ -486,6 +488,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # borrowed from a running session shared with other entries — rebuilding
         # that one would strand the co-tenants on the old hub (issue #606).
         self._owns_hub: bool = False
+        # The shared-session record this flow holds, as (username, record).
+        self._held_session: tuple[str, dict[str, Any]] | None = None
         self.otp_challenge: tuple[str | None, list[OtpPhone] | None] | None = None
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
@@ -906,10 +910,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
         if username not in sessions:
-            # No holder yet: the config entry does not exist, so nothing can
-            # hold this session. ``async_setup_entry`` adopts it as the first
-            # holder once HA creates and sets up the entry.
             sessions[username] = _new_session_record(self.hub)
+        # Registered here or borrowed in async_step_user, the flow holds the
+        # session until it ends; an entry it creates takes its own hold during
+        # setup, which HA runs before removing the flow.
+        self._hold_flow_session(username, sessions[username])
 
         try:
             installations = await self.hub.client.list_installations()
@@ -1096,24 +1101,40 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    @property
+    def _session_holder(self) -> str:
+        """This flow's key in a session's holders; never an entry id's shape."""
+        return f"config_flow:{self.flow_id}"
+
+    def _hold_flow_session(self, username: str, session: dict[str, Any]) -> None:
+        """Hold ``session``, first releasing any other one this flow holds.
+
+        The user can go back to the first step and sign in to another account,
+        so the earlier account's session is let go here rather than stranded.
+        """
+        if self._held_session is not None and self._held_session[1] is not session:
+            self._release_flow_session()
+        _hold_session_reference(session, self._session_holder)
+        self._held_session = (username, session)
+
+    def _release_flow_session(self) -> None:
+        """Release this flow's hold; the session goes once nobody holds it."""
+        if self._held_session is None:
+            return
+        username, session = self._held_session
+        self._held_session = None
+        sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
+        _release_session_hold(sessions, username, session, self._session_holder)
+
     @callback
     def async_remove(self) -> None:
-        """Drop the session this flow registered if no entry took it over.
+        """Release the flow's session hold.
 
         HA calls this on every way out of the flow: a returned or raised abort,
         the user closing the dialog, and a created entry. On the last, HA has
         already set the new entry up, so it holds the session and it is kept.
         """
-        self._cleanup_flow_session()
-
-    def _cleanup_flow_session(self) -> None:
-        """Remove session stored by this flow if it has no active references."""
-        if not self.config.get(CONF_USERNAME):
-            return
-        username = self.config[CONF_USERNAME]
-        sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        if username in sessions and not sessions[username]["holders"]:
-            sessions.pop(username)
+        self._release_flow_session()
 
     @staticmethod
     @callback

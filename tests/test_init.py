@@ -1665,8 +1665,8 @@ class TestAsyncUnloadEntry:
     async def test_unload_entry_that_never_acquired_keeps_cotenant_session(self, hass):
         """Unloading a non-holder must not drop the reference a holder still owns.
 
-        An entry whose setup never completed holds no reference, so unloading
-        it must leave the holders alone rather than pop the shared session out
+        An entry that never took a reference must, when unloaded, leave the
+        holders alone rather than pop the shared session out
         from under the co-tenant that is still using it.
         """
         hub = make_securitas_hub_mock()
@@ -1884,8 +1884,8 @@ class TestSharedSession:
         """Regression test for issue #557 — attach the entry to a reused hub.
 
         The config flow builds a VerisureHub with ``config_entry=None`` (the
-        entry does not exist yet) and registers it in ``sessions`` with
-        no holders.  When HA then sets up the freshly-created entry,
+        entry does not exist yet) and registers it in ``sessions``, held only
+        by the flow.  When HA then sets up the freshly-created entry,
         ``_get_or_create_session`` reuses that detached hub.  It MUST attach
         the entry, otherwise ``_persist_refresh_token`` reports
         ``no-config-entry``, rotated refresh tokens are never written to the
@@ -1903,7 +1903,7 @@ class TestSharedSession:
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN].setdefault("sessions", {})[username] = {
             "hub": mock_hub,
-            "holders": set(),
+            "holders": {"config_flow:flow-id"},
         }
 
         with (
@@ -1921,9 +1921,12 @@ class TestSharedSession:
         # The reused config-flow hub must now own the config entry so that
         # rotated refresh tokens are persisted rather than dropped.
         assert mock_hub.config_entry is entry
-        # Reuse path: no fresh login, and the entry adopts the detached hub.
+        # Reuse path: no fresh login, and the entry holds the flow's hub too.
         mock_hub.login.assert_not_awaited()
-        assert len(hass.data[DOMAIN]["sessions"][username]["holders"]) == 1
+        assert hass.data[DOMAIN]["sessions"][username]["holders"] == {
+            "config_flow:flow-id",
+            entry.entry_id,
+        }
 
     async def test_per_entry_data_stored(self, hass, mock_hub):
         """Each entry should have its own per-entry data with hub and devices."""
@@ -3012,9 +3015,13 @@ class TestSetupRefreshCrashEscalation:
         mock_hub.config_entry = None
         hass.data[DOMAIN].setdefault("sessions", {})[username] = {
             "hub": mock_hub,
-            "holders": set(),
+            "holders": {"config_flow:flow-id"},
         }
         assert await self._attempt(hass, entry, mock_hub) is True
+        # HA removes the flow once its entry is set up, releasing its hold.
+        hass.data[DOMAIN]["sessions"][username]["holders"].discard(
+            "config_flow:flow-id"
+        )
         await async_unload_entry(hass, entry)
 
         with pytest.raises(ConfigEntryNotReady):

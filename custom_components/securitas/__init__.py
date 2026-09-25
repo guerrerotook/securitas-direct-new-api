@@ -647,32 +647,46 @@ async def _login_ipv4_first(
 
 
 def _new_session_record(hub: VerisureHub) -> dict[str, Any]:
-    """Build a shared-session record that nobody holds yet.
+    """Build a shared-session record; its creator adds itself as a holder next.
 
-    Both places a session is created start here — this module, and the config
-    flow, which builds its hub before its config entry exists and so has no
-    holder to record yet. ``holders`` is the whole of the bookkeeping: how many
-    entries are using the hub is ``len(holders)``, never a separate tally that
-    could drift away from it.
+    ``holders`` names everyone using the hub: config entry ids, plus a key per
+    open config flow that signed in with or borrowed it. The record is dropped
+    once nobody holds it.
     """
     return {"hub": hub, "holders": set()}
 
 
-def _hold_session_reference(session: dict[str, Any], entry_id: str) -> None:
-    """Record ``entry_id`` as a holder of the shared session.
+def _hold_session_reference(session: dict[str, Any], holder: str) -> None:
+    """Record ``holder`` (an entry id or a flow's key) as using the session.
 
-    A reference counts once per config entry, however many times that entry's
-    setup runs: Home Assistant retries a setup that raised ConfigEntryNotReady
-    without unloading first, so the same entry reaches ``_get_or_create_session``
-    again and must not take a second reference. Holding the entry ids rather
-    than a bare tally is what makes that idempotent.
+    A hold counts once per holder, however many times it is taken: Home
+    Assistant retries a setup that raised ConfigEntryNotReady without unloading
+    first, so the same entry reaches ``_get_or_create_session`` again and must
+    not take a second hold.
     """
-    session["holders"].add(entry_id)
+    session["holders"].add(holder)
 
 
-def _drop_session_reference(session: dict[str, Any], entry_id: str) -> None:
-    """Forget ``entry_id``'s reference; an entry that held none is untouched."""
-    session["holders"].discard(entry_id)
+def _drop_session_reference(session: dict[str, Any], holder: str) -> None:
+    """Forget ``holder``'s hold; one that held nothing leaves the others alone."""
+    session["holders"].discard(holder)
+
+
+def _release_session_hold(
+    sessions: dict[str, Any], username: str, session: dict[str, Any], holder: str
+) -> bool:
+    """Drop ``holder``'s hold and unregister the session once nobody holds it.
+
+    Returns True when nobody holds it any more. It is removed from ``sessions``
+    only while it is still the record registered there, so a holder of a record
+    that has since been replaced never removes its replacement.
+    """
+    _drop_session_reference(session, holder)
+    if session["holders"]:
+        return False
+    if sessions.get(username) is session:
+        sessions.pop(username)
+    return True
 
 
 async def _get_or_create_session(
@@ -693,8 +707,11 @@ async def _get_or_create_session(
 
     async with setup_locks[username]:
         if username in sessions:
-            # Reuse existing session
-            client: VerisureHub = sessions[username]["hub"]
+            session = sessions[username]
+            # Hold it before anything below awaits: a config flow closing in
+            # the meantime would otherwise unregister it as held by nobody.
+            _hold_session_reference(session, entry.entry_id)
+            client: VerisureHub = session["hub"]
             # The config-flow hub is built before the ConfigEntry exists, so it
             # starts detached (config_entry=None) and is registered in
             # ``sessions`` by the flow. When HA then sets up the freshly-created
@@ -718,11 +735,9 @@ async def _get_or_create_session(
                 client.adopt_refresh_token(stored_token)
                 await _login_or_raise(hass, client, username)
         else:
-            # Create new session and log in
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
-
-        _hold_session_reference(sessions[username], entry.entry_id)
+            _hold_session_reference(sessions[username], entry.entry_id)
 
     # Either branch hands back a live session, which proves the stored token.
     _clear_setup_refresh_crash(hass, username)
@@ -1443,26 +1458,25 @@ def _release_shared_session(
     username: str,
     leaving: ConfigEntry,
 ) -> None:
-    """Drop one reference to a shared session, popping it when the last leaves.
+    """Release ``leaving``'s hold on a shared session; pop it once no one holds it.
 
-    Dropping a reference an entry never took cannot take one away from an
-    entry that did — that is what stops a co-tenant's session being pulled out
-    from under it. A record no entry holds at all is still dropped, as before.
+    Releasing a hold an entry never took cannot take one away from an entry
+    that did, which stops a co-tenant's session being pulled out from under it.
 
     When the session survives but the entry being unloaded is the one the hub
     persists rotated refresh tokens to, hand that persistence off to a surviving
     co-tenant entry and write the current token there immediately. Otherwise
     rotations would keep targeting the removed entry, the survivor's on-disk
     token would go stale, and the xSRefreshLogin 'fr' crash (issue #557) would
-    recur on the survivor's next restart.
+    recur on the survivor's next restart. When no loaded co-tenant is left (a
+    config flow, or an entry whose setup is being retried, still holds it),
+    detach the hub instead, so the next entry set up on it attaches itself.
     """
     session = sessions[username]
-    # An entry whose setup never completed holds no reference, so this leaves
-    # the holders alone. Counting the leaver out regardless would pop the
-    # session out from under a co-tenant that is still using it.
-    _drop_session_reference(session, leaving.entry_id)
-    if not session["holders"]:
-        sessions.pop(username)
+    # An entry that never took a reference leaves the holders alone. Counting
+    # the leaver out regardless would pop the session out from under a
+    # co-tenant that is still using it.
+    if _release_session_hold(sessions, username, session, leaving.entry_id):
         return
 
     hub: VerisureHub = session["hub"]
@@ -1478,6 +1492,7 @@ def _release_shared_session(
             hub.config_entry = entry
             hub.persist_current_refresh_token()
             return
+    hub.config_entry = None
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

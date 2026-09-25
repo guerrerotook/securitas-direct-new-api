@@ -1,9 +1,10 @@
 """Tests for the Verisure OWA config flow."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER, ConfigEntryState
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -32,6 +33,7 @@ from custom_components.securitas import (
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    _get_or_create_session,
 )
 from custom_components.securitas.config_flow import SECTION_PIN
 from custom_components.securitas.const import (
@@ -2050,18 +2052,21 @@ async def test_full_flow_select_installation_creates_entry(hass):
 async def test_aborted_flow_drops_a_session_no_entry_holds(hass):
     """Abandoning the flow must not strand the hub it signed in with.
 
-    The flow registers its hub before its config entry exists, so that record
-    has no holders. If the user walks away, nothing will ever adopt it.
+    The flow registers its hub before its config entry exists, so the flow is
+    its only holder. If the user walks away, nothing will ever adopt it.
     """
     from custom_components.securitas.config_flow import FlowHandler
 
     hub = _hub_factory()
+    record = {"hub": hub, "holders": set()}
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN]["sessions"] = {"test@example.com": {"hub": hub, "holders": set()}}
+    hass.data[DOMAIN]["sessions"] = {"test@example.com": record}
 
     flow = FlowHandler()
     flow.hass = hass
+    flow.flow_id = "flow-id"
     flow.config = {CONF_USERNAME: "test@example.com"}
+    flow._hold_flow_session("test@example.com", record)
 
     flow.async_remove()
 
@@ -2089,7 +2094,11 @@ async def test_aborted_flow_keeps_a_session_a_loaded_entry_holds(hass):
 
     flow = FlowHandler()
     flow.hass = hass
+    flow.flow_id = "flow-id"
     flow.config = {CONF_USERNAME: "test@example.com"}
+    flow._hold_flow_session(
+        "test@example.com", hass.data[DOMAIN]["sessions"]["test@example.com"]
+    )
 
     flow.async_remove()
 
@@ -2190,6 +2199,206 @@ async def test_completed_flow_leaves_the_session_to_its_new_entry(hass):
     session = _flow_sessions(hass)["test@example.com"]
     assert session["hub"] is mock_hub
     assert session["holders"] == {entry.entry_id}
+
+
+async def _start_user_flow(hass, hub, credentials=USER_INPUT_CREDENTIALS):
+    with _patches(hub):
+        return await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}, data=credentials
+        )
+
+
+async def _finish_from_options(hass, result):
+    assert result["step_id"] == "options"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input=_fill_optional_sections(result, USER_INPUT_OPTIONS),
+    )
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=USER_INPUT_MAPPINGS_STD
+    )
+
+
+async def test_closing_a_flow_that_borrowed_a_loaded_entrys_session_keeps_it(hass):
+    """Through the real flow manager: the borrowing flow signs in to nothing,
+    and closing it leaves the loaded entry's hold on the session."""
+    hub = _hub_factory()
+    hub.config = make_config_entry_data()
+    await hub.login()
+    hub.login.reset_mock()
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "test@example.com": {"hub": hub, "holders": {"loaded-entry-id"}}
+    }
+
+    result = await _start_user_flow(hass, hub)
+    assert result["step_id"] == "options"
+    hass.config_entries.flow.async_abort(result["flow_id"])
+
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is hub
+    assert session["holders"] == {"loaded-entry-id"}
+    hub.login.assert_not_awaited()
+
+
+async def test_closing_one_flow_keeps_the_session_another_flow_borrowed(hass):
+    """Two setup dialogs open for one account share the first one's sign-in.
+
+    Closing the first must not pull that session from under the second, or the
+    second's new entry has to sign in all over again.
+    """
+    hub = _hub_factory()
+    hub.config = make_config_entry_data()
+    first = await _start_user_flow(hass, hub)
+    second = await _start_user_flow(hass, hub)
+    assert hub.login.await_count == 1
+
+    hass.config_entries.flow.async_abort(first["flow_id"])
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=_hub_factory()),
+    ) as fresh_login:
+        result = await _finish_from_options(hass, second)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    fresh_login.assert_not_awaited()
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is hub
+    assert session["holders"] == {result["result"].entry_id}
+
+
+async def test_closing_a_flow_during_an_entrys_token_recovery_keeps_the_session(
+    hass,
+):
+    """An entry reusing the flow's session may sign in again first (a dead
+    refresh token); closing the flow meanwhile must not unregister the session
+    the entry is about to hold."""
+    hub = _hub_factory()
+    hub.config = make_config_entry_data()
+    flow = await _start_user_flow(hass, hub)
+    hub.refresh_token_is_dead = True
+    hub.get_refresh_token.return_value = "dead-token"
+    data = make_config_entry_data()
+    data[CONF_REFRESH_TOKEN] = "fresh-token"
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    entry.add_to_hass(hass)
+
+    recovery_started, finish_recovery = asyncio.Event(), asyncio.Event()
+
+    async def recovery_login(*_args, **_kwargs):
+        recovery_started.set()
+        await finish_recovery.wait()
+
+    with patch(
+        "custom_components.securitas._login_or_raise", side_effect=recovery_login
+    ):
+        setup = asyncio.create_task(_get_or_create_session(hass, data, entry))
+        await asyncio.wait_for(recovery_started.wait(), 2)
+        hass.config_entries.flow.async_abort(flow["flow_id"])
+        finish_recovery.set()
+        assert await setup is hub
+
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is hub
+    assert session["holders"] == {entry.entry_id}
+
+
+async def test_closing_a_flow_keeps_a_session_an_entry_registered_over_its_own(
+    hass,
+):
+    """An entry signing in afresh can register its session over the one a flow
+    registered while that sign-in was under way; closing the flow must then
+    leave the entry's session alone."""
+    data = make_config_entry_data()
+    entry = MockConfigEntry(domain=DOMAIN, data=data)
+    entry.add_to_hass(hass)
+    entry_hub = _hub_factory()
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def fresh_login(*_args, **_kwargs):
+        login_started.set()
+        await finish_login.wait()
+        return entry_hub
+
+    hass.data.setdefault(DOMAIN, {})
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=fresh_login
+    ):
+        setup = asyncio.create_task(_get_or_create_session(hass, data, entry))
+        await asyncio.wait_for(login_started.wait(), 2)
+        flow = await _start_user_flow(hass, _hub_factory())
+        finish_login.set()
+        assert await setup is entry_hub
+
+    hass.config_entries.flow.async_abort(flow["flow_id"])
+
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is entry_hub
+    assert session["holders"] == {entry.entry_id}
+
+
+async def test_changing_username_releases_the_first_accounts_session(hass):
+    """After a failed installation lookup the user may try another account.
+
+    The first account's session must go as soon as the flow moves on to the
+    second, and closing the dialog must then leave nothing behind.
+    """
+    hub = _hub_factory()
+    hub.client.list_installations.side_effect = VerisureOwaError("offline")
+    result = await _start_user_flow(hass, hub)
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert set(_flow_sessions(hass)) == {"test@example.com"}
+
+    other_hub = _hub_factory()
+    other_hub.client.list_installations.side_effect = VerisureOwaError("offline")
+    with _patches(other_hub):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "other@example.com"},
+        )
+    assert result["step_id"] == "user"
+    assert set(_flow_sessions(hass)) == {"other@example.com"}
+
+    hass.config_entries.flow.async_abort(result["flow_id"])
+
+    assert _flow_sessions(hass) == {}
+
+
+async def test_a_flow_outliving_the_entry_it_borrowed_from_hands_its_entry_the_hub(
+    hass,
+):
+    """Removing the only entry while a second-installation flow still holds its
+    session keeps the session alive; the hub must then persist tokens to the
+    flow's new entry, not to the removed one."""
+    hub = _hub_factory()
+    hub.config = make_config_entry_data()
+    hub.client.list_installations = AsyncMock(
+        return_value=[
+            make_installation(number="111", alias="Home"),
+            make_installation(number="222", alias="Office"),
+        ]
+    )
+    result = await _start_user_flow(hass, hub)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={CONF_INSTALLATION: "111"}
+    )
+    result = await _finish_from_options(hass, result)
+    first_entry = result["result"]
+    assert first_entry.state is ConfigEntryState.LOADED
+    assert hub.config_entry is first_entry
+
+    result = await _start_user_flow(hass, hub)
+    await hass.config_entries.async_remove(first_entry.entry_id)
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=_hub_factory()),
+    ) as fresh_login:
+        result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    fresh_login.assert_not_awaited()
+    assert hub.config_entry is result["result"]
 
 
 # ===================================================================
