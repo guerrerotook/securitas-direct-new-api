@@ -29,7 +29,13 @@ except ImportError:
     from homeassistant.components.http import (
         StaticPathConfig,  # type: ignore[reportPrivateImportUsage]
     )
-from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import (
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+    SOURCE_REAUTH,
+    ConfigEntry,
+    ConfigEntryChange,
+    ConfigEntryState,
+)
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -39,13 +45,14 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.service import (
     async_extract_entity_ids,
@@ -678,8 +685,8 @@ def _release_session_hold(
     """Drop ``holder``'s hold and unregister the session once nobody holds it.
 
     Returns True when nobody holds it any more. It is removed from ``sessions``
-    only while it is still the record registered there, so a holder of a record
-    that has since been replaced never removes its replacement.
+    only while it is still the record registered there: a holder only ever
+    removes the record it holds, never a different record for the same account.
     """
     _drop_session_hold(session, holder)
     if session["holders"]:
@@ -702,6 +709,13 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
         hub.persist_current_refresh_token()
 
 
+def _account_lock(hass: HomeAssistant, username: str) -> asyncio.Lock:
+    """The lock under which an entry or a setup dialog finds the account's
+    session, or signs in and registers one, so they never both sign in."""
+    setup_locks = hass.data.setdefault(DOMAIN, {}).setdefault("setup_locks", {})
+    return setup_locks.setdefault(username, asyncio.Lock())
+
+
 async def _get_or_create_session(
     hass: HomeAssistant, config: dict[str, Any], entry: ConfigEntry
 ) -> VerisureHub:
@@ -709,16 +723,13 @@ async def _get_or_create_session(
 
     Multiple config entries for the same username share a single
     VerisureHub / VerisureOwaClient session to avoid duplicate logins
-    and WAF rate-limit blocks.  A per-username lock prevents concurrent
-    async_setup_entry calls from creating duplicate hubs.
+    and WAF rate-limit blocks.  The account lock stops entry setups and setup
+    dialogs signing in to the same account at once.
     """
     username = config[CONF_USERNAME]
     sessions = hass.data[DOMAIN].setdefault("sessions", {})
-    setup_locks = hass.data[DOMAIN].setdefault("setup_locks", {})
-    if username not in setup_locks:
-        setup_locks[username] = asyncio.Lock()
 
-    async with setup_locks[username]:
+    async with _account_lock(hass, username):
         if username in sessions:
             session = sessions[username]
             # Hold it before anything below awaits: a config flow closing in
@@ -1161,6 +1172,10 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
     (one-directory-per-repo limit). After upgrading to v5.0.2 the stale
     ``verisure_owa/`` folder no longer does anything; the Repair tells the
     user to delete it manually.
+
+    Also listens for config entry state changes, so the integration can clean
+    up when Home Assistant unloads an entry without calling
+    ``async_unload_entry``.
     """
     orphan = Path(hass.config.path("custom_components", "verisure_owa"))
     if orphan.is_dir():
@@ -1175,7 +1190,87 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
             translation_key="orphan_verisure_owa_directory",
             translation_placeholders={"path": str(orphan)},
         )
+
+    @callback
+    def _entry_changed(change: ConfigEntryChange, entry: ConfigEntry) -> None:
+        _async_entry_changed(hass, change, entry)
+
+    # Lives as long as Home Assistant does (async_setup runs once per start),
+    # so the unsubscribe is deliberately not tied to any entry.
+    async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _entry_changed)
     return True
+
+
+async def _async_register_cards(hass: HomeAssistant) -> None:
+    """Serve the dashboard cards and register them as Lovelace resources."""
+    panel_dir = str(Path(__file__).parent / "www")
+    await hass.http.async_register_static_paths(
+        [
+            # cache_headers=True gives the (large) card bundles a long
+            # max-age so the browser / companion app serves them from cache
+            # instead of re-downloading on every cold dashboard open — which
+            # made the alarm chip render 5-10s late on a slow network.
+            #
+            # Safe on THIS path because every URL the integration emits here
+            # is cache-busted:
+            #  - registered entry points via _card_url's ?v=<hash>-<version>
+            #    (content-hash — busts whenever the file changes), and
+            #  - their bare cross-module imports (shared.js, card-utils.js)
+            #    carry a ?v=<version> query stamped into the import specifiers
+            #    (enforced by card-cache-busting.test.js).
+            # The shared modules are version- (not hash-) busted, which is
+            # sufficient because users only receive new files via a HACS
+            # update, which by definition bumps the manifest version, and the
+            # test forces the stamps to track that version — so every
+            # delivered change yields new URLs and nothing is served stale.
+            StaticPathConfig(
+                "/verisure-owa-panel",
+                panel_dir,
+                cache_headers=True,
+            ),
+            # Legacy path kept indefinitely so anyone who hardcoded a
+            # /securitas_panel/... URL into a Markdown card, picture-glance,
+            # or external link before v5 doesn't break. cache_headers=False
+            # here (revalidation): these are user-hardcoded URLs WITHOUT a
+            # ?v= bust token, so a long max-age would pin them stale for ~31
+            # days after an update. Revalidation keeps them fresh. The
+            # bytes we actually want hard-cached are served via
+            # /verisure-owa-panel above.
+            StaticPathConfig(
+                "/securitas_panel",
+                panel_dir,
+                cache_headers=False,
+            ),
+        ]
+    )
+    # Register the lightweight chip/badge module FIRST so the always-visible
+    # alarm chip renders ASAP on cold load. Resource order matters in the
+    # add_extra_js_url fallback: the URLs inject as ordered
+    # <script type="module"> tags that execute in document order, so the
+    # heavy alarm card must not precede the chip.
+    await _register_card_resource(
+        hass, CHIP_CARD_BASE_URL, CHIP_CARD_URL, "chip_card_resource_id"
+    )
+    await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
+    await _register_card_resource(
+        hass,
+        CAMERA_CARD_BASE_URL,
+        CAMERA_CARD_URL,
+        "camera_card_resource_id",
+    )
+    await _register_card_resource(
+        hass,
+        ACTIVITY_LOG_CARD_BASE_URL,
+        ACTIVITY_LOG_CARD_URL,
+        "activity_log_card_resource_id",
+    )
+    await _register_card_resource(
+        hass,
+        MORE_INFO_BASE_URL,
+        MORE_INFO_MODULE_URL,
+        "more_info_resource_id",
+    )
+    hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -1190,69 +1285,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register card static path + Lovelace resource early so the card
     # is available even when login fails (ConfigEntryNotReady).
-    if hass.http and not hass.data.get(DOMAIN, {}).get("card_registered"):
-        panel_dir = str(Path(__file__).parent / "www")
-        await hass.http.async_register_static_paths(
-            [
-                # cache_headers=True gives the (large) card bundles a long
-                # max-age so the browser / companion app serves them from cache
-                # instead of re-downloading on every cold dashboard open — which
-                # made the alarm chip render 5-10s late on a slow network.
-                #
-                # Safe on THIS path because every URL the integration emits here
-                # is cache-busted:
-                #  - registered entry points via _card_url's ?v=<hash>-<version>
-                #    (content-hash — busts whenever the file changes), and
-                #  - their bare cross-module imports (shared.js, card-utils.js)
-                #    carry a ?v=<version> query stamped into the import specifiers
-                #    (enforced by card-cache-busting.test.js).
-                # The shared modules are version- (not hash-) busted, which is
-                # sufficient because users only receive new files via a HACS
-                # update, which by definition bumps the manifest version, and the
-                # test forces the stamps to track that version — so every
-                # delivered change yields new URLs and nothing is served stale.
-                StaticPathConfig(
-                    "/verisure-owa-panel",
-                    panel_dir,
-                    cache_headers=True,
-                ),
-                # Legacy path kept indefinitely so anyone who hardcoded a
-                # /securitas_panel/... URL into a Markdown card, picture-glance,
-                # or external link before v5 doesn't break. cache_headers=False
-                # here (revalidation): these are user-hardcoded URLs WITHOUT a
-                # ?v= bust token, so a long max-age would pin them stale for ~31
-                # days after an update. Revalidation keeps them fresh. The
-                # bytes we actually want hard-cached are served via
-                # /verisure-owa-panel above.
-                StaticPathConfig(
-                    "/securitas_panel",
-                    panel_dir,
-                    cache_headers=False,
-                ),
-            ]
-        )
-        # Register the lightweight chip/badge module FIRST so the always-visible
-        # alarm chip renders ASAP on cold load. Resource order matters in the
-        # add_extra_js_url fallback: the URLs inject as ordered
-        # <script type="module"> tags that execute in document order, so the
-        # heavy alarm card must not precede the chip.
-        await _register_card_resource(
-            hass, CHIP_CARD_BASE_URL, CHIP_CARD_URL, "chip_card_resource_id"
-        )
-        await _register_card_resource(hass, CARD_BASE_URL, CARD_URL, "card_resource_id")
-        await _register_card_resource(
-            hass, CAMERA_CARD_BASE_URL, CAMERA_CARD_URL, "camera_card_resource_id"
-        )
-        await _register_card_resource(
-            hass,
-            ACTIVITY_LOG_CARD_BASE_URL,
-            ACTIVITY_LOG_CARD_URL,
-            "activity_log_card_resource_id",
-        )
-        await _register_card_resource(
-            hass, MORE_INFO_BASE_URL, MORE_INFO_MODULE_URL, "more_info_resource_id"
-        )
-        hass.data.setdefault(DOMAIN, {})["card_registered"] = True
+    if hass.http:
+        async with _card_lock(hass):
+            if not hass.data.get(DOMAIN, {}).get("card_registered"):
+                await _async_register_cards(hass)
 
     # Register verisure_owa.* service aliases alongside the securitas.* primary
     # registrations. Both forms are functionally equal; docs steer users toward
@@ -1522,10 +1558,14 @@ def _token_successor(
 
 # An entry setting up or waiting to retry may hold no session yet (it failed,
 # or is still signing in, before taking one) but still needs the integration.
+# So does one whose setup failed, typically waiting for the user to sign in
+# again: the dashboards keep their cards meanwhile. Reloading, disabling or
+# deleting it passes through NOT_LOADED, which runs the clean-up check again.
 _ENTRY_STATES_IN_USE = (
     ConfigEntryState.LOADED,
     ConfigEntryState.SETUP_IN_PROGRESS,
     ConfigEntryState.SETUP_RETRY,
+    ConfigEntryState.SETUP_ERROR,
     # Home Assistant before 2025.3 has no such state: an entry being unloaded
     # stays LOADED, which is already listed.
     *(
@@ -1541,12 +1581,11 @@ def _integration_in_use(hass: HomeAssistant, exclude: ConfigEntry | None) -> boo
     dialog is open.
 
     A dialog signing in afresh holds no session until its sign-in finishes.
-    Reauth dialogs do not count: their steps sign in on a hub of their own and
-    never touch the shared data (the entry's reload sets it up again), and HA
-    aborts them only after the entry's ``async_remove_entry`` has run, so
-    counting them would leave the integration set up once that entry is
-    deleted. Options dialogs live in another manager and read the shared data
-    only through ``get``.
+    Reauth dialogs need not count: their entry does while it waits for them,
+    and closing one runs the clean-up check again. Their steps sign in on a
+    hub of their own and never touch the shared data (the entry's reload sets
+    it up again). Options dialogs live in another manager and read the shared
+    data only through ``get``.
     """
     if hass.data.get(DOMAIN, {}).get("sessions"):
         return True
@@ -1566,6 +1605,49 @@ def _integration_in_use(hass: HomeAssistant, exclude: ConfigEntry | None) -> boo
     )
 
 
+@callback
+def _async_entry_changed(
+    hass: HomeAssistant, change: ConfigEntryChange, entry: ConfigEntry
+) -> None:
+    if (
+        change is ConfigEntryChange.UPDATED
+        and entry.domain == DOMAIN
+        and entry.state is ConfigEntryState.NOT_LOADED
+    ):
+        hass.async_create_task(_async_entry_unloaded(hass, entry))
+
+
+async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up once an entry is unloaded, however it was unloaded.
+
+    HA unloads an entry that is retrying or whose setup failed without calling
+    ``async_unload_entry``, so that entry's hold is released here. And an
+    unload's own clean-up check can see another entry that is still unloading
+    as in use; the last one to finish unloading runs the check again here.
+
+    HA holds the entry's setup lock across a reload, so waiting for it lets a
+    reloaded entry set up again first and keep its session and crash count.
+    """
+    async with entry.setup_lock:
+        if entry.state is not ConfigEntryState.NOT_LOADED:
+            return
+        sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
+        username: str = entry.data.get(CONF_USERNAME, "")
+        if username in sessions and entry.entry_id in sessions[username]["holders"]:
+            _release_shared_session(hass, sessions, username, entry)
+    await _async_teardown_domain_if_unused(hass)
+
+
+def _card_lock(hass: HomeAssistant) -> asyncio.Lock:
+    """Serialise registering the dashboard cards with removing them.
+
+    Kept outside ``hass.data[DOMAIN]``, which the clean-up discards. Without
+    it, an entry setting up while the cards are removed finds the ones not yet
+    removed still listed, keeps them, and the clean-up then removes them.
+    """
+    return hass.data.setdefault(f"{DOMAIN}_card_lock", asyncio.Lock())
+
+
 async def _async_teardown_domain_if_unused(
     hass: HomeAssistant, exclude: ConfigEntry | None = None
 ) -> None:
@@ -1573,9 +1655,10 @@ async def _async_teardown_domain_if_unused(
 
     ``exclude`` is the entry being unloaded, which does not count as using it.
     """
-    if DOMAIN not in hass.data or _integration_in_use(hass, exclude):
-        return
-    await _async_teardown_domain(hass, exclude)
+    async with _card_lock(hass):
+        if DOMAIN not in hass.data or _integration_in_use(hass, exclude):
+            return
+        await _async_teardown_domain(hass, exclude)
 
 
 async def _async_teardown_domain(
@@ -1626,9 +1709,9 @@ async def _async_teardown_domain(
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Release a deleted entry's hold on its session if unloading did not.
 
-    Home Assistant unloads only a loaded entry before deleting it. An entry
-    whose setup failed after taking its hold (waiting to retry, or needing
-    reauth) still holds the session here.
+    Home Assistant calls ``async_unload_entry`` only for a loaded entry before
+    deleting it. An entry whose setup failed after taking its hold (waiting to
+    retry, or needing reauth) still holds the session here.
     """
     domain_data = hass.data.get(DOMAIN)
     username = entry.data.get(CONF_USERNAME)
