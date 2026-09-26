@@ -5,7 +5,12 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_USER, ConfigEntryState
+from homeassistant.config_entries import (
+    SOURCE_REAUTH,
+    SOURCE_USER,
+    ConfigEntryDisabler,
+    ConfigEntryState,
+)
 from homeassistant.const import (
     CONF_CODE,
     CONF_DEVICE_ID,
@@ -2302,16 +2307,16 @@ async def test_closing_a_flow_during_an_entrys_token_recovery_keeps_the_session(
     assert session["holders"] == {entry.entry_id}
 
 
-async def test_closing_a_flow_keeps_a_session_an_entry_registered_over_its_own(
+async def test_closing_a_flow_that_waited_for_an_entrys_sign_in_keeps_its_session(
     hass,
 ):
-    """An entry signing in afresh can register its session over the one a flow
-    registered while that sign-in was under way; closing the flow must then
-    leave the entry's session alone."""
+    """A flow started while an entry signs in afresh waits for it and borrows
+    its session; closing the flow must then leave the entry's session alone."""
     data = make_config_entry_data()
     entry = MockConfigEntry(domain=DOMAIN, data=data)
     entry.add_to_hass(hass)
     entry_hub = _hub_factory()
+    entry_hub.config = data
     login_started, finish_login = asyncio.Event(), asyncio.Event()
 
     async def fresh_login(*_args, **_kwargs):
@@ -2325,9 +2330,11 @@ async def test_closing_a_flow_keeps_a_session_an_entry_registered_over_its_own(
     ):
         setup = asyncio.create_task(_get_or_create_session(hass, data, entry))
         await asyncio.wait_for(login_started.wait(), 2)
-        flow = await _start_user_flow(hass, _hub_factory())
+        flow = asyncio.create_task(_start_user_flow(hass, _hub_factory()))
+        await asyncio.sleep(0)
         finish_login.set()
         assert await setup is entry_hub
+        flow = await flow
 
     hass.config_entries.flow.async_abort(flow["flow_id"])
 
@@ -3036,6 +3043,327 @@ async def test_reloading_the_only_entry_sets_the_integration_up_again(hass):
     assert home.state is ConfigEntryState.LOADED
     assert _flow_sessions(hass)["test@example.com"]["holders"] == {home.entry_id}
     assert _alias_services(hass)
+
+
+# ===================================================================
+# TestTeardownRecheck: the clean-up runs once the last user goes, whichever it is
+# ===================================================================
+
+
+def _assert_torn_down(hass):
+    assert DOMAIN not in hass.data
+    assert not _alias_services(hass)
+
+
+async def _load_other_account_entry(hass):
+    other = _add_other_account_entry(hass)
+    other_hub = _hub_factory()
+    other_hub.config = make_config_entry_data(username="other@example.com")
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=other_hub),
+    ):
+        assert await hass.config_entries.async_setup(other.entry_id)
+    return other
+
+
+async def _office_retrying_while_holding_the_session(hass):
+    """Load Home, then set Office (same account) up to fail after taking its hold."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    office = _add_office_entry(hass)
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations",
+        AsyncMock(side_effect=VerisureOwaError("offline")),
+    ):
+        assert not await hass.config_entries.async_setup(office.entry_id)
+    assert office.state is ConfigEntryState.SETUP_RETRY
+    assert office.entry_id in _flow_sessions(hass)["test@example.com"]["holders"]
+    return home, office
+
+
+async def _disable(hass, entry):
+    assert await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+
+
+async def test_closing_a_dialog_that_never_signed_in_tears_down_after_the_last_entry(
+    hass,
+):
+    """The open dialog keeps the integration set up when the last entry
+    unloads; it holds no session, so closing it is the last chance to clean up."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    form = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    assert form["step_id"] == "user"
+    assert await hass.config_entries.async_unload(home.entry_id)
+    assert _alias_services(hass)
+
+    hass.config_entries.flow.async_abort(form["flow_id"])
+    await hass.async_block_till_done()
+
+    _assert_torn_down(hass)
+
+
+async def test_disabling_the_only_entry_while_it_waits_to_retry_tears_down(hass):
+    """HA unloads a retrying entry without calling the integration."""
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+
+    await _disable(hass, other)
+
+    assert other.state is ConfigEntryState.NOT_LOADED
+    _assert_torn_down(hass)
+
+
+async def test_disabling_a_loaded_entry_then_a_retrying_one_tears_down(hass):
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+
+    await _disable(hass, home)
+    assert _alias_services(hass)
+    await _disable(hass, other)
+
+    _assert_torn_down(hass)
+
+
+async def test_disabling_a_retrying_entry_releases_its_hold_on_the_session(hass):
+    """A retrying entry that took its hold still holds it when HA unloads it
+    without calling the integration; nothing else would ever let go of it."""
+    home, office = await _office_retrying_while_holding_the_session(hass)
+
+    await _disable(hass, office)
+
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {home.entry_id}
+    await _disable(hass, home)
+    _assert_torn_down(hass)
+
+
+async def test_reloading_the_only_entry_waiting_to_retry_keeps_its_crash_count(hass):
+    """HA passes the entry through NOT_LOADED on its way to setting it up again;
+    the clean-up must not run in between."""
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+    domain_data = hass.data[DOMAIN]
+    other_hub = _hub_factory()
+    other_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+
+    async def crashing_login(hass, _config, _entry, username):
+        await _login_or_raise(hass, other_hub, username)
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=crashing_login
+    ):
+        await hass.config_entries.async_reload(other.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.data[DOMAIN] is domain_data
+    assert _crash_streaks(hass) == {"other@example.com": 2}
+
+
+async def test_reloading_an_entry_waiting_to_retry_keeps_its_session(hass):
+    """Letting go of the session while HA sets the entry up again would cost a
+    fresh sign-in, the churn holding it through retries exists to avoid."""
+    home, office = await _office_retrying_while_holding_the_session(hass)
+    await _disable(hass, home)
+    record = _flow_sessions(hass)["test@example.com"]
+    assert record["holders"] == {office.entry_id}
+
+    with (
+        patch(
+            "custom_components.securitas._fetch_and_cache_installations",
+            AsyncMock(side_effect=VerisureOwaError("offline")),
+        ),
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ) as fresh_login,
+    ):
+        await hass.config_entries.async_reload(office.entry_id)
+        await hass.async_block_till_done()
+
+    fresh_login.assert_not_awaited()
+    assert _flow_sessions(hass)["test@example.com"] is record
+
+
+async def test_an_entry_needing_reauth_keeps_the_cards_registered(hass):
+    """The cards are registered before signing in so dashboards keep working
+    while the only entry waits for the user to sign in again."""
+    other = _add_other_account_entry(hass)
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(side_effect=AuthenticationError("rejected")),
+    ):
+        assert not await hass.config_entries.async_setup(other.entry_id)
+    await hass.async_block_till_done()
+
+    assert other.state is ConfigEntryState.SETUP_ERROR
+    assert hass.data[DOMAIN]["card_registered"]
+    assert _alias_services(hass)
+
+
+async def test_two_entries_unloading_at_once_tear_down_after_the_last(hass):
+    """HA keeps an entry unloading while its background tasks finish, after the
+    integration's unload returned; two entries each doing so see each other
+    as still in use."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    other = await _load_other_account_entry(hass)
+    cancelled = {home.entry_id: asyncio.Event(), other.entry_id: asyncio.Event()}
+    finish = asyncio.Event()
+
+    async def slow_to_stop(entry_id):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled[entry_id].set()
+            await finish.wait()
+
+    for entry in (home, other):
+        entry.async_create_background_task(
+            hass, slow_to_stop(entry.entry_id), f"slow_to_stop_{entry.entry_id}"
+        )
+    unloads = [
+        asyncio.create_task(hass.config_entries.async_unload(entry.entry_id))
+        for entry in (home, other)
+    ]
+    await asyncio.wait_for(cancelled[home.entry_id].wait(), 2)
+    await asyncio.wait_for(cancelled[other.entry_id].wait(), 2)
+    assert _alias_services(hass)
+
+    finish.set()
+    assert all(await asyncio.gather(*unloads))
+    await hass.async_block_till_done()
+
+    _assert_torn_down(hass)
+
+
+class _FakeLovelaceResources:
+    """The Lovelace resource store, with a delete that can be paused."""
+
+    def __init__(self):
+        self.loaded = True
+        self.items: dict[str, dict] = {}
+        self._next_id = 0
+        self.pause_deletes = asyncio.Event()
+        self.pause_deletes.set()
+        self.deleting = asyncio.Event()
+
+    def async_items(self):
+        return list(self.items.values())
+
+    async def async_create_item(self, data):
+        self._next_id += 1
+        item = {**data, "id": str(self._next_id)}
+        self.items[item["id"]] = item
+        return item
+
+    async def async_update_item(self, item_id, data):
+        self.items[item_id].update(data)
+        return self.items[item_id]
+
+    async def async_delete_item(self, item_id):
+        del self.items[item_id]
+        self.deleting.set()
+        await self.pause_deletes.wait()
+
+
+async def test_an_entry_set_up_while_the_cards_are_being_removed_keeps_all_five(hass):
+    resources = _FakeLovelaceResources()
+    hass.data["lovelace"] = MagicMock(resources=resources)
+    hass.http = MagicMock()
+    hass.http.async_register_static_paths = AsyncMock()
+    home = await _load_home_entry(hass, _two_installation_hub())
+    assert len(resources.items) == 5
+
+    resources.pause_deletes.clear()
+    unload = asyncio.create_task(hass.config_entries.async_unload(home.entry_id))
+    await asyncio.wait_for(resources.deleting.wait(), 2)
+    other = asyncio.create_task(_load_other_account_entry(hass))
+    for _ in range(10):
+        await asyncio.sleep(0)
+    resources.pause_deletes.set()
+    assert await unload
+    other_entry = await other
+    await hass.async_block_till_done()
+
+    assert other_entry.state is ConfigEntryState.LOADED
+    assert len(resources.items) == 5
+    assert _alias_services(hass)
+
+
+# ===================================================================
+# TestSignInRace: a dialog and an entry signing in to one account at once
+# ===================================================================
+
+
+async def test_a_dialog_waits_for_an_entry_signing_in_and_uses_its_session(hass):
+    """Both signing in from scratch would leave two hubs, and the entry would
+    replace the dialog's session; the dialog waits and borrows the entry's."""
+    office = _add_office_entry(hass)
+    entry_hub = _two_installation_hub()
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def slow_fresh_login(*_args, **_kwargs):
+        login_started.set()
+        await finish_login.wait()
+        return entry_hub
+
+    dialog_hub = _two_installation_hub()
+    with patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=slow_fresh_login
+    ):
+        setup = hass.async_create_task(hass.config_entries.async_setup(office.entry_id))
+        await asyncio.wait_for(login_started.wait(), 2)
+        flow = asyncio.create_task(_start_user_flow(hass, dialog_hub))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        finish_login.set()
+        assert await setup
+        result = await flow
+
+    assert result["step_id"] == "options"
+    dialog_hub.login.assert_not_awaited()
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is entry_hub
+    assert session["holders"] == {
+        office.entry_id,
+        f"config_flow:{result['flow_id']}",
+    }
+
+
+async def test_an_entry_waits_for_a_dialog_signing_in_and_uses_its_session(hass):
+    dialog_hub = _two_installation_hub()
+    dialog_hub.get_authentication_token.side_effect = None
+    dialog_hub.get_authentication_token.return_value = None
+    login_started, finish_login = asyncio.Event(), asyncio.Event()
+
+    async def slow_login():
+        login_started.set()
+        await finish_login.wait()
+        dialog_hub.get_authentication_token.return_value = FAKE_JWT
+
+    dialog_hub.login.side_effect = slow_login
+    flow = asyncio.create_task(_start_user_flow(hass, dialog_hub))
+    await asyncio.wait_for(login_started.wait(), 2)
+    office = _add_office_entry(hass)
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=_two_installation_hub()),
+    ) as fresh_login:
+        setup = hass.async_create_task(hass.config_entries.async_setup(office.entry_id))
+        for _ in range(10):
+            await asyncio.sleep(0)
+        finish_login.set()
+        result = await flow
+        assert await setup
+
+    fresh_login.assert_not_awaited()
+    session = _flow_sessions(hass)["test@example.com"]
+    assert session["hub"] is dialog_hub
+    assert session["holders"] == {
+        office.entry_id,
+        f"config_flow:{result['flow_id']}",
+    }
 
 
 # ===================================================================
