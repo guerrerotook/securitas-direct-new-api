@@ -560,8 +560,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             async_get_clientsession(self.hass, family=family),
             self.hass,
         )
-        # This flow built the hub, so the IPv4 fallback may rebuild it; borrowing
-        # a shared hub (async_step_user) clears this flag again.
+        # This flow built the hub, so the IPv4 fallback may rebuild it;
+        # _borrow_session clears this flag again.
         self._owns_hub = True
         return self.hub
 
@@ -1072,23 +1072,23 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         again without the lock, so an entry unloading meanwhile never waits on
         this dialog.
         """
-        if not self._owns_hub:
-            await self._sign_in_if_needed()
-            return
-        async with _account_lock(self.hass, username):
-            sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
-            if (session := sessions.get(username)) is not None:
-                # An entry or another dialog signed in while this dialog waited
-                # for the lock or for a 2FA code.
-                self._borrow_session(username, session)
-            await self._sign_in_if_needed()
-            assert self.hub is not None
-            if username not in sessions:
-                sessions[username] = _new_session_record(self.hub)
-            # The flow holds the session until it ends; an entry it creates
-            # takes its own hold during setup, which HA runs before removing
-            # the flow.
-            self._hold_flow_session(username, sessions[username])
+        if self._owns_hub:
+            async with _account_lock(self.hass, username):
+                sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
+                if (session := sessions.get(username)) is not None:
+                    # An entry or another dialog signed in while this dialog
+                    # waited for the lock or for a 2FA code.
+                    self._borrow_session(username, session)
+                else:
+                    await self._sign_in_if_needed()
+                    assert self.hub is not None
+                    sessions[username] = _new_session_record(self.hub)
+                    # The flow holds the session until it ends; an entry it
+                    # creates takes its own hold during setup, which HA runs
+                    # before removing the flow.
+                    self._hold_flow_session(username, sessions[username])
+                    return
+        await self._sign_in_if_needed()
 
     async def _sign_in_if_needed(self) -> None:
         assert self.hub is not None
@@ -1136,8 +1136,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         HA calls this on every way out of the flow: a returned or raised abort,
         the user closing the dialog, and a created entry. On the last, HA has
         already set the new entry up, so it holds the session and it is kept.
-        An open dialog keeps the integration set up even when it holds nothing,
-        so closing any dialog may leave nothing using it.
+        An open setup dialog keeps the integration set up even when it holds
+        nothing, so closing one may leave nothing using it. A reauth dialog
+        does not count; its entry keeps the integration set up while it waits.
         """
         self._release_flow_session()
         self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))

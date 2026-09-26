@@ -685,8 +685,8 @@ def _release_session_hold(
     """Drop ``holder``'s hold and unregister the session once nobody holds it.
 
     Returns True when nobody holds it any more. It is removed from ``sessions``
-    only while it is still the record registered there, so a holder of a record
-    that has since been replaced never removes its replacement.
+    only while it is still the record registered there: a holder only ever
+    removes the record it holds, never a different record for the same account.
     """
     _drop_session_hold(session, holder)
     if session["holders"]:
@@ -1172,6 +1172,10 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
     (one-directory-per-repo limit). After upgrading to v5.0.2 the stale
     ``verisure_owa/`` folder no longer does anything; the Repair tells the
     user to delete it manually.
+
+    Also listens for config entry state changes, so the integration can clean
+    up when Home Assistant unloads an entry without calling
+    ``async_unload_entry``.
     """
     orphan = Path(hass.config.path("custom_components", "verisure_owa"))
     if orphan.is_dir():
@@ -1191,6 +1195,8 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
     def _entry_changed(change: ConfigEntryChange, entry: ConfigEntry) -> None:
         _async_entry_changed(hass, change, entry)
 
+    # Lives as long as Home Assistant does (async_setup runs once per start),
+    # so the unsubscribe is deliberately not tied to any entry.
     async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _entry_changed)
     return True
 
@@ -1552,10 +1558,14 @@ def _token_successor(
 
 # An entry setting up or waiting to retry may hold no session yet (it failed,
 # or is still signing in, before taking one) but still needs the integration.
+# So does one whose setup failed, typically waiting for the user to sign in
+# again: the dashboards keep their cards meanwhile. Reloading, disabling or
+# deleting it passes through NOT_LOADED, which runs the clean-up check again.
 _ENTRY_STATES_IN_USE = (
     ConfigEntryState.LOADED,
     ConfigEntryState.SETUP_IN_PROGRESS,
     ConfigEntryState.SETUP_RETRY,
+    ConfigEntryState.SETUP_ERROR,
     # Home Assistant before 2025.3 has no such state: an entry being unloaded
     # stays LOADED, which is already listed.
     *(
@@ -1571,12 +1581,11 @@ def _integration_in_use(hass: HomeAssistant, exclude: ConfigEntry | None) -> boo
     dialog is open.
 
     A dialog signing in afresh holds no session until its sign-in finishes.
-    Reauth dialogs do not count: their steps sign in on a hub of their own and
-    never touch the shared data (the entry's reload sets it up again), and HA
-    aborts them only after the entry's ``async_remove_entry`` has run, so
-    counting them would leave the integration set up once that entry is
-    deleted. Options dialogs live in another manager and read the shared data
-    only through ``get``.
+    Reauth dialogs need not count: their entry does while it waits for them,
+    and closing one runs the clean-up check again. Their steps sign in on a
+    hub of their own and never touch the shared data (the entry's reload sets
+    it up again). Options dialogs live in another manager and read the shared
+    data only through ``get``.
     """
     if hass.data.get(DOMAIN, {}).get("sessions"):
         return True
@@ -1615,8 +1624,6 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
     ``async_unload_entry``, so that entry's hold is released here. And an
     unload's own clean-up check can see another entry that is still unloading
     as in use; the last one to finish unloading runs the check again here.
-    An entry whose setup failed is not unloaded, so its failing does not
-    trigger the clean-up and remove the cards from the user's dashboards.
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
     reloaded entry set up again first and keep its session and crash count.
@@ -1702,9 +1709,9 @@ async def _async_teardown_domain(
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Release a deleted entry's hold on its session if unloading did not.
 
-    Home Assistant unloads only a loaded entry before deleting it. An entry
-    whose setup failed after taking its hold (waiting to retry, or needing
-    reauth) still holds the session here.
+    Home Assistant calls ``async_unload_entry`` only for a loaded entry before
+    deleting it. An entry whose setup failed after taking its hold (waiting to
+    retry, or needing reauth) still holds the session here.
     """
     domain_data = hass.data.get(DOMAIN)
     username = entry.data.get(CONF_USERNAME)
