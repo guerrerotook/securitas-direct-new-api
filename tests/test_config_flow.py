@@ -2308,7 +2308,7 @@ async def test_closing_a_flow_during_an_entrys_token_recovery_keeps_the_session(
     assert session["holders"] == {entry.entry_id}
 
 
-async def test_closing_a_flow_that_waited_for_an_entrys_sign_in_keeps_its_session(
+async def test_closing_a_flow_that_waited_for_an_entry_to_sign_in_keeps_its_session(
     hass,
 ):
     """A flow started while an entry signs in afresh waits for it and borrows
