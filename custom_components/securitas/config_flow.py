@@ -58,6 +58,7 @@ from . import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     VerisureHub,
+    _account_lock,
     _async_teardown_domain_if_unused,
     _login_ipv4_then_any,
     _new_session_record,
@@ -700,55 +701,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # Reuse existing session for this username if one is already running,
         # to avoid a new login that would invalidate the active session.
         username = self.config[CONF_USERNAME]
-        sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        if username in sessions:
-            # Held before finish_setup's sign-in awaits: the last entry
-            # unloading meanwhile would otherwise drop the session under us.
-            self._hold_flow_session(username, sessions[username])
-            existing_hub = sessions[username]["hub"]
-            self.hub = existing_hub
-            # Borrowed, not built here: the fallback must not rebuild it
-            # (entries or other setup dialogs hold it), so leave _owns_hub False.
-            self._owns_hub = False
-            self.config[CONF_DEVICE_ID] = existing_hub.config[CONF_DEVICE_ID]
-            self.config[CONF_UNIQUE_ID] = existing_hub.config[CONF_UNIQUE_ID]
-            self.config[CONF_DEVICE_INDIGITALL] = existing_hub.config.get(
-                CONF_DEVICE_INDIGITALL, ""
-            )
-            return await self.finish_setup()
-
-        uuid = generate_uuid()
-        self.config[CONF_DEVICE_ID] = uuid
-        self.config[CONF_UNIQUE_ID] = uuid
-
-        self.hub = self._create_client()
-
-        # Login — catches credential errors and network failures
-        try:
-            await self._login_with_family_fallback()
-        except TwoFactorRequiredError:
-            # 2FA required — proceed to device validation for phone list
-            return await self._start_2fa_flow()
-        except AccountBlockedError:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=self._user_schema(user_input),
-                errors={"base": "account_blocked"},
-            )
-        except AuthenticationError:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=self._user_schema(user_input),
-                errors={"base": "invalid_auth"},
-            )
-        except VerisureOwaError:
-            return self.async_show_form(
-                step_id="user",
-                data_schema=self._user_schema(user_input),
-                errors={"base": "cannot_connect"},
-            )
-
-        # Login succeeded without 2FA — proceed directly
+        session = self.hass.data.get(DOMAIN, {}).get("sessions", {}).get(username)
+        if session is not None:
+            # Held before finish_setup awaits: the last entry unloading
+            # meanwhile would otherwise drop the session under us.
+            self._borrow_session(username, session)
+        else:
+            uuid = generate_uuid()
+            self.config[CONF_DEVICE_ID] = uuid
+            self.config[CONF_UNIQUE_ID] = uuid
+            self.hub = self._create_client()
         return await self.finish_setup()
 
     async def async_step_reauth(
@@ -886,9 +848,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def finish_setup(self) -> config_entries.ConfigFlowResult:
         """Login, discover installations, detect peri, advance to options."""
         assert self.hub is not None
+        username = self.config[CONF_USERNAME]
         try:
-            if self.hub.get_authentication_token() is None:
-                await self._login_with_family_fallback()
+            await self._sign_in_and_hold_session(username)
         except TwoFactorRequiredError:
             return await self._start_2fa_flow()
         except AccountBlockedError:
@@ -909,17 +871,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
-
-        self.hass.data.setdefault(DOMAIN, {})
-
-        username = self.config[CONF_USERNAME]
-        sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
-        if username not in sessions:
-            sessions[username] = _new_session_record(self.hub)
-        # The flow holds the session until it ends (a borrowed one is already
-        # held; holding again changes nothing); an entry it creates takes its
-        # own hold during setup, which HA runs before removing the flow.
-        self._hold_flow_session(username, sessions[username])
 
         try:
             installations = await self.hub.client.list_installations()
@@ -1111,6 +1062,51 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """This flow's key in a session's holders; never an entry id's shape."""
         return f"config_flow:{self.flow_id}"
 
+    async def _sign_in_and_hold_session(self, username: str) -> None:
+        """Sign in unless the account's session is already running, and hold it.
+
+        A dialog that might sign in from scratch does so under the account
+        lock, which entry setup also takes, so an entry and this dialog never
+        both sign in to the account: whichever comes second uses the session
+        the first registered. A borrowed session is already held and signs in
+        again without the lock, so an entry unloading meanwhile never waits on
+        this dialog.
+        """
+        if not self._owns_hub:
+            await self._sign_in_if_needed()
+            return
+        async with _account_lock(self.hass, username):
+            sessions = self.hass.data[DOMAIN].setdefault("sessions", {})
+            if (session := sessions.get(username)) is not None:
+                # An entry or another dialog signed in while this dialog waited
+                # for the lock or for a 2FA code.
+                self._borrow_session(username, session)
+            await self._sign_in_if_needed()
+            assert self.hub is not None
+            if username not in sessions:
+                sessions[username] = _new_session_record(self.hub)
+            # The flow holds the session until it ends; an entry it creates
+            # takes its own hold during setup, which HA runs before removing
+            # the flow.
+            self._hold_flow_session(username, sessions[username])
+
+    async def _sign_in_if_needed(self) -> None:
+        assert self.hub is not None
+        if self.hub.get_authentication_token() is None:
+            await self._login_with_family_fallback()
+
+    def _borrow_session(self, username: str, session: dict[str, Any]) -> None:
+        """Use and hold the account's running session instead of signing in."""
+        self._hold_flow_session(username, session)
+        hub: VerisureHub = session["hub"]
+        self.hub = hub
+        # Borrowed, not built here: the fallback must not rebuild it (entries
+        # or other setup dialogs hold it).
+        self._owns_hub = False
+        self.config[CONF_DEVICE_ID] = hub.config[CONF_DEVICE_ID]
+        self.config[CONF_UNIQUE_ID] = hub.config[CONF_UNIQUE_ID]
+        self.config[CONF_DEVICE_INDIGITALL] = hub.config.get(CONF_DEVICE_INDIGITALL, "")
+
     def _hold_flow_session(self, username: str, session: dict[str, Any]) -> None:
         """Hold ``session``, first releasing any other one this flow holds.
 
@@ -1124,33 +1120,27 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._held_session = (username, session)
 
     def _release_flow_session(self) -> None:
-        """Release this flow's hold; the session goes once nobody holds it.
-
-        A flow can be the last thing using the integration (no entry uses it
-        yet, or every entry was deleted while the dialog stayed open), so
-        letting go of the last session also runs the clean-up, which tears the
-        integration down only if no entry or other setup dialog still uses it.
-        """
+        """Release this flow's hold; the session goes once nobody holds it."""
         if self._held_session is None:
             return
         username, session = self._held_session
         self._held_session = None
         sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        if (
-            _release_session_hold(sessions, username, session, self._session_holder)
-            and not sessions
-        ):
-            self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
+        _release_session_hold(sessions, username, session, self._session_holder)
 
     @callback
     def async_remove(self) -> None:
-        """Release the flow's session hold.
+        """Release the flow's session hold, then clean up if nothing else uses
+        the integration.
 
         HA calls this on every way out of the flow: a returned or raised abort,
         the user closing the dialog, and a created entry. On the last, HA has
         already set the new entry up, so it holds the session and it is kept.
+        An open dialog keeps the integration set up even when it holds nothing,
+        so closing any dialog may leave nothing using it.
         """
         self._release_flow_session()
+        self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
 
     @staticmethod
     @callback
