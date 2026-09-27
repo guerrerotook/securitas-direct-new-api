@@ -86,8 +86,9 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
     async def execute_partial_disarm(self, circuits: list[str]) -> bool:
         """Disarm the specified circuits, leaving others unchanged.
 
-        Returns True on success, False on VerisureOwaError. Empty
-        ``circuits`` is a no-op success.
+        Waits first for any operation already running on the affected panels.
+        Returns True on success, False on failure (including giving up on that
+        wait). Empty ``circuits`` is a no-op success.
 
         Drives the same optimistic-state lifecycle as a user-initiated disarm
         on each affected entity (this combined panel + any registered axis
@@ -104,6 +105,11 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         """
         if not circuits:
             return True
+        affected = [self, *self._affected_axis_subpanels(circuits)]
+        try:
+            await self._wait_until_idle(affected)
+        except HomeAssistantError:
+            return False
         # target is set only when the current state is readable; None means the
         # state is unknown ('N' etc.) and we disarm the circuits unconditionally.
         target: AlarmState | None = None
@@ -113,12 +119,12 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             if target == current:
                 return True
 
-        affected = [self, *self._affected_axis_subpanels(circuits)]
         for entity in affected:
             entity._operation_in_progress = True  # pylint: disable=protected-access
             entity._operation_kind = "partial_disarm"  # pylint: disable=protected-access
             entity._operation_epoch += 1  # pylint: disable=protected-access
             entity._force_state(AlarmControlPanelState.DISARMING)  # pylint: disable=protected-access
+        ok = False
         try:
             if target is not None:
                 result = await self._execute_transition(target)
@@ -126,6 +132,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 result = await self._disarm_circuits_unconditional(set(circuits))
             for entity in affected:
                 entity.update_status_alarm(result)
+            ok = True
         except (VerisureOwaError, HomeAssistantError) as err:
             # VerisureOwaError includes OperationTimeoutError (command accepted
             # but the confirmation poll didn't resolve): it is rolled back here
@@ -136,8 +143,6 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             # path are a tracked #508 follow-up.) HomeAssistantError means every
             # disarm alternative was rejected by the panel — roll back too
             # rather than leave the entities stuck in DISARMING.
-            for entity in affected:
-                entity._state = entity._last_state  # pylint: disable=protected-access
             detail = err.log_detail() if isinstance(err, VerisureOwaError) else err
             _LOGGER.error(
                 "Partial disarm failed for %s circuits %s: %s",
@@ -147,9 +152,11 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             )
             return False
         finally:
-            # Released on every exit, even an unforeseen error: a user disarm
-            # waits for this flag and would otherwise wait for good.
+            # Every exit that did not succeed (handled error, unforeseen error,
+            # cancellation) shows the circuits as still armed and frees the flag.
             for entity in affected:
+                if not ok:
+                    entity._state = entity._last_state  # pylint: disable=protected-access
                 entity._operation_in_progress = False  # pylint: disable=protected-access
                 entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()

@@ -48,6 +48,7 @@ from custom_components.securitas.notification_translations import (
 )
 from custom_components.securitas.pin_crypto import encode_pin, hash_pin
 from custom_components.securitas.verisure_owa_api.command_resolver import (
+    PROTO_TO_ALARM_STATE,
     AlarmState,
     InteriorMode,
     PerimeterMode,
@@ -9405,37 +9406,185 @@ async def test_disarm_pressed_during_partial_disarm_runs_after_it():
     assert panel._state == AlarmControlPanelState.DISARMED
 
 
-async def test_partial_disarm_unexpected_error_leaves_no_panel_busy():
-    """A partial disarm that fails in an unforeseen way still releases every
-    panel it made busy, so a disarm pressed afterwards is carried out."""
-    from custom_components.securitas.verisure_owa_api.models import (
-        AlarmState,
-        AnnexMode,
-        InteriorMode,
-        PerimeterMode,
-    )
-
+@pytest.mark.parametrize(
+    "error", [RuntimeError("bug"), asyncio.CancelledError()], ids=["error", "cancel"]
+)
+async def test_partial_disarm_unexpected_exit_rolls_back_and_frees_panels(error):
+    """A partial disarm that ends in an unforeseen error, or is cancelled,
+    shows every panel it touched as it was (still armed) and leaves none
+    busy, so a disarm pressed afterwards is carried out."""
     panel = make_alarm()
     interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
     setup_alarm_entry_data(panel, sub_panels=[interior])
     panel._client.config_entry = MagicMock(entry_id="entry-id-1")
     panel._last_proto_code = "T"
-    panel.coordinator.alarm_state = AlarmState(
-        interior=InteriorMode.TOTAL,
-        perimeter=PerimeterMode.OFF,
-        annex=AnnexMode.OFF,
-    )
-    panel._execute_transition = AsyncMock(side_effect=RuntimeError("bug"))
+    panel._state = AlarmControlPanelState.ARMED_AWAY
+    interior._state = AlarmControlPanelState.ARMED_AWAY
+    panel.coordinator.alarm_state = PROTO_TO_ALARM_STATE["T"]
+    panel._execute_transition = AsyncMock(side_effect=error)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(type(error)):
         await panel.execute_partial_disarm(["interior"])
 
-    assert panel._operation_in_progress is False
-    assert interior._operation_in_progress is False
+    for entity in (panel, interior):
+        assert entity._state == AlarmControlPanelState.ARMED_AWAY
+        assert entity._operation_in_progress is False
     panel._execute_transition = AsyncMock(return_value=_status("D"))
     await asyncio.wait_for(panel.async_alarm_disarm(), timeout=2)
     panel._execute_transition.assert_awaited_once()
     assert panel._state == AlarmControlPanelState.DISARMED
+
+
+def _coordinator_follows_panel(alarm):
+    """Make each coordinator refresh report the state the panel last confirmed."""
+
+    async def refresh():
+        alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE[alarm._last_proto_code]
+
+    alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE[alarm._last_proto_code]
+    alarm.coordinator.async_request_refresh = AsyncMock(side_effect=refresh)
+
+
+async def test_partial_disarm_waits_for_a_running_arm_and_queued_disarm():
+    """Mode change from night to away, blocked at the panel; the user presses
+    Disarm and the door lock asks for a partial disarm. Nothing else runs
+    while the arm is in flight; then the user's disarm runs, and the partial
+    disarm finds nothing left to do. The alarm ends disarmed."""
+    alarm = make_alarm()
+    alarm.update_status_alarm(_status("Q"))  # armed night
+    _coordinator_follows_panel(alarm)
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started
+    )
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+    partial_task = asyncio.create_task(alarm.execute_partial_disarm(["interior"]))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert targets == [armed_away]  # nothing runs while the arm is in flight
+    assert alarm._operation_kind == "arm"
+    arm_gate.set()
+    _, _, partial_ok = await asyncio.wait_for(
+        asyncio.gather(arm_task, disarm_task, partial_task), timeout=2
+    )
+
+    assert targets == [armed_away, disarmed]
+    assert partial_ok is True
+    assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+async def test_partial_disarm_during_arm_disarms_once_the_arm_lands():
+    """The door lock's partial disarm arriving while an arm is still at the
+    panel waits for it, then disarms what the arm armed — it does not skip
+    on the not-yet-armed state and let the arm land after the door opened."""
+    alarm = make_alarm()
+    _coordinator_follows_panel(alarm)
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started
+    )
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    partial_task = asyncio.create_task(alarm.execute_partial_disarm(["interior"]))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert targets == [armed_away]
+    arm_gate.set()
+    _, partial_ok = await asyncio.wait_for(
+        asyncio.gather(arm_task, partial_task), timeout=2
+    )
+
+    assert partial_ok is True
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+async def test_partial_disarm_during_full_disarm_keeps_second_disarm_ignored():
+    """A partial disarm arriving while a user disarm runs waits for it, so a
+    second user disarm is still ignored rather than run alongside."""
+    alarm = make_alarm()
+    alarm.update_status_alarm(_status("T"))
+    _coordinator_follows_panel(alarm)
+    disarm_gate = asyncio.Event()
+    disarm_started = asyncio.Event()
+    in_flight = 0
+    most_in_flight = 0
+    calls = 0
+
+    async def transition(target, **_force_params):
+        nonlocal in_flight, most_in_flight, calls
+        calls += 1
+        in_flight += 1
+        most_in_flight = max(most_in_flight, in_flight)
+        if calls == 1:
+            disarm_started.set()
+            await disarm_gate.wait()
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return _status("D")
+
+    alarm._execute_transition = AsyncMock(side_effect=transition)
+    first = asyncio.create_task(alarm.async_alarm_disarm())
+    await disarm_started.wait()
+    partial_task = asyncio.create_task(alarm.execute_partial_disarm(["interior"]))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    second = asyncio.create_task(alarm.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    disarm_gate.set()
+    await asyncio.wait_for(asyncio.gather(first, partial_task, second), timeout=2)
+
+    assert most_in_flight == 1
+    assert calls == 1
+    assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+async def test_partial_disarm_gives_up_behind_a_stuck_operation():
+    """A partial disarm waiting behind an arm that never finishes reports
+    failure to the lock after the limit — and leaves the arm's flag alone."""
+    from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
+
+    alarm = make_alarm()
+    alarm.update_status_alarm(_status("T"))
+    alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE["T"]
+    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
+    _record_transitions(alarm)
+    alarm._operation_in_progress = True
+    alarm._operation_kind = "arm"
+
+    ok = await asyncio.wait_for(alarm.execute_partial_disarm(["interior"]), timeout=2)
+
+    assert ok is False
+    alarm._execute_transition.assert_not_awaited()
+    assert alarm._operation_in_progress is True
+    assert alarm._operation_kind == "arm"
+
+
+async def test_queued_disarm_leaves_displayed_state_alone_while_it_waits():
+    """While a disarm waits behind an arm the panel keeps showing Arming; it
+    shows Disarming only once the disarm is actually sent."""
+    alarm = make_alarm()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    _record_transitions(alarm, arm_gate=arm_gate, arm_started=arm_started)
+
+    arm_task = asyncio.create_task(alarm.async_alarm_arm_away())
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert alarm._state == AlarmControlPanelState.ARMING
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    assert alarm._state == AlarmControlPanelState.DISARMED
 
 
 async def test_disarm_gives_up_waiting_behind_a_stuck_operation(caplog):

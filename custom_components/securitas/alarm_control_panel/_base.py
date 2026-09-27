@@ -12,7 +12,7 @@ import datetime
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import timedelta
 from typing import Any, Literal
 
@@ -113,11 +113,8 @@ _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 # that a stray request can't silently swallow an unrelated prompt later on.
 _ARM_PROMPT_SUPPRESS_WINDOW = 120.0
 
-# Upper bound on the confirmation polls one arm makes: _execute_transition
-# tries twice, each try runs up to three steps (disarm, arm, annex), the arm
-# step can be two commands ("<arm>+PERI1"), and an open-sensor rejection adds
-# one exceptions poll — 10 in all. Two more cover the status refresh and
-# activity write that follow the arm.
+# A generous multiple of the poll timeout: an arm makes several confirmation
+# polls (see _execute_transition's retries and the resolver's steps).
 _MAX_POLLS_PER_OPERATION = 12
 
 # How long a suppressed arm-blocked prompt waits for the auto-force-arm that
@@ -362,20 +359,52 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self._operation_idle.set()
 
     def _operation_wait_limit(self) -> float:
-        """Seconds a disarm may wait for a running arm before giving up.
-
-        Each of an arm's _MAX_POLLS_PER_OPERATION polls can take up to the
-        operation poll timeout (CONF_OPERATION_POLL_TIMEOUT, default
-        DEFAULT_OPERATION_POLL_TIMEOUT = 120 s, at most 300 s in the options
-        flow), so 24 minutes by default. Waiting longer means the busy flag is
-        stuck, not that the arm is slow.
-        """
+        """Seconds to wait for a running operation before treating its flag as stuck."""
         poll_timeout = float(
             self._client.config.get(
                 CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
             )
         )
         return _MAX_POLLS_PER_OPERATION * poll_timeout
+
+    async def _wait_until_idle(
+        self,
+        entities: Sequence[BaseVerisureOwaAlarmPanel],
+        *,
+        stop_behind_disarm: bool = False,
+    ) -> bool:
+        """Wait until none of ``entities`` is running an operation.
+
+        With ``stop_behind_disarm``, returns False as soon as one is running a
+        full disarm, rather than waiting for it. Raises the translated
+        ``operation_in_progress`` error after _operation_wait_limit().
+        """
+        # pylint: disable=protected-access
+        wait_limit = self._operation_wait_limit()
+        busy: BaseVerisureOwaAlarmPanel | None = None
+        try:
+            async with asyncio.timeout(wait_limit):
+                while busy := next(
+                    (e for e in entities if e._operation_in_progress), None
+                ):
+                    if stop_behind_disarm and busy._operation_kind not in (
+                        "arm",
+                        "partial_disarm",
+                    ):
+                        return False
+                    await busy._operation_idle.wait()
+        except TimeoutError as err:
+            _LOGGER.warning(
+                "%s gave up waiting %.0f s for a running %s to finish",
+                self.installation.number,
+                wait_limit,
+                busy._operation_kind if busy else None,
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="operation_in_progress",
+            ) from err
+        return True
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -1082,28 +1111,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # `self._context` ~1 s after async_set_context, and waiting for an arm
         # plus the disarm transition and state writes below take longer.
         user_context = self._context
-        wait_limit = self._operation_wait_limit()
-        try:
-            async with asyncio.timeout(wait_limit):
-                while self._operation_in_progress:
-                    if self._operation_kind not in ("arm", "partial_disarm"):
-                        _LOGGER.debug(
-                            "Disarm ignored for %s: a disarm is already in progress",
-                            self.installation.number,
-                        )
-                        return
-                    await self._operation_idle.wait()
-        except TimeoutError as err:
-            _LOGGER.warning(
-                "Disarm for %s gave up waiting %.0f s for a %s to finish",
+        if not await self._wait_until_idle([self], stop_behind_disarm=True):
+            _LOGGER.debug(
+                "Disarm ignored for %s: a disarm is already in progress",
                 self.installation.number,
-                wait_limit,
-                self._operation_kind,
             )
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="operation_in_progress",
-            ) from err
+            return
         self._operation_in_progress = True
         self._operation_kind = "disarm"
         self._operation_epoch += 1
