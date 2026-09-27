@@ -15,8 +15,8 @@ import {
   migrateCompactAlarmConfig,
   reportDeprecatedElement,
   TRANSLATIONS,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0";
-import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.8.0";
+} from "./verisure-owa-alarm-shared.js?v=5.9.0";
+import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.9.0";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
