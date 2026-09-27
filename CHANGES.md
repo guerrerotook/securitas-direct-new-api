@@ -4,6 +4,18 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.9.0
 
+### Added
+
+**The auto-force-arm tick box is now on the Tile card too ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  With **"Offer an auto-force-arm tick box in the alarm controls"** turned on, a Tile card with **Alarm modes** and the **Verisure OWA Open Sensors** feature shows the "force-arm past open sensors" tick box while the alarm is disarmed. Ticking it there or in the More Info dialog ticks it in both. Home Assistant's Alarm panel card can't be extended; use the More Info dialog it opens. See [Auto-force-arm tick box](https://github.com/guerrerotook/securitas-direct-new-api#auto-force-arm-tick-box).
+
+### Changed
+
+**The tick box only force-arms arms you start next to it ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  In the More Info dialog, a ticked box used to force-arm any arm that started while the dialog was open — including one from an automation, another screen or the Verisure app. It now acts only on an arm started from the dialog's own buttons, and the Tile works the same way, so a Tile left on a wall tablet can't force every arm in the house.
+
+### Fixed
+
+**A blocked arm could go unnoticed when auto-force-arm was ticked ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  If you closed the More Info dialog right after pressing arm, and a door or window was open, nothing force-armed and the "arm blocked" notification was skipped too — the alarm quietly stayed disarmed. With built-in notifications on, the "arm blocked" notification is now sent about 15 seconds later whenever the expected force-arm doesn’t happen.
+
 ## v5.8.0
 
 The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog** and the **Tile card** both surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). As a result, the custom alarm card, badge and Mushroom chip are now deprecated. Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.
