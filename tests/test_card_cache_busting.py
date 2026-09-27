@@ -53,11 +53,14 @@ def _manifest_version(component: Path = _SECURITAS) -> str:
 def _stale_imports(www: Path, version: str) -> dict[str, list[str]]:
     """Imports whose query is not ?v=<hash8 of the file on disk>-<version>."""
     offenders: dict[str, list[str]] = {}
+    expected: dict[str, str] = {}
     for path in sorted(www.glob("*.js")):
         bad = []
         for name, query in _IMPORT_RE.findall(path.read_text()):
-            digest = hashlib.sha256((www / name).read_bytes()).hexdigest()[:8]
-            if query != f"?v={digest}-{version}":
+            if name not in expected:
+                digest = hashlib.sha256((www / name).read_bytes()).hexdigest()[:8]
+                expected[name] = f"?v={digest}-{version}"
+            if query != expected[name]:
                 bad.append(f"./{name}{query}")
         if bad:
             offenders[path.name] = bad
@@ -77,8 +80,7 @@ def _queries_of(www: Path, target: str) -> dict[str, set[str]]:
 def test_card_imports_carry_content_stamps() -> None:
     offenders = _stale_imports(_WWW, _manifest_version())
     assert not offenders, (
-        f"card JS relative imports out of date: {offenders}. "
-        "Run: python scripts/stamp_card_imports.py"
+        f"card JS relative imports out of date: {offenders}. Run: {_STAMP_COMMAND}"
     )
 
 
@@ -132,6 +134,52 @@ def test_an_import_cycle_is_refused(tmp_path: Path) -> None:
     (tmp_path / "b.js").write_text('import "./a.js?v=1";\n')
     with pytest.raises(ValueError, match="cycle"):
         script.compute_stamps(tmp_path, "1.0.0")
+
+
+def _run_script_on(tmp_path: Path, files: dict[str, str], *args: str):
+    """Run a copy of the script against a scratch component holding ``files``."""
+    www = tmp_path / "custom_components" / "securitas" / "www"
+    www.mkdir(parents=True)
+    shutil.copy(_SECURITAS / "manifest.json", www.parent / "manifest.json")
+    for name, text in files.items():
+        (www / name).write_text(text)
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(_SCRIPT, tmp_path / "scripts" / _SCRIPT.name)
+    return subprocess.run(
+        [sys.executable, f"scripts/{_SCRIPT.name}", *args],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("files", "message"),
+    [
+        (
+            {"a.js": 'import "./b.js?v=1";\n', "b.js": 'import "./a.js?v=1";\n'},
+            "stamp_card_imports: import cycle: a.js -> b.js -> a.js",
+        ),
+        (
+            {"a.js": 'import "./gone.js?v=1";\n'},
+            "stamp_card_imports: a.js imports missing file(s): gone.js",
+        ),
+    ],
+)
+def test_script_reports_a_bad_import_graph_in_one_line(
+    tmp_path: Path, files: dict[str, str], message: str
+) -> None:
+    result = _run_script_on(tmp_path, files, "--check")
+    assert result.returncode == 1
+    assert result.stderr == f"{message}\n"
+    assert result.stdout == ""
+
+
+def test_script_says_ok_when_nothing_is_stale(tmp_path: Path) -> None:
+    result = _run_script_on(tmp_path, {"a.js": "export const a = 1;\n"}, "--check")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "stamp_card_imports: ok ✓\n"
 
 
 def _release_step_script(name: str) -> str:

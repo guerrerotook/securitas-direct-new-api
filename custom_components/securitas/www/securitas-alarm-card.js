@@ -15,8 +15,9 @@
 //
 // A user who has BOTH this legacy resource and the canonical
 // /verisure-owa-panel/...js resources registered loads the canonical modules
-// twice (the import URLs here differ from _card_url's ?v=<hash>-<version>
-// resource URLs, so the ES-module loader doesn't dedup them). That's a
+// twice (this legacy resource is served from /securitas_panel/, so its
+// relative imports resolve under /securitas_panel/ rather than
+// /verisure-owa-panel/, and the ES-module loader doesn't dedup them). That's a
 // harmless, legacy-only redundant fetch: customElements.define is guarded by
 // `if (!customElements.get(...))` and the customCards/customBadges pushes by
 // `.find(...)`, so the second run's registrations are silent no-ops.
@@ -25,5 +26,5 @@
 // /securitas_panel/securitas-alarm-card.js entry from Settings →
 // Dashboards → Resources; the canonical /verisure-owa-panel/...js
 // resources are auto-registered by the integration.
-import "./verisure-owa-alarm-card.js?v=16d06a5b-5.9.0";
+import "./verisure-owa-alarm-card.js?v=67394aa4-5.9.0";
 import "./verisure-owa-alarm-chip.js?v=25740c02-5.9.0";

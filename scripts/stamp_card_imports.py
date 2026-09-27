@@ -15,7 +15,8 @@ Re-run this script after editing any card module. The entry points' own URLs
 are computed when const.py is imported, so Home Assistant must be restarted
 to serve the new ones.
 
-Exit code: with --check, 1 when any import is out of date, else 0.
+Exit code: 1 when an import names a missing file or forms a cycle, or, with
+--check, when any import is out of date; else 0.
 """
 
 from __future__ import annotations
@@ -47,8 +48,10 @@ def _restamp(text: str, stamps: dict[str, str]) -> str:
     )
 
 
-def _plan(www_dir: Path, version: str) -> tuple[dict[str, str], dict[str, str]]:
-    """Return (stamp per file, stamped text per file)."""
+def _plan(
+    www_dir: Path, version: str
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Return (stamp per file, stamped text per file, current text per file)."""
     sources = {p.name: p.read_bytes().decode("utf-8") for p in www_dir.glob("*.js")}
     deps: dict[str, list[str]] = {}
     for name, text in sources.items():
@@ -76,7 +79,7 @@ def _plan(www_dir: Path, version: str) -> tuple[dict[str, str], dict[str, str]]:
 
     for name in sorted(sources):
         visit(name)
-    return stamps, stamped
+    return stamps, stamped, sources
 
 
 def compute_stamps(www_dir: Path, version: str) -> dict[str, str]:
@@ -89,11 +92,10 @@ def stamp(www_dir: Path, version: str, check: bool = False) -> list[str]:
 
     Returns one line per import that was (or, with check, would be) changed.
     """
-    stamps, stamped = _plan(www_dir, version)
+    stamps, stamped, sources = _plan(www_dir, version)
     changes: list[str] = []
     for name in sorted(stamped):
-        path = www_dir / name
-        current = path.read_bytes().decode("utf-8")
+        current = sources[name]
         if stamped[name] == current:
             continue
         changes.extend(
@@ -102,7 +104,7 @@ def stamp(www_dir: Path, version: str, check: bool = False) -> list[str]:
             if m["query"] != f"?v={stamps[m['name']]}"
         )
         if not check:
-            path.write_bytes(stamped[name].encode("utf-8"))
+            (www_dir / name).write_bytes(stamped[name].encode("utf-8"))
     return changes
 
 
@@ -118,7 +120,10 @@ def main() -> int:
     args = parser.parse_args()
 
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
-    changes = stamp(COMPONENT / "www", manifest["version"], check=args.check)
+    try:
+        changes = stamp(COMPONENT / "www", manifest["version"], check=args.check)
+    except ValueError as err:
+        sys.exit(f"stamp_card_imports: {err}")
     if args.check and changes:
         print("Card module imports are out of date:")
         for line in changes:
@@ -127,6 +132,10 @@ def main() -> int:
         return 1
     for line in changes:
         print(line)
+    if changes:
+        print(f"stamp_card_imports: restamped {len(changes)} import(s) ✓")
+    else:
+        print("stamp_card_imports: ok ✓")
     return 0
 
 

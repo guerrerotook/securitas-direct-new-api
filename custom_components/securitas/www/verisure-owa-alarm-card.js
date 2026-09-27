@@ -62,11 +62,9 @@ export {
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the
 // always-visible alarm chip renders without waiting for this heavier card
-// bundle. It is deliberately NOT imported here: a relative import would resolve
-// to a different URL than the registered chip resource (the resource carries
-// _card_url's ?v=<hash>-<version>), so importing it would just fetch chip.js a
-// second time for no benefit. Badge/chip taps now open HA's native More Info
-// dialog; this custom card remains available as an explicit Lovelace card.
+// bundle. This card does not use the chip module, so it does not import it.
+// Badge/chip taps open HA's native More Info dialog; this custom card remains
+// available as an explicit Lovelace card.
 
 class VerisureOwaAlarmCard extends HTMLElement {
   constructor() {

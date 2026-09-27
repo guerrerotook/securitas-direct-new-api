@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 // imports between modules are stamped in the JS source as
 // ?v=<first 8 hex of sha256(imported file)>-<manifest version>.
 //
-// Fix a failure with:  python scripts/stamp_card_imports.py
+// Fix a failure with:  python3 scripts/stamp_card_imports.py
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../..");
@@ -26,12 +26,16 @@ const IMPORT_RE = /\b(?:from\s+|import\s*\(?\s*)"\.\/([A-Za-z0-9._-]+\.js)([^"]*
 
 const wwwFiles = readdirSync(wwwDir).filter((f) => f.endsWith(".js"));
 
+const expectedQueries = new Map();
 const expectedQuery = (name) => {
-  const hash = createHash("sha256")
-    .update(readFileSync(join(wwwDir, name)))
-    .digest("hex")
-    .slice(0, 8);
-  return `?v=${hash}-${VERSION}`;
+  if (!expectedQueries.has(name)) {
+    const hash = createHash("sha256")
+      .update(readFileSync(join(wwwDir, name)))
+      .digest("hex")
+      .slice(0, 8);
+    expectedQueries.set(name, `?v=${hash}-${VERSION}`);
+  }
+  return expectedQueries.get(name);
 };
 
 describe("card module relative imports are stamped with the imported file's content hash", () => {
