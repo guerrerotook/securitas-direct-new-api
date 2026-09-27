@@ -185,7 +185,7 @@ def client(transport):
 
 class TestGetCameraDevices:
     async def test_returns_filtered_camera_list(self, client, transport):
-        """Only QR, YR, YP, QP active devices are returned."""
+        """Only active camera devices (QR, YR, YP, QP, XR) are returned."""
         transport.execute.return_value = device_list_response(
             devices=[
                 {
@@ -236,6 +236,57 @@ class TestGetCameraDevices:
         assert result[0].device_type == "QR"
         assert result[1].name == "Back Camera"
         assert result[1].device_type == "YR"
+
+    async def test_discovers_xr_cameras(self, client, transport):
+        """XR cameras are discovered alongside YR (issue #616's device list)."""
+        transport.execute.return_value = device_list_response(
+            devices=[
+                {
+                    "id": "0",
+                    "code": "1",
+                    "zoneId": None,
+                    "name": "Salon",
+                    "type": "XR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "1",
+                    "code": "2",
+                    "zoneId": None,
+                    "name": "Pasillo",
+                    "type": "XR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "2",
+                    "code": "3",
+                    "zoneId": None,
+                    "name": "Buhardilla",
+                    "type": "YR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+                {
+                    "id": "5",
+                    "code": "1",
+                    "zoneId": None,
+                    "name": "Pasillo",
+                    "type": "ZR",
+                    "isActive": None,
+                    "serialNumber": None,
+                },
+            ]
+        )
+
+        result = await client.get_camera_devices(_make_installation())
+
+        assert [(d.zone_id, d.code, d.device_type) for d in result] == [
+            ("XR01", 1, "XR"),
+            ("XR02", 2, "XR"),
+            ("YR03", 3, "YR"),
+        ]
 
     async def test_empty_devices_list(self, client, transport):
         """Returns empty list when no devices match."""
@@ -1000,6 +1051,24 @@ class TestCameraRequestContracts:
             assert submit["variables"]["deviceType"] == expected_code, (
                 f"device_type={device_type} should map to {expected_code}"
             )
+
+    async def test_capture_image_xr_sends_only_device_code(self, client, transport):
+        """XR requests carry no deviceType/mediaType/resolution, as the website's
+        own RequestImages for an XR camera does (HAR on issue #616)."""
+        transport.execute.side_effect = [
+            request_images_response("ref-img-1"),
+            request_images_status_response(res="OK"),
+            thumbnail_response(id_signal="new-signal"),
+        ]
+
+        await client.capture_image(_make_installation(), 1, "XR", "XR01")
+
+        submit = transport.execute.call_args_list[0][0][0]
+        assert submit["variables"] == {
+            "numinst": "123456",
+            "panel": "SDVFAST",
+            "devices": [1],
+        }
 
     async def test_capture_image_status_poll_payload(self, client, transport):
         """capture_image status poll sends correct variables with counter."""

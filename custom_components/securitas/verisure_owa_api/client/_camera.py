@@ -29,10 +29,12 @@ from ._base import _ClientBase
 
 _LOGGER = logging.getLogger(__name__)
 
-CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP"}
+CAMERA_DEVICE_TYPES = {"QR", "YR", "YP", "QP", "XR"}
 IMAGE_RESOLUTION = 0
 IMAGE_MEDIA_TYPE = 1
 IMAGE_DEVICE_TYPE_MAP: dict[str, int] = {"QR": 106, "YR": 106, "YP": 103, "QP": 107}
+# The website's RequestImages for these types carries only the device code.
+CODE_ONLY_IMAGE_DEVICE_TYPES = {"XR"}
 
 
 class _CameraMixin(_ClientBase):
@@ -41,7 +43,7 @@ class _CameraMixin(_ClientBase):
     async def get_camera_devices(
         self, installation: Installation
     ) -> list[CameraDevice]:
-        """Get list of camera devices (QR, YR, YP, QP) for an installation.
+        """Get list of camera devices (QR, YR, YP, QP, XR) for an installation.
 
         Returns:
             A list of CameraDevice instances for active camera devices.
@@ -162,17 +164,18 @@ class _CameraMixin(_ClientBase):
                     zone_id,
                     err,
                 )
-        # Submit capture request
+        submit_variables: dict[str, Any] = {
+            "numinst": installation.number,
+            "panel": installation.panel,
+            "devices": [device_code],
+        }
+        if device_type not in CODE_ONLY_IMAGE_DEVICE_TYPES:
+            submit_variables["resolution"] = IMAGE_RESOLUTION
+            submit_variables["mediaType"] = IMAGE_MEDIA_TYPE
+            submit_variables["deviceType"] = IMAGE_DEVICE_TYPE_MAP.get(device_type, 106)
         submit_content = {
             "operationName": "RequestImages",
-            "variables": {
-                "numinst": installation.number,
-                "panel": installation.panel,
-                "devices": [device_code],
-                "resolution": IMAGE_RESOLUTION,
-                "mediaType": IMAGE_MEDIA_TYPE,
-                "deviceType": IMAGE_DEVICE_TYPE_MAP.get(device_type, 106),
-            },
+            "variables": submit_variables,
             "query": REQUEST_IMAGES_MUTATION,
         }
         submit_envelope = await self._execute_graphql(
