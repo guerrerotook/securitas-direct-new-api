@@ -164,6 +164,7 @@ describe("deprecated elements report themselves to the Home Assistant log", () =
     ["verisure-owa-alarm-chip", "chip"],
     ["mushroom-verisure-owa-alarm-chip", "chip"],
     ["securitas-alarm-chip", "chip"],
+    ["mushroom-securitas-alarm-chip", "chip"],
   ])("%s reports itself once as %s with its dashboard", (tag, element) => {
     window.history.replaceState(null, "", "/dashboard-security/alarm");
     const hass = hassWithAlarm();
