@@ -629,14 +629,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         (#550).  This is not the #441 silent no-op: we send the disarm rather
         than letting the resolver compute nothing off a state it can't read.
         Any other transition needs a known current state to plan, so it is
-        refused with the actual code surfaced for reporting.
+        refused with the actual code surfaced for reporting. A full disarm is
+        also sent unconditionally while the confirmed state is provisional (a
+        command the panel accepted but never confirmed); other transitions
+        still plan from that state.
         """
         proto_code = self._planning_proto_code()
+        if target == _FULLY_DISARMED and (
+            _modelled_state(proto_code) is None
+            or self.coordinator.confirmed_is_provisional
+        ):
+            return await self._disarm_circuits_unconditional(
+                self._full_disarm_circuits(), **force_params
+            )
         if _modelled_state(proto_code) is None:
-            if target == _FULLY_DISARMED:
-                return await self._disarm_circuits_unconditional(
-                    self._full_disarm_circuits(), **force_params
-                )
             if proto_code is None:
                 raise VerisureOwaError(
                     "Alarm state not yet known. "

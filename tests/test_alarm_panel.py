@@ -10046,3 +10046,31 @@ async def test_timed_out_arm_to_a_state_with_no_code_keeps_the_confirmed_code():
 
     assert _sent(annex) == ["ARMANNEX1"]
     assert main.coordinator.confirmed_proto_code == "A"
+
+
+async def test_disarm_again_after_a_disarm_that_timed_out_sends_it():
+    """A disarm that timed out shows disarmed without the panel confirming it.
+    Pressing Disarm again sends the disarm rather than trusting that state."""
+    panel, _, _ = await _polled_panel_and_lock("T")
+    _record_transitions(
+        panel, hold="disarm", error=OperationTimeoutError("not confirmed")
+    )
+    await panel.async_alarm_disarm()
+
+    _record_transitions(panel)
+    await panel.async_alarm_disarm()
+
+    assert _sent(panel) == ["DARM1"]
+    assert panel.coordinator.confirmed_is_provisional is False
+
+
+async def test_disarm_on_a_confirmed_disarmed_alarm_sends_nothing():
+    """Disarm pressed when the installation is confirmed disarmed has nothing
+    to send."""
+    panel, _, _ = await _polled_panel_and_lock("D")
+    _record_transitions(panel)
+
+    await panel.async_alarm_disarm()
+
+    assert _sent(panel) == []
+    assert panel._state == AlarmControlPanelState.DISARMED
