@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +33,10 @@ _WWW = _SECURITAS / "www"
 _SCRIPT = _ROOT / "scripts" / "stamp_card_imports.py"
 _RELEASE_WORKFLOW = _ROOT / ".github" / "workflows" / "release.yaml"
 _STAMP_COMMAND = "python3 scripts/stamp_card_imports.py"
+# pytest-cov before 7.0 starts coverage in every child Python it can see
+# (the COV_CORE_* variables). A child run from a scratch folder has no branch
+# coverage config, and its statement-only data then breaks the parent's combine.
+_CHILD_ENV = {k: v for k, v in os.environ.items() if not k.startswith("COV_CORE_")}
 
 _IMPORT_RE = re.compile(
     r'\b(?:from\s+|import\s*\(?\s*)"\./([A-Za-z0-9._-]+\.js)([^"]*)"'
@@ -148,6 +153,7 @@ def _run_script_on(tmp_path: Path, files: dict[str, str], *args: str):
     return subprocess.run(
         [sys.executable, f"scripts/{_SCRIPT.name}", *args],
         cwd=tmp_path,
+        env=_CHILD_ENV,
         capture_output=True,
         text=True,
         check=False,
@@ -233,6 +239,7 @@ def test_release_bump_step_leaves_stamps_the_tests_accept(tmp_path: Path) -> Non
     check = subprocess.run(
         [sys.executable, "scripts/stamp_card_imports.py", "--check"],
         cwd=tmp_path,
+        env=_CHILD_ENV,
         capture_output=True,
         text=True,
         check=False,
