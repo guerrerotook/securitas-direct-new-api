@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "O serviço já está configurado",
             "reauth_successful": "Reautenticação realizada com sucesso",
-            "no_refresh_token": "Login bem-sucedido, mas a Verisure não retornou um token de atualização. A integração não pode salvar as credenciais com segurança. Tente novamente mais tarde ou reporte se persistir."
+            "no_refresh_token": "Login bem-sucedido, mas a Verisure não retornou um token de atualização. A integração não pode salvar as credenciais com segurança. Tente novamente mais tarde ou reporte se persistir.",
+            "installation_not_on_account": "Esta conta Verisure não consegue ver a instalação {number}. Entre com uma conta que tenha acesso a ela."
         },
         "step": {
             "reauth_confirm": {

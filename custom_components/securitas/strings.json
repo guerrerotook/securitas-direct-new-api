@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "Service is already configured",
             "reauth_successful": "Reauthentication successful",
-            "no_refresh_token": "Login succeeded but Verisure did not return a refresh token. The integration cannot persist credentials safely. Please try again later or report this if it persists."
+            "no_refresh_token": "Login succeeded but Verisure did not return a refresh token. The integration cannot persist credentials safely. Please try again later or report this if it persists.",
+            "installation_not_on_account": "This Verisure account can't see installation {number}. Sign in with an account that has access to it."
         },
         "step": {
             "reauth_confirm": {

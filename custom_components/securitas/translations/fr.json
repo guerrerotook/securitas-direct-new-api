@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "Le service est déjà configuré",
             "reauth_successful": "Réauthentification réussie",
-            "no_refresh_token": "La connexion a réussi mais Verisure n'a pas renvoyé de jeton d'actualisation. L'intégration ne peut pas enregistrer les identifiants en toute sécurité. Veuillez réessayer plus tard ou signaler le problème s'il persiste."
+            "no_refresh_token": "La connexion a réussi mais Verisure n'a pas renvoyé de jeton d'actualisation. L'intégration ne peut pas enregistrer les identifiants en toute sécurité. Veuillez réessayer plus tard ou signaler le problème s'il persiste.",
+            "installation_not_on_account": "Ce compte Verisure ne voit pas l'installation {number}. Connectez-vous avec un compte qui y a accès."
         },
         "step": {
             "reauth_confirm": {

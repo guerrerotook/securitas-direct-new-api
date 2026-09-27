@@ -3869,8 +3869,12 @@ async def _reauth_as_other_account(hass, entry, other_hub=None):
     if other_hub is None:
         other_hub = _hub_factory()
         other_hub.config = make_config_entry_data(username="other@example.com")
+    reauth_hub = _hub_factory()
+    reauth_hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number=entry.data[CONF_INSTALLATION])]
+    )
     with (
-        _patches(_hub_factory()),
+        _patches(reauth_hub),
         patch(
             "custom_components.securitas._login_ipv4_first",
             AsyncMock(return_value=other_hub),
@@ -4305,6 +4309,73 @@ async def test_a_reauth_onto_another_account_clears_that_accounts_crash_count(
     assert home.data[CONF_USERNAME] == "other@example.com"
     assert home.state is ConfigEntryState.SETUP_RETRY
     assert other.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_a_reauth_onto_an_account_without_the_installation_is_refused(hass):
+    """Signing in as an account that cannot see the entry's installation would
+    leave the entry with no devices; the dialog refuses, naming the
+    installation, and the entry stays on its first account."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    data_before = dict(home.data)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        _reauth_hub_seeing("333"),
+        patch("custom_components.securitas._login_ipv4_first"),
+    )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "installation_not_on_account"
+    assert result["description_placeholders"] == {"number": "111"}
+    assert dict(home.data) == data_before
+    assert home.state is ConfigEntryState.LOADED
+
+
+async def test_a_reauth_onto_another_account_that_cannot_list_asks_again(hass):
+    """If the other account's installations cannot be listed, the switch is
+    not made and the dialog asks again rather than guessing."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    data_before = dict(home.data)
+    reauth_hub = _hub_factory()
+    reauth_hub.client.list_installations = AsyncMock(
+        side_effect=VerisureOwaError("offline")
+    )
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        reauth_hub,
+        patch("custom_components.securitas._login_ipv4_first"),
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert dict(home.data) == data_before
+
+
+async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):
+    """The account already saw the installation when the entry was set up; a
+    same-account reauth costs no extra call."""
+    home = await _home_crashed_once_then_rejected(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    await _submit_reauth(
+        hass,
+        home,
+        "test@example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    reauth_hub.client.list_installations.assert_not_awaited()
+    assert home.state is ConfigEntryState.LOADED
 
 
 # ===================================================================

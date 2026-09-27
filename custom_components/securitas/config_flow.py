@@ -769,6 +769,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return await self._finish_reauth()
 
+        return self._reauth_form(errors)
+
+    def _reauth_form(
+        self, errors: dict[str, str] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        assert self._reauth_entry is not None
         username = self._reauth_entry.data.get(CONF_USERNAME, "")
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -778,7 +784,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_PASSWORD): str,
                 }
             ),
-            errors=errors,
+            errors=errors or {},
         )
 
     async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
@@ -796,6 +802,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             )
             return self.async_abort(reason="no_refresh_token")
         username = self.config[CONF_USERNAME]
+        installation = self._reauth_entry.data.get(CONF_INSTALLATION)
+        if installation and username != self._reauth_entry.data.get(CONF_USERNAME):
+            # Another account keeps the entry's installation number; one that
+            # cannot see it would leave the entry with no devices.
+            try:
+                installations = await self.hub.client.list_installations()
+            except VerisureOwaError:
+                return self._reauth_form({"base": "cannot_connect"})
+            if all(inst.number != installation for inst in installations):
+                return self.async_abort(
+                    reason="installation_not_on_account",
+                    description_placeholders={"number": installation},
+                )
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
