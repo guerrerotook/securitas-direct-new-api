@@ -228,13 +228,18 @@ export class AutoForceArmTracker {
     this._prevState = s;
   }
 
-  // Best effort: a rejection (offline panel, missing service) only means the
-  // step did not happen, and must not surface as an unhandled rejection.
+  // Best effort: a failure (offline panel, missing service, a dropped
+  // connection that throws before returning a promise) only means the step did
+  // not happen, and must not escape into the surface's render or surface as an
+  // unhandled rejection.
   _call(hass, service, entityId) {
     if (!entityId || !hass?.callService) return;
-    Promise.resolve(hass.callService("verisure_owa", service, { entity_id: entityId })).catch(
-      () => {},
-    );
+    try {
+      const result = hass.callService("verisure_owa", service, { entity_id: entityId });
+      Promise.resolve(result).catch(() => {});
+    } catch {
+      /* the step did not happen */
+    }
   }
 }
 

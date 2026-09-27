@@ -504,6 +504,23 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     expect(services).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
   });
 
+  it("contains a service call that throws before returning a promise", () => {
+    const { tracker, disarmed, select } = setup();
+    const services = [];
+    const hass = makeHass({
+      callService: (_domain, service) => {
+        services.push(service);
+        throw new Error("disconnected");
+      },
+    });
+
+    fire(select, "armed_away", tracker, disarmed);
+    expect(() => tracker.update(stateOf({ state: "arming" }), true, hass)).not.toThrow();
+    expect(() => tracker.update(stateOf({ forceArmAvailable: true }), true, hass)).not.toThrow();
+
+    expect(services).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
+  });
+
   it("tolerates a missing state object or hass", () => {
     const tracker = new AutoForceArmTracker(CONTROL);
     const select = nestedSelect(CONTROL);
