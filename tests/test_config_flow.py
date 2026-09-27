@@ -4231,6 +4231,83 @@ async def test_the_first_accounts_cached_list_lasts_only_its_usual_time(
 
 
 # ===================================================================
+# TestReauthOutcomes: what a reauth leaves behind for the next setup
+# ===================================================================
+
+
+def _reauth_hub_seeing(*numbers):
+    """A reauth dialog's hub whose account lists these installations."""
+    hub = _hub_factory()
+    hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number=n) for n in numbers]
+    )
+    return hub
+
+
+async def _submit_reauth(hass, entry, username, reauth_hub, setup_login):
+    """Answer the entry's reauth dialog as ``username``; ``setup_login``
+    stands in for the reload's sign-in."""
+    flows = _reauth_flows_for(hass, entry)
+    flow_id = (
+        flows[0]["flow_id"]
+        if flows
+        else (await _start_reauth_flow(hass, entry))["flow_id"]
+    )
+    with _patches(reauth_hub), setup_login:
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_USERNAME: username, CONF_PASSWORD: "new-password"},
+        )
+        await hass.async_block_till_done()
+    return result
+
+
+async def test_a_reauth_on_the_same_account_gives_the_next_crash_its_retry(hass):
+    """Signing in again proves the new token, so the crashes of the old one
+    must not count against it: its first crash waits to retry."""
+    home = await _home_crashed_once_then_rejected(hass)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "test@example.com",
+        _reauth_hub_seeing("111"),
+        _crashing_login(_hub_factory()),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert not _reauth_flows_for(hass, home)
+
+
+async def test_a_reauth_onto_another_account_clears_that_accounts_crash_count(
+    hass,
+):
+    """The account signed in to has a crash count from another of its
+    entries; the successful sign-in proves its token, so Home's first crash
+    on it waits to retry."""
+    await _load_third_account_entry(hass)
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    assert _crash_streaks(hass) == {"other@example.com": 1}
+    home.async_start_reauth(hass)
+    await hass.async_block_till_done()
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        _reauth_hub_seeing("111"),
+        _crashing_login(_hub_factory()),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.data[CONF_USERNAME] == "other@example.com"
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert other.state is ConfigEntryState.SETUP_RETRY
+
+
+# ===================================================================
 # TestSubPanelToggleVisibility (~6 tests)
 # ===================================================================
 

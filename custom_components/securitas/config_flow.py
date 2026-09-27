@@ -60,6 +60,7 @@ from . import (
     VerisureHub,
     _account_lock,
     _async_teardown_domain_if_unused,
+    _clear_setup_refresh_crash,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
@@ -794,11 +795,15 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 "leaving existing entry unchanged"
             )
             return self.async_abort(reason="no_refresh_token")
+        username = self.config[CONF_USERNAME]
         new_data = {**self._reauth_entry.data}
-        new_data[CONF_USERNAME] = self.config[CONF_USERNAME]
+        new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
         new_data[CONF_REFRESH_TOKEN] = refresh_token
         self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
+        # This sign-in proves the new token; crashes of the one it replaces
+        # must not count against it.
+        _clear_setup_refresh_crash(self.hass, username)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")
 
