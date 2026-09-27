@@ -88,7 +88,7 @@
                             "auto_force_arm": "Mostra una casella d'armat forçat automàtic als controls de l'alarma"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Mosaic (Tile) amb els modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
+                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Peça (Tile) amb els Modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
                         }
                     },
                     "subpanels": {
@@ -151,7 +151,7 @@
                             "auto_force_arm": "Mostra una casella d'armat forçat automàtic als controls de l'alarma"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Mosaic (Tile) amb els modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
+                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Peça (Tile) amb els Modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
                         }
                     },
                     "subpanels": {

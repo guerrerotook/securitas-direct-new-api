@@ -32,13 +32,13 @@ describe("arming-exception shared helpers", () => {
   });
 
   it("speaks Catalan rather than falling back to English", () => {
-    expect(armExceptionTranslation("ca", "force_arm")).toBe("Forçar armat");
-    expect(armExceptionTranslation("ca", "cancel")).toBe("Cancel·lar");
+    expect(armExceptionTranslation("ca", "force_arm")).toBe("Força l’armat");
+    expect(armExceptionTranslation("ca", "cancel")).toBe("Cancel·la");
     expect(armExceptionTranslation("ca", "open_sensors")).toBe(
       "Sensor(s) obert(s) — armar igualment?",
     );
     expect(armExceptionTranslation("ca", "auto_force_arm")).toBe(
-      "Forçar l’armat automàticament amb sensors oberts",
+      "Força l’armat automàticament amb sensors oberts",
     );
     expect(armExceptionTranslation("ca", "action_failed_detail", { error: "x" })).toBe(
       "L’acció de l’alarma ha fallat: x",

@@ -50,9 +50,9 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
     action_failed_detail: "A ação do alarme falhou: {error}",
   },
   ca: {
-    force_arm: "Forçar armat",
-    auto_force_arm: "Forçar l’armat automàticament amb sensors oberts",
-    cancel: "Cancel·lar",
+    force_arm: "Força l’armat",
+    auto_force_arm: "Força l’armat automàticament amb sensors oberts",
+    cancel: "Cancel·la",
     open_sensors: "Sensor(s) obert(s) — armar igualment?",
     open_sensors_no_force: "Sensor(s) obert(s) — tanqueu-los abans d’armar",
     action_failed: "L’acció de l’alarma ha fallat. Torneu-ho a provar.",

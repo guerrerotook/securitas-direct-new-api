@@ -135,8 +135,8 @@ describe("Verisure native alarm More Info extension", () => {
     });
     const root = exceptionRoot(element);
 
-    expect(root.querySelector(".force").textContent).toBe("Forçar armat");
-    expect(root.querySelector(".cancel").textContent).toBe("Cancel·lar");
+    expect(root.querySelector(".force").textContent).toBe("Força l’armat");
+    expect(root.querySelector(".cancel").textContent).toBe("Cancel·la");
     expect(root.querySelector(".force-title").textContent).toContain(
       "Sensor(s) obert(s) — armar igualment?",
     );

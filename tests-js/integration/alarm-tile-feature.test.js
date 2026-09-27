@@ -388,7 +388,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       feature.hass = makeHass({ language: "ca", states: { [ENTITY]: alarmEntity() } });
 
       expect(toggle(feature).getAttribute("label")).toBe(
-        "Forçar l’armat automàticament amb sensors oberts",
+        "Força l’armat automàticament amb sensors oberts",
       );
     });
   });

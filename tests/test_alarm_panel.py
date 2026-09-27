@@ -157,7 +157,7 @@ class TestNotificationTranslationsPersistentMessageTrim:
             "it": "Forza armamento",
             "pt": "For\u00e7ar armamento",
             "pt-BR": "For\u00e7ar armamento",
-            "ca": "For\u00e7ar armat",
+            "ca": "For\u00e7a l\u2019armat",
         }
         for locale in self.LOCALES:
             entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]
