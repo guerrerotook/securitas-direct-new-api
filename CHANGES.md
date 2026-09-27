@@ -4,9 +4,11 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.9.0
 
-Two fixes, and neither needs anything from you: one for anyone whose alarm kept dropping to _unavailable_ with a DNS error, and one for what the integration left behind after a setup that failed or was abandoned, which matters most on accounts with more than one installation.
+Three fixes, and none needs anything from you: XR cameras now show up in Home Assistant, the alarm no longer drops to _unavailable_ with a DNS error on some networks, and the integration now tidies up after a setup that failed or was abandoned, which matters most on accounts with more than one installation.
 
 ### Fixed
+
+**XR cameras now appear in Home Assistant ([#616](https://github.com/guerrerotook/securitas-direct-new-api/issues/616)).**  Installations with XR cameras only got entities for their other cameras; the XR ones were skipped, even though they take photos on request in My Verisure. They are now set up like any other Verisure camera, with a thumbnail entity, a full-resolution image entity and a capture button, and a photo request asks the camera in the same way the Verisure website does. They appear by themselves after you update. Thanks to [@Alejandro0465](https://github.com/Alejandro0465) for the report and the network capture that showed how the website asks an XR camera for a photo.
 
 **The alarm no longer goes unavailable because of an IPv6 lookup ([#606](https://github.com/guerrerotook/securitas-direct-new-api/issues/606)).**  On some networks the alarm repeatedly went _unavailable_ with a DNS error such as `DNS server returned answer with no data`. Verisure's server has no IPv6 address in any supported country, so asking for one can only ever come back empty — and on those networks the empty answer made the whole lookup fail instead of using the IPv4 address that resolved perfectly well. The integration now asks for IPv4 only, so it never asks the question that was failing. If your Home Assistant is on an IPv6-only network and has no IPv4 address of its own, it finds it cannot connect and tries again the ordinary way, so that setup keeps working too — usually at once, or after up to 30 seconds if your network drops the attempt silently instead of refusing it. Thanks to [@Teuqol](https://github.com/Teuqol) for the detailed diagnosis that found the cause.
 
