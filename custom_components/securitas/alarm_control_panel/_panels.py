@@ -325,8 +325,8 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
     """Sub-panel driving only the interior axis.
 
     Capabilities (ARMDAY, ARMNIGHT, ARM) gate which HA states are exposed.
-    The perimeter and annex axes are preserved from the coordinator's current
-    joint state when computing target states.
+    The perimeter and annex axes are preserved from the installation's latest
+    known state (``_planning_state``) when computing target states.
     """
 
     _SUFFIX = "_interior"
@@ -391,7 +391,7 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
             raise VerisureOwaError(
                 f"Unsupported alarm mode for Interior panel: {ha_state}"
             )
-        current = self.coordinator.alarm_state
+        current = self._planning_state() or self.coordinator.alarm_state
         return AlarmState(
             interior=interior_target_map[ha_state],
             perimeter=current.perimeter,
@@ -413,7 +413,7 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
     """Sub-panel driving only the perimeter axis.
 
     Perimeter is binary (ON/OFF). The interior and annex axes are preserved
-    from the coordinator's current joint state when computing target states.
+    from the installation's latest known state when computing target states.
     """
 
     _SUFFIX = "_perimeter"
@@ -454,7 +454,7 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
             raise VerisureOwaError(
                 f"Unsupported alarm mode for Perimeter panel: {ha_state}"
             )
-        current = self.coordinator.alarm_state
+        current = self._planning_state() or self.coordinator.alarm_state
         return AlarmState(
             interior=current.interior,
             perimeter=perimeter_target_map[ha_state],
@@ -474,7 +474,7 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
     """Sub-panel driving only the annex axis.
 
     Annex is binary (ON/OFF). The interior and perimeter axes are preserved
-    from the coordinator's current joint state when computing target states.
+    from the installation's latest known state when computing target states.
     """
 
     _SUFFIX = "_annex"
@@ -512,7 +512,7 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
             raise VerisureOwaError(
                 f"Unsupported alarm mode for Annex panel: {ha_state}"
             )
-        current = self.coordinator.alarm_state
+        current = self._planning_state() or self.coordinator.alarm_state
         return AlarmState(
             interior=current.interior,
             perimeter=current.perimeter,

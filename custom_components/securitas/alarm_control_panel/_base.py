@@ -117,6 +117,12 @@ def _modelled_state(proto_code: str | None) -> AlarmState | None:
     return PROTO_TO_ALARM_STATE.get(proto_code)
 
 
+class _NoCommandStatus(OperationStatus):
+    """The answer to a transition that sent no command. It is shown like any
+    result but, not being a panel response, never recorded as the
+    installation's confirmed state."""
+
+
 # How long an auto-force-arm "suppress the next arm-exception prompt" request
 # stays armed. Long enough to cover the arm round-trip that follows it, short enough
 # that a stray request can't silently swallow an unrelated prompt later on.
@@ -532,7 +538,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return False
         if is_proto_letter(status.protom_response):
             self._last_proto_code = status.protom_response
-            self.coordinator.record_confirmed_proto_code(status.protom_response)
+            if not isinstance(status, _NoCommandStatus):
+                self.coordinator.record_confirmed_proto_code(status.protom_response)
         return True
 
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:
@@ -610,10 +617,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     ) -> OperationStatus:
         """Execute a state transition, retrying once if state was stale.
 
-        After executing the resolved command sequence, checks whether the
-        panel's actual state matches the target.  If not (e.g. because
-        ``_last_proto_code`` was stale), updates the proto code from the
-        real response and retries with the corrected current state.
+        Plans from ``_planning_proto_code()``. After executing the resolved
+        command sequence, checks whether the panel's actual state matches the
+        target.  If not (the planned-from code was stale), records the real
+        response and retries with the corrected current state.
 
         When the panel's current state is unknown (no poll seen yet, or a
         proto code we don't model like 'N' after a central-station reset), a
@@ -624,18 +631,19 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         Any other transition needs a known current state to plan, so it is
         refused with the actual code surfaced for reporting.
         """
-        if not self._current_proto_modeled():
+        proto_code = self._planning_proto_code()
+        if _modelled_state(proto_code) is None:
             if target == _FULLY_DISARMED:
                 return await self._disarm_circuits_unconditional(
                     self._full_disarm_circuits(), **force_params
                 )
-            if self._last_proto_code is None:
+            if proto_code is None:
                 raise VerisureOwaError(
                     "Alarm state not yet known. "
                     "Please wait for the first status poll and try again."
                 )
             raise VerisureOwaError(
-                f"Alarm is in unknown state '{self._last_proto_code}'. "
+                f"Alarm is in unknown state '{proto_code}'. "
                 f"Please open an issue at {PROJECT_URL}/issues "
                 "including this state code."
             )
@@ -643,17 +651,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         result: OperationStatus | None = None
 
         for attempt in range(2):
-            # Guarded above: past the refusal block the code is modelled, so
-            # it is non-None and in PROTO_TO_ALARM_STATE. Re-read each pass —
-            # the retry below may have corrected it.
-            proto_code = self._last_proto_code
+            # Guarded above, and the retry below only sets a modelled code.
             assert proto_code is not None
             current = PROTO_TO_ALARM_STATE[proto_code]
             steps = self._resolver.resolve(current, target)
 
             if not steps:
                 # Resolver says we're already in the target state.
-                return OperationStatus(protom_response=proto_code)
+                return _NoCommandStatus(protom_response=proto_code)
 
             for step in steps:
                 result = await self._execute_step(step, **force_params)
@@ -675,7 +680,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                         actual_state,
                         actual_proto,
                     )
+                    proto_code = actual_proto
                     self._last_proto_code = actual_proto
+                    self.coordinator.record_confirmed_proto_code(actual_proto)
                     continue
 
             # No proto code to compare, or second attempt — accept as-is.
@@ -684,14 +691,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         assert result is not None
         return result
 
-    def _current_proto_modeled(self) -> bool:
-        """Return True if the last polled proto code maps to a known AlarmState.
+    def _planning_proto_code(self) -> str | None:
+        """The proto code transitions are planned from: the installation's
+        confirmed code, which a command on any panel updates, or this panel's
+        own last code while nothing has been confirmed."""
+        confirmed = self.coordinator.confirmed_proto_code
+        return self._last_proto_code if confirmed is None else confirmed
 
-        False both when nothing has been polled (``None``) and when the panel
-        reports a proto code we don't model (e.g. 'N'), so callers can treat
-        the current state as unreadable in either case.
-        """
-        return _modelled_state(self._last_proto_code) is not None
+    def _planning_state(self) -> AlarmState | None:
+        """``_planning_proto_code()`` as an AlarmState, or None if unreadable."""
+        return _modelled_state(self._planning_proto_code())
 
     def _confirmed_alarm_state(self) -> AlarmState | None:
         """The installation's latest known state (coordinator's
@@ -741,7 +750,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             result = await self._execute_step(step, **force_params)
         if result is None:
             # No axis needed disarming — report the disarmed state.
-            return OperationStatus(protom_response=PROTO_DISARMED)
+            return _NoCommandStatus(protom_response=PROTO_DISARMED)
         return result
 
     async def _execute_step(

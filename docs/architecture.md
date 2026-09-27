@@ -222,7 +222,7 @@ The `CommandResolver` class models the alarm as three independent axes — `Inte
 
 4. **Runtime discovery of unsupported commands:** When a command fails with a non-409 `VerisureOwaError`, `_execute_step()` calls `resolver.mark_unsupported(command)`, and the resolver skips it in all future resolutions. This is per-command granularity (not a global flag), so a disarm-specific failure (e.g. `DARM1DARMPERI`) does not disable unrelated compound arm commands. The unsupported set is in-memory and resets on HA restart.
 
-5. **Disarm uses current state:** The resolver determines the disarm command from the current `AlarmState` (derived from `_last_proto_code`), not from configuration flags. If both interior and perimeter are armed, it tries `DARM1DARMPERI` first, falling back to `DARM1`. If only perimeter is armed, it tries `DARMPERI` first, falling back to `DARM1`.
+5. **Disarm uses current state:** The resolver determines the disarm command from the current `AlarmState` (derived from `_planning_proto_code()`, see *Installation-wide confirmed state*), not from configuration flags. If both interior and perimeter are armed, it tries `DARM1DARMPERI` first, falling back to `DARM1`. If only perimeter is armed, it tries `DARMPERI` first, falling back to `DARM1`.
 
 6. **409 errors** (server busy) are re-raised immediately and do not trigger the fallback chain.
 
@@ -230,7 +230,7 @@ Home Assistant has five alarm buttons (Home, Away, Night, Vacation, Custom Bypas
 
 If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Verisure OWA state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
-**Unknown proto codes: arm refuses, disarm proceeds** (issues [#441](https://github.com/guerrerotook/securitas-direct-new-api/issues/441), [#550](https://github.com/guerrerotook/securitas-direct-new-api/issues/550)). `_last_proto_code` admits any single uppercase ASCII letter — including codes we don't yet model (e.g. `N`, which Verisure reports after a central-station reset). The two operations are handled differently because a disarm command is *unconditional* while an arm is not:
+**Unknown proto codes: arm refuses, disarm proceeds** (issues [#441](https://github.com/guerrerotook/securitas-direct-new-api/issues/441), [#550](https://github.com/guerrerotook/securitas-direct-new-api/issues/550)). `_last_proto_code` and `AlarmCoordinator.confirmed_proto_code` admit any single uppercase ASCII letter — including codes we don't yet model (e.g. `N`, which Verisure reports after a central-station reset). The two operations are handled differently because a disarm command is *unconditional* while an arm is not:
 
 - **Arm** needs a known current state to plan the transition, so `_execute_transition()` refuses with a translated notification naming the actual code. Sending incorrect transitions off an unknown state was one half of #441. The refusal clears automatically on the next poll once the alarm returns to a state we model.
 - **Disarm** proceeds unconditionally. `_execute_transition()` routes a full disarm to `_disarm_circuits_unconditional()`, which asks the resolver for disarm-only steps (`resolve_disarm_only()`) — `DARM1` / `DARM1DARMPERI` / `DARMANNEX1` clear their axis regardless of the current state, so no read is needed. This is *not* the #441 silent no-op (resolver computing `current==target` off a stale `D` and skipping `DARM1`): the command is actually sent. The lock's auto-disarm and partial disarm take the same path when the installation's latest known state (`AlarmCoordinator.confirmed_proto_code`, read through `_confirmed_alarm_state()`) is missing or unmodelled — otherwise an unmodeled code would read as nothing armed and the disarm would silently skip, leaving the door open over an armed alarm.
@@ -412,9 +412,9 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
 
 **Coordinator integration:** The `_handle_coordinator_update()` callback skips updates while `_operation_in_progress` is True (during arm/disarm) to prevent stale API responses from overwriting the transitional state. On each coordinator update, `_clear_force_context()` is called and `_update_from_coordinator()` maps the `SStatus.status` proto code to an HA state.
 
-**Installation-wide confirmed state:** `AlarmCoordinator.confirmed_proto_code` holds the latest known proto code for the installation. Every panel's command result (`update_status_alarm`, including the optimistic result after a confirmation timeout) records it through `record_confirmed_proto_code()`, and every poll writes it unless a panel is mid-command (a panel's busy flag calls `operation_started()` / `operation_finished()`), because a poll landing then may predate the command's result. Right after a command it is therefore newer than the coordinator's `data`; and because the coordinator's own first poll writes it, it is known even before the panels are added to Home Assistant. The lock's auto-disarm and `execute_partial_disarm` decide what is armed from it.
+**Installation-wide confirmed state:** `AlarmCoordinator.confirmed_proto_code` holds the latest known proto code for the installation. Every panel's command result (`update_status_alarm`, including the optimistic result after a confirmation timeout, and the corrected code when `_execute_transition` retries after a mismatch) records it through `record_confirmed_proto_code()` — but not the answer to a transition that sent no command (`_NoCommandStatus`), which is not a panel response — and every poll writes it unless a panel is mid-command (a panel's busy flag calls `operation_started()` / `operation_finished()`), because a poll landing then may predate the command's result. Right after a command it is therefore newer than the coordinator's `data`; and because the coordinator's own first poll writes it, it is known even before the panels are added to Home Assistant. The lock's auto-disarm and `execute_partial_disarm` decide what is armed from it, and every panel plans its commands from it (`_planning_proto_code()`, which falls back to the panel's own `_last_proto_code` only while nothing is confirmed); sub-panels also keep the other axes from it when building a target. So a panel whose own polls lag behind a command sent from another panel still plans from what that command confirmed.
 
-**Waiting behind a running command:** a user disarm, the lock's auto-disarm and `execute_partial_disarm` first wait (`_wait_until_idle`, bounded by `_operation_wait_limit()`, then the translated `operation_in_progress` error) until no alarm panel of the installation is running a command. A user disarm is a quiet no-op only when a full disarm is already running on the same panel. Arms are not queued: an arm pressed while its own panel is busy is ignored. Each panel's own `_last_proto_code` stays separate: the resolver re-reads it while a command is in flight.
+**Waiting behind a running command:** a user disarm, the lock's auto-disarm and `execute_partial_disarm` first wait (`_wait_until_idle`, bounded by `_operation_wait_limit()`, then the translated `operation_in_progress` error) until no alarm panel of the installation is running a command. A user disarm is a quiet no-op only when a full disarm is already running on the same panel. Arms are not queued: an arm pressed while its own panel is busy is ignored.
 
 **State mapping system:** During `__init__`, two dictionaries are built from the user's configuration:
 
@@ -430,7 +430,7 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
 3. set_arm_state(target_mode):
    a. Convert target HA mode to AlarmState via _mode_to_alarm_state()
    b. _execute_transition(target_alarm_state, **force_params):
-      - Derives current AlarmState from _last_proto_code
+      - Derives current AlarmState from _planning_proto_code() (the installation's confirmed code)
       - resolver.resolve(current, target) returns list of CommandSteps
       - If mode change (e.g. Partial→Total): resolver inserts disarm first
       - For each step, _execute_step() tries command alternatives in order
@@ -948,7 +948,7 @@ User presses "Arm Away" in HA UI
     → set_arm_state(ARMED_AWAY)
       → _mode_to_alarm_state(ARMED_AWAY) = AlarmState(TOTAL, ON)  (example with peri)
       → _execute_transition(target=AlarmState(TOTAL, ON))
-        → current = AlarmState from _last_proto_code (e.g. "B" → DAY+ON)
+        → current = AlarmState from _planning_proto_code() (e.g. "B" → DAY+ON)
         → resolver.resolve(current, target) returns:
           Step 1: disarm [DARM1DARMPERI, DARM1]  (mode change needs disarm first)
           Step 2: arm [ARMINTEXT1, ARM1PERI1, ARM1+PERI1]
@@ -961,7 +961,7 @@ User presses "Arm Away" in HA UI
           → fail? mark_unsupported, try ARM1 then PERI1
         → Return OperationStatus with protomResponse="A"
       → update_status_alarm(status)
-        → _last_proto_code = "A"
+        → _last_proto_code = "A"; coordinator.record_confirmed_proto_code("A")
         → _status_map["A"] = ARMED_AWAY
         → _state = ARMED_AWAY                   # UI shows "Armed Away"
 ```
@@ -980,7 +980,7 @@ AlarmCoordinator fires every scan_interval seconds
     → _clear_force_context()
     → _update_from_coordinator(data)
       → proto_code from status.status
-      → _last_proto_code = proto_code  # Track for resolver's current state
+      → _last_proto_code = proto_code  # resolver's fallback until a code is confirmed
       → protomResponse "D" → DISARMED
       → protomResponse in _status_map → mapped HA state
       → protomResponse unknown → ARMED_CUSTOM_BYPASS + notification
