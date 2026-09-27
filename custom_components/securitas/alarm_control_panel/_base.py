@@ -638,17 +638,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         refused with the actual code surfaced for reporting. A full disarm is
         also sent unconditionally while the confirmed state is provisional (a
         command the panel accepted but never confirmed); other transitions
-        still plan from that state.
+        still plan from that state, adjusted by
+        ``_unconfirmed_planning_state``.
         """
         proto_code = self._planning_proto_code()
-        if target == _FULLY_DISARMED and (
-            _modelled_state(proto_code) is None
-            or self.coordinator.confirmed_is_provisional
-        ):
+        current = _modelled_state(proto_code)
+        provisional = self.coordinator.confirmed_is_provisional
+        if target == _FULLY_DISARMED and (current is None or provisional):
             return await self._disarm_circuits_unconditional(
                 self._full_disarm_circuits(), **force_params
             )
-        if _modelled_state(proto_code) is None:
+        if current is None:
             if proto_code is None:
                 raise VerisureOwaError(
                     "Alarm state not yet known. "
@@ -660,12 +660,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 "including this state code."
             )
 
+        assert proto_code is not None  # current is modelled, so it has a code
+        if provisional:
+            current = self._unconfirmed_planning_state(current, target)
+
         result: OperationStatus | None = None
 
         for attempt in range(2):
-            # Guarded above, and the retry below only sets a modelled code.
-            assert proto_code is not None
-            current = PROTO_TO_ALARM_STATE[proto_code]
             steps = self._resolver.resolve(current, target)
 
             if not steps:
@@ -693,6 +694,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                         actual_proto,
                     )
                     proto_code = actual_proto
+                    current = actual_state
                     self._last_proto_code = actual_proto
                     self.coordinator.record_confirmed_proto_code(actual_proto)
                     continue
@@ -702,6 +704,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         assert result is not None
         return result
+
+    def _unconfirmed_planning_state(  # pylint: disable=unused-argument
+        self, current: AlarmState, target: AlarmState
+    ) -> AlarmState:
+        """The state to plan ``target`` from while ``current`` is provisional.
+
+        The combined panel plans from it as it is; axis sub-panels override
+        this so a disarm is sent again rather than skipped.
+        """
+        return current
 
     def _planning_proto_code(self) -> str | None:
         """The proto code transitions are planned from: the installation's
@@ -886,10 +898,35 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         command: str,
         **force_params: str,
     ) -> OperationStatus:
-        """Send a single arm or disarm command to the API."""
-        if command.startswith("D"):
-            return await self.client.disarm_alarm(self.installation, command)
-        return await self.client.arm_alarm(self.installation, command, **force_params)
+        """Send a single arm or disarm command to the API, recording the state
+        the panel confirms so a transition cut short between its commands
+        leaves the real state behind."""
+        sent = False
+
+        def _mark_sent() -> None:
+            nonlocal sent
+            sent = True
+
+        try:
+            if command.startswith("D"):
+                result = await self.client.disarm_alarm(
+                    self.installation, command, on_start=_mark_sent
+                )
+            else:
+                result = await self.client.arm_alarm(
+                    self.installation, command, on_start=_mark_sent, **force_params
+                )
+        except asyncio.CancelledError:
+            # Once sent, the panel may have accepted the command before its
+            # confirmation was cancelled, so its state is no longer known.
+            if sent:
+                self.coordinator.mark_confirmed_provisional(
+                    self.coordinator.possible_proto_codes | {None}
+                )
+            raise
+        if is_proto_letter(result.protom_response):
+            self.coordinator.record_confirmed_proto_code(result.protom_response)
+        return result
 
     def _persist_unsupported(self) -> None:
         """Write the resolver's unsupported set to entry.data and refresh state.
@@ -1105,8 +1142,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """
         self._set_waf_blocked(False)
         self._set_state_provisional(True)
+        earlier = self.coordinator.possible_proto_codes
+        if target not in ALARM_STATE_TO_PROTO:
+            # The optimistic code falls back to an earlier one, so the state
+            # the command may have reached is recorded as unknown.
+            earlier |= {None}
         self.update_status_alarm(self._optimistic_status(target))
-        self.coordinator.mark_confirmed_provisional()
+        self.coordinator.mark_confirmed_provisional(earlier)
         _LOGGER.warning(
             "%s not confirmed within timeout for %s; state provisional, "
             "awaiting reconciliation: %s",

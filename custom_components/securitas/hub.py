@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import logging
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
@@ -597,13 +598,24 @@ class VerisureHub:
         return modes
 
     async def arm_alarm(
-        self, installation: Installation, command: str, **force_params: str
+        self,
+        installation: Installation,
+        command: str,
+        *,
+        on_start: Callable[[], None] | None = None,
+        **force_params: str,
     ) -> Any:
-        """Arm the alarm via the client (polling handled internally)."""
+        """Arm the alarm via the client (polling handled internally).
+
+        ``on_start`` runs once the command leaves the queue: a caller
+        cancelled before then sent nothing.
+        """
         force_id = force_params.get("force_arming_remote_id")
         suid = force_params.get("suid")
 
         async def _arm() -> OperationStatus:
+            if on_start is not None:
+                on_start()
             return await self.client.arm(
                 installation, command, force_id=force_id, suid=suid
             )
@@ -624,12 +636,26 @@ class VerisureHub:
             priority=ApiQueue.FOREGROUND,
         )
 
-    async def disarm_alarm(self, installation: Installation, command: str) -> Any:
-        """Disarm the alarm via the client (polling handled internally)."""
+    async def disarm_alarm(
+        self,
+        installation: Installation,
+        command: str,
+        *,
+        on_start: Callable[[], None] | None = None,
+    ) -> Any:
+        """Disarm the alarm via the client (polling handled internally).
+
+        ``on_start`` runs once the command leaves the queue, as for
+        ``arm_alarm``.
+        """
+
+        async def _disarm() -> OperationStatus:
+            if on_start is not None:
+                on_start()
+            return await self.client.disarm(installation, command)
+
         return await self._api_queue.submit(
-            self.client.disarm,
-            installation,
-            command,
+            _disarm,
             priority=ApiQueue.FOREGROUND,
         )
 

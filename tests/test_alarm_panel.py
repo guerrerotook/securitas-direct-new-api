@@ -3,7 +3,7 @@
 import asyncio
 import inspect
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from unittest.mock import call as mock_call
 
 import attr
@@ -658,13 +658,20 @@ def make_alarm(
     # The installation-wide confirmed state behaves like the real coordinator's.
     coordinator.confirmed_proto_code = None
     coordinator.confirmed_is_provisional = False
+    coordinator.earlier_possible = frozenset()
+    # Each MagicMock has its own class, so this property is this mock's alone.
+    type(coordinator).possible_proto_codes = property(
+        lambda c: c.earlier_possible | {c.confirmed_proto_code}
+    )
 
     def _record_confirmed(proto_code):
         coordinator.confirmed_proto_code = proto_code
         coordinator.confirmed_is_provisional = False
+        coordinator.earlier_possible = frozenset()
 
-    def _mark_provisional():
+    def _mark_provisional(earlier):
         coordinator.confirmed_is_provisional = True
+        coordinator.earlier_possible = frozenset(earlier)
 
     coordinator.record_confirmed_proto_code = MagicMock(side_effect=_record_confirmed)
     coordinator.mark_confirmed_provisional = MagicMock(side_effect=_mark_provisional)
@@ -1095,7 +1102,9 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm("1234")
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, STATE_TO_COMMAND[VerisureOwaState.DISARMED]
+            alarm.installation,
+            STATE_TO_COMMAND[VerisureOwaState.DISARMED],
+            on_start=ANY,
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -1151,7 +1160,7 @@ class TestAsyncAlarmDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI"
+            alarm.installation, "DARM1DARMPERI", on_start=ANY
         )
 
     async def test_disarm_with_peri_configured_but_not_armed_uses_darm1(self):
@@ -1177,7 +1186,9 @@ class TestAsyncAlarmDisarm:
 
         await alarm.async_alarm_disarm()
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
 
 # ===========================================================================
@@ -1234,7 +1245,9 @@ class TestSetArmState:
 
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
         alarm.client.arm_alarm.assert_called_once()
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
@@ -4202,7 +4215,7 @@ class TestCompoundArmCommands:
         await alarm.async_alarm_arm_night()
 
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1PERI1"
+            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY
         )
         assert len(alarm._resolver.unsupported) == 0
         assert alarm._state == AlarmControlPanelState.ARMED_NIGHT
@@ -4270,6 +4283,7 @@ class TestCompoundArmCommands:
         expected_params = {
             "force_arming_remote_id": "ref-123",
             "suid": "suid-456",
+            "on_start": ANY,
         }
         assert len(calls) == 2
         assert calls[0][1] == expected_params
@@ -4607,7 +4621,7 @@ class TestCompoundArmCommands:
 
         # Should only try ARMNIGHT1PERI1 once — NOT fall back to multi-step
         alarm.client.arm_alarm.assert_called_once_with(
-            alarm.installation, "ARMNIGHT1PERI1"
+            alarm.installation, "ARMNIGHT1PERI1", on_start=ANY
         )
         assert "ARMNIGHT1PERI1" not in alarm._resolver.unsupported
 
@@ -4743,7 +4757,7 @@ class TestDynamicDisarm:
         await alarm.async_alarm_disarm()
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI"
+            alarm.installation, "DARM1DARMPERI", on_start=ANY
         )
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -4764,7 +4778,7 @@ class TestDynamicDisarm:
 
         calls = []
 
-        async def disarm_side_effect(installation, command):
+        async def disarm_side_effect(installation, command, **_kwargs):
             calls.append(command)
             if command == "DARM1DARMPERI":
                 raise VerisureOwaError(
@@ -4803,7 +4817,7 @@ class TestDynamicDisarm:
 
         calls = []
 
-        async def disarm_side_effect(installation, command):
+        async def disarm_side_effect(installation, command, **_kwargs):
             calls.append(command)
             if command == "DARM1DARMPERI":
                 raise VerisureOwaError(
@@ -4850,7 +4864,9 @@ class TestDynamicDisarm:
 
         await alarm.async_alarm_disarm()
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
     async def test_no_peri_config_uses_darm1(self):
         """Without peri config, always sends DARM1."""
@@ -4862,7 +4878,9 @@ class TestDynamicDisarm:
 
         await alarm.async_alarm_disarm()
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
     async def test_unsupported_combined_skips_to_darm1(self):
         """With combined disarm marked unsupported, peri armed goes to DARM1."""
@@ -4884,7 +4902,9 @@ class TestDynamicDisarm:
 
         await alarm.async_alarm_disarm()
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
     async def test_both_disarm_attempts_fail(self):
         """When both DARM1DARMPERI and DARM1 fail with 400, raise translated HomeAssistantError."""
@@ -4925,7 +4945,7 @@ class TestDynamicDisarm:
 
         # Should only try DARM1DARMPERI once — NOT fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI"
+            alarm.installation, "DARM1DARMPERI", on_start=ANY
         )
         # Error placeholder carries clean API message, no full args dump
         mock_notify.assert_called_once()
@@ -4963,7 +4983,7 @@ class TestDynamicDisarm:
 
         disarm_calls = []
 
-        async def track_disarm(installation, command):
+        async def track_disarm(installation, command, **_kwargs):
             disarm_calls.append(command)
             if command == "DARM1DARMPERI":
                 raise VerisureOwaError(
@@ -5011,7 +5031,9 @@ class TestExecuteTransition:
         await alarm._execute_transition(
             AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         )
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
     async def test_disarm_compound_fallback_to_darm1(self):
         """Disarm from total_peri falls back from DARM1DARMPERI to DARM1."""
@@ -5071,7 +5093,7 @@ class TestExecuteTransition:
             )
         # Only tried first command, didn't fall back
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI"
+            alarm.installation, "DARM1DARMPERI", on_start=ANY
         )
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
 
@@ -5088,7 +5110,7 @@ class TestExecuteTransition:
             )
         # Only tried first command, didn't fall back to DARM1
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI"
+            alarm.installation, "DARM1DARMPERI", on_start=ANY
         )
         # Not marked as unsupported — error was transient
         assert "DARM1DARMPERI" not in alarm._resolver.unsupported
@@ -5119,8 +5141,12 @@ class TestExecuteTransition:
         await alarm._execute_transition(
             AlarmState(interior=InteriorMode.NIGHT, perimeter=PerimeterMode.OFF)
         )
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
-        alarm.client.arm_alarm.assert_called_once_with(alarm.installation, "ARMNIGHT1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
+        alarm.client.arm_alarm.assert_called_once_with(
+            alarm.installation, "ARMNIGHT1", on_start=ANY
+        )
 
     async def test_arm_total_peri_multi_step(self):
         """Arm total+peri falls back to multi-step when compounds unsupported."""
@@ -5230,7 +5256,9 @@ class TestExecuteTransitionDisarmsFromUnknownState:
             AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         )
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
     async def test_unknown_letter_sends_compound_disarm_with_peri(self):
         alarm = make_alarm(has_peri=True)
@@ -5242,7 +5270,7 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         )
 
         alarm.client.disarm_alarm.assert_called_once_with(
-            alarm.installation, "DARM1DARMPERI"
+            alarm.installation, "DARM1DARMPERI", on_start=ANY
         )
 
     async def test_none_proto_code_sends_disarm(self):
@@ -5255,7 +5283,9 @@ class TestExecuteTransitionDisarmsFromUnknownState:
             AlarmState(interior=InteriorMode.OFF, perimeter=PerimeterMode.OFF)
         )
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
 
     async def test_unknown_state_never_arms(self):
         """The disarm-from-unknown path must never emit an arm command."""
@@ -5305,7 +5335,9 @@ class TestExecuteTransitionDisarmsFromUnknownState:
         ) as mock_notify:
             await alarm.async_alarm_disarm()
 
-        alarm.client.disarm_alarm.assert_called_once_with(alarm.installation, "DARM1")
+        alarm.client.disarm_alarm.assert_called_once_with(
+            alarm.installation, "DARM1", on_start=ANY
+        )
         mock_notify.assert_not_called()
         assert alarm._state == AlarmControlPanelState.DISARMED
 
@@ -6272,7 +6304,9 @@ class TestSubPanelDisarmFromUnknownState:
         target = panel._resolve_target_state(AlarmControlPanelState.DISARMED)
         await panel._execute_transition(target)
 
-        panel.client.disarm_alarm.assert_called_once_with(panel.installation, "DARM1")
+        panel.client.disarm_alarm.assert_called_once_with(
+            panel.installation, "DARM1", on_start=ANY
+        )
 
     async def test_perimeter_subpanel_disarms_only_perimeter(self):
         panel = _make_perimeter_panel(
@@ -6287,7 +6321,7 @@ class TestSubPanelDisarmFromUnknownState:
         await panel._execute_transition(target)
 
         panel.client.disarm_alarm.assert_called_once_with(
-            panel.installation, "DARMPERI"
+            panel.installation, "DARMPERI", on_start=ANY
         )
 
 
@@ -7755,7 +7789,9 @@ class TestExecutePartialDisarm:
         ok = await panel.execute_partial_disarm(["interior"])
 
         assert ok is True
-        panel.client.disarm_alarm.assert_called_once_with(panel.installation, "DARM1")
+        panel.client.disarm_alarm.assert_called_once_with(
+            panel.installation, "DARM1", on_start=ANY
+        )
 
     async def test_unknown_state_disarm_never_arms(self):
         """The unknown-state partial-disarm path must never emit an arm command."""
@@ -9132,12 +9168,13 @@ async def test_disarm_genuine_failure_rolls_back_and_is_not_provisional():
 
 
 async def test_disarm_reentry_guard_ignores_overlapping_call():
-    """A second disarm while one is in progress is ignored (no duplicate DARM)."""
+    """A second disarm while a disarm is in flight is ignored (no duplicate DARM)."""
     from unittest.mock import AsyncMock
 
     alarm = make_alarm()
     alarm._last_proto_code = "Q"
-    alarm._operation_in_progress = True  # simulate an in-flight operation
+    alarm._operation_in_progress = True  # simulate an in-flight disarm
+    alarm._operation_kind = "disarm"
     alarm.client.disarm_alarm = AsyncMock()
 
     await alarm.async_alarm_disarm()
@@ -9173,7 +9210,7 @@ def _status(proto: str) -> OperationStatus:
 
 
 # The state each arm command leaves the panel in; every disarm command leaves 'D'.
-_ARM_COMMAND_ANSWERS = {"ARM1": "T", "ARMINTEXT1": "A", "PERI1": "E"}
+_ARM_COMMAND_ANSWERS = {"ARM1": "T", "ARMINTEXT1": "A", "PERI1": "E", "ARMANNEX1": "X"}
 
 
 def _record_transitions(
@@ -9358,8 +9395,8 @@ async def test_waiting_disarm_is_attributed_to_the_user_who_pressed_it():
 
 
 async def test_arm_pressed_while_disarm_waits_is_still_ignored():
-    """Only the disarm waits: an arm pressed while another arm runs is ignored
-    as before, and the queued disarm still runs afterwards."""
+    """Only the disarm waits: an arm pressed while another arm runs is ignored,
+    and the queued disarm still runs afterwards."""
     alarm = make_alarm()
     arm_gate = asyncio.Event()
     arm_started = asyncio.Event()
@@ -10098,3 +10135,344 @@ async def test_disarm_on_a_confirmed_disarmed_alarm_sends_nothing():
 
     assert _sent(panel) == []
     assert panel._state == AlarmControlPanelState.DISARMED
+
+
+async def test_interior_disarm_again_after_one_that_timed_out_sends_it():
+    """An Interior disarm that timed out shows the interior disarmed without
+    the panel confirming it. Pressing Interior Disarm again sends that disarm
+    again, keeping the perimeter armed."""
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    main.update_status_alarm(_status("A"))  # interior total + perimeter
+    _record_transitions(
+        interior, hold="disarm", error=OperationTimeoutError("not confirmed")
+    )
+    await interior.async_alarm_disarm()
+    assert _sent(interior) == ["DARM1DARMPERI"]  # timed out on the first step
+    assert main.coordinator.confirmed_proto_code == "E"  # perimeter only
+    assert main.coordinator.confirmed_is_provisional
+
+    _record_transitions(interior)
+    await interior.async_alarm_disarm()
+
+    assert _sent(interior) == ["DARM1DARMPERI", "PERI1"]
+    assert main.coordinator.confirmed_proto_code == "E"
+    assert main.coordinator.confirmed_is_provisional is False
+
+
+def _sub_panel_sharing(main, panel_cls):
+    """A ``panel_cls`` sub-panel on ``main``'s installation and coordinator."""
+    with patch.object(panel_cls, "async_schedule_update_ha_state", MagicMock()):
+        panel = panel_cls(
+            installation=main.installation,
+            client=main.client,
+            coordinator=main.coordinator,
+        )
+    panel.hass = main.hass
+    panel.async_write_ha_state = MagicMock()
+    return panel
+
+
+async def test_interior_disarm_after_a_perimeter_arm_timed_out_sends_nothing():
+    """A Perimeter arm that timed out shows the perimeter armed without the
+    panel confirming it, and the interior was confirmed off before it.
+    Pressing Interior Disarm has nothing to disarm, so it sends nothing
+    rather than disarming and re-arming the perimeter."""
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    perimeter = _sub_panel_sharing(main, PerimeterVerisureOwaAlarmPanel)
+    main.update_status_alarm(_status("D"))
+    _record_transitions(perimeter, error=OperationTimeoutError("not confirmed"))
+    await perimeter.set_arm_state("armed_away")
+    assert _sent(perimeter) == ["PERI1"]
+    assert main.coordinator.confirmed_proto_code == "E"  # perimeter only
+    assert main.coordinator.confirmed_is_provisional
+
+    _record_transitions(interior)
+    await interior.async_alarm_disarm()
+
+    assert _sent(interior) == []
+
+
+async def test_interior_disarm_after_an_annex_arm_timed_out_sends_nothing():
+    """The same for an Annex arm that timed out: the interior was confirmed
+    off, so Interior Disarm neither disarms nor re-arms the annex."""
+    main = make_alarm()
+    main.coordinator.has_annex = True
+    annex = _sub_panel_sharing(main, AnnexVerisureOwaAlarmPanel)
+    interior = _sub_panel_sharing(main, InteriorVerisureOwaAlarmPanel)
+    main.update_status_alarm(_status("D"))
+    _record_transitions(annex, error=OperationTimeoutError("not confirmed"))
+    await annex.set_arm_state("armed_away")
+    assert _sent(annex) == ["ARMANNEX1"]
+    assert main.coordinator.confirmed_proto_code == "X"  # annex only
+    assert main.coordinator.confirmed_is_provisional
+
+    _record_transitions(interior)
+    await interior.async_alarm_disarm()
+
+    assert _sent(interior) == []
+
+
+async def test_interior_disarm_after_an_arm_and_a_disarm_both_timed_out_sends_it():
+    """An Interior arm and then an Interior disarm both timed out, with the
+    perimeter confirmed armed throughout. The arm may have landed and the
+    disarm not, so pressing Interior Disarm again sends the disarm, keeping
+    the perimeter armed."""
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    main.update_status_alarm(_status("E"))  # perimeter only
+    timeout = OperationTimeoutError("not confirmed")
+    _record_transitions(interior, error=timeout)
+    await interior.set_arm_state("armed_away")
+    assert main.coordinator.confirmed_proto_code == "A"
+    _record_transitions(interior, hold="disarm", error=timeout)
+    await interior.async_alarm_disarm()
+    assert main.coordinator.confirmed_proto_code == "E"
+    assert main.coordinator.confirmed_is_provisional
+
+    _record_transitions(interior)
+    await interior.async_alarm_disarm()
+
+    assert _sent(interior) == ["DARM1DARMPERI", "PERI1"]
+
+
+async def test_partial_disarm_that_fails_as_it_starts_frees_every_panel():
+    """A partial disarm whose first state write fails leaves no panel busy,
+    so a later disarm does not wait for it."""
+    main, interior, _ = _main_and_interior_panels()
+    main.update_status_alarm(_status("T"))
+    main._force_state = MagicMock(side_effect=RuntimeError("state write failed"))
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        await main.execute_partial_disarm(["interior"])
+
+    assert main._operation_in_progress is False
+    assert interior._operation_in_progress is False
+
+
+async def test_partial_disarm_whose_final_state_write_fails_frees_every_panel():
+    """A state write that fails while a partial disarm finishes still leaves
+    every panel it touched free."""
+    main, interior, _ = _main_and_interior_panels()
+    main.update_status_alarm(_status("T"))
+    _record_transitions(main)
+
+    async def disarm_then_break_state_writes(step, **_kwargs):
+        main.async_write_ha_state = MagicMock(
+            side_effect=RuntimeError("state write failed")
+        )
+        return _status("D")
+
+    main._execute_step = AsyncMock(side_effect=disarm_then_break_state_writes)
+
+    with pytest.raises(RuntimeError, match="state write failed"):
+        await main.execute_partial_disarm(["interior"])
+
+    assert main._operation_in_progress is False
+    assert interior._operation_in_progress is False
+
+
+def _route_through_hub(panel):
+    """Send ``panel``'s commands through a real hub and its real API queue.
+    Returns the hub, whose ``client`` stands in for Verisure."""
+    from tests.test_hub import make_hub
+
+    hub = make_hub()
+    panel.client.arm_alarm = hub.arm_alarm
+    panel.client.disarm_alarm = hub.disarm_alarm
+    return hub
+
+
+async def _until(condition):
+    for _ in range(50):
+        if condition():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError("condition never met")
+
+
+async def test_disarm_waiting_behind_an_arm_cancelled_at_the_panel_still_disarms():
+    """An arm Verisure accepted is cancelled before it is confirmed, so the
+    panel may be arming. The disarm that was waiting behind it still sends
+    the disarm rather than trusting the old disarmed state."""
+    panel = make_alarm()
+    panel.update_status_alarm(_status("D"))
+    hub = _route_through_hub(panel)
+    accepted, never = asyncio.Event(), asyncio.Event()
+
+    async def accepted_arm(*_args, **_kwargs):
+        accepted.set()
+        await never.wait()  # waiting for the panel to confirm the arm
+
+    hub.client.arm = AsyncMock(side_effect=accepted_arm)
+    hub.client.disarm = AsyncMock(return_value=_status("D"))
+    arm = asyncio.create_task(panel.set_arm_state("armed_away"))
+    await accepted.wait()
+    disarm = asyncio.create_task(panel.async_alarm_disarm())
+    await asyncio.sleep(0)
+
+    arm.cancel()
+    await asyncio.gather(arm, return_exceptions=True)
+    await asyncio.wait_for(disarm, timeout=2)
+
+    hub.client.disarm.assert_awaited_once()
+    assert panel._state == AlarmControlPanelState.DISARMED
+
+
+async def test_arm_cancelled_while_queued_leaves_the_confirmed_state_trusted():
+    """An arm cancelled while it still waits in the API queue is dropped
+    before reaching Verisure, so the confirmed state stays trusted."""
+    from custom_components.securitas.api_queue import ApiQueue
+
+    panel = make_alarm()
+    panel.update_status_alarm(_status("D"))
+    hub = _route_through_hub(panel)
+    hub.client.arm = AsyncMock(return_value=_status("T"))
+    release = asyncio.Event()
+    busy = asyncio.create_task(
+        hub.api_queue.submit(release.wait, priority=ApiQueue.FOREGROUND)
+    )
+    await _until(lambda: hub.api_queue._pending_foreground == 1)
+    arm = asyncio.create_task(panel.set_arm_state("armed_away"))
+    await _until(lambda: hub.api_queue._pending_foreground == 2)
+
+    arm.cancel()
+    await asyncio.gather(arm, return_exceptions=True)
+    release.set()
+    await busy
+
+    hub.client.arm.assert_not_awaited()
+    assert panel.coordinator.confirmed_proto_code == "D"
+    assert panel.coordinator.confirmed_is_provisional is False
+
+
+async def test_arm_cancelled_before_its_command_is_sent_leaves_the_state_trusted():
+    """An arm cancelled while its transition is under way but before any
+    command is handed to the hub leaves the confirmed state trusted."""
+    panel = make_alarm()
+    panel.update_status_alarm(_status("D"))
+    waiting, never = asyncio.Event(), asyncio.Event()
+
+    async def stuck_before_sending(*_args, **_kwargs):
+        waiting.set()
+        await never.wait()
+
+    panel._dismiss_pending_force_context_on_siblings = AsyncMock()
+    panel._execute_transition = AsyncMock(side_effect=stuck_before_sending)
+    arm = asyncio.create_task(panel.set_arm_state("armed_away"))
+    await waiting.wait()
+
+    arm.cancel()
+    await asyncio.gather(arm, return_exceptions=True)
+
+    assert panel.coordinator.confirmed_proto_code == "D"
+    assert panel.coordinator.confirmed_is_provisional is False
+
+
+def _answer_like_a_panel(hub):
+    """Have ``hub``'s Verisure stand-in answer each command with the state it
+    leaves the panel in."""
+
+    async def arm(_installation, command, **_kwargs):
+        return _status(_ARM_COMMAND_ANSWERS[command])
+
+    async def disarm(_installation, _command, **_kwargs):
+        return _status("D")
+
+    hub.client.arm = AsyncMock(side_effect=arm)
+    hub.client.disarm = AsyncMock(side_effect=disarm)
+
+
+def _hub_commands(hub):
+    """The commands that reached Verisure through ``hub``, in order."""
+    calls = [*hub.client.disarm.await_args_list, *hub.client.arm.await_args_list]
+    return [c.args[1] for c in calls]
+
+
+async def test_disarm_cancelled_between_its_commands_keeps_the_first_ones_result():
+    """An Interior disarm from interior+perimeter sends two commands. The
+    first is confirmed (fully disarmed) and the disarm is cancelled while the
+    second waits to be sent, so the panel is fully disarmed. A later Interior
+    Arm plans from that, and sends the arm."""
+    from custom_components.securitas.api_queue import ApiQueue
+
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    main.update_status_alarm(_status("A"))  # interior total + perimeter
+    hub = _route_through_hub(interior)
+    _answer_like_a_panel(hub)
+    release = asyncio.Event()
+    disarmed = asyncio.Event()
+    busy: list[asyncio.Task] = []
+
+    async def disarm_then_hold_the_queue(_installation, _command, **_kwargs):
+        busy.append(
+            asyncio.create_task(
+                hub.api_queue.submit(release.wait, priority=ApiQueue.FOREGROUND)
+            )
+        )
+        await _until(lambda: hub.api_queue._pending_foreground == 2)
+        disarmed.set()
+        return _status("D")
+
+    hub.client.disarm = AsyncMock(side_effect=disarm_then_hold_the_queue)
+    disarm = asyncio.create_task(interior.async_alarm_disarm())
+    await disarmed.wait()
+    await _until(lambda: hub.api_queue._pending_foreground == 2)
+
+    disarm.cancel()
+    await asyncio.gather(disarm, return_exceptions=True)
+    release.set()
+    await busy[0]
+    assert _hub_commands(hub) == ["DARM1DARMPERI"]
+    assert main.coordinator.confirmed_proto_code == "D"
+    assert main.coordinator.confirmed_is_provisional is False
+
+    _answer_like_a_panel(hub)
+    await interior.set_arm_state("armed_away")
+
+    assert _hub_commands(hub) == ["ARM1"]
+
+
+async def test_annex_disarm_after_an_arm_to_an_unmodelled_state_timed_out_sends_it():
+    """With the perimeter armed, an Annex arm times out. Perimeter and annex
+    together have no state code, so the annex may be armed although the
+    recorded code shows it off. Pressing Annex Disarm sends the annex
+    disarm."""
+    main = make_alarm(has_peri=True)
+    main.coordinator.has_annex = True
+    annex = _sub_panel_sharing(main, AnnexVerisureOwaAlarmPanel)
+    main.update_status_alarm(_status("E"))  # perimeter only
+    _record_transitions(annex, error=OperationTimeoutError("not confirmed"))
+    await annex.set_arm_state("armed_away")
+    assert _sent(annex) == ["ARMANNEX1"]
+    assert main.coordinator.confirmed_is_provisional
+
+    _record_transitions(annex)
+    await annex.async_alarm_disarm()
+
+    assert _sent(annex)[0] == "DARMANNEX1"
+
+
+async def test_interior_disarm_after_an_arm_cancelled_at_the_panel_sends_it():
+    """With the perimeter armed, an Interior arm reaches Verisure and is
+    cancelled before it is confirmed, so the interior may be armed. Pressing
+    Interior Disarm disarms it and re-arms the perimeter."""
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    main.update_status_alarm(_status("E"))  # perimeter only
+    hub = _route_through_hub(interior)
+    _answer_like_a_panel(hub)
+    accepted, never = asyncio.Event(), asyncio.Event()
+
+    async def accepted_arm(*_args, **_kwargs):
+        accepted.set()
+        await never.wait()  # waiting for the panel to confirm the arm
+
+    hub.client.arm = AsyncMock(side_effect=accepted_arm)
+    arm = asyncio.create_task(interior.set_arm_state("armed_away"))
+    await accepted.wait()
+    arm.cancel()
+    await asyncio.gather(arm, return_exceptions=True)
+    assert main.coordinator.confirmed_is_provisional
+
+    _answer_like_a_panel(hub)
+    await interior.async_alarm_disarm()
+
+    assert _hub_commands(hub) == ["DARM1DARMPERI", "PERI1"]

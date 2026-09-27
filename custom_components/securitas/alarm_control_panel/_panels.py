@@ -38,7 +38,11 @@ from ..verisure_owa_api.command_resolver import (
     InteriorMode,
     PerimeterMode,
 )
-from ._base import BaseVerisureOwaAlarmPanel, build_partial_disarm_target
+from ._base import (
+    BaseVerisureOwaAlarmPanel,
+    _modelled_state,
+    build_partial_disarm_target,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,13 +125,16 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             if target == current:
                 return True
 
-        for entity in affected:
-            entity._operation_in_progress = True  # pylint: disable=protected-access
-            entity._operation_kind = "partial_disarm"  # pylint: disable=protected-access
-            entity._operation_epoch += 1  # pylint: disable=protected-access
-            entity._force_state(AlarmControlPanelState.DISARMING)  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        taken: list[BaseVerisureOwaAlarmPanel] = []
         ok = False
         try:
+            for entity in affected:
+                entity._operation_in_progress = True
+                taken.append(entity)
+                entity._operation_kind = "partial_disarm"
+                entity._operation_epoch += 1
+                entity._force_state(AlarmControlPanelState.DISARMING)
             if target is not None:
                 result = await self._execute_transition(target)
             else:
@@ -137,9 +144,9 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             ok = True
         except (VerisureOwaError, HomeAssistantError) as err:
             # VerisureOwaError includes OperationTimeoutError (command accepted
-            # but the confirmation poll didn't resolve): it is rolled back here
-            # — unlike the user-facing arm/disarm paths, which treat that as
-            # accepted-but-provisional. The rollback shows the circuits as
+            # but the confirmation poll didn't resolve): it is rolled back in
+            # the `finally` below — unlike the user-facing arm/disarm paths,
+            # which treat that as accepted-but-provisional. The rollback shows the circuits as
             # still-armed (the fail-safe direction) but reports failure to the
             # lock automation. (Provisional semantics for this multi-entity
             # path are a tracked #508 follow-up.) HomeAssistantError means every
@@ -155,11 +162,14 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             return False
         finally:
             # Every exit that did not succeed (handled error, unforeseen error,
-            # cancellation) shows the circuits as still armed and frees the flag.
-            for entity in affected:
+            # cancellation) shows the circuits as still armed. Every flag is
+            # freed before any state write, which can raise: a flag left set
+            # would hold every later disarm until the wait gives up.
+            for entity in taken:
                 if not ok:
-                    entity._state = entity._last_state  # pylint: disable=protected-access
-                entity._operation_in_progress = False  # pylint: disable=protected-access
+                    entity._state = entity._last_state
+                entity._operation_in_progress = False
+            for entity in taken:
                 entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True
@@ -199,6 +209,15 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         return [axis_panels[c] for c in circuits if c in axis_panels]
 
 
+# Per circuit: the AlarmState field it maps to, its off value, and the armed
+# value a disarm is planned from when the axis may really be armed.
+_AXIS_FIELDS: dict[str, tuple[str, Any, Any]] = {
+    CIRCUIT_INTERIOR: ("interior", InteriorMode.OFF, InteriorMode.TOTAL),
+    CIRCUIT_PERIMETER: ("perimeter", PerimeterMode.OFF, PerimeterMode.ON),
+    CIRCUIT_ANNEX: ("annex", AnnexMode.OFF, AnnexMode.ON),
+}
+
+
 class _AxisSubPanelMixin:
     """Mixin that routes state updates through _extract_state(joint_state).
 
@@ -223,6 +242,35 @@ class _AxisSubPanelMixin:
         state — the other axes' real state is unreadable, so they must be
         left untouched instead of blindly disarmed (#550)."""
         return {self._AXIS}
+
+    def _unconfirmed_planning_state(
+        self, current: AlarmState, target: AlarmState
+    ) -> AlarmState:
+        """Plan a disarm of this axis as if the axis were still armed, when
+        any state the installation may really be in has it armed.
+
+        The provisional state may show the axis off only because an earlier
+        disarm was accepted but never confirmed; planning from it would send
+        nothing. The resolver then sends the disarm again and keeps the
+        other axes as they were. When every possible state has the axis off
+        (say, only another axis's arm is unconfirmed), nothing is sent.
+        """
+        field, off, armed = _AXIS_FIELDS[self._AXIS]
+        if getattr(target, field) != off or getattr(current, field) != off:
+            return current
+        possible = [
+            _modelled_state(code)
+            for code in self.coordinator.possible_proto_codes  # type: ignore[attr-defined]
+        ]
+        if all(
+            state is not None and getattr(state, field) == off for state in possible
+        ):
+            return current
+        return current.model_copy(update={field: armed})
+
+    def _joint_state(self) -> AlarmState:
+        """The installation's state the other axes are kept at when planning."""
+        return self._planning_state() or self.coordinator.alarm_state  # type: ignore[attr-defined]
 
     @property
     def suggested_object_id(self) -> str:
@@ -391,7 +439,7 @@ class InteriorVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPane
             raise VerisureOwaError(
                 f"Unsupported alarm mode for Interior panel: {ha_state}"
             )
-        current = self._planning_state() or self.coordinator.alarm_state
+        current = self._joint_state()
         return AlarmState(
             interior=interior_target_map[ha_state],
             perimeter=current.perimeter,
@@ -454,7 +502,7 @@ class PerimeterVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPan
             raise VerisureOwaError(
                 f"Unsupported alarm mode for Perimeter panel: {ha_state}"
             )
-        current = self._planning_state() or self.coordinator.alarm_state
+        current = self._joint_state()
         return AlarmState(
             interior=current.interior,
             perimeter=perimeter_target_map[ha_state],
@@ -512,7 +560,7 @@ class AnnexVerisureOwaAlarmPanel(_AxisSubPanelMixin, BaseVerisureOwaAlarmPanel):
             raise VerisureOwaError(
                 f"Unsupported alarm mode for Annex panel: {ha_state}"
             )
-        current = self._planning_state() or self.coordinator.alarm_state
+        current = self._joint_state()
         return AlarmState(
             interior=current.interior,
             perimeter=current.perimeter,

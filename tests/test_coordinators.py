@@ -183,12 +183,12 @@ class TestAlarmCoordinator:
         )
         coord.record_confirmed_proto_code("D")
         assert coord.confirmed_is_provisional is False
-        coord.mark_confirmed_provisional()
+        coord.mark_confirmed_provisional({"D"})
         assert coord.confirmed_is_provisional is True
         coord.record_confirmed_proto_code("T")
         assert coord.confirmed_is_provisional is False
 
-        coord.mark_confirmed_provisional()
+        coord.mark_confirmed_provisional({"D"})
         panel = object()
         coord.operation_started(panel)
         client.get_general_status.return_value = SStatus(status="D")
@@ -202,6 +202,31 @@ class TestAlarmCoordinator:
         await coord._async_update_data()
         assert coord.confirmed_is_provisional is False
         assert coord.confirmed_proto_code == "D"
+
+    @pytest.mark.asyncio
+    async def test_possible_codes_keep_every_unconfirmed_state_until_a_poll(self):
+        """While the recorded code is provisional, the installation may be in
+        the last confirmed state or any unconfirmed command's; a poll makes
+        the polled code the only one again."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        assert coord.possible_proto_codes == {None}
+        coord.record_confirmed_proto_code("E")
+        assert coord.possible_proto_codes == {"E"}
+
+        for optimistic in ("A", "E"):  # an arm, then a disarm, both timed out
+            earlier = coord.possible_proto_codes
+            coord.record_confirmed_proto_code(optimistic)
+            coord.mark_confirmed_provisional(earlier)
+        assert coord.confirmed_proto_code == "E"
+        assert coord.possible_proto_codes == {"E", "A"}
+
+        client.get_general_status.return_value = SStatus(status="T")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is False
+        assert coord.possible_proto_codes == {"T"}
 
     @pytest.mark.asyncio
     async def test_waf_blocked_raises_update_failed(self):

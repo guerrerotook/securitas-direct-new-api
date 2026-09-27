@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn
@@ -249,6 +249,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._capabilities_populated: bool = False
         self._confirmed_proto_code: str | None = None
         self._confirmed_provisional = False
+        self._earlier_possible: frozenset[str | None] = frozenset()
         self._panels_in_operation: set[object] = set()
 
     @property
@@ -263,19 +264,36 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
 
     @property
     def confirmed_is_provisional(self) -> bool:
-        """True while ``confirmed_proto_code`` is the optimistic result of a
-        command the panel accepted but never confirmed (#508)."""
+        """True while the panel may not be in ``confirmed_proto_code``: a
+        command it accepted was never confirmed (#508). The code is then that
+        command's optimistic result after a timeout, or the code from before
+        it after a cancellation; ``possible_proto_codes`` lists the rest."""
         return self._confirmed_provisional
+
+    @property
+    def possible_proto_codes(self) -> frozenset[str | None]:
+        """The codes the installation may really be in: ``confirmed_proto_code``
+        alone, or while that is provisional, also the last confirmed code and
+        each later unconfirmed command's optimistic code. None stands for a
+        state that is not known."""
+        return self._earlier_possible | {self._confirmed_proto_code}
 
     def record_confirmed_proto_code(self, proto_code: str) -> None:
         """Record a panel command's result as the installation's state."""
         self._confirmed_proto_code = proto_code
         self._confirmed_provisional = False
+        self._earlier_possible = frozenset()
 
-    def mark_confirmed_provisional(self) -> None:
+    def mark_confirmed_provisional(self, earlier: Iterable[str | None]) -> None:
         """Flag the recorded code as unconfirmed until a real command result
-        or a poll replaces it."""
+        or a poll replaces it.
+
+        ``earlier`` is ``possible_proto_codes`` read before the unconfirmed
+        command's optimistic code was recorded, plus None if the command's
+        effect is not known.
+        """
         self._confirmed_provisional = True
+        self._earlier_possible = frozenset(earlier)
 
     def operation_started(self, panel: object) -> None:
         """Hold back polled states while ``panel`` runs a command: a poll
@@ -398,9 +416,8 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
             self._client, self._fetch, "Alarm status"
         )
         proto_code = data.status.status if data.status else None
-        if not self._panels_in_operation and is_proto_letter(proto_code):
-            self._confirmed_proto_code = proto_code
-            self._confirmed_provisional = False
+        if proto_code and not self._panels_in_operation and is_proto_letter(proto_code):
+            self.record_confirmed_proto_code(proto_code)
         return data
 
 

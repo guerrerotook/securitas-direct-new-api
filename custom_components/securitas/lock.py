@@ -691,9 +691,10 @@ class VerisureLock(  # type: ignore[override]
         panel = self._combined_alarm_panel
         if panel is None:
             return None
-        # Decided only once any arm or disarm already running on the panel has
-        # finished, from the state it confirmed: the polled state lags behind,
-        # and would show nothing armed while an arm from disarmed is in flight.
+        # Decided only once any arm or disarm already running on any alarm panel
+        # of the installation has finished, from the state it confirmed: the
+        # polled state lags behind, and would show nothing armed while an arm
+        # from disarmed is in flight.
         try:
             current = await panel.alarm_state_when_idle()
         except HomeAssistantError:
