@@ -14,7 +14,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ### Fixed
 
-**A blocked arm could go unnoticed when auto-force-arm was ticked ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  If you closed the More Info dialog right after pressing arm, and a door or window was open, nothing force-armed and the "arm blocked" notification was skipped too — the alarm quietly stayed disarmed. With built-in notifications on, the "arm blocked" notification is now sent about 15 seconds later whenever the expected force-arm doesn’t happen.
+**A blocked arm could go unnoticed when auto-force-arm was ticked ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  If you closed the More Info dialog right after pressing arm, and a door or window was open, nothing force-armed and the "arm blocked" notification was skipped too — the alarm quietly stayed disarmed. With built-in notifications on, the "arm blocked" notification is now sent about 15 seconds after the panel reports the open sensor, whenever the expected force-arm doesn’t happen.
 
 ## v5.8.0
 

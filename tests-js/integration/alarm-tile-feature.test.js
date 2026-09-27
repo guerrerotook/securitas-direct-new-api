@@ -339,6 +339,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
     push(feature, alarmEntity({ forceArmAvailable: true, armExceptions: ["Door"] }), callService);
   }
 
+  // HA's modes control fires show-dialog itself to open its PIN prompt.
   function openPinPrompt(select) {
     select.getRootNode().host.dispatchEvent(
       new CustomEvent("show-dialog", {
@@ -349,6 +350,8 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
     );
   }
 
+  // The prompt lives elsewhere in HA's shell and fires dialog-closed on
+  // Submit and Cancel alike; it reaches window.
   function closePinPrompt() {
     window.dispatchEvent(
       new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
