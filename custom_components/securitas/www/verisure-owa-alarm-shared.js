@@ -66,7 +66,6 @@ export const TRANSLATIONS = {
     editor_hold_action: "Hold action",
     editor_double_tap_action: "Double-tap action",
     card_name: "Verisure OWA Alarm Card",
-    card_description: "Alarm card for Verisure: dynamic arm modes, PIN support, force-arm for open sensors.",
     deprecated_card: "This card is deprecated and will be removed in a future release. Use Home Assistant\u2019s Tile or Alarm panel card instead.",
     deprecated_badge: "This badge is deprecated and will be removed in a future release. Use Home Assistant\u2019s own entity badge instead.",
     deprecated_how: "How to switch",
@@ -113,7 +112,6 @@ export const TRANSLATIONS = {
     editor_hold_action: "Acción al mantener pulsado",
     editor_double_tap_action: "Acción al tocar dos veces",
     card_name: "Tarjeta de Alarma Verisure",
-    card_description: "Tarjeta de alarma para Verisure: modos de armado, PIN y armado forzado.",
     deprecated_card: "Esta tarjeta est\u00e1 obsoleta y se eliminar\u00e1 en una versi\u00f3n futura. Usa en su lugar la tarjeta Tile o la tarjeta de panel de alarma de Home Assistant.",
     deprecated_badge: "Esta insignia est\u00e1 obsoleta y se eliminar\u00e1 en una versi\u00f3n futura. Usa en su lugar la insignia de entidad de Home Assistant.",
     deprecated_how: "C\u00f3mo cambiar",
@@ -160,7 +158,6 @@ export const TRANSLATIONS = {
     editor_hold_action: "Action sur appui long",
     editor_double_tap_action: "Action sur double appui",
     card_name: "Carte d\u2019alarme Verisure",
-    card_description: "Carte d\u2019alarme Verisure\u00a0: modes d\u2019armement, PIN et armement forc\u00e9.",
     deprecated_card: "Cette carte est obsol\u00e8te et sera supprim\u00e9e dans une prochaine version. Utilisez plut\u00f4t la carte Tuile ou la carte de panneau d\u2019alarme de Home Assistant.",
     deprecated_badge: "Ce badge est obsol\u00e8te et sera supprim\u00e9 dans une prochaine version. Utilisez plut\u00f4t le badge d\u2019entit\u00e9 de Home Assistant.",
     deprecated_how: "Comment migrer",
@@ -207,7 +204,6 @@ export const TRANSLATIONS = {
     editor_hold_action: "Azione alla pressione prolungata",
     editor_double_tap_action: "Azione al doppio tocco",
     card_name: "Scheda Allarme Verisure",
-    card_description: "Scheda allarme Verisure: modalit\u00e0 di armamento, PIN e armamento forzato.",
     deprecated_card: "Questa scheda \u00e8 deprecata e verr\u00e0 rimossa in una versione futura. Usa invece la scheda Riquadro o la scheda pannello d\u2019allarme di Home Assistant.",
     deprecated_badge: "Questo badge \u00e8 deprecato e verr\u00e0 rimosso in una versione futura. Usa invece il badge entit\u00e0 di Home Assistant.",
     deprecated_how: "Come passare",
@@ -254,7 +250,6 @@ export const TRANSLATIONS = {
     editor_hold_action: "A\u00e7\u00e3o ao manter premido",
     editor_double_tap_action: "A\u00e7\u00e3o ao tocar duas vezes",
     card_name: "Cart\u00e3o de Alarme Verisure",
-    card_description: "Cart\u00e3o de alarme Verisure: modos de armar, PIN e armamento for\u00e7ado.",
     deprecated_card: "Este cart\u00e3o est\u00e1 obsoleto e ser\u00e1 removido numa vers\u00e3o futura. Use antes o cart\u00e3o Mosaico ou o cart\u00e3o de painel de alarme do Home Assistant.",
     deprecated_badge: "Este crach\u00e1 est\u00e1 obsoleto e ser\u00e1 removido numa vers\u00e3o futura. Use antes o crach\u00e1 de entidade do Home Assistant.",
     deprecated_how: "Como mudar",
@@ -271,7 +266,8 @@ export const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key
 export const DEPRECATION_DOCS_URL =
   "https://github.com/guerrerotook/securitas-direct-new-api#replacing-the-deprecated-alarm-card-badge-and-chip";
 
-const DEPRECATION_DISMISSED_KEY = "verisure-owa-deprecation-dismissed";
+const DEPRECATION_DISMISSED_KEY = "verisure-owa:deprecation-dismissed";
+export const DEPRECATION_DISMISSED_EVENT = "verisure-owa-deprecation-dismissed";
 
 export function deprecationNoticeDismissed() {
   try {
@@ -285,8 +281,9 @@ export function dismissDeprecationNotice() {
   try {
     globalThis.localStorage?.setItem(DEPRECATION_DISMISSED_KEY, "true");
   } catch (_) {
-    // Storage blocked: the notice closes for this card only.
+    // Storage blocked: the event below still closes it on every mounted card.
   }
+  globalThis.dispatchEvent?.(new Event(DEPRECATION_DISMISSED_EVENT));
 }
 
 /**

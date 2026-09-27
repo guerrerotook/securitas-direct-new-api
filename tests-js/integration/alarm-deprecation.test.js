@@ -73,6 +73,51 @@ describe("alarm card deprecation notice", () => {
     }
   });
 
+  it("remembers the dismissal under the verisure-owa: storage prefix", () => {
+    const card = mount("verisure-owa-alarm-card");
+    card.shadowRoot.querySelector(".deprecation-dismiss").click();
+    expect(globalThis.localStorage.getItem("verisure-owa:deprecation-dismissed")).toBe("true");
+  });
+
+  it("hides the notice on every other mounted card, legacy alias included", () => {
+    const hass = hassWithAlarm();
+    const first = mount("verisure-owa-alarm-card", hass);
+    const second = mount("verisure-owa-alarm-card", hass);
+    const legacy = mount("securitas-alarm-card", hass);
+    first.shadowRoot.querySelector(".deprecation-dismiss").click();
+    // An ordinary update with the alarm state unchanged must not be needed.
+    second.hass = { ...hass, states: { ...hass.states } };
+    expect(second.shadowRoot.querySelector(".deprecation-notice")).toBeNull();
+    expect(legacy.shadowRoot.querySelector(".deprecation-notice")).toBeNull();
+  });
+
+  it("hides the notice on other mounted cards even when storage is blocked", () => {
+    const getItem = vi.spyOn(globalThis.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const setItem = vi.spyOn(globalThis.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      const first = mount("verisure-owa-alarm-card");
+      const second = mount("verisure-owa-alarm-card");
+      first.shadowRoot.querySelector(".deprecation-dismiss").click();
+      expect(second.shadowRoot.querySelector(".deprecation-notice")).toBeNull();
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    }
+  });
+
+  it("stops listening for dismissals once removed from the page", () => {
+    const first = mount("verisure-owa-alarm-card");
+    const removed = mount("verisure-owa-alarm-card");
+    removed.remove();
+    const render = vi.spyOn(removed, "_render");
+    expect(() => first.shadowRoot.querySelector(".deprecation-dismiss").click()).not.toThrow();
+    expect(render).not.toHaveBeenCalled();
+  });
+
   it("appears on the legacy securitas-alarm-card alias too", () => {
     const card = mount("securitas-alarm-card");
     expect(card.shadowRoot.querySelector(".deprecation-notice")).not.toBeNull();

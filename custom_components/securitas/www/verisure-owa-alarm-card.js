@@ -43,6 +43,7 @@ import {
   alarmEntitySuggestion,
   _makeLegacyShim,
   DEPRECATION_DOCS_URL,
+  DEPRECATION_DISMISSED_EVENT,
   deprecationNoticeDismissed,
   dismissDeprecationNotice,
   reportDeprecatedElement,
@@ -83,9 +84,19 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._autoForceArm = false;
     this._pendingAutoForce = false;
     this._autoForceArming = false;
+    this._onDeprecationDismissed = () => {
+      if (this._deprecationDismissed) return;
+      this._deprecationDismissed = true;
+      this._render();
+    };
+  }
+
+  connectedCallback() {
+    window.addEventListener(DEPRECATION_DISMISSED_EVENT, this._onDeprecationDismissed);
   }
 
   disconnectedCallback() {
+    window.removeEventListener(DEPRECATION_DISMISSED_EVENT, this._onDeprecationDismissed);
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
     // Force the next `set hass` call (which fires on reconnection) to
     // re-run `_render`. Without this, the cached `_lastKey` matches the
@@ -354,9 +365,8 @@ class VerisureOwaAlarmCard extends HTMLElement {
       </ha-card>`;
 
     this.shadowRoot.querySelector(".deprecation-dismiss")?.addEventListener("click", () => {
-      this._deprecationDismissed = true;
+      this._onDeprecationDismissed();
       dismissDeprecationNotice();
-      this._render();
     });
 
     const armExceptionSlot = this.shadowRoot.getElementById("arm-exception-slot");
