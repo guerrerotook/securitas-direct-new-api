@@ -468,6 +468,15 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
         "Forzar armado automáticamente con sensores abiertos",
       );
     });
+
+    it("uses Catalan for the label when Home Assistant is in Catalan", () => {
+      const { feature } = mountTile();
+      feature.hass = makeHass({ language: "ca", states: { [ENTITY]: alarmEntity() } });
+
+      expect(toggle(feature).getAttribute("label")).toBe(
+        "Forçar l’armat automàticament amb sensors oberts",
+      );
+    });
   });
 
   describe("tick persistence", () => {

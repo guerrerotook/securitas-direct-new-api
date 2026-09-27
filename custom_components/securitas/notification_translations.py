@@ -750,7 +750,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "L'armat s'ha bloquejat perquè els següents sensors estan "
                 "oberts:\n{sensor_list}\n\n"
-                "Per armar igualment, obre l'alarma i toca **Force Arm**."
+                "Per armar igualment, obre l'alarma i toca **Forçar armat**."
             ),
             "mobile_message": (
                 "Armat bloquejat — sensor(s) obert(s): {sensor_list}. Armar igualment?"

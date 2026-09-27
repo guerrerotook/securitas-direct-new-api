@@ -49,6 +49,15 @@ export const ARM_EXCEPTION_TRANSLATIONS = {
     action_failed: "A ação do alarme falhou. Tente novamente.",
     action_failed_detail: "A ação do alarme falhou: {error}",
   },
+  ca: {
+    force_arm: "Forçar armat",
+    auto_force_arm: "Forçar l’armat automàticament amb sensors oberts",
+    cancel: "Cancel·lar",
+    open_sensors: "Sensor(s) obert(s) — armar igualment?",
+    open_sensors_no_force: "Sensor(s) obert(s) — tanqueu-los abans d’armar",
+    action_failed: "L’acció de l’alarma ha fallat. Torneu-ho a provar.",
+    action_failed_detail: "L’acció de l’alarma ha fallat: {error}",
+  },
 };
 
 ARM_EXCEPTION_TRANSLATIONS["pt-BR"] = ARM_EXCEPTION_TRANSLATIONS.pt;

@@ -142,6 +142,30 @@ class TestNotificationTranslationsPersistentMessageTrim:
                 f"Locale {locale!r} no longer mentions {keepers[locale]!r}"
             )
 
+    def test_message_names_the_force_arm_button_by_its_card_label(self):
+        """The message tells the user which button to tap, so it must use the
+        label the More Info dialog shows in that language
+        (ARM_EXCEPTION_TRANSLATIONS in www/verisure-owa-arm-exception.js)."""
+        from custom_components.securitas.notification_translations import (
+            NOTIFICATION_TRANSLATIONS,
+        )
+
+        button_labels = {
+            "en": "Force Arm",
+            "es": "Forzar armado",
+            "fr": "Forcer l\u2019armement",
+            "it": "Forza armamento",
+            "pt": "For\u00e7ar armamento",
+            "pt-BR": "For\u00e7ar armamento",
+            "ca": "For\u00e7ar armat",
+        }
+        for locale in self.LOCALES:
+            entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]
+            assert f"**{button_labels[locale]}**" in entry["message"], (
+                f"Locale {locale!r} does not name the button "
+                f"{button_labels[locale]!r}: {entry['message']!r}"
+            )
+
 
 def test_unconfirmed_notification_strings_exist_all_locales():
     """Every locale defines arm_unconfirmed and disarm_unconfirmed with tokens."""

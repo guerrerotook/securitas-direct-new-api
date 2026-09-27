@@ -23,11 +23,25 @@ describe("arming-exception shared helpers", () => {
   it("provides the auto-force label in every supported locale", () => {
     // More Info imports only this lightweight module, so the auto-force tick
     // box label must live here rather than in the dashboard bundle.
-    for (const lang of ["en", "es", "fr", "it", "pt", "pt-BR"]) {
+    for (const lang of ["en", "es", "fr", "it", "pt", "pt-BR", "ca"]) {
       const value = armExceptionTranslation(lang, "auto_force_arm");
       expect(value).not.toBe("auto_force_arm");
       expect(value.length).toBeGreaterThan(0);
     }
+  });
+
+  it("speaks Catalan rather than falling back to English", () => {
+    expect(armExceptionTranslation("ca", "force_arm")).toBe("Forçar armat");
+    expect(armExceptionTranslation("ca", "cancel")).toBe("Cancel·lar");
+    expect(armExceptionTranslation("ca", "open_sensors")).toBe(
+      "Sensor(s) obert(s) — armar igualment?",
+    );
+    expect(armExceptionTranslation("ca", "auto_force_arm")).toBe(
+      "Forçar l’armat automàticament amb sensors oberts",
+    );
+    expect(armExceptionTranslation("ca", "action_failed_detail", { error: "x" })).toBe(
+      "L’acció de l’alarma ha fallat: x",
+    );
   });
 
   it("normalizes missing, malformed and forceable entity state", () => {
