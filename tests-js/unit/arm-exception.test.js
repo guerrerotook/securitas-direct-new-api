@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AUTO_FORCE_ARM_START_MS,
+  AUTO_FORCE_CHANGED_EVENT,
   AUTO_FORCE_INTENT_TTL_MS,
   AutoForceArmTracker,
+  writeAutoForce,
   armExceptionState,
   armExceptionTranslation,
 } from "../../custom_components/securitas/www/verisure-owa-arm-exception.js";
@@ -144,6 +147,24 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     document.body.removeEventListener("value-changed", listener);
   }
 
+  // HA's setProtectedAlarmControlPanelMode fires show-dialog from the modes
+  // control itself (bubbles + composed) to open its PIN prompt.
+  function openPinPrompt(tracker, from = CONTROL, dialogTag = "dialog-enter-code") {
+    const control = document.querySelector(from) || nestedSelect(from).getRootNode().host;
+    const listener = (event) => tracker.noteShowDialog(event);
+    document.body.addEventListener("show-dialog", listener);
+    control.dispatchEvent(
+      new CustomEvent("show-dialog", { detail: { dialogTag }, bubbles: true, composed: true }),
+    );
+    document.body.removeEventListener("show-dialog", listener);
+  }
+
+  // The prompt lives elsewhere in HA's shell and fires dialog-closed on
+  // Submit and Cancel alike; it reaches window.
+  function closePinPrompt(tracker, dialog = "dialog-enter-code") {
+    tracker.noteDialogClosed(new CustomEvent("dialog-closed", { detail: { dialog } }));
+  }
+
   function setup() {
     const tracker = new AutoForceArmTracker(CONTROL);
     const hass = makeHass();
@@ -237,21 +258,162 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     expect(hass.callService).not.toHaveBeenCalled();
   });
 
-  it("keeps the intent for the PIN-entry window, then discards it", () => {
+  it("keeps the intent while the PIN prompt is open, up to the cap, then discards it", () => {
     vi.useFakeTimers();
     const { tracker, hass, disarmed, select } = setup();
 
     fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
     vi.advanceTimersByTime(AUTO_FORCE_INTENT_TTL_MS);
     tracker.update(stateOf({ state: "arming" }), true, hass);
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
 
     const late = setup();
     fire(late.select, "armed_away", late.tracker, late.disarmed);
+    openPinPrompt(late.tracker);
     vi.advanceTimersByTime(AUTO_FORCE_INTENT_TTL_MS + 1);
     late.tracker.update(stateOf({ state: "arming" }), true, late.hass);
     late.tracker.update(stateOf({ forceArmAvailable: true }), true, late.hass);
     expect(late.hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("discards a press that no arm follows within the start window when no PIN prompt opens", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("still forces an arm that starts within the start window with no PIN prompt", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("discards the press shortly after the PIN prompt is cancelled", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
+    vi.advanceTimersByTime(5_000);
+    closePinPrompt(tracker);
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("forces the arm that follows a submitted PIN prompt", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
+    vi.advanceTimersByTime(30_000);
+    closePinPrompt(tracker);
+    vi.advanceTimersByTime(1_000);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("ignores other dialogs and a PIN prompt opened by another control", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker, CONTROL, "some-other-dialog");
+    openPinPrompt(tracker, "another-modes-control");
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(hass.callService).not.toHaveBeenCalled();
+
+    const other = setup();
+    fire(other.select, "armed_away", other.tracker, other.disarmed);
+    openPinPrompt(other.tracker);
+    closePinPrompt(other.tracker, "some-other-dialog");
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    other.tracker.update(stateOf({ state: "arming" }), true, other.hass);
+    expect(calls(other.hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("listens on the scope and window once connected, and stops once disconnected", () => {
+    vi.useFakeTimers();
+    const tracker = new AutoForceArmTracker(CONTROL);
+    const hass = makeHass();
+    const scope = document.createElement("div");
+    document.body.appendChild(scope);
+    const control = document.createElement(CONTROL);
+    const select = document.createElement("ha-control-select");
+    control.attachShadow({ mode: "open" }).appendChild(select);
+    scope.appendChild(control);
+    const press = () =>
+      select.dispatchEvent(
+        new CustomEvent("value-changed", {
+          detail: { value: "armed_away" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    const prompt = () =>
+      control.dispatchEvent(
+        new CustomEvent("show-dialog", {
+          detail: { dialogTag: "dialog-enter-code" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    const closed = () =>
+      window.dispatchEvent(
+        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
+      );
+    tracker.connect(scope, { stateObj: () => stateOf(), ticked: () => true });
+    tracker.update(stateOf(), true, hass);
+
+    press();
+    prompt();
+    vi.advanceTimersByTime(30_000);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+
+    tracker.update(stateOf({ state: "armed_away" }), true, hass);
+    tracker.update(stateOf(), true, hass);
+    press();
+    prompt();
+    closed();
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+
+    tracker.update(stateOf(), true, hass);
+    press();
+    tracker.disconnect();
+    tracker.update(stateOf(), true, hass);
+    press();
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("announces a saved tick so every mounted surface can follow it", () => {
+    const heard = vi.fn();
+    window.addEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+
+    writeAutoForce(ENTITY, true);
+    window.removeEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+
+    expect(heard).toHaveBeenCalledOnce();
+    expect(heard.mock.calls[0][0].detail).toEqual({ entityId: ENTITY, on: true });
   });
 
   it("uses an intent once: a later arm from elsewhere is not forced", () => {

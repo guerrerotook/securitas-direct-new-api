@@ -18,6 +18,7 @@ import {
   TRANSLATIONS,
 } from "./verisure-owa-alarm-shared.js?v=5.9.0";
 import {
+  AUTO_FORCE_CHANGED_EVENT,
   AutoForceArmTracker,
   armExceptionTranslation,
   hassLanguage,
@@ -63,8 +64,8 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._listenScope = null;
     this._recheckTimer = null;
     this._toggleKey = null;
-    this._onValueChanged = (event) => {
-      this._autoForceTracker.noteValueChanged(event, this._entity(), this._ticked());
+    this._onAutoForceChanged = (event) => {
+      if (event.detail?.entityId === this._entityId()) this._render();
     };
 
     const style = document.createElement("style");
@@ -100,7 +101,13 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
 
   connectedCallback() {
     this._listenScope = this._featureScope();
-    this._listenScope?.addEventListener("value-changed", this._onValueChanged);
+    if (this._listenScope) {
+      this._autoForceTracker.connect(this._listenScope, {
+        stateObj: () => this._entity(),
+        ticked: () => this._ticked(),
+      });
+    }
+    globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._render();
     // HA renders each sibling feature in its own later update, so an Alarm
     // modes feature placed after this one does not exist yet.
@@ -113,9 +120,9 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
   disconnectedCallback() {
     clearTimeout(this._recheckTimer);
     this._recheckTimer = null;
-    this._listenScope?.removeEventListener("value-changed", this._onValueChanged);
+    this._autoForceTracker.disconnect();
     this._listenScope = null;
-    this._autoForceTracker.reset();
+    globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
   }
 
   setConfig() {

@@ -84,6 +84,34 @@ function pressMode(element, value = "armed_away", controlTag) {
   return event;
 }
 
+// HA's modes control fires show-dialog itself to open its PIN prompt; the
+// prompt then lives in HA's shell and fires dialog-closed there on Submit or
+// Cancel, which reaches window.
+function openPinPrompt(element) {
+  const native = element.shadowRoot.getElementById("native-control");
+  const control = native.firstElementChild.shadowRoot.firstElementChild;
+  control.dispatchEvent(
+    new CustomEvent("show-dialog", {
+      detail: { dialogTag: "dialog-enter-code" },
+      bubbles: true,
+      composed: true,
+    }),
+  );
+}
+
+function closePinPrompt() {
+  const prompt = document.createElement("dialog-enter-code");
+  document.body.appendChild(prompt);
+  prompt.dispatchEvent(
+    new CustomEvent("dialog-closed", {
+      detail: { dialog: "dialog-enter-code" },
+      bubbles: true,
+      composed: true,
+    }),
+  );
+  prompt.remove();
+}
+
 beforeEach(() => {
   localStorage.clear();
 });
@@ -136,6 +164,31 @@ describe("More Info auto-force tick box persistence (localStorage)", () => {
     cb.checked = false;
     cb.dispatchEvent(new Event("change"));
     expect(localStorage.getItem(LS_KEY)).toBe("false");
+  });
+
+  it("follows a tick made on another surface in this page straight away", () => {
+    const { element } = mountMoreInfo();
+    const other = mountMoreInfo().element;
+    const cb = checkbox(other);
+
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change"));
+    expect(checkbox(element).checked).toBe(true);
+
+    cb.checked = false;
+    cb.dispatchEvent(new Event("change"));
+    expect(checkbox(element).checked).toBe(false);
+  });
+
+  it("ignores a tick made for another alarm", () => {
+    const { element } = mountMoreInfo();
+    const other = mountMoreInfo({ entityId: "alarm_control_panel.other" }).element;
+    const cb = checkbox(other);
+
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change"));
+
+    expect(checkbox(element).checked).toBe(false);
   });
 
   it("renders the box pre-checked from a stored true choice (set via the card)", () => {
@@ -374,6 +427,7 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     const { element, callService } = mountMoreInfo();
 
     pressMode(element);
+    openPinPrompt(element);
     vi.advanceTimersByTime(60_001);
     armWithException(element, callService);
 
@@ -386,7 +440,51 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     const { element, callService } = mountMoreInfo();
 
     pressMode(element);
+    openPinPrompt(element);
     vi.advanceTimersByTime(59_000);
+    armWithException(element, callService);
+
+    expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", { entity_id: ENTITY });
+  });
+
+  it("does NOT auto-force an arm from elsewhere after the PIN prompt is cancelled", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    openPinPrompt(element);
+    vi.advanceTimersByTime(3_000);
+    closePinPrompt();
+    vi.advanceTimersByTime(10_001);
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("does NOT auto-force an arm from elsewhere after a press that was never sent", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    vi.advanceTimersByTime(10_001);
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("stops hearing the PIN prompt once removed", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+    element.remove();
+
+    closePinPrompt();
+    document.body.appendChild(element);
+    pressMode(element);
+    openPinPrompt(element);
+    vi.advanceTimersByTime(30_000);
     armWithException(element, callService);
 
     expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", { entity_id: ENTITY });

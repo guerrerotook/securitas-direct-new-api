@@ -460,7 +460,25 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       moreInfoBox.checked = true;
       moreInfoBox.dispatchEvent(new Event("change"));
 
-      push(feature, alarmEntity());
+      expect(checkbox(feature).checked).toBe(true);
+    });
+
+    it("stops following ticks once removed", () => {
+      const { feature, wrapper, group } = mountTile();
+      const other = mountTile();
+      wrapper.remove();
+
+      const cb = checkbox(other.feature);
+      cb.checked = true;
+      cb.dispatchEvent(new Event("change"));
+      const render = vi.spyOn(feature, "_render");
+      cb.checked = false;
+      cb.dispatchEvent(new Event("change"));
+      expect(render).not.toHaveBeenCalled();
+
+      group("features").appendChild(wrapper);
+      cb.checked = true;
+      cb.dispatchEvent(new Event("change"));
       expect(checkbox(feature).checked).toBe(true);
     });
   });
@@ -530,6 +548,55 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       armWithException(feature, callService);
 
       expect(autoForceCalls(callService)).toEqual([]);
+    });
+
+    it("does NOT force an arm from elsewhere after the PIN prompt is cancelled", () => {
+      vi.useFakeTimers();
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, modes, callService } = mountTile();
+
+      pressMode(modes.select);
+      modes.select.getRootNode().host.dispatchEvent(
+        new CustomEvent("show-dialog", {
+          detail: { dialogTag: "dialog-enter-code" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      vi.advanceTimersByTime(3_000);
+      window.dispatchEvent(
+        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
+      );
+      vi.advanceTimersByTime(10_001);
+      armWithException(feature, callService);
+      vi.useRealTimers();
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
+    it("still forces an arm made after typing a PIN", () => {
+      vi.useFakeTimers();
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, modes, callService } = mountTile();
+
+      pressMode(modes.select);
+      modes.select.getRootNode().host.dispatchEvent(
+        new CustomEvent("show-dialog", {
+          detail: { dialogTag: "dialog-enter-code" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      vi.advanceTimersByTime(30_000);
+      window.dispatchEvent(
+        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
+      );
+      armWithException(feature, callService);
+      vi.useRealTimers();
+
+      expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+        entity_id: ENTITY,
+      });
     });
 
     it("does NOT force when the tick box is off", () => {

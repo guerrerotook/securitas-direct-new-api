@@ -7,6 +7,7 @@
 // open sensors for arms started from this dialog's own mode buttons.
 
 import {
+  AUTO_FORCE_CHANGED_EVENT,
   AutoForceArmTracker,
   armExceptionTranslation,
   hassLanguage,
@@ -47,13 +48,12 @@ class VerisureOwaMoreInfo extends HTMLElement {
     `;
     this._nativeControl = document.createElement("more-info-content");
     this._nativeControl.id = "native-control";
-    this._nativeControl.addEventListener("value-changed", (event) => {
-      this._autoForceTracker.noteValueChanged(
-        event,
-        this._resolvedStateObj(),
-        this._autoForceArm,
-      );
-    });
+    this._onAutoForceChanged = (event) => {
+      if (event.detail?.entityId !== this._entityId) return;
+      this._autoForceArm = event.detail.on === true;
+      this._lastSyncKey = null;
+      this._syncAutoForce();
+    };
 
     this._autoForceField = document.createElement("ha-formfield");
     this._autoForceField.className = "auto-force-toggle";
@@ -79,13 +79,19 @@ class VerisureOwaMoreInfo extends HTMLElement {
   }
 
   connectedCallback() {
+    this._autoForceTracker.connect(this._nativeControl, {
+      stateObj: () => this._resolvedStateObj(),
+      ticked: () => this._autoForceArm,
+    });
+    globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._forwardNativeProperties();
     this._syncAutoForce();
     this._updateForceExtension();
   }
 
   disconnectedCallback() {
-    this._autoForceTracker.reset();
+    this._autoForceTracker.disconnect();
+    globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
   }
 
   set hass(hass) {

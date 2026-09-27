@@ -74,12 +74,19 @@ export function readAutoForce(entityId) {
   }
 }
 
+// The browser only fires `storage` in other tabs, so surfaces mounted in this
+// page learn of a tick made elsewhere in it from this event.
+export const AUTO_FORCE_CHANGED_EVENT = "verisure-owa-auto-force-changed";
+
 export function writeAutoForce(entityId, on) {
   try {
     globalThis.localStorage?.setItem(autoForceStorageKey(entityId), on ? "true" : "false");
   } catch {
     /* private mode / storage disabled — the tick box just won't persist */
   }
+  globalThis.dispatchEvent?.(
+    new CustomEvent(AUTO_FORCE_CHANGED_EVENT, { detail: { entityId, on: on === true } }),
+  );
 }
 
 // Auto-force only ever acts when BOTH the integration capability gate is on
@@ -90,19 +97,26 @@ export function autoForceActive(stateObj, ticked) {
   return ticked === true && stateObj?.attributes?.auto_force_arm_enabled === true;
 }
 
-// Long enough to cover typing a PIN in HA's code dialog between pressing an
-// arm button and the arm service call that moves the panel to `arming`.
+// How long a press stays valid while HA's PIN prompt is open (time to type).
 export const AUTO_FORCE_INTENT_TTL_MS = 60_000;
+
+// How long a press stays valid with no PIN prompt open: before one opens, or
+// after it closes. The arm service call then follows within about a second,
+// so this only has to outlast that; it also bounds how long a cancelled
+// prompt or a rejected arm can leave the press behind.
+export const AUTO_FORCE_ARM_START_MS = 10_000;
+
+const PIN_PROMPT = "dialog-enter-code";
 
 const IN_FLIGHT_STATES = new Set(["arming", "pending"]);
 
 // Auto-force for the surfaces that wrap Home Assistant's own alarm-mode
 // buttons (More Info, Tile). HA dispatches the arm, not our code, so the
-// surface feeds this tracker two things: the `value-changed` events it sees
-// from HA's modes control (an arm intent, recorded only when it came from
-// `controlTag`), and every state update. Only an arm that follows an intent is
-// forced; an arm started anywhere else (automation, another screen, the
-// Verisure app) is left alone.
+// tracker listens for what HA's modes control announces — the chosen mode
+// (`value-changed`) and its PIN prompt opening (`show-dialog`) and closing
+// (`dialog-closed`) — and is fed every state update. Only an arm that follows
+// a press on `controlTag` is forced; an arm started anywhere else (automation,
+// another screen, the Verisure app) is left alone.
 export class AutoForceArmTracker {
   constructor(controlTag) {
     this._controlTag = controlTag;
@@ -112,6 +126,7 @@ export class AutoForceArmTracker {
   _reset(entityId) {
     this._entityId = entityId;
     this._intentAt = null;
+    this._deadline = 0;
     this._pending = false;
     this._prevState = null;
   }
@@ -120,6 +135,30 @@ export class AutoForceArmTracker {
   // removed, a later arm cannot be one it started.
   reset() {
     this._reset(null);
+  }
+
+  // Listens on `scope` (an ancestor of the modes control) for presses and the
+  // PIN prompt opening, and on window for the prompt closing: HA renders the
+  // prompt in its own shell, outside the surface.
+  connect(scope, { stateObj, ticked }) {
+    this.disconnect();
+    const onValueChanged = (event) => this.noteValueChanged(event, stateObj(), ticked());
+    const onShowDialog = (event) => this.noteShowDialog(event);
+    const onDialogClosed = (event) => this.noteDialogClosed(event);
+    scope.addEventListener("value-changed", onValueChanged);
+    scope.addEventListener("show-dialog", onShowDialog);
+    globalThis.addEventListener("dialog-closed", onDialogClosed);
+    this._disconnect = () => {
+      scope.removeEventListener("value-changed", onValueChanged);
+      scope.removeEventListener("show-dialog", onShowDialog);
+      globalThis.removeEventListener("dialog-closed", onDialogClosed);
+    };
+  }
+
+  disconnect() {
+    this._disconnect?.();
+    this._disconnect = null;
+    this.reset();
   }
 
   _syncEntity(stateObj) {
@@ -137,6 +176,21 @@ export class AutoForceArmTracker {
     this._syncEntity(stateObj);
     if (stateObj.state !== "disarmed" || !autoForceActive(stateObj, ticked)) return;
     this._intentAt = Date.now();
+    this._deadline = this._intentAt + AUTO_FORCE_ARM_START_MS;
+  }
+
+  // Synchronous from the listener, like noteValueChanged.
+  noteShowDialog(event) {
+    if (this._intentAt === null || event.detail?.dialogTag !== PIN_PROMPT) return;
+    if (!event.composedPath().some((node) => node.localName === this._controlTag)) return;
+    this._deadline = this._intentAt + AUTO_FORCE_INTENT_TTL_MS;
+  }
+
+  // Submit and Cancel both close the prompt; after a Submit the arm starts
+  // within the start window, after a Cancel the press lapses with it.
+  noteDialogClosed(event) {
+    if (this._intentAt === null || event.detail?.dialog !== PIN_PROMPT) return;
+    this._deadline = Math.min(this._deadline, Date.now() + AUTO_FORCE_ARM_START_MS);
   }
 
   // Runs on every state update, including repeats of the same state.
@@ -147,7 +201,7 @@ export class AutoForceArmTracker {
     const entityId = stateObj.entity_id;
 
     if (this._intentAt !== null && this._prevState === "disarmed" && s !== "disarmed") {
-      const fresh = Date.now() - this._intentAt <= AUTO_FORCE_INTENT_TTL_MS;
+      const fresh = Date.now() <= this._deadline;
       this._intentAt = null;
       if (fresh && IN_FLIGHT_STATES.has(s) && autoForceActive(stateObj, ticked)) {
         this._pending = true;
