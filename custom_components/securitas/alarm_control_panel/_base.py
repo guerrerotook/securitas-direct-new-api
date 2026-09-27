@@ -109,6 +109,12 @@ _LOGGER = logging.getLogger(__name__)
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 
 
+def _cancel_timer(unsub: Callable[[], None] | None) -> None:
+    """Cancel a pending ``async_call_later`` timer, if any."""
+    if unsub is not None:
+        unsub()
+
+
 def _modelled_state(proto_code: str | None) -> AlarmState | None:
     """The AlarmState a proto code stands for, or None if it is missing or
     one we don't model (e.g. 'N' after a central-station reset)."""
@@ -1444,9 +1450,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _cancel_force_arm_expiry(self) -> None:
         """Cancel any pending expiry timer (no-op if not scheduled)."""
-        if self._force_arm_expiry_unsub is not None:
-            self._force_arm_expiry_unsub()
-            self._force_arm_expiry_unsub = None
+        _cancel_timer(self._force_arm_expiry_unsub)
+        self._force_arm_expiry_unsub = None
 
     async def _async_handle_force_arm_expiry(self, _now: datetime.datetime) -> None:
         """Timer callback: fire expired event + side effects if context still alive.
@@ -1765,9 +1770,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _cancel_suppressed_prompt_fallback(self) -> None:
         """Cancel any pending suppressed-prompt fallback (no-op if none)."""
-        if self._suppressed_prompt_fallback_unsub is not None:
-            self._suppressed_prompt_fallback_unsub()
-            self._suppressed_prompt_fallback_unsub = None
+        _cancel_timer(self._suppressed_prompt_fallback_unsub)
+        self._suppressed_prompt_fallback_unsub = None
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
         """Send translated persistent + mobile notifications for an arming exception."""
