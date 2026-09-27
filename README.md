@@ -220,7 +220,7 @@ Home Assistant's own dashboard elements now show open sensors and offer Force Ar
 | If you use | Replace it with |
 | --- | --- |
 | **Verisure OWA Alarm Card** | A [Tile card](#tile-card) with the **Alarm modes** and **Verisure OWA Open Sensors** features, which lists the blocking sensors, offers Force Arm and shows the [auto-force-arm tick box](#auto-force-arm-tick-box) inside the Tile. Home Assistant's **Alarm panel card** also works: the More Info dialog opened from it offers Force Arm and the tick box. |
-| **Verisure OWA Alarm Badge** | Home Assistant's own entity badge for the alarm. Tapping it opens More Info. Unlike the custom badge, it does not switch to a warning icon when arming is blocked. |
+| **Verisure OWA Alarm Badge** | Home Assistant's own Entity badge for the alarm. Tapping it opens More Info. Unlike the custom badge, it does not switch to a warning icon when arming is blocked. |
 | **Mushroom chip** (`type: verisure-owa-alarm`) | Mushroom's own alarm chip, `type: alarm-control-panel`. |
 
 ## Custom Alarm Card
@@ -249,7 +249,7 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 ### Badge
 
 > [!WARNING]
-> Deprecated: use Home Assistant's own entity badge. See [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
+> Deprecated: use Home Assistant's own Entity badge. See [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog, where Home Assistant owns the alarm modes and PIN entry. Hold and double-tap can use the supported dashboard actions described under [Gesture Actions](#gesture-actions).
 
@@ -285,7 +285,7 @@ The Badge offers the Home Assistant **More Info**, **Navigate**, **Perform actio
 
 #### Using the Badge with native alarm controls
 
-This describes the deprecated **Verisure OWA Alarm Badge**. For new dashboards use Home Assistant's own entity badge instead, which opens the same More Info dialog — see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
+This describes the deprecated **Verisure OWA Alarm Badge**. For new dashboards use Home Assistant's own Entity badge instead, which opens the same More Info dialog — see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 With the existing Badge:
 

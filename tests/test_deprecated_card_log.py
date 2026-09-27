@@ -41,7 +41,7 @@ async def _report(ws, element: str, dashboard: str = "lovelace") -> dict:
     ("element", "replacement"),
     [
         ("card", "Tile card"),
-        ("badge", "entity badge"),
+        ("badge", "Entity badge"),
         ("chip", "Mushroom"),
     ],
 )
