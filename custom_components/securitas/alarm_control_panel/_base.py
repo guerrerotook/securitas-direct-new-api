@@ -266,8 +266,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # suppressed. Auto-force-arm (card or More Info dialog) sets this via
         # the suppress_arm_exception_prompt service for an arm it intends to
         # force through, so the user sees the "force-armed" confirmation
-        # instead of a prompt that would be dismissed a beat later. Self-expires so a stray request can't swallow a later,
-        # unrelated prompt.
+        # instead of a prompt that would be dismissed a beat later.
+        # Self-expires so a stray request can't swallow a later, unrelated
+        # prompt.
         self._suppress_arm_prompt_until: float = 0.0
 
     def suppress_arm_exception_prompt(self) -> None:
@@ -1599,12 +1600,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # Auto-force-arm asks us to skip this prompt for an arm it will force
         # through — the follow-up "force-armed" confirmation tells the user
         # what happened instead. The card asks before it arms; the More Info
-        # dialog only once arming starts, so its request can arrive too late. The suppression window still
-        # gates that confirmation (see set_arm_state), so it fires only for
-        # this auto path, never for a manual Force Arm tap.
+        # dialog only once arming starts, so its request can arrive too late.
+        # The suppression window still gates that confirmation (see
+        # set_arm_state), so it fires only for this auto path, never for a
+        # manual Force Arm tap.
         # Suppression is requested optimistically, before the panel has said
-        # whether forcing is allowed. A panel that then says forcing is prohibited cannot complete the
-        # auto-force flow, so its warning must never be suppressed.
+        # whether forcing is allowed. A panel that then says forcing is
+        # prohibited cannot complete the auto-force flow, so its warning must
+        # never be suppressed.
         if event.data.get("allow_forcing", True) and self._arm_prompt_suppressed():
             return
         if not event.data.get("allow_forcing", True):
