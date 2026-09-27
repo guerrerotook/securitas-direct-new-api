@@ -75,8 +75,10 @@ export function readAutoForce(entityId) {
   }
 }
 
-// The browser only fires `storage` in other tabs, so More Info and the Tile
-// learn of a tick made elsewhere in this page from this event.
+// More Info and the Tile learn of a tick made elsewhere in this page from this
+// event. Nothing listens for the browser's `storage` event, so a tick made in
+// another tab shows only after the alarm changes or the surface is put back on
+// the page.
 export const AUTO_FORCE_CHANGED_EVENT = "verisure-owa-auto-force-changed";
 
 export function writeAutoForce(entityId, on) {

@@ -437,7 +437,7 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
   });
 
-  it("announces a saved tick so every mounted surface can follow it", () => {
+  it("announces a saved tick so More Info and the Tile can follow it", () => {
     const heard = vi.fn();
     window.addEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
 

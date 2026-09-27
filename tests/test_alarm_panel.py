@@ -457,9 +457,10 @@ class TestForceArmNotificationsConfig:
     async def test_arm_prompt_suppression_skips_prompt(self):
         """A set suppress flag stops the arming-exception prompt from firing.
 
-        The auto-force card sets this flag before dispatching an arm it intends
-        to force through, so the human never sees the transient "force-arm
-        required?" prompt (which the auto-force would immediately dismiss).
+        Auto-force-arm sets this flag for an arm it intends to force through
+        (the deprecated card before arming; More Info and the Tile once arming
+        starts), so the human never sees the transient "force-arm required?"
+        prompt (which the auto-force would immediately dismiss).
         """
         alarm = make_alarm()
         alarm.client.config["force_arm_notifications"] = True
@@ -536,10 +537,10 @@ class TestForceArmNotificationsConfig:
         """An auto-forced arm dismisses the arming-exception prompt too.
 
         The dashboard card pre-suppresses the prompt so nothing is shown, but the
-        native More Info dialog can only react after HA dispatches the arm — the
-        prompt may already be on screen when our suppress lands. Dismiss it in
-        both cases (a no-op when it was never shown); the "force-armed"
-        confirmation still fires as the replacement.
+        native More Info dialog and the Tile can only react after HA dispatches
+        the arm — the prompt may already be on screen when our suppress lands.
+        Dismiss it in both cases (a no-op when it was never shown); the
+        "force-armed" confirmation still fires as the replacement.
         """
         alarm = self._force_context_alarm()
         alarm._dismiss_arming_exception_notification = MagicMock()

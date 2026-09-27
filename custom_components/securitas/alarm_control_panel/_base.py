@@ -107,8 +107,8 @@ _LOGGER = logging.getLogger(__name__)
 # state) and therefore safe to issue even when the current state is unknown.
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 
-# How long a card's "suppress the next arm-exception prompt" request stays
-# armed. Long enough to cover the arm round-trip that follows it, short enough
+# How long an auto-force-arm "suppress the next arm-exception prompt" request
+# stays armed. Long enough to cover the arm round-trip that follows it, short enough
 # that a stray request can't silently swallow an unrelated prompt later on.
 _ARM_PROMPT_SUPPRESS_WINDOW = 120.0
 

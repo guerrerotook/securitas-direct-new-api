@@ -182,7 +182,8 @@ shows it below the arm controls.
 
 Home Assistant's **Alarm panel card** (the keypad card) can't be extended, so it
 has no tick box of its own; use the More Info dialog it opens, or a
-[Tile card](#tile-card) with **Alarm modes**.
+[Tile card](#tile-card) with **Alarm modes** and the **Verisure OWA Open
+Sensors** feature.
 
 ## Tile Card
 
