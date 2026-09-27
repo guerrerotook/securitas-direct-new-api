@@ -10,6 +10,26 @@ import {
   armExceptionTranslation,
 } from "../../custom_components/securitas/www/verisure-owa-arm-exception.js";
 import { makeHass } from "../fixtures/hass.js";
+import { makeModesControl, pressMode } from "../fixtures/ha-alarm-dom.js";
+
+const ENTITY = "alarm_control_panel.test";
+const CONTROL = "fake-alarm-modes";
+
+function stateOf({
+  state = "disarmed",
+  forceArmAvailable = false,
+  autoForceArmEnabled = true,
+  entityId = ENTITY,
+} = {}) {
+  return {
+    entity_id: entityId,
+    state,
+    attributes: {
+      force_arm_available: forceArmAvailable,
+      auto_force_arm_enabled: autoForceArmEnabled,
+    },
+  };
+}
 
 describe("arming-exception shared helpers", () => {
   it("resolves regional, English and key fallbacks", () => {
@@ -123,25 +143,6 @@ describe("verisure-owa-arm-exception-alert public API", () => {
 });
 
 describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
-  const ENTITY = "alarm_control_panel.test";
-  const CONTROL = "fake-alarm-modes";
-
-  function stateOf({
-    state = "disarmed",
-    forceArmAvailable = false,
-    autoForceArmEnabled = true,
-    entityId = ENTITY,
-  } = {}) {
-    return {
-      entity_id: entityId,
-      state,
-      attributes: {
-        force_arm_available: forceArmAvailable,
-        auto_force_arm_enabled: autoForceArmEnabled,
-      },
-    };
-  }
-
   // A control nested in a shadow root, as HA's alarm-modes controls are: the
   // event leaves through the host, so only composedPath() can name the control.
   function nestedSelect(tag) {
@@ -810,24 +811,7 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
 });
 
 describe("AutoForceTickBox (the tick box shared by More Info and the Tile)", () => {
-  const ENTITY = "alarm_control_panel.test";
   const OTHER = "alarm_control_panel.other";
-  const CONTROL = "fake-alarm-modes";
-
-  function stateOf({
-    state = "disarmed",
-    autoForceArmEnabled = true,
-    forceArmAvailable = false,
-  } = {}) {
-    return {
-      entity_id: ENTITY,
-      state,
-      attributes: {
-        auto_force_arm_enabled: autoForceArmEnabled,
-        force_arm_available: forceArmAvailable,
-      },
-    };
-  }
 
   function tickBoxFor(entityId, onChange = vi.fn()) {
     const box = new AutoForceTickBox(CONTROL, { onChange });
@@ -960,9 +944,7 @@ describe("AutoForceTickBox (the tick box shared by More Info and the Tile)", () 
     localStorage.setItem(`verisure-owa:auto-force-arm:${ENTITY}`, "true");
     const hass = makeHass();
     const scope = document.createElement("div");
-    const control = document.createElement(CONTROL);
-    const select = document.createElement("ha-control-select");
-    control.attachShadow({ mode: "open" }).appendChild(select);
+    const { control, select } = makeModesControl(CONTROL);
     scope.appendChild(control);
     document.body.appendChild(scope);
     const box = new AutoForceTickBox(CONTROL);
@@ -970,13 +952,7 @@ describe("AutoForceTickBox (the tick box shared by More Info and the Tile)", () 
     box.setEntity(ENTITY);
     box.track(stateOf(), hass);
 
-    select.dispatchEvent(
-      new CustomEvent("value-changed", {
-        detail: { value: "armed_away" },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    pressMode(select, "armed_away");
     box.track(stateOf({ state: "arming" }), hass);
     box.track(stateOf({ forceArmAvailable: true }), hass);
     box.disconnect();
