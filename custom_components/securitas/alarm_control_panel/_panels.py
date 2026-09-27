@@ -116,6 +116,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         affected = [self, *self._affected_axis_subpanels(circuits)]
         for entity in affected:
             entity._operation_in_progress = True  # pylint: disable=protected-access
+            entity._operation_kind = "partial_disarm"  # pylint: disable=protected-access
             entity._operation_epoch += 1  # pylint: disable=protected-access
             entity._force_state(AlarmControlPanelState.DISARMING)  # pylint: disable=protected-access
         try:

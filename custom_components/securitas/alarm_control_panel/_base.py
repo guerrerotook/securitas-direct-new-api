@@ -7,13 +7,14 @@ inherit the bulk of their behaviour from BaseVerisureOwaAlarmPanel here.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import time
 import uuid
 from collections.abc import Callable
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.components.alarm_control_panel import (
@@ -243,7 +244,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._update_interval: timedelta = timedelta(
             seconds=scan_seconds if scan_seconds > 0 else DEFAULT_SCAN_INTERVAL
         )
-        self._operation_in_progress: bool = False
+        self._operation_idle = asyncio.Event()
+        self._operation_idle.set()
+        # Which operation holds the busy flag; a disarm waits behind an arm or
+        # a partial disarm, but not behind another full disarm.
+        self._operation_kind: Literal["arm", "disarm", "partial_disarm"] | None = None
         self._operation_epoch: int = 0
         self._code_hash: str | None = client.config.get(CONF_CODE_HASH, None)
         self._attr_code_format: CodeFormat | None = None
@@ -336,6 +341,18 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._cancel_force_arm_expiry()
         self._cancel_suppressed_prompt_fallback()
         await super().async_will_remove_from_hass()
+
+    @property
+    def _operation_in_progress(self) -> bool:
+        return not self._operation_idle.is_set()
+
+    @_operation_in_progress.setter
+    def _operation_in_progress(self, in_progress: bool) -> None:
+        if in_progress:
+            self._operation_idle.clear()
+        else:
+            self._operation_kind = None
+            self._operation_idle.set()
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -1038,28 +1055,31 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
-        if self._operation_in_progress:
-            _LOGGER.debug(
-                "Disarm ignored for %s: an operation is already in progress",
-                self.installation.number,
-            )
-            return
-        await self._dismiss_pending_force_context_on_siblings(
-            reason=DISMISSAL_REASON_USER_DISARM,
-            new_mode="disarmed",
-        )
         # Capture the calling user's context up-front — HA expires
-        # `self._context` ~1 s after async_set_context, and the disarm
-        # transition + state writes below take longer than that.
+        # `self._context` ~1 s after async_set_context, and waiting for an arm
+        # plus the disarm transition and state writes below take longer.
         user_context = self._context
-        self._force_state(AlarmControlPanelState.DISARMING)
+        while self._operation_in_progress:
+            if self._operation_kind not in ("arm", "partial_disarm"):
+                _LOGGER.debug(
+                    "Disarm ignored for %s: a disarm is already in progress",
+                    self.installation.number,
+                )
+                return
+            await self._operation_idle.wait()
         self._operation_in_progress = True
+        self._operation_kind = "disarm"
         self._operation_epoch += 1
         # Declared before the try so it is always bound in the except handlers
         # (pyright reportPossiblyUnbound); it is always set before the awaited
         # transition that can raise OperationTimeoutError.
         target: AlarmState | None = None
         try:
+            await self._dismiss_pending_force_context_on_siblings(
+                reason=DISMISSAL_REASON_USER_DISARM,
+                new_mode="disarmed",
+            )
+            self._force_state(AlarmControlPanelState.DISARMING)
             target = self._resolve_target_state("disarmed")
             result = await self._execute_transition(target)
             self._set_waf_blocked(False)
@@ -1123,6 +1143,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # transition + state writes below take longer than that.
         user_context = self._context
         self._operation_in_progress = True
+        self._operation_kind = "arm"
         self._operation_epoch += 1
         self._last_arm_result = OperationStatus()
 

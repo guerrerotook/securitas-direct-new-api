@@ -1,5 +1,6 @@
 """Tests for alarm_control_panel entity logic."""
 
+import asyncio
 import inspect
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -59,6 +60,7 @@ from custom_components.securitas.verisure_owa_api.const import (
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
     ArmingExceptionError,
+    OperationTimeoutError,
     VerisureOwaError,
 )
 from custom_components.securitas.verisure_owa_api.models import (
@@ -9155,3 +9157,249 @@ async def test_arm_reentry_guard_ignores_overlapping_call():
     await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
     alarm.client.arm_alarm.assert_not_called()
+
+
+def _status(proto: str) -> OperationStatus:
+    return OperationStatus(
+        operation_status="OK",
+        message="",
+        status="",
+        installation_number="123456",
+        protom_response=proto,
+        protom_response_date="",
+    )
+
+
+def _record_transitions(alarm, *, arm_gate=None, arm_started=None, arm_error=None):
+    """Replace the panel round trip: record each target, answer arm with 'T'
+    and disarm with 'D'. The arm can wait on ``arm_gate`` and/or end in
+    ``arm_error``; ``arm_started`` is set once the arm reaches the panel."""
+    disarmed = alarm._resolve_target_state("disarmed")
+    targets = []
+
+    async def transition(target, **_force_params):
+        targets.append(target)
+        if target == disarmed:
+            await asyncio.sleep(0)  # a real panel round trip yields
+            return _status("D")
+        if arm_started is not None:
+            arm_started.set()
+        if arm_gate is not None:
+            await arm_gate.wait()
+        if arm_error is not None:
+            raise arm_error
+        return _status("T")
+
+    alarm._execute_transition = AsyncMock(side_effect=transition)
+    return targets, alarm._resolve_target_state("armed_away"), disarmed
+
+
+async def test_disarm_pressed_during_arm_refresh_runs_after_the_arm():
+    """A disarm pressed after the panel confirmed the arm, while the arm is
+    still refreshing, is carried out once the arm finishes."""
+    alarm = make_alarm()
+    targets, armed_away, disarmed = _record_transitions(alarm)
+    refresh_started = asyncio.Event()
+    release_refresh = asyncio.Event()
+    calls = 0
+
+    async def refresh():
+        nonlocal calls
+        calls += 1
+        if calls == 1:  # the arm's refresh; the disarm's own returns at once
+            refresh_started.set()
+            await release_refresh.wait()
+
+    alarm.coordinator.async_request_refresh = AsyncMock(side_effect=refresh)
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await refresh_started.wait()
+    disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+    await asyncio.sleep(0)
+    release_refresh.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+    assert alarm._operation_in_progress is False
+
+
+async def test_disarm_pressed_while_arm_awaits_panel_runs_after_the_arm():
+    """A disarm pressed while the arm is still waiting for the panel waits for
+    it, then disarms — it is not sent alongside the arm."""
+    alarm = make_alarm()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started
+    )
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert targets == [armed_away]  # the disarm is waiting, not sent
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+@pytest.mark.parametrize(
+    "arm_error",
+    [
+        VerisureOwaError("boom"),
+        OperationTimeoutError("not confirmed"),
+        ArmingExceptionError(
+            reference_id="ref",
+            suid="suid",
+            exceptions=[{"status": "0", "deviceType": "MG", "alias": "Door"}],
+        ),
+        HomeAssistantError("rejected"),
+    ],
+    ids=["error", "timeout", "open_sensor", "ha_error"],
+)
+async def test_waiting_disarm_still_runs_when_the_arm_fails(arm_error):
+    """However the arm ends, a disarm waiting behind it is carried out —
+    never dropped and never left hanging."""
+    alarm = make_alarm()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started, arm_error=arm_error
+    )
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+    await asyncio.sleep(0)
+    arm_gate.set()
+    arm_result, disarm_result = await asyncio.wait_for(
+        asyncio.gather(arm_task, disarm_task, return_exceptions=True), timeout=2
+    )
+
+    assert disarm_result is None
+    if isinstance(arm_error, HomeAssistantError):
+        assert arm_result is arm_error
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+    assert alarm._operation_in_progress is False
+
+
+async def test_waiting_disarm_is_attributed_to_the_user_who_pressed_it():
+    """HA forgets the caller's context about a second after the call; a disarm
+    that waited behind an arm still logs its activity against the user who
+    pressed Disarm."""
+    from homeassistant.core import Context
+
+    alarm = make_alarm()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    _record_transitions(alarm, arm_gate=arm_gate, arm_started=arm_started)
+    arm_ctx, disarm_ctx = Context(), Context()
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base.inject_ha_event",
+        new=AsyncMock(),
+    ) as mock_inject:
+        alarm._context = arm_ctx
+        arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+        await arm_started.wait()
+        alarm._context = disarm_ctx
+        disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+        await asyncio.sleep(0)
+        alarm._context = None  # HA expired the disarm caller's context
+        arm_gate.set()
+        await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    contexts = {
+        c.kwargs["alias"]: c.kwargs["context"] for c in mock_inject.call_args_list
+    }
+    assert contexts == {"Armed": arm_ctx, "Disarmed": disarm_ctx}
+
+
+async def test_arm_pressed_while_disarm_waits_is_still_ignored():
+    """Only the disarm waits: an arm pressed while another arm runs is ignored
+    as before, and the queued disarm still runs afterwards."""
+    alarm = make_alarm()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started
+    )
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(alarm.async_alarm_disarm())
+    await asyncio.sleep(0)
+    await alarm.set_arm_state("armed_away")  # ignored: the first arm still runs
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+async def test_two_disarms_waiting_behind_an_arm_send_one_disarm():
+    """Two disarms pressed while an arm runs disarm once, not twice."""
+    alarm = make_alarm()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started
+    )
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    first = asyncio.create_task(alarm.async_alarm_disarm())
+    second = asyncio.create_task(alarm.async_alarm_disarm())
+    await asyncio.sleep(0)
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, first, second), timeout=2)
+
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+async def test_disarm_pressed_during_partial_disarm_runs_after_it():
+    """A disarm pressed while the lock's partial disarm runs is carried out
+    once the partial disarm finishes."""
+    from custom_components.securitas.verisure_owa_api.models import (
+        AlarmState,
+        AnnexMode,
+        InteriorMode,
+        PerimeterMode,
+    )
+
+    panel = make_alarm()
+    panel._last_proto_code = "T"
+    panel.coordinator.alarm_state = AlarmState(
+        interior=InteriorMode.TOTAL,
+        perimeter=PerimeterMode.OFF,
+        annex=AnnexMode.OFF,
+    )
+    partial_started = asyncio.Event()
+    release_partial = asyncio.Event()
+    calls = 0
+
+    async def transition(target, **_force_params):
+        nonlocal calls
+        calls += 1
+        if calls == 1:  # the partial disarm
+            partial_started.set()
+            await release_partial.wait()
+        return _status("D")
+
+    panel._execute_transition = AsyncMock(side_effect=transition)
+    partial_task = asyncio.create_task(panel.execute_partial_disarm(["interior"]))
+    await partial_started.wait()
+    disarm_task = asyncio.create_task(panel.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert calls == 1  # the disarm is waiting, not sent
+    release_partial.set()
+    await asyncio.wait_for(asyncio.gather(partial_task, disarm_task), timeout=2)
+
+    assert calls == 2
+    assert panel._state == AlarmControlPanelState.DISARMED
