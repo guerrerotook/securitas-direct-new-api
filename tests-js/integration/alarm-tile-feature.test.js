@@ -339,6 +339,17 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
     push(feature, alarmEntity({ forceArmAvailable: true, armExceptions: ["Door"] }), callService);
   }
 
+  // The keypad's tick button in HA's PIN prompt, clicked as a user would.
+  function submitPin() {
+    const prompt = document.createElement("dialog-enter-code");
+    const tick = document.createElement("ha-control-button");
+    tick.className = "submit";
+    prompt.attachShadow({ mode: "open" }).appendChild(tick);
+    document.body.appendChild(prompt);
+    tick.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    prompt.remove();
+  }
+
   function autoForceCalls(callService) {
     return callService.mock.calls
       .map((call) => call[1])
@@ -643,7 +654,6 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       window.dispatchEvent(
         new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
       );
-      vi.advanceTimersByTime(10_001);
       armWithException(feature, callService);
 
       expect(autoForceCalls(callService)).toEqual([]);
@@ -663,14 +673,32 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
         }),
       );
       vi.advanceTimersByTime(30_000);
+      submitPin();
+      armWithException(feature, callService);
       window.dispatchEvent(
         new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
       );
-      armWithException(feature, callService);
 
       expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
         entity_id: ENTITY,
       });
+    });
+
+    it("does NOT force an arm from elsewhere while the PIN prompt is still open", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, modes, callService } = mountTile();
+
+      pressMode(modes.select);
+      modes.select.getRootNode().host.dispatchEvent(
+        new CustomEvent("show-dialog", {
+          detail: { dialogTag: "dialog-enter-code" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
     });
 
     it("does NOT force when the tick box is off", () => {

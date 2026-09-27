@@ -99,6 +99,17 @@ function openPinPrompt(element) {
   );
 }
 
+// The keypad's tick button in HA's PIN prompt, clicked as a user would.
+function submitPin() {
+  const prompt = document.createElement("dialog-enter-code");
+  const tick = document.createElement("ha-control-button");
+  tick.className = "submit";
+  prompt.attachShadow({ mode: "open" }).appendChild(tick);
+  document.body.appendChild(prompt);
+  tick.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+  prompt.remove();
+}
+
 function closePinPrompt() {
   const prompt = document.createElement("dialog-enter-code");
   document.body.appendChild(prompt);
@@ -473,7 +484,7 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     expect(autoForceCalls(callService)).toEqual([]);
   });
 
-  it("still auto-forces when the arm starts within 60 s while the PIN prompt is open", () => {
+  it("still auto-forces when the PIN is submitted within 60 s", () => {
     vi.useFakeTimers();
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo();
@@ -481,9 +492,21 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     pressMode(element);
     openPinPrompt(element);
     vi.advanceTimersByTime(59_000);
+    submitPin();
     armWithException(element, callService);
 
     expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", { entity_id: ENTITY });
+  });
+
+  it("does NOT auto-force an arm from elsewhere while the PIN prompt is still open", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    openPinPrompt(element);
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
   });
 
   it("does NOT auto-force an arm from elsewhere after the PIN prompt is cancelled", () => {
@@ -495,7 +518,6 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     openPinPrompt(element);
     vi.advanceTimersByTime(3_000);
     closePinPrompt();
-    vi.advanceTimersByTime(10_001);
     armWithException(element, callService);
 
     expect(autoForceCalls(callService)).toEqual([]);
@@ -524,6 +546,7 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     pressMode(element);
     openPinPrompt(element);
     vi.advanceTimersByTime(30_000);
+    submitPin();
     armWithException(element, callService);
 
     expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", { entity_id: ENTITY });

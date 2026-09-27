@@ -165,6 +165,57 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     tracker.noteDialogClosed(new CustomEvent("dialog-closed", { detail: { dialog } }));
   }
 
+  // HA's PIN prompt, as dialog-enter-code renders it: a keypad whose tick
+  // button submits, the PIN box (Enter submits), and for text PINs a footer
+  // Submit button.
+  function pinPromptElement() {
+    const dialog = document.createElement("dialog-enter-code");
+    const root = dialog.attachShadow({ mode: "open" });
+    const input = document.createElement("ha-input");
+    input.id = "code";
+    const inner = input.attachShadow({ mode: "open" }).appendChild(document.createElement("input"));
+    const digit = document.createElement("ha-control-button");
+    digit.textContent = "8";
+    const clear = document.createElement("ha-control-button");
+    clear.className = "clear";
+    const tick = document.createElement("ha-control-button");
+    tick.className = "submit";
+    const textSubmit = document.createElement("ha-button");
+    textSubmit.slot = "primaryAction";
+    const textCancel = document.createElement("ha-button");
+    textCancel.slot = "secondaryAction";
+    root.append(input, digit, clear, tick, textSubmit, textCancel);
+    document.body.appendChild(dialog);
+    return { dialog, inner, digit, clear, tick, textSubmit, textCancel };
+  }
+
+  // Dispatch as the browser would, with the tracker listening where connect()
+  // listens (window, capture), so composedPath() is real.
+  function inPrompt(tracker, dispatch) {
+    const listener = (event) => tracker.noteSubmit(event);
+    window.addEventListener("click", listener, true);
+    window.addEventListener("keydown", listener, true);
+    dispatch();
+    window.removeEventListener("click", listener, true);
+    window.removeEventListener("keydown", listener, true);
+  }
+
+  function clickIn(tracker, element) {
+    inPrompt(tracker, () =>
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true })),
+    );
+  }
+
+  function pressKeyIn(tracker, element, key) {
+    inPrompt(tracker, () =>
+      element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, composed: true })),
+    );
+  }
+
+  function submitPin(tracker) {
+    clickIn(tracker, pinPromptElement().tick);
+  }
+
   function setup() {
     const tracker = new AutoForceArmTracker(CONTROL);
     const hass = makeHass();
@@ -265,6 +316,7 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     fire(select, "armed_away", tracker, disarmed);
     openPinPrompt(tracker);
     vi.advanceTimersByTime(AUTO_FORCE_INTENT_TTL_MS);
+    submitPin(tracker);
     tracker.update(stateOf({ state: "arming" }), true, hass);
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
 
@@ -272,6 +324,7 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     fire(late.select, "armed_away", late.tracker, late.disarmed);
     openPinPrompt(late.tracker);
     vi.advanceTimersByTime(AUTO_FORCE_INTENT_TTL_MS + 1);
+    submitPin(late.tracker);
     late.tracker.update(stateOf({ state: "arming" }), true, late.hass);
     late.tracker.update(stateOf({ forceArmAvailable: true }), true, late.hass);
     expect(late.hass.callService).not.toHaveBeenCalled();
@@ -300,15 +353,86 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
   });
 
-  it("discards the press shortly after the PIN prompt is cancelled", () => {
-    vi.useFakeTimers();
+  it("forgets the press as soon as the PIN prompt closes without a Submit", () => {
     const { tracker, hass, disarmed, select } = setup();
 
     fire(select, "armed_away", tracker, disarmed);
     openPinPrompt(tracker);
-    vi.advanceTimersByTime(5_000);
     closePinPrompt(tracker);
-    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("does not force an arm that starts while the PIN prompt is open and nothing was submitted", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("forces the arm that lands after a Submit but before the prompt reports closing", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
+    submitPin(tracker);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    closePinPrompt(tracker);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
+  });
+
+  it("counts the keypad tick, Enter in the PIN box and a text-PIN Submit button as a Submit", () => {
+    const submits = [
+      (tracker) => clickIn(tracker, pinPromptElement().tick),
+      (tracker) => pressKeyIn(tracker, pinPromptElement().inner, "Enter"),
+      (tracker) => clickIn(tracker, pinPromptElement().textSubmit),
+    ];
+    for (const submit of submits) {
+      const { tracker, hass, disarmed, select } = setup();
+      fire(select, "armed_away", tracker, disarmed);
+      openPinPrompt(tracker);
+      submit(tracker);
+      tracker.update(stateOf({ state: "arming" }), true, hass);
+      expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+    }
+  });
+
+  it("ignores other prompt keys and buttons, and submit-like buttons outside the prompt", () => {
+    const { tracker, hass, disarmed, select } = setup();
+    const prompt = pinPromptElement();
+    const outside = document.createElement("ha-control-button");
+    outside.className = "submit";
+    document.body.appendChild(outside);
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
+    clickIn(tracker, prompt.digit);
+    clickIn(tracker, prompt.clear);
+    clickIn(tracker, prompt.textCancel);
+    pressKeyIn(tracker, prompt.inner, "8");
+    clickIn(tracker, outside);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("ignores a Submit when its own PIN prompt is not open", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS - 1_000);
+    openPinPrompt(tracker, "another-modes-control");
+    // Counted, this Submit would restart the start window.
+    submitPin(tracker);
+    vi.advanceTimersByTime(2_000);
     tracker.update(stateOf({ state: "arming" }), true, hass);
 
     expect(hass.callService).not.toHaveBeenCalled();
@@ -321,6 +445,7 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     fire(select, "armed_away", tracker, disarmed);
     openPinPrompt(tracker);
     vi.advanceTimersByTime(30_000);
+    submitPin(tracker);
     closePinPrompt(tracker);
     vi.advanceTimersByTime(1_000);
     tracker.update(stateOf({ state: "arming" }), true, hass);
@@ -344,6 +469,7 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     openPinPrompt(other.tracker);
     closePinPrompt(other.tracker, "some-other-dialog");
     vi.advanceTimersByTime(AUTO_FORCE_ARM_START_MS + 1);
+    submitPin(other.tracker);
     other.tracker.update(stateOf({ state: "arming" }), true, other.hass);
     expect(calls(other.hass)).toEqual(["suppress_arm_exception_prompt"]);
   });
@@ -390,6 +516,9 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     press();
     prompt();
     vi.advanceTimersByTime(30_000);
+    pinPromptElement().tick.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, composed: true }),
+    );
     tracker.update(stateOf({ state: "arming" }), true, hass);
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
 
