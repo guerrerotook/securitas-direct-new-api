@@ -84,6 +84,28 @@ function pressMode(element, value = "armed_away", controlTag) {
   return event;
 }
 
+// A press whose modes control opens the PIN prompt from its own handler on
+// the select, before the press has left the control.
+function pressModeThatPromptsAtOnce(element) {
+  const select = nativeModeSelect(element);
+  select.addEventListener("value-changed", () =>
+    select.dispatchEvent(
+      new CustomEvent("show-dialog", {
+        detail: { dialogTag: "dialog-enter-code" },
+        bubbles: true,
+        composed: true,
+      }),
+    ),
+  );
+  select.dispatchEvent(
+    new CustomEvent("value-changed", {
+      detail: { value: "armed_away" },
+      bubbles: true,
+      composed: true,
+    }),
+  );
+}
+
 // HA's modes control fires show-dialog itself to open its PIN prompt; the
 // prompt then lives in HA's shell and fires dialog-closed there on Submit or
 // Cancel, which reaches window.
@@ -508,6 +530,27 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     armWithException(element, callService);
 
     expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("does NOT auto-force an arm from elsewhere while a PIN prompt opened at once by the press is unsubmitted", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressModeThatPromptsAtOnce(element);
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("auto-forces after a Submit in a PIN prompt opened at once by the press", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressModeThatPromptsAtOnce(element);
+    submitPin();
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
   });
 
   it("does NOT auto-force an arm from elsewhere after the PIN prompt is cancelled", () => {

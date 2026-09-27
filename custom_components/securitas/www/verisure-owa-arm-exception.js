@@ -173,14 +173,15 @@ export class AutoForceArmTracker {
     const onShowDialog = (event) => this.noteShowDialog(event);
     const onDialogClosed = (event) => this.noteDialogClosed(event);
     const onPromptInput = (event) => this.noteSubmit(event);
-    scope.addEventListener("value-changed", onValueChanged);
+    // Capture: the press is recorded before the control's own handler can open the PIN prompt.
+    scope.addEventListener("value-changed", onValueChanged, true);
     scope.addEventListener("show-dialog", onShowDialog);
     globalThis.addEventListener("dialog-closed", onDialogClosed);
     // Capture: the prompt's own handlers submit and close it on this event.
     globalThis.addEventListener("click", onPromptInput, true);
     globalThis.addEventListener("keydown", onPromptInput, true);
     this._disconnect = () => {
-      scope.removeEventListener("value-changed", onValueChanged);
+      scope.removeEventListener("value-changed", onValueChanged, true);
       scope.removeEventListener("show-dialog", onShowDialog);
       globalThis.removeEventListener("dialog-closed", onDialogClosed);
       globalThis.removeEventListener("click", onPromptInput, true);

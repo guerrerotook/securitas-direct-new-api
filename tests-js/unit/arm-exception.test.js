@@ -554,6 +554,92 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
   });
 
+  // happy-dom removes a capture listener even when the remove omits the
+  // capture flag, where a browser would leave it attached, so check the flags.
+  it("removes each listener with the same capture flag it was added with", () => {
+    const tracker = new AutoForceArmTracker(CONTROL);
+    const scope = document.createElement("div");
+    const record = (target) => {
+      const added = [];
+      const removed = [];
+      vi.spyOn(target, "addEventListener").mockImplementation((type, fn, capture) =>
+        added.push([type, fn, capture === true]),
+      );
+      vi.spyOn(target, "removeEventListener").mockImplementation((type, fn, capture) =>
+        removed.push([type, fn, capture === true]),
+      );
+      return { added, removed };
+    };
+    const onScope = record(scope);
+    const onWindow = record(globalThis);
+
+    tracker.connect(scope);
+    tracker.disconnect();
+    vi.restoreAllMocks();
+
+    expect(onScope.added.find(([type]) => type === "value-changed")[2]).toBe(true);
+    expect(onScope.removed).toEqual(onScope.added);
+    expect(onWindow.removed).toEqual(onWindow.added);
+  });
+
+  // A modes control whose own handler on its inner select opens the PIN prompt
+  // straight away, before the press has bubbled out to the tracker's scope.
+  function connectedControlThatPromptsAtOnce() {
+    const tracker = new AutoForceArmTracker(CONTROL);
+    const hass = makeHass();
+    const scope = document.createElement("div");
+    document.body.appendChild(scope);
+    const control = document.createElement(CONTROL);
+    const select = document.createElement("ha-control-select");
+    control.attachShadow({ mode: "open" }).appendChild(select);
+    scope.appendChild(control);
+    select.addEventListener("value-changed", () =>
+      select.dispatchEvent(
+        new CustomEvent("show-dialog", {
+          detail: { dialogTag: "dialog-enter-code" },
+          bubbles: true,
+          composed: true,
+        }),
+      ),
+    );
+    tracker.connect(scope);
+    tracker.update(stateOf(), true, hass);
+    const press = () =>
+      select.dispatchEvent(
+        new CustomEvent("value-changed", {
+          detail: { value: "armed_away" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    return { tracker, hass, press };
+  }
+
+  it("does not force an arm from elsewhere while a PIN prompt opened at once by the press is unsubmitted", () => {
+    const { tracker, hass, press } = connectedControlThatPromptsAtOnce();
+
+    press();
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+    tracker.disconnect();
+  });
+
+  it("forces the arm after a Submit in a PIN prompt opened at once by the press", () => {
+    const { tracker, hass, press } = connectedControlThatPromptsAtOnce();
+
+    press();
+    pinPromptElement().tick.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, composed: true }),
+    );
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
+    tracker.disconnect();
+  });
+
   it("judges a press by the tick and state from the latest update", () => {
     const tracker = new AutoForceArmTracker(CONTROL);
     const hass = makeHass();
