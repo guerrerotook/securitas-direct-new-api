@@ -508,7 +508,8 @@ def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
 
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
-    """Forget the account's setup-time crash count: a live session proved the token."""
+    """Forget the account's setup-time crash count: a live session or a
+    successful sign-in proved the token."""
     hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
 

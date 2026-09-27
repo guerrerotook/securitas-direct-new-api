@@ -3867,12 +3867,12 @@ async def _reauth_as_other_account(hass, entry, other_hub=None):
         else (await _start_reauth_flow(hass, entry))["flow_id"]
     )
     if other_hub is None:
-        other_hub = _hub_factory()
-        other_hub.config = make_config_entry_data(username="other@example.com")
+        other_hub = _hub_for_other_account(
+            make_installation(number=entry.data[CONF_INSTALLATION])
+        )
     reauth_hub = _hub_factory()
-    reauth_hub.client.list_installations = AsyncMock(
-        return_value=[make_installation(number=entry.data[CONF_INSTALLATION])]
-    )
+    # The dialog signs in to the same account the reload does.
+    reauth_hub.client.list_installations = other_hub.client.list_installations
     with (
         _patches(reauth_hub),
         patch(
@@ -4355,6 +4355,58 @@ async def test_a_reauth_onto_another_account_that_cannot_list_asks_again(hass):
     assert result["step_id"] == "reauth_confirm"
     assert result["errors"] == {"base": "cannot_connect"}
     assert dict(home.data) == data_before
+
+
+async def test_a_switch_lists_the_new_accounts_installations_once(hass):
+    """The dialog's check already fetched the new account's list; the reload
+    that follows must use it rather than ask Verisure again."""
+    await _load_third_account_entry(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    reauth_hub = _reauth_hub_seeing("111")
+    reload_hub = _hub_for_other_account(make_installation(number="111"))
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=reload_hub),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.state is ConfigEntryState.LOADED
+    assert (
+        reauth_hub.client.list_installations.await_count
+        + reload_hub.client.list_installations.await_count
+        == 1
+    )
+    assert [
+        d.installation.number for d in hass.data[DOMAIN][home.entry_id]["devices"]
+    ] == ["111"]
+
+
+async def test_the_same_email_in_other_capitals_is_not_a_switch(hass):
+    """Verisure treats the email the same whatever its capitals, so retyping
+    it differently is the same account: no installation check is made."""
+    home = await _home_crashed_once_then_rejected(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "Test@Example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    reauth_hub.client.list_installations.assert_not_awaited()
 
 
 async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):

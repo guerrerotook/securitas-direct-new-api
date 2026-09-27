@@ -803,7 +803,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_refresh_token")
         username = self.config[CONF_USERNAME]
         installation = self._reauth_entry.data.get(CONF_INSTALLATION)
-        if installation and username != self._reauth_entry.data.get(CONF_USERNAME):
+        old_username = self._reauth_entry.data.get(CONF_USERNAME, "")
+        # Verisure matches the email whatever its capitals: only another
+        # address is another account.
+        if installation and username.casefold() != old_username.casefold():
             # Another account keeps the entry's installation number; one that
             # cannot see it would leave the entry with no devices.
             try:
@@ -815,6 +818,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     reason="installation_not_on_account",
                     description_placeholders={"number": installation},
                 )
+            if DOMAIN in self.hass.data:
+                self.hass.data[DOMAIN][f"installations_cache_{username}"] = {
+                    "data": installations,
+                    "time": time.monotonic(),
+                }
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
