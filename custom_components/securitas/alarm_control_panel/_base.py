@@ -1643,6 +1643,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             # The auto-force is abandoned: a later Force Arm tap is the user's
             # own choice and must not get the auto-force confirmation.
             self._suppress_arm_prompt_until = 0.0
+            # Defensive, like the sibling handlers: an options change reloads
+            # the entry, which cancels this timer anyway.
+            if not self._notifications_enabled:
+                return
             self.hass.async_create_task(self._async_notify_arm_exceptions(event))
 
         self._suppressed_prompt_fallback_unsub = async_call_later(

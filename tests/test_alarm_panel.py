@@ -2973,6 +2973,25 @@ class TestSuppressedPromptFallback:
 
         assert self._blocked_prompts(alarm) == []
 
+    async def test_no_blocked_prompt_when_notifications_turned_off_meanwhile(
+        self, timers
+    ):
+        """The late prompt re-reads the notifications option when it fires.
+
+        Defensive: a real options change reloads the entry, which cancels the
+        timer. This checks the send still reads the setting at fire time, so a
+        prompt scheduled while notifications were on stays silent if they are
+        off by then.
+        """
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+
+        alarm.client.config["force_arm_notifications"] = False
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
+
     async def test_entity_removal_cancels_the_pending_prompt(self, timers):
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
