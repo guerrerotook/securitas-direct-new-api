@@ -87,7 +87,7 @@
                             "auto_force_arm": "Mostrar una casilla de armado forzado automático en los controles de la alarma"
                         },
                         "data_description": {
-                            "auto_force_arm": "Cuando está activado, el diálogo de información de la alarma (y la tarjeta de alarma obsoleta) muestra una casilla que fuerza el armado automáticamente ignorando puertas/ventanas abiertas, en lugar de esperar su confirmación. La elección se recuerda por dispositivo en el navegador. Déjelo desactivado si su panel no admite el armado forzado."
+                            "auto_force_arm": "Cuando está activado, el diálogo de información de la alarma y una tarjeta Mosaico (Tile) con los modos de alarma y la función Verisure OWA Open Sensors (y la tarjeta de alarma obsoleta) muestran una casilla que fuerza el armado automáticamente ignorando puertas/ventanas abiertas, en lugar de esperar su confirmación. Solo actúa sobre un armado iniciado con los botones que la acompañan. La elección se recuerda por dispositivo en el navegador. Déjelo desactivado si su panel no admite el armado forzado."
                         }
                     },
                     "subpanels": {
@@ -150,7 +150,7 @@
                             "auto_force_arm": "Mostrar una casilla de armado forzado automático en los controles de la alarma"
                         },
                         "data_description": {
-                            "auto_force_arm": "Cuando está activado, el diálogo de información de la alarma (y la tarjeta de alarma obsoleta) muestra una casilla que fuerza el armado automáticamente ignorando puertas/ventanas abiertas, en lugar de esperar su confirmación. La elección se recuerda por dispositivo en el navegador. Déjelo desactivado si su panel no admite el armado forzado."
+                            "auto_force_arm": "Cuando está activado, el diálogo de información de la alarma y una tarjeta Mosaico (Tile) con los modos de alarma y la función Verisure OWA Open Sensors (y la tarjeta de alarma obsoleta) muestran una casilla que fuerza el armado automáticamente ignorando puertas/ventanas abiertas, en lugar de esperar su confirmación. Solo actúa sobre un armado iniciado con los botones que la acompañan. La elección se recuerda por dispositivo en el navegador. Déjelo desactivado si su panel no admite el armado forzado."
                         }
                     },
                     "subpanels": {

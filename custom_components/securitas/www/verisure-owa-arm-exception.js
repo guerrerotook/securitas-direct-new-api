@@ -57,11 +57,12 @@ export function hassLanguage(hass) {
   return hass?.language || hass?.locale?.language || "en";
 }
 
-// ── Per-device auto-force-arm preference (shared by the alarm card and the
-// native More Info dialog) ──────────────────────────────────────────────────
-// Defined here, in the module both surfaces import, so the storage key can
-// never drift between them: the tick is remembered per device and shared, so
-// ticking it in either place enables it for the other.
+// ── Per-device auto-force-arm preference (shared by the alarm card, the
+// native More Info dialog and the Tile feature) ─────────────────────────────
+// Defined here, in the module every surface imports, so the storage key can
+// never drift between them. The tick is remembered per device; More Info and
+// the Tile follow each other's ticks, while the deprecated alarm card only reads
+// it when its config loads.
 export function autoForceStorageKey(entityId) {
   return `verisure-owa:auto-force-arm:${entityId}`;
 }
@@ -74,12 +75,21 @@ export function readAutoForce(entityId) {
   }
 }
 
+// More Info and the Tile learn of a tick made elsewhere in this page from this
+// event. Nothing listens for the browser's `storage` event, so a tick made in
+// another tab shows only after the alarm changes or the surface is put back on
+// the page.
+export const AUTO_FORCE_CHANGED_EVENT = "verisure-owa-auto-force-changed";
+
 export function writeAutoForce(entityId, on) {
   try {
     globalThis.localStorage?.setItem(autoForceStorageKey(entityId), on ? "true" : "false");
   } catch {
     /* private mode / storage disabled — the tick box just won't persist */
   }
+  globalThis.dispatchEvent?.(
+    new CustomEvent(AUTO_FORCE_CHANGED_EVENT, { detail: { entityId, on: on === true } }),
+  );
 }
 
 // Auto-force only ever acts when BOTH the integration capability gate is on
@@ -88,6 +98,203 @@ export function writeAutoForce(entityId, on) {
 // after an admin turns the option off.
 export function autoForceActive(stateObj, ticked) {
   return ticked === true && stateObj?.attributes?.auto_force_arm_enabled === true;
+}
+
+// How long a press stays valid while HA's PIN prompt is open (time to type).
+export const AUTO_FORCE_INTENT_TTL_MS = 60_000;
+
+// How long a press stays valid with no PIN prompt open, and after a Submit in
+// one. The arm service call then follows within about a second (measured
+// ~0.1 s after Submit), so this only has to outlast that; it also bounds how
+// long an arm refused by HA (a wrong PIN) can leave the press behind.
+export const AUTO_FORCE_ARM_START_MS = 10_000;
+
+const PIN_PROMPT = "dialog-enter-code";
+
+// HA's PIN prompt submits from the keypad's tick button, a text PIN's footer
+// button, or Enter in the PIN box; anything else that closes it is a Cancel.
+// Should HA rename these, no Submit is seen and nothing is auto-forced after a
+// PIN: the user gets the normal Force Arm prompt instead.
+function isPinSubmit(event) {
+  const path = event.composedPath();
+  if (!path.some((node) => node.localName === PIN_PROMPT)) return false;
+  if (event.type === "keydown") {
+    return event.key === "Enter" && path.some((node) => node.localName === "ha-input" && node.id === "code");
+  }
+  return path.some(
+    (node) =>
+      (node.localName === "ha-control-button" && node.classList?.contains("submit")) ||
+      (node.localName === "ha-button" && node.slot === "primaryAction"),
+  );
+}
+
+const IN_FLIGHT_STATES = new Set(["arming", "pending"]);
+
+// Auto-force for the surfaces that wrap Home Assistant's own alarm-mode
+// buttons (More Info, Tile). HA dispatches the arm, not our code, so the
+// tracker listens for what HA's modes control announces — the chosen mode
+// (`value-changed`) and its PIN prompt opening (`show-dialog`), being
+// submitted (a click or Enter in it) and closing (`dialog-closed`) — and is fed
+// every state update. Only an arm that follows a press on `controlTag` (and,
+// when a PIN is asked for, a Submit) is forced; an arm started anywhere else
+// (automation, another screen, the Verisure app) is left alone.
+export class AutoForceArmTracker {
+  constructor(controlTag) {
+    this._controlTag = controlTag;
+    this._disconnect = null;
+    this._clearInputs();
+    this._reset(null);
+  }
+
+  // The latest state and tick from update(), which a button press is judged
+  // against.
+  _clearInputs() {
+    this._stateObj = null;
+    this._ticked = false;
+  }
+
+  _reset(entityId) {
+    this._entityId = entityId;
+    this._intentAt = null;
+    this._deadline = 0;
+    this._promptOpen = false;
+    this._submitted = false;
+    this._pending = false;
+    this._prevState = null;
+  }
+
+  // Listens on `scope` (an ancestor of the modes control) for presses and the
+  // PIN prompt opening, and on window for the prompt being submitted and
+  // closing: HA renders the prompt in its own shell, outside the surface. A
+  // press before the first update() is ignored.
+  connect(scope) {
+    this.disconnect();
+    const onValueChanged = (event) => this.noteValueChanged(event, this._stateObj, this._ticked);
+    const onShowDialog = (event) => this.noteShowDialog(event);
+    const onDialogClosed = (event) => this.noteDialogClosed(event);
+    const onPromptInput = (event) => this.noteSubmit(event);
+    // Capture: the press is recorded before the control's own handler can open the PIN prompt.
+    scope.addEventListener("value-changed", onValueChanged, true);
+    scope.addEventListener("show-dialog", onShowDialog);
+    globalThis.addEventListener("dialog-closed", onDialogClosed);
+    // Capture: the prompt's own handlers submit and close it on this event.
+    globalThis.addEventListener("click", onPromptInput, true);
+    globalThis.addEventListener("keydown", onPromptInput, true);
+    this._disconnect = () => {
+      scope.removeEventListener("value-changed", onValueChanged, true);
+      scope.removeEventListener("show-dialog", onShowDialog);
+      globalThis.removeEventListener("dialog-closed", onDialogClosed);
+      globalThis.removeEventListener("click", onPromptInput, true);
+      globalThis.removeEventListener("keydown", onPromptInput, true);
+    };
+  }
+
+  // A button press belongs to the surface it was made on; once the surface is
+  // removed, a later arm cannot be one it started.
+  disconnect() {
+    this._disconnect?.();
+    this._disconnect = null;
+    this._clearInputs();
+    this._reset(null);
+  }
+
+  _syncEntity(stateObj) {
+    if (stateObj.entity_id !== this._entityId) this._reset(stateObj.entity_id);
+  }
+
+  // Must be called synchronously from the event listener: composedPath() is
+  // empty once dispatch has finished. The event is only read, never stopped,
+  // so HA's own handler still dispatches the arm.
+  noteValueChanged(event, stateObj, ticked) {
+    if (!stateObj) return;
+    const mode = event.detail?.value;
+    if (typeof mode !== "string" || !mode.startsWith("armed_")) return;
+    if (!event.composedPath().some((node) => node.localName === this._controlTag)) return;
+    this._syncEntity(stateObj);
+    if (stateObj.state !== "disarmed" || !autoForceActive(stateObj, ticked)) return;
+    this._intentAt = Date.now();
+    this._deadline = this._intentAt + AUTO_FORCE_ARM_START_MS;
+  }
+
+  // Synchronous from the listener, like noteValueChanged.
+  noteShowDialog(event) {
+    if (this._intentAt === null || event.detail?.dialogTag !== PIN_PROMPT) return;
+    if (!event.composedPath().some((node) => node.localName === this._controlTag)) return;
+    this._promptOpen = true;
+    this._submitted = false;
+    this._deadline = this._intentAt + AUTO_FORCE_INTENT_TTL_MS;
+  }
+
+  // Synchronous from the listener, like noteValueChanged. A Submit after the
+  // typing cap does not revive the press.
+  noteSubmit(event) {
+    if (this._intentAt === null || !this._promptOpen || this._submitted) return;
+    if (Date.now() > this._deadline || !isPinSubmit(event)) return;
+    this._submitted = true;
+    this._deadline = Date.now() + AUTO_FORCE_ARM_START_MS;
+  }
+
+  // The arm follows a Submit before the prompt finishes closing (measured
+  // ~0.1 s vs ~0.25 s), so closing only matters when nothing was submitted:
+  // that is a Cancel, and the press goes with it.
+  noteDialogClosed(event) {
+    if (this._intentAt === null || !this._promptOpen) return;
+    if (event.detail?.dialog !== PIN_PROMPT) return;
+    this._promptOpen = false;
+    if (!this._submitted) this._intentAt = null;
+  }
+
+  // Runs on every state update, including repeats of the same state.
+  update(stateObj, ticked, hass) {
+    this._stateObj = stateObj || null;
+    this._ticked = ticked;
+    if (!stateObj) return;
+    this._syncEntity(stateObj);
+    const s = stateObj.state;
+    const entityId = stateObj.entity_id;
+
+    if (this._intentAt !== null && this._prevState === "disarmed" && s !== "disarmed") {
+      // While the prompt is open, an arm before its Submit is not this one.
+      const fresh = Date.now() <= this._deadline && (!this._promptOpen || this._submitted);
+      this._intentAt = null;
+      if (fresh && IN_FLIGHT_STATES.has(s) && autoForceActive(stateObj, ticked)) {
+        this._pending = true;
+        // Fired as the arm goes in flight, before the exception lands, so the
+        // transient "force-arm required?" prompt may be skipped entirely; if
+        // it loses that race the backend still dismisses it on force-arm.
+        this._call(hass, "suppress_arm_exception_prompt", entityId);
+        this._prevState = s;
+        return;
+      }
+    }
+
+    if (this._pending) {
+      if (stateObj.attributes?.force_arm_available === true) {
+        this._pending = false;
+        // The gate or tick may have been turned off since the arm started.
+        if (autoForceActive(stateObj, ticked)) this._call(hass, "force_arm", entityId);
+      } else if (!IN_FLIGHT_STATES.has(s)) {
+        // Settled with no forceable exception (armed, or a non-forceable
+        // rejection back to disarmed): a later force context is not ours.
+        this._pending = false;
+      }
+    }
+    this._prevState = s;
+  }
+
+  // Best effort: a failure (offline panel, missing service, a dropped
+  // connection that throws before returning a promise) only means the step did
+  // not happen, and must not escape into the surface's render or surface as an
+  // unhandled rejection.
+  _call(hass, service, entityId) {
+    if (!entityId || !hass?.callService) return;
+    try {
+      const result = hass.callService("verisure_owa", service, { entity_id: entityId });
+      Promise.resolve(result).catch(() => {});
+    } catch {
+      /* the step did not happen */
+    }
+  }
 }
 
 export function armExceptionTranslation(lang, key, vars) {

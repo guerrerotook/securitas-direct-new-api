@@ -981,9 +981,12 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             "name": "Suppress arm-exception prompt",
             "description": (
                 "Suppress the next 'force-arm required' prompt for this panel "
-                "and send a 'force-armed' confirmation instead. Fired by the "
-                "auto-force-arm option (in the alarm's More Info dialog or the "
-                "alarm card) as it arms; not intended for manual use."
+                "and send a 'force-armed' confirmation instead. If no force-arm "
+                "follows within 15 seconds of the arm being blocked, the normal "
+                "arm-blocked notification is sent after all. Fired by the "
+                "auto-force-arm option (in the alarm's More Info dialog, the "
+                "Tile card or the alarm card) as it arms; not intended for "
+                "manual use."
             ),
             "fields": {},
             "target": _entity_target("alarm_control_panel"),

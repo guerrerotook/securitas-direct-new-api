@@ -87,7 +87,7 @@
                             "auto_force_arm": "Mostrar uma caixa de armar forçado automático nos controlos do alarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando ativado, a janela de informações do alarme (e o cartão de alarme obsoleto) mostra uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
+                            "auto_force_arm": "Quando ativado, a janela de informações do alarme e um cartão Mosaico (Tile) com os modos de alarme e a funcionalidade Verisure OWA Open Sensors (e o cartão de alarme obsoleto) mostram uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. Só atua num armamento iniciado pelos botões ao lado. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
                         }
                     },
                     "subpanels": {
@@ -150,7 +150,7 @@
                             "auto_force_arm": "Mostrar uma caixa de armar forçado automático nos controlos do alarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando ativado, a janela de informações do alarme (e o cartão de alarme obsoleto) mostra uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
+                            "auto_force_arm": "Quando ativado, a janela de informações do alarme e um cartão Mosaico (Tile) com os modos de alarme e a funcionalidade Verisure OWA Open Sensors (e o cartão de alarme obsoleto) mostram uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. Só atua num armamento iniciado pelos botões ao lado. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
                         }
                     },
                     "subpanels": {

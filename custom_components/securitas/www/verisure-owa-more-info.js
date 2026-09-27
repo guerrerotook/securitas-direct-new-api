@@ -3,11 +3,13 @@
 // Home Assistant continues to own alarm modes, PIN handling, state display,
 // accessibility and responsive layout. This wrapper composes the native
 // control with the shared arming-exception element and a per-device
-// auto-force-arm tick box (mirroring the dashboard card's option).
+// auto-force-arm tick box, shared with the Tile feature, that force-arms past
+// open sensors for arms started from this dialog's own mode buttons.
 
 import {
+  AUTO_FORCE_CHANGED_EVENT,
+  AutoForceArmTracker,
   armExceptionTranslation,
-  autoForceActive,
   hassLanguage,
   readAutoForce,
   writeAutoForce,
@@ -18,14 +20,10 @@ class VerisureOwaMoreInfo extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
 
-    // Per-device auto-force-arm state. Home Assistant's stock control
-    // dispatches the arm here (not our code), so the intent is armed by
-    // observing the panel move disarmed→arming rather than by a click we own.
-    // `_pendingAutoForce` therefore never fires for a stale/foreign force
-    // context that was already present when the dialog opened.
     this._autoForceArm = false;
-    this._pendingAutoForce = false;
-    this._prevState = null;
+    this._autoForceTracker = new AutoForceArmTracker(
+      "ha-state-control-alarm_control_panel-modes",
+    );
     this._entityId = null;
     this._lastSyncKey = null;
 
@@ -50,6 +48,12 @@ class VerisureOwaMoreInfo extends HTMLElement {
     `;
     this._nativeControl = document.createElement("more-info-content");
     this._nativeControl.id = "native-control";
+    this._onAutoForceChanged = (event) => {
+      if (event.detail?.entityId !== this._entityId) return;
+      this._autoForceArm = event.detail.on === true;
+      this._lastSyncKey = null;
+      this._syncAutoForce();
+    };
 
     this._autoForceField = document.createElement("ha-formfield");
     this._autoForceField.className = "auto-force-toggle";
@@ -59,9 +63,8 @@ class VerisureOwaMoreInfo extends HTMLElement {
     this._autoForceField.appendChild(this._autoForceCheckbox);
     this._autoForceCheckbox.addEventListener("change", (event) => {
       event.stopPropagation();
-      this._autoForceArm = this._autoForceCheckbox.checked === true;
-      if (this._entityId) writeAutoForce(this._entityId, this._autoForceArm);
-      this._lastSyncKey = null; // reflect the new tick immediately
+      // _onAutoForceChanged hears this write and takes the new tick.
+      if (this._entityId) writeAutoForce(this._entityId, this._autoForceCheckbox.checked === true);
     });
 
     this._forceExtension = document.createElement("verisure-owa-arm-exception-alert");
@@ -75,9 +78,19 @@ class VerisureOwaMoreInfo extends HTMLElement {
   }
 
   connectedCallback() {
+    // A tick saved while this was removed was not heard, even if an update
+    // re-read storage before the save, so re-read it now.
+    this._entityId = null;
+    this._autoForceTracker.connect(this._nativeControl);
+    globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._forwardNativeProperties();
     this._syncAutoForce();
     this._updateForceExtension();
+  }
+
+  disconnectedCallback() {
+    this._autoForceTracker.disconnect();
+    globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
   }
 
   set hass(hass) {
@@ -142,78 +155,6 @@ class VerisureOwaMoreInfo extends HTMLElement {
     return (this._entityId && this._hass?.states?.[this._entityId]) || this._stateObj || null;
   }
 
-  // Fire-and-forget verisure_owa service call for an auto-force step. A
-  // rejection (offline panel, missing service) just means this step didn't
-  // happen — contain it so it never surfaces as an unhandled promise rejection
-  // in the browser console. Returns the settled promise for tests.
-  _bestEffortCall(service, entityId) {
-    if (!entityId || !this._hass?.callService) return Promise.resolve();
-    return Promise.resolve(
-      this._hass.callService("verisure_owa", service, { entity_id: entityId }),
-    ).catch(() => {});
-  }
-
-  // Request to skip the transient "force-arm required?" prompt for the arm now
-  // in flight — fired as the panel moves to `arming`, before the exception
-  // lands, so the prompt may be suppressed entirely. If it loses the race the
-  // backend still dismisses the prompt on force-arm; either way the follow-up
-  // "force-armed" confirmation is what tells the user what happened.
-  _suppressArmPrompt(entityId) {
-    this._bestEffortCall("suppress_arm_exception_prompt", entityId);
-  }
-
-  // Called on every hass/stateObj update. When a user arm (dispatched by HA's
-  // stock control) hits a forceable exception, force-arm automatically instead
-  // of leaving the prompt for the user. Mirrors the dashboard card's
-  // state-machine, but arms the intent from the observed disarmed→arming
-  // transition since this wrapper does not own the arm dispatch.
-  _maybeAutoForceArm(stateObj) {
-    if (!stateObj) return;
-    const s = stateObj.state;
-    const entityId = stateObj.entity_id;
-    const forceable = stateObj.attributes?.force_arm_available === true;
-
-    // Arm-start: a fresh arm just went in-flight from disarmed. Arm the intent
-    // and pre-suppress the prompt best-effort. Because the intent is only ever
-    // armed here — once the panel is already in flight — there is no
-    // "clicked but not yet arming" gap to track (unlike the dashboard card,
-    // which arms on its own click a tick before the panel moves).
-    if (
-      !this._pendingAutoForce &&
-      this._prevState === "disarmed" &&
-      (s === "arming" || s === "pending") &&
-      autoForceActive(stateObj, this._autoForceArm)
-    ) {
-      this._pendingAutoForce = true;
-      this._suppressArmPrompt(entityId);
-      this._prevState = s;
-      return;
-    }
-
-    if (this._pendingAutoForce) {
-      if (forceable) {
-        this._pendingAutoForce = false;
-        // Re-check the authoritative gate at fire time: if the option was
-        // turned off (or the tick cleared) after the arm started, don't force.
-        if (autoForceActive(stateObj, this._autoForceArm)) {
-          this._bestEffortCall("force_arm", entityId);
-        }
-        this._prevState = s;
-        return;
-      }
-      if (s === "arming" || s === "pending") {
-        // The arm reached the panel and is in flight — wait for it to resolve.
-        this._prevState = s;
-        return;
-      }
-      // Any settled state with no forceable exception means the arm resolved:
-      // armed OK, or a non-forceable rejection that bounced back to disarmed.
-      // Drop the intent so a later, unrelated force context can't trigger it.
-      this._pendingAutoForce = false;
-    }
-    this._prevState = s;
-  }
-
   _syncAutoForce() {
     if (!this._autoForceField) return;
     const stateObj = this._resolvedStateObj();
@@ -221,22 +162,17 @@ class VerisureOwaMoreInfo extends HTMLElement {
     if (entityId && entityId !== this._entityId) {
       this._entityId = entityId;
       this._autoForceArm = readAutoForce(entityId);
-      // Drop any intent/transition state from a previous entity so a reused
-      // instance can't carry a stale pending force-arm across a swap.
-      this._pendingAutoForce = false;
-      this._prevState = null;
       this._lastSyncKey = null;
     }
+    // The tracker runs on every update (it catches a force context that
+    // appears on the same tick) and judges a button press by the last one.
+    this._autoForceTracker.update(stateObj, this._autoForceArm, this._hass);
     if (!stateObj) return;
 
-    // The state machine must run every tick (it catches a force context that
-    // appears on the same tick), but the presentation below only changes with
-    // the gate, language and tick state — memoize it so the common no-op tick,
-    // and the paired set hass/set stateObj call, skip the DOM/translation work.
-    this._maybeAutoForceArm(stateObj);
-
     // The tick box is a pre-arm preference, offered only while the alarm can
-    // be armed and the integration capability gate is on.
+    // be armed and the integration capability gate is on. It only changes with
+    // the gate, language and tick state, so it is memoized: the common no-op
+    // update, and the paired set hass/set stateObj call, skip the DOM work.
     const gateOn = stateObj.attributes?.auto_force_arm_enabled === true;
     const show = gateOn && stateObj.state === "disarmed";
     const lang = hassLanguage(this._hass);

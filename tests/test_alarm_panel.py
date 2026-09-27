@@ -14,6 +14,7 @@ from homeassistant.components.alarm_control_panel.const import (
     AlarmControlPanelState,
     CodeFormat,
 )
+from homeassistant.core import Event
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as _er_for_feature_detect
 from homeassistant.helpers.entity_registry import DeletedRegistryEntry
@@ -40,6 +41,9 @@ from custom_components.securitas.coordinators import (
 from custom_components.securitas.events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
     FORCE_ARM_EXPIRED_EVENT_TYPE,
+)
+from custom_components.securitas.notification_translations import (
+    NOTIFICATION_TRANSLATIONS,
 )
 from custom_components.securitas.pin_crypto import encode_pin, hash_pin
 from custom_components.securitas.verisure_owa_api.command_resolver import (
@@ -453,9 +457,10 @@ class TestForceArmNotificationsConfig:
     async def test_arm_prompt_suppression_skips_prompt(self):
         """A set suppress flag stops the arming-exception prompt from firing.
 
-        The auto-force card sets this flag before dispatching an arm it intends
-        to force through, so the human never sees the transient "force-arm
-        required?" prompt (which the auto-force would immediately dismiss).
+        Auto-force-arm sets this flag for an arm it intends to force through
+        (the deprecated card before arming; More Info and the Tile once arming
+        starts), so the human never sees the transient "force-arm required?"
+        prompt (which the auto-force would immediately dismiss).
         """
         alarm = make_alarm()
         alarm.client.config["force_arm_notifications"] = True
@@ -532,10 +537,10 @@ class TestForceArmNotificationsConfig:
         """An auto-forced arm dismisses the arming-exception prompt too.
 
         The dashboard card pre-suppresses the prompt so nothing is shown, but the
-        native More Info dialog can only react after HA dispatches the arm — the
-        prompt may already be on screen when our suppress lands. Dismiss it in
-        both cases (a no-op when it was never shown); the "force-armed"
-        confirmation still fires as the replacement.
+        native More Info dialog and the Tile can only react after HA dispatches
+        the arm — the prompt may already be on screen when our suppress lands.
+        Dismiss it in both cases (a no-op when it was never shown); the
+        "force-armed" confirmation still fires as the replacement.
         """
         alarm = self._force_context_alarm()
         alarm._dismiss_arming_exception_notification = MagicMock()
@@ -2755,6 +2760,261 @@ class TestForceArmExpiryTimer:
         )
 
         unsub_mock.assert_called_once()
+
+
+class _FakeTimers:
+    """Stand-in for async_call_later that fires timers as the test advances time."""
+
+    def __init__(self) -> None:
+        self._now = 0.0
+        self._timers: list[dict] = []
+
+    def call_later(self, _hass, delay, action):
+        seconds = delay.total_seconds() if isinstance(delay, timedelta) else delay
+        timer = {"due": self._now + seconds, "action": action, "active": True}
+        self._timers.append(timer)
+
+        def unsub() -> None:
+            timer["active"] = False
+
+        return unsub
+
+    async def advance(self, seconds: float) -> None:
+        self._now += seconds
+        for timer in sorted(self._timers, key=lambda t: t["due"]):
+            if timer["active"] and timer["due"] <= self._now:
+                timer["active"] = False
+                result = timer["action"](datetime.now())
+                if inspect.isawaitable(result):
+                    await result
+
+
+class TestSuppressedPromptFallback:
+    """A suppressed "arm blocked" prompt is sent after all when nobody forces.
+
+    Auto-force-arm suppresses the prompt on the promise that the frontend will
+    call force_arm. If that frontend goes away first, the user must still hear
+    that the alarm did not arm, well before the force-arm window expires.
+    """
+
+    # Comfortably inside the 180 s force-arm window, so expiry cannot be what
+    # reaches the user.
+    _WAIT = 30
+
+    _BLOCKED_TITLE = NOTIFICATION_TRANSLATIONS["en"]["arm_blocked_open_sensors"][
+        "title"
+    ]
+
+    @pytest.fixture
+    def timers(self):
+        fake = _FakeTimers()
+        with patch(
+            "custom_components.securitas.alarm_control_panel._base.async_call_later",
+            side_effect=fake.call_later,
+        ):
+            yield fake
+
+    @staticmethod
+    def _make_panel(*, allow_forcing: bool = True):
+        alarm = make_alarm()
+        alarm.client.config["force_arm_notifications"] = True
+        alarm._state = AlarmControlPanelState.DISARMED
+        alarm.hass.services.async_call = AsyncMock()
+        pending: list = []
+        alarm.hass.async_create_task = MagicMock(side_effect=pending.append)
+        alarm._pending_tasks = pending
+
+        def _route_event(event_type, payload):
+            if event_type == "verisure_owa_arming_exception":
+                alarm._notify_arm_exceptions_from_event(Event(event_type, payload))
+
+        alarm.hass.bus.async_fire = MagicMock(side_effect=_route_event)
+        alarm.client.arm_alarm = AsyncMock(
+            side_effect=[
+                ArmingExceptionError(
+                    "ref-1",
+                    "suid-1",
+                    [{"alias": "Window"}],
+                    allow_forcing=allow_forcing,
+                ),
+                OperationStatus(
+                    operation_status="OK",
+                    message="",
+                    status="",
+                    installation_number="123456",
+                    protom_response="T",
+                    protom_response_date="",
+                ),
+            ]
+        )
+        return alarm
+
+    @staticmethod
+    async def _drain(alarm) -> None:
+        while alarm._pending_tasks:
+            await alarm._pending_tasks.pop(0)
+
+    def _created(self, alarm, notification_id: str) -> list[dict]:
+        return [
+            c.kwargs["service_data"]
+            for c in alarm.hass.services.async_call.call_args_list
+            if c.kwargs.get("service") == "create"
+            and c.kwargs["service_data"]["notification_id"] == notification_id
+        ]
+
+    def _blocked_prompts(self, alarm) -> list[dict]:
+        return [
+            data
+            for data in self._created(alarm, alarm._arming_exception_notification_id)
+            if data["title"] == self._BLOCKED_TITLE
+        ]
+
+    def _force_armed_confirmations(self, alarm) -> list[dict]:
+        return self._created(alarm, alarm._force_armed_notification_id)
+
+    async def _suppressed_arm_blocked(self, alarm) -> None:
+        alarm.suppress_arm_exception_prompt()
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+        await self._drain(alarm)
+
+    async def test_blocked_prompt_sent_when_nobody_forces_the_suppressed_arm(
+        self, timers
+    ):
+        """A suppressed arm-blocked prompt is sent late when no force-arm follows."""
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+        assert self._blocked_prompts(alarm) == []
+
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        prompts = self._blocked_prompts(alarm)
+        assert len(prompts) == 1
+        assert "Window" in prompts[0]["message"]
+
+    async def test_no_blocked_prompt_when_the_suppressed_arm_is_forced(self, timers):
+        """Forcing the suppressed arm cancels the late prompt and confirms the force."""
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+
+        await alarm.async_force_arm()
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
+        assert len(self._force_armed_confirmations(alarm)) == 1
+
+    async def test_force_arm_after_the_late_prompt_sends_no_auto_confirmation(
+        self, timers
+    ):
+        """A force-arm after the late prompt sends no force-armed confirmation."""
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        await alarm.async_force_arm()
+        await self._drain(alarm)
+
+        assert self._force_armed_confirmations(alarm) == []
+
+    async def test_unforceable_warning_is_sent_once_despite_suppression(self, timers):
+        """An arm that cannot be forced is warned about once, not again later."""
+        alarm = self._make_panel(allow_forcing=False)
+        await self._suppressed_arm_blocked(alarm)
+        assert len(self._created(alarm, alarm._arming_exception_notification_id)) == 1
+
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert len(self._created(alarm, alarm._arming_exception_notification_id)) == 1
+
+    async def test_unsuppressed_prompt_is_sent_once_at_once(self, timers):
+        """Without suppression the prompt is sent immediately and not repeated."""
+        alarm = self._make_panel()
+        await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+        await self._drain(alarm)
+        assert len(self._blocked_prompts(alarm)) == 1
+
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert len(self._blocked_prompts(alarm)) == 1
+
+    async def test_no_blocked_prompt_after_the_suppressed_arm_is_cancelled(
+        self, timers
+    ):
+        """Cancelling the force-arm cancels the late prompt."""
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+
+        await alarm.async_force_arm_cancel()
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
+
+    async def test_no_blocked_prompt_after_the_force_arm_window_expires(self, timers):
+        """Expiry of the force-arm window cancels the late prompt."""
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+
+        await alarm._async_handle_force_arm_expiry(datetime.now())
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
+
+    async def test_no_blocked_prompt_after_a_new_arm_dismisses_the_context(
+        self, timers
+    ):
+        """A new arm that dismisses the force context cancels the late prompt."""
+        alarm = self._make_panel()
+        setup_alarm_entry_data(alarm)
+        await self._suppressed_arm_blocked(alarm)
+
+        await alarm._dismiss_pending_force_context_on_siblings(
+            reason="user_arm", new_mode=AlarmControlPanelState.ARMED_HOME
+        )
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
+
+    async def test_no_blocked_prompt_when_notifications_turned_off_meanwhile(
+        self, timers
+    ):
+        """The late prompt re-reads the notifications option when it fires.
+
+        Defensive: a real options change reloads the entry, which cancels the
+        timer. This checks the send still reads the setting at fire time, so a
+        prompt scheduled while notifications were on stays silent if they are
+        off by then.
+        """
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+
+        alarm.client.config["force_arm_notifications"] = False
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
+
+    async def test_entity_removal_cancels_the_pending_prompt(self, timers):
+        """Removing the entity cancels the late prompt."""
+        alarm = self._make_panel()
+        await self._suppressed_arm_blocked(alarm)
+        # Removal does not wipe the context, so only the explicit cancel on
+        # teardown stops the timer from firing on a removed entity.
+        with patch.object(
+            CoordinatorEntity, "async_will_remove_from_hass", AsyncMock()
+        ):
+            await alarm.async_will_remove_from_hass()
+
+        await timers.advance(self._WAIT)
+        await self._drain(alarm)
+
+        assert self._blocked_prompts(alarm) == []
 
 
 class TestArmingExceptionDismissedOnEntityRemoval:

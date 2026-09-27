@@ -107,10 +107,16 @@ _LOGGER = logging.getLogger(__name__)
 # state) and therefore safe to issue even when the current state is unknown.
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 
-# How long a card's "suppress the next arm-exception prompt" request stays
-# armed. Long enough to cover the arm round-trip that follows it, short enough
+# How long an auto-force-arm "suppress the next arm-exception prompt" request
+# stays armed. Long enough to cover the arm round-trip that follows it, short enough
 # that a stray request can't silently swallow an unrelated prompt later on.
 _ARM_PROMPT_SUPPRESS_WINDOW = 120.0
+
+# How long a suppressed arm-blocked prompt waits for the auto-force-arm that
+# asked for the suppression. If the frontend went away before calling
+# force_arm, the prompt is sent after all rather than leaving the user
+# unaware that the alarm did not arm.
+_SUPPRESSED_PROMPT_FALLBACK_DELAY = 15.0
 
 
 def _read_unsupported_for_installation(
@@ -189,8 +195,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._attr_extra_state_attributes["custom_ui_more_info"] = MORE_INFO_ELEMENT
         # Advertise the auto-force-arm capability gate to the frontend.
         # Static per config (an options change reloads the entry), so it's set
-        # once here. The card and the More Info dialog only offer their
-        # per-device tick box when True.
+        # once here. The card, the More Info dialog and the Tile feature only
+        # offer their per-device tick box when True.
         self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
             self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
         )
@@ -261,9 +267,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # warning cleanly.
         self._force_context: dict[str, Any] | None = None
         self._force_arm_expiry_unsub: Callable[[], None] | None = None
+        self._suppressed_prompt_fallback_unsub: Callable[[], None] | None = None
         self._last_handled_event_id: str | None = None
         # Monotonic deadline until which the next arming-exception prompt is
-        # suppressed. Auto-force-arm (card or More Info dialog) sets this via
+        # suppressed. Auto-force-arm (card, More Info dialog or Tile) sets this via
         # the suppress_arm_exception_prompt service for an arm it intends to
         # force through, so the user sees the "force-armed" confirmation
         # instead of a prompt that would be dismissed a beat later.
@@ -276,13 +283,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         Target of the verisure_owa.suppress_arm_exception_prompt service. The
         window also gates the follow-up "force-armed" confirmation, so only an
-        auto-forced arm (card set this flag) confirms; a manual Force Arm tap
+        auto-forced arm (auto-force set this flag) confirms; a manual Force Arm tap
         does not.
         """
         self._suppress_arm_prompt_until = time.monotonic() + _ARM_PROMPT_SUPPRESS_WINDOW
 
     def _arm_prompt_suppressed(self) -> bool:
-        """True while a card-requested prompt suppression is still in effect."""
+        """True while an auto-force-requested prompt suppression is still in effect."""
         return time.monotonic() < self._suppress_arm_prompt_until
 
     async def async_added_to_hass(self) -> None:
@@ -325,8 +332,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 reason=DISMISSAL_REASON_INTEGRATION_RELOAD,
                 new_mode=None,
             )
-        # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
+        # Cancel the timers to avoid late callbacks on a torn-down entity.
         self._cancel_force_arm_expiry()
+        self._cancel_suppressed_prompt_fallback()
         await super().async_will_remove_from_hass()
 
     @callback
@@ -1379,6 +1387,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # cancel, sibling dismissal, expiry) — clear it so it can't swallow a
         # later, unrelated prompt.
         self._suppress_arm_prompt_until = 0.0
+        self._cancel_suppressed_prompt_fallback()
 
     def _notify_force_armed(self, bypassed: list[dict[str, Any]]) -> None:
         """Schedule the "force-armed" confirmation (sync-callable)."""
@@ -1600,7 +1609,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # Auto-force-arm asks us to skip this prompt for an arm it will force
         # through — the follow-up "force-armed" confirmation tells the user
         # what happened instead. The card asks before it arms; the More Info
-        # dialog only once arming starts, so its request can arrive too late.
+        # dialog and the Tile only once arming starts, so their request can
+        # arrive too late.
         # The suppression window still gates that confirmation (see
         # set_arm_state), so it fires only for this auto path, never for a
         # manual Force Arm tap.
@@ -1609,10 +1619,45 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # prohibited cannot complete the auto-force flow, so its warning must
         # never be suppressed.
         if event.data.get("allow_forcing", True) and self._arm_prompt_suppressed():
+            self._schedule_suppressed_prompt_fallback(event)
             return
         if not event.data.get("allow_forcing", True):
             self._suppress_arm_prompt_until = 0.0
         self.hass.async_create_task(self._async_notify_arm_exceptions(event))
+
+    def _schedule_suppressed_prompt_fallback(self, event: Event) -> None:
+        """Send the suppressed prompt later if nobody forces the arm by then.
+
+        Every resolution of the force context (force_arm, cancel, dismissal,
+        expiry) wipes it through ``_wipe_force_arm_state``, which cancels this
+        timer.
+        """
+        self._cancel_suppressed_prompt_fallback()
+        context = self._force_context
+
+        @callback
+        def _send_prompt(_now: datetime.datetime) -> None:
+            self._suppressed_prompt_fallback_unsub = None
+            if context is None or self._force_context is not context:
+                return
+            # The auto-force is abandoned: a later Force Arm tap is the user's
+            # own choice and must not get the auto-force confirmation.
+            self._suppress_arm_prompt_until = 0.0
+            # Defensive, like the sibling handlers: an options change reloads
+            # the entry, which cancels this timer anyway.
+            if not self._notifications_enabled:
+                return
+            self.hass.async_create_task(self._async_notify_arm_exceptions(event))
+
+        self._suppressed_prompt_fallback_unsub = async_call_later(
+            self.hass, _SUPPRESSED_PROMPT_FALLBACK_DELAY, _send_prompt
+        )
+
+    def _cancel_suppressed_prompt_fallback(self) -> None:
+        """Cancel any pending suppressed-prompt fallback (no-op if none)."""
+        if self._suppressed_prompt_fallback_unsub is not None:
+            self._suppressed_prompt_fallback_unsub()
+            self._suppressed_prompt_fallback_unsub = None
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
         """Send translated persistent + mobile notifications for an arming exception."""
