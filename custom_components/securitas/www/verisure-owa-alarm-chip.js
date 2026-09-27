@@ -13,6 +13,8 @@ import {
   attachGesture,
   _makeLegacyShim,
   migrateCompactAlarmConfig,
+  reportDeprecatedElement,
+  TRANSLATIONS,
 } from "./verisure-owa-alarm-shared.js?v=5.8.0";
 import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.8.0";
 
@@ -140,6 +142,10 @@ class VerisureOwaAlarmBadge extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._deprecationReported) {
+      this._deprecationReported = true;
+      reportDeprecatedElement(hass, "badge");
+    }
     // HA may assign hass before setConfig() with some element lifecycles; stay
     // a no-op until configured (setConfig triggers the first render).
     if (!this._config) return;
@@ -337,6 +343,10 @@ class VerisureOwaAlarmChip extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._deprecationReported) {
+      this._deprecationReported = true;
+      reportDeprecatedElement(hass, "chip");
+    }
     this._tryRender();
   }
 
@@ -445,8 +455,8 @@ window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === "verisure-owa-alarm-chip")) {
   window.customCards.push({
     type:        "verisure-owa-alarm-chip",
-    name:        "Verisure OWA Alarm Chip",
-    description: "Mushroom-compatible alarm chip — shows alarm state with force-arm support.",
+    name:        "Verisure OWA Alarm Chip (deprecated)",
+    description: "Deprecated: use Mushroom's own alarm control panel chip instead.",
     preview:     false,
   });
 }
@@ -454,8 +464,8 @@ window.customBadges = window.customBadges || [];
 if (!window.customBadges.find(b => b.type === "verisure-owa-alarm-badge")) {
   window.customBadges.push({
     type:        "verisure-owa-alarm-badge",
-    name:        "Verisure OWA Alarm Badge",
-    description: "Alarm badge with name and state — click to open native More Info.",
+    name:        "Verisure OWA Alarm Badge (deprecated)",
+    description: TRANSLATIONS.en.deprecated_badge,
     // preview:false — a live picker preview calls setConfig(getStubConfig(hass)),
     // and on a system with no alarm_control_panel.* entity that stub is
     // { entity: "" }, which setConfig rejects ("Please define an entity"),

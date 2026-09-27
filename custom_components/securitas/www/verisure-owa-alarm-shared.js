@@ -67,6 +67,10 @@ export const TRANSLATIONS = {
     editor_double_tap_action: "Double-tap action",
     card_name: "Verisure OWA Alarm Card",
     card_description: "Alarm card for Verisure: dynamic arm modes, PIN support, force-arm for open sensors.",
+    deprecated_card: "This card is deprecated and will be removed in a future release. Use Home Assistant\u2019s Tile or Alarm panel card instead.",
+    deprecated_badge: "This badge is deprecated and will be removed in a future release. Use Home Assistant\u2019s own entity badge instead.",
+    deprecated_how: "How to switch",
+    deprecated_dismiss: "Dismiss",
   },
   es: {
     ...ARM_EXCEPTION_TRANSLATIONS.es,
@@ -110,6 +114,10 @@ export const TRANSLATIONS = {
     editor_double_tap_action: "Acción al tocar dos veces",
     card_name: "Tarjeta de Alarma Verisure",
     card_description: "Tarjeta de alarma para Verisure: modos de armado, PIN y armado forzado.",
+    deprecated_card: "Esta tarjeta est\u00e1 obsoleta y se eliminar\u00e1 en una versi\u00f3n futura. Usa en su lugar la tarjeta Tile o la tarjeta de panel de alarma de Home Assistant.",
+    deprecated_badge: "Esta insignia est\u00e1 obsoleta y se eliminar\u00e1 en una versi\u00f3n futura. Usa en su lugar la insignia de entidad de Home Assistant.",
+    deprecated_how: "C\u00f3mo cambiar",
+    deprecated_dismiss: "Descartar",
   },
   fr: {
     ...ARM_EXCEPTION_TRANSLATIONS.fr,
@@ -153,6 +161,10 @@ export const TRANSLATIONS = {
     editor_double_tap_action: "Action sur double appui",
     card_name: "Carte d\u2019alarme Verisure",
     card_description: "Carte d\u2019alarme Verisure\u00a0: modes d\u2019armement, PIN et armement forc\u00e9.",
+    deprecated_card: "Cette carte est obsol\u00e8te et sera supprim\u00e9e dans une prochaine version. Utilisez plut\u00f4t la carte Tuile ou la carte de panneau d\u2019alarme de Home Assistant.",
+    deprecated_badge: "Ce badge est obsol\u00e8te et sera supprim\u00e9 dans une prochaine version. Utilisez plut\u00f4t le badge d\u2019entit\u00e9 de Home Assistant.",
+    deprecated_how: "Comment migrer",
+    deprecated_dismiss: "Ignorer",
   },
   it: {
     ...ARM_EXCEPTION_TRANSLATIONS.it,
@@ -196,6 +208,10 @@ export const TRANSLATIONS = {
     editor_double_tap_action: "Azione al doppio tocco",
     card_name: "Scheda Allarme Verisure",
     card_description: "Scheda allarme Verisure: modalit\u00e0 di armamento, PIN e armamento forzato.",
+    deprecated_card: "Questa scheda \u00e8 deprecata e verr\u00e0 rimossa in una versione futura. Usa invece la scheda Riquadro o la scheda pannello d\u2019allarme di Home Assistant.",
+    deprecated_badge: "Questo badge \u00e8 deprecato e verr\u00e0 rimosso in una versione futura. Usa invece il badge entit\u00e0 di Home Assistant.",
+    deprecated_how: "Come passare",
+    deprecated_dismiss: "Chiudi",
   },
   pt: {
     ...ARM_EXCEPTION_TRANSLATIONS.pt,
@@ -239,6 +255,10 @@ export const TRANSLATIONS = {
     editor_double_tap_action: "A\u00e7\u00e3o ao tocar duas vezes",
     card_name: "Cart\u00e3o de Alarme Verisure",
     card_description: "Cart\u00e3o de alarme Verisure: modos de armar, PIN e armamento for\u00e7ado.",
+    deprecated_card: "Este cart\u00e3o est\u00e1 obsoleto e ser\u00e1 removido numa vers\u00e3o futura. Use antes o cart\u00e3o Mosaico ou o cart\u00e3o de painel de alarme do Home Assistant.",
+    deprecated_badge: "Este crach\u00e1 est\u00e1 obsoleto e ser\u00e1 removido numa vers\u00e3o futura. Use antes o crach\u00e1 de entidade do Home Assistant.",
+    deprecated_how: "Como mudar",
+    deprecated_dismiss: "Dispensar",
   },
 };
 
@@ -246,6 +266,44 @@ export const TRANSLATIONS = {
 TRANSLATIONS["pt-BR"] = TRANSLATIONS.pt;
 
 export const _t = (lang, key, vars) => formatTranslation(lang, TRANSLATIONS, key, vars);
+
+// ── Deprecation of the custom alarm card, badge and chip ─────────────────────
+export const DEPRECATION_DOCS_URL =
+  "https://github.com/guerrerotook/securitas-direct-new-api#replacing-the-deprecated-alarm-card-badge-and-chip";
+
+const DEPRECATION_DISMISSED_KEY = "verisure-owa-deprecation-dismissed";
+
+export function deprecationNoticeDismissed() {
+  try {
+    return globalThis.localStorage?.getItem(DEPRECATION_DISMISSED_KEY) === "true";
+  } catch (_) {
+    return false;
+  }
+}
+
+export function dismissDeprecationNotice() {
+  try {
+    globalThis.localStorage?.setItem(DEPRECATION_DISMISSED_KEY, "true");
+  } catch (_) {
+    // Storage blocked: the notice closes for this card only.
+  }
+}
+
+/**
+ * Ask the integration to write a deprecation warning to the Home Assistant
+ * log. The backend deduplicates per element and dashboard; a missing or
+ * failing command must never affect rendering.
+ */
+export function reportDeprecatedElement(hass, element) {
+  const dashboard = (globalThis.location?.pathname || "").split("/")[1] || "";
+  try {
+    Promise.resolve(
+      hass.callWS({ type: "verisure_owa/deprecated_element", element, dashboard }),
+    ).catch(() => {});
+  } catch (_) {
+    // Older frontends or test doubles without callWS.
+  }
+}
 
 /**
  * Run a Home Assistant service without leaving rejected service promises

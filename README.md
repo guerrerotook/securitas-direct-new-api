@@ -178,9 +178,22 @@ controls. **Force Arm** appears only when that panel explicitly permits it;
 otherwise the dialog shows the sensors and a **Cancel** action so they can be
 closed before retrying.
 
+## Replacing the deprecated alarm card, badge and chip
+
+Home Assistant's own dashboard elements now show open sensors and offer Force Arm through the [native More Info dialog](#native-alarm-more-info), so the integration's custom alarm card, badge and Mushroom chip are **deprecated** and will be removed in a future release. They keep working until then. The alarm card shows a notice you can close, and the Home Assistant log shows a warning naming the dashboard each one is used on.
+
+| If you use | Replace it with |
+| --- | --- |
+| **Verisure OWA Alarm Card** | A [Tile card](#tile-card) with the **Alarm modes** and **Verisure OWA Open Sensors** features, which lists the blocking sensors and offers Force Arm inside the Tile. Home Assistant's **Alarm panel card** also works: the More Info dialog opened from it offers Force Arm. |
+| **Verisure OWA Alarm Badge** | Home Assistant's own entity badge for the alarm. Tapping it opens More Info. Unlike the custom badge, it does not switch to a warning icon when arming is blocked. |
+| **Mushroom chip** (`type: verisure-owa-alarm`) | Mushroom's own alarm chip, `type: alarm-control-panel`. |
+
 ## Custom Alarm Card
 
-The custom alarm card (`verisure-owa-alarm-card`) is the default way to interact with the alarm from a dashboard. Unlike the stock HA alarm panel card, it surfaces the force-arm warning and buttons inline when arming is blocked.
+> [!WARNING]
+> Deprecated: see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
+
+The custom alarm card (`verisure-owa-alarm-card`) surfaces the force-arm warning and buttons inline when arming is blocked.
 
 |                   Disarmed                   |                   Armed (Home)                   |                   Custom Mapping                    |
 | :------------------------------------------: | :----------------------------------------------: | :-------------------------------------------------: |
@@ -200,11 +213,17 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 
 ### Badge
 
+> [!WARNING]
+> Deprecated: use Home Assistant's own entity badge. See [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
+
 A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog, where Home Assistant owns the alarm modes and PIN entry. Hold and double-tap can use the supported dashboard actions described under [Gesture Actions](#gesture-actions).
 
 Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; choose the time format for timestamp content; and configure tap, hold and double-tap actions.
 
 ### Mushroom Chip
+
+> [!WARNING]
+> Deprecated: use Mushroom's own `alarm-control-panel` chip. See [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 For a [Mushroom Chips Card](https://github.com/piitaya/lovelace-mushroom), use `type: verisure-owa-alarm`. Same icon and colors as the badge in a Mushroom-compatible pill. Tap opens the native More Info dialog; hold and double-tap are configured in YAML — see [Gesture Actions](#gesture-actions) below.
 

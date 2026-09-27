@@ -63,6 +63,7 @@ from .api_queue import ApiQueue
 from .card_resources import (
     _register_card_resource,
     _unregister_card_resource,
+    async_register_deprecation_command,
 )
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
     ACTIVITY_LOG_CARD_BASE_URL,
@@ -1226,6 +1227,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
     # Lives as long as Home Assistant does (async_setup runs once per start),
     # so the unsubscribe is deliberately not tied to any entry.
     async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _entry_changed)
+    async_register_deprecation_command(hass)
     return True
 
 

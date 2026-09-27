@@ -4,19 +4,21 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.8.0
 
-The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog**, the alarm **badge**, and the **Tile card** all surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.
+The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog** and the **Tile card** both surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). As a result, the custom alarm card, badge and Mushroom chip are now deprecated. Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.
 
 ### Added
 
 **Force Arm across Home Assistant's native UI ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)).**  When an open door or window blocks arming, the standard alarm **More Info dialog** and the **Tile card** now list the open sensors and offer Force Arm and Cancel right there — the familiar Home Assistant controls, with no custom card required. Panels that don't allow forcing (such as in Spain) still get the list and a note to close the sensors first. Contributed by [@foxdalas](https://github.com/foxdalas).
-
-**A first-class alarm badge ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)).**  The Verisure alarm badge is now a proper native Home Assistant badge: a live preview when you add it, content settings for its name and icon, and the option to show the alarm state in the badges row. Contributed by [@foxdalas](https://github.com/foxdalas).
 
 **Arm past open doors and windows automatically ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  A new tick box, off by default, arms straight past any open sensor instead of stopping to ask you to confirm each time. Your choice is remembered per device and works from both the alarm card and Home Assistant's native UI. Thanks to [@WSorban](https://github.com/WSorban) for the request.
 
 **A clear heads-up for a rare restart problem ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  A few accounts still hit a server-side error on every restart that leaves the alarm unavailable until it is removed and set up again. This release adds optional detailed logging to help track down the cause, and now shows a single plain warning — with steps to help — the first time it happens, so affected users know what is going on instead of seeing an unexplained failure. Thanks to [@amullr](https://github.com/amullr) for the report.
 
 **A native activity event entity ([#593](https://github.com/guerrerotook/securitas-direct-new-api/pull/593)).**  The panel's activity timeline — arms, disarms, intrusions, image requests, power events — is now also exposed as a Home Assistant `event` entity (`event.<alias>_activity`), so it appears in the built-in Logbook and can trigger automations directly, with no custom card. Each entry carries its category as the event type, translated in every supported language, and the newest event is always the one shown. The existing activity-log sensor, card and event bus are unchanged.
+
+### Deprecated
+
+**The custom alarm card, badge and Mushroom chip.**  Home Assistant's own More Info dialog and Tile card now show open sensors and offer Force Arm, so these three will be removed in a future release. They keep working until then; the alarm card shows a notice, and the Home Assistant log names each dashboard that still uses one. See [how to switch](https://github.com/guerrerotook/securitas-direct-new-api#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 ### Fixed
 

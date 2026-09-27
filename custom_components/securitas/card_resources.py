@@ -12,9 +12,14 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from typing import Any
 
+import voluptuous as vol
 from homeassistant.components import frontend
-from homeassistant.core import HomeAssistant
+from homeassistant.components.websocket_api import async_register_command
+from homeassistant.components.websocket_api.connection import ActiveConnection
+from homeassistant.components.websocket_api.decorators import websocket_command
+from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 
@@ -85,3 +90,55 @@ async def _unregister_card_resource(
                 await resources.async_delete_item(resource_id)
     except Exception:  # pylint: disable=broad-exception-caught
         _LOGGER.debug("[teardown] Could not remove Lovelace resource %s", resource_id)
+
+
+DEPRECATION_DOCS_URL = (
+    "https://github.com/guerrerotook/securitas-direct-new-api"
+    "#replacing-the-deprecated-alarm-card-badge-and-chip"
+)
+_DEPRECATED_ELEMENTS = {
+    "card": (
+        "alarm card",
+        "Home Assistant's Tile card with the Verisure OWA Open Sensors feature, "
+        "or its Alarm panel card",
+    ),
+    "badge": ("alarm badge", "Home Assistant's own entity badge"),
+    "chip": ("Mushroom alarm chip", "Mushroom's own alarm control panel chip"),
+}
+_REPORTED_KEY = f"{DOMAIN}_deprecated_elements_reported"
+
+
+@callback
+def async_register_deprecation_command(hass: HomeAssistant) -> None:
+    """Let the deprecated dashboard elements report where they are used."""
+    async_register_command(hass, _ws_deprecated_element)
+
+
+@websocket_command(
+    {
+        vol.Required("type"): "verisure_owa/deprecated_element",
+        vol.Required("element"): vol.In(_DEPRECATED_ELEMENTS),
+        vol.Optional("dashboard", default=""): vol.All(str, vol.Length(max=100)),
+    }
+)
+@callback
+def _ws_deprecated_element(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    reported: set[tuple[str, str]] = hass.data.setdefault(_REPORTED_KEY, set())
+    key = (msg["element"], msg["dashboard"])
+    if key not in reported:
+        reported.add(key)
+        name, replacement = _DEPRECATED_ELEMENTS[msg["element"]]
+        where = f"dashboard /{msg['dashboard']}" if msg["dashboard"] else "a dashboard"
+        _LOGGER.warning(
+            "The Verisure OWA %s used on %s is deprecated and will be removed in "
+            "a future release. Replace it with %s: %s",
+            name,
+            where,
+            replacement,
+            DEPRECATION_DOCS_URL,
+        )
+    connection.send_result(msg["id"])
