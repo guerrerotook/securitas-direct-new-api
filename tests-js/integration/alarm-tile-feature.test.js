@@ -545,6 +545,10 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
   });
 
   describe("auto-force acts only on this Tile's Alarm modes buttons", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it("force-arms an arm started from the Tile's Alarm modes feature", () => {
       localStorage.setItem(LS_KEY, "true");
       const { feature, modes, callService } = mountTile();
@@ -630,7 +634,6 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       );
       vi.advanceTimersByTime(10_001);
       armWithException(feature, callService);
-      vi.useRealTimers();
 
       expect(autoForceCalls(callService)).toEqual([]);
     });
@@ -653,7 +656,6 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
         new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
       );
       armWithException(feature, callService);
-      vi.useRealTimers();
 
       expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
         entity_id: ENTITY,
