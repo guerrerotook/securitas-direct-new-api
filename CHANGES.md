@@ -10,7 +10,7 @@ The headline this release is that the integration now lives in Home Assistant's 
 
 **Force Arm across Home Assistant's native UI ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)).**  When an open door or window blocks arming, the standard alarm **More Info dialog** and the **Tile card** now list the open sensors and offer Force Arm and Cancel right there — the familiar Home Assistant controls, with no custom card required. Panels that don't allow forcing (such as in Spain) still get the list and a note to close the sensors first. Contributed by [@foxdalas](https://github.com/foxdalas).
 
-**Arm past open doors and windows automatically ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  A new tick box, off by default, arms straight past any open sensor instead of stopping to ask you to confirm each time. Your choice is remembered per device and works from both the alarm card and Home Assistant's native UI. Thanks to [@WSorban](https://github.com/WSorban) for the request.
+**Arm past open doors and windows automatically ([#566](https://github.com/guerrerotook/securitas-direct-new-api/issues/566)).**  A new tick box, off by default, arms straight past any open sensor instead of stopping to ask you to confirm each time. Your choice is remembered per device and works from both the alarm card and Home Assistant's native alarm More Info dialog (the Tile card does not offer it). Thanks to [@WSorban](https://github.com/WSorban) for the request.
 
 **A clear heads-up for a rare restart problem ([#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568)).**  A few accounts still hit a server-side error on every restart that leaves the alarm unavailable until it is removed and set up again. This release adds optional detailed logging to help track down the cause, and now shows a single plain warning — with steps to help — the first time it happens, so affected users know what is going on instead of seeing an unexplained failure. Thanks to [@amullr](https://github.com/amullr) for the report.
 
@@ -18,7 +18,7 @@ The headline this release is that the integration now lives in Home Assistant's 
 
 ### Deprecated
 
-**The custom alarm card, badge and Mushroom chip.**  Home Assistant's own More Info dialog and Tile card now show open sensors and offer Force Arm, so these three will be removed in a future release. They keep working until then; the alarm card shows a notice, and the Home Assistant log names each dashboard that still uses one. See [how to switch](https://github.com/guerrerotook/securitas-direct-new-api#replacing-the-deprecated-alarm-card-badge-and-chip).
+**The custom alarm card, badge and Mushroom chip are deprecated ([#602](https://github.com/guerrerotook/securitas-direct-new-api/pull/602)).**  Home Assistant's own More Info dialog and Tile card now show open sensors and offer Force Arm, so these three will be removed in a future release. They keep working until then; the alarm card shows a notice, and the Home Assistant log names each dashboard that still uses one. See [how to switch](https://github.com/guerrerotook/securitas-direct-new-api#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 ### Fixed
 

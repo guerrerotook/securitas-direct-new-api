@@ -39,8 +39,9 @@ suppress_arm_exception_prompt:
     Use `verisure_owa.suppress_arm_exception_prompt` instead.
 
     Suppress the next "force-arm required" prompt for this panel and send a
-    "force-armed" confirmation instead. Fired by the alarm card's
-    auto-force-arm option just before it arms; not intended for manual use.
+    "force-armed" confirmation instead. Fired by the auto-force-arm option (in
+    the alarm's More Info dialog or the alarm card) as it arms; not
+    intended for manual use.
   target:
     entity:
       integration: securitas

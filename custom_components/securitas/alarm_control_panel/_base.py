@@ -187,9 +187,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # control. The custom element composes the stock control and adds the
         # Verisure force-arm exception UI only while an exception is active.
         self._attr_extra_state_attributes["custom_ui_more_info"] = MORE_INFO_ELEMENT
-        # Advertise the auto-force-arm capability gate to the Lovelace card.
+        # Advertise the auto-force-arm capability gate to the frontend.
         # Static per config (an options change reloads the entry), so it's set
-        # once here. The card only offers its per-device tick box when True.
+        # once here. The card and the More Info dialog only offer their
+        # per-device tick box when True.
         self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
             self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
         )
@@ -262,11 +263,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._force_arm_expiry_unsub: Callable[[], None] | None = None
         self._last_handled_event_id: str | None = None
         # Monotonic deadline until which the next arming-exception prompt is
-        # suppressed. The auto-force card sets this (via the
-        # suppress_arm_exception_prompt service) right before dispatching an
-        # arm it intends to force through, so the user sees the "force-armed"
-        # confirmation instead of a prompt that would be dismissed a beat
-        # later. Self-expires so a stray request can't swallow a later,
+        # suppressed. Auto-force-arm (card or More Info dialog) sets this via
+        # the suppress_arm_exception_prompt service for an arm it intends to
+        # force through, so the user sees the "force-armed" confirmation
+        # instead of a prompt that would be dismissed a beat later. Self-expires so a stray request can't swallow a later,
         # unrelated prompt.
         self._suppress_arm_prompt_until: float = 0.0
 
@@ -1596,13 +1596,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _notify_arm_exceptions_from_event(self, event: Event) -> None:
         """Send notifications about arming exceptions from event data."""
-        # The auto-force card asks us to skip this prompt for an arm it is
-        # about to force through — the follow-up "force-armed" confirmation
-        # tells the user what happened instead. The suppression window still
+        # Auto-force-arm asks us to skip this prompt for an arm it will force
+        # through — the follow-up "force-armed" confirmation tells the user
+        # what happened instead. The card asks before it arms; the More Info
+        # dialog only once arming starts, so its request can arrive too late. The suppression window still
         # gates that confirmation (see set_arm_state), so it fires only for
         # this auto path, never for a manual Force Arm tap.
-        # Suppression is requested optimistically before the first arm call.
-        # A panel that then says forcing is prohibited cannot complete the
+        # Suppression is requested optimistically, before the panel has said
+        # whether forcing is allowed. A panel that then says forcing is prohibited cannot complete the
         # auto-force flow, so its warning must never be suppressed.
         if event.data.get("allow_forcing", True) and self._arm_prompt_suppressed():
             return

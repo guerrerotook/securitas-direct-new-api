@@ -982,8 +982,8 @@ _ALIASED_SERVICES: tuple[tuple[str, SupportsResponse, dict[str, Any]], ...] = (
             "description": (
                 "Suppress the next 'force-arm required' prompt for this panel "
                 "and send a 'force-armed' confirmation instead. Fired by the "
-                "alarm card's auto-force-arm option just before it arms; not "
-                "intended for manual use."
+                "auto-force-arm option (in the alarm's More Info dialog or the "
+                "alarm card) as it arms; not intended for manual use."
             ),
             "fields": {},
             "target": _entity_target("alarm_control_panel"),
@@ -1204,7 +1204,8 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
 
     Also listens for config entry state changes, so the integration can clean
     up when Home Assistant unloads an entry without calling
-    ``async_unload_entry``.
+    ``async_unload_entry``, and registers the websocket command the deprecated
+    dashboard elements use to report where they are still in use.
     """
     orphan = Path(hass.config.path("custom_components", "verisure_owa"))
     if orphan.is_dir():

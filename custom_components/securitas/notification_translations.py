@@ -80,7 +80,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "Arming was blocked because the following sensor(s) are open:\n"
                 "{sensor_list}\n\n"
-                "To arm anyway, tap **Force Arm** on the alarm card."
+                "To arm anyway, open the alarm and tap **Force Arm**."
             ),
             "mobile_message": (
                 "Arm blocked — open sensor(s): {sensor_list}. Arm anyway?"
@@ -186,8 +186,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "El armado se bloqueó porque los siguientes sensores están "
                 "abiertos:\n{sensor_list}\n\n"
-                "Para armar de todos modos, pulsa **Armar de todos modos** en "
-                "la tarjeta de la alarma."
+                "Para armar de todos modos, abre la alarma y pulsa "
+                "**Forzar armado**."
             ),
             "mobile_message": (
                 "Armado bloqueado — sensor(es) abierto(s): {sensor_list}. "
@@ -301,8 +301,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "L'armement a été bloqué car les capteurs suivants sont "
                 "ouverts :\n{sensor_list}\n\n"
-                "Pour armer quand même, appuyez sur **Armer quand même** sur "
-                "la carte d'alarme."
+                "Pour armer quand même, ouvrez l'alarme et appuyez sur "
+                "**Forcer l\u2019armement**."
             ),
             "mobile_message": (
                 "Armement bloqué — capteur(s) ouvert(s) : {sensor_list}. "
@@ -415,8 +415,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "L'attivazione è stata bloccata perché i seguenti sensori "
                 "sono aperti:\n{sensor_list}\n\n"
-                "Per attivare comunque, tocca **Attiva comunque** sulla card "
-                "dell'allarme."
+                "Per attivare comunque, apri l'allarme e tocca "
+                "**Forza armamento**."
             ),
             "mobile_message": (
                 "Attivazione bloccata — sensore(i) aperto(i): {sensor_list}. "
@@ -527,8 +527,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "O armar foi bloqueado porque os seguintes sensores estão "
                 "abertos:\n{sensor_list}\n\n"
-                "Para armar na mesma, toque em **Armar na mesma** no cartão "
-                "do alarme."
+                "Para armar na mesma, abra o alarme e toque em "
+                "**Forçar armamento**."
             ),
             "mobile_message": (
                 "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. Armar na mesma?"
@@ -638,8 +638,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "Armar foi bloqueado porque os seguintes sensores estão "
                 "abertos:\n{sensor_list}\n\n"
-                "Para armar mesmo assim, toque em **Forçar armado** no cartão "
-                "do alarme."
+                "Para armar mesmo assim, abra o alarme e toque em "
+                "**Forçar armamento**."
             ),
             "mobile_message": (
                 "Armar bloqueado — sensor(es) aberto(s): {sensor_list}. "
@@ -750,8 +750,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "L'armat s'ha bloquejat perquè els següents sensors estan "
                 "oberts:\n{sensor_list}\n\n"
-                "Per armar igualment, toca **Forçar armat** a la targeta de "
-                "l'alarma."
+                "Per armar igualment, obre l'alarma i toca **Force Arm**."
             ),
             "mobile_message": (
                 "Armat bloquejat — sensor(s) obert(s): {sensor_list}. Armar igualment?"

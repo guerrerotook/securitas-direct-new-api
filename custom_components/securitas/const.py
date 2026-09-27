@@ -78,12 +78,12 @@ CONF_MAP_CUSTOM = "map_custom"
 CONF_MAP_VACATION = "map_vacation"
 CONF_NOTIFY_GROUP = "notify_group"
 CONF_FORCE_ARM_NOTIFICATIONS = "force_arm_notifications"
-# Capability gate for the card's per-device auto-force-arm tick box. Off by
-# default: force-arming silently bypasses open door/window sensors, and some
-# countries/panels don't support it at all, so the option must be opted into
-# per installation. When on, the alarm entity advertises `auto_force_arm_enabled`
-# and the Lovelace card offers the tick box; the actual per-arm behaviour is
-# then remembered per-device in the browser, never here.
+# Capability gate for the per-device auto-force-arm tick box in the alarm card
+# and the More Info dialog. Off by default: force-arming silently bypasses open
+# door/window sensors, and some countries/panels don't support it at all, so the
+# option must be opted into per installation. When on, the alarm entity
+# advertises `auto_force_arm_enabled` and both offer the tick box; the actual
+# per-arm behaviour is then remembered per-device in the browser, never here.
 CONF_AUTO_FORCE_ARM = "auto_force_arm"
 CONF_INSTALLATION = "installation"
 CONF_ENABLE_INTERIOR_PANEL = "enable_interior_panel"

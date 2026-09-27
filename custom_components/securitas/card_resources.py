@@ -105,6 +105,8 @@ _DEPRECATED_ELEMENTS = {
     "badge": ("alarm badge", "Home Assistant's own entity badge"),
     "chip": ("Mushroom alarm chip", "Mushroom's own alarm control panel chip"),
 }
+# Kept outside ``hass.data[DOMAIN]``, which the clean-up discards, so the
+# once-per-run record survives it.
 _REPORTED_KEY = f"{DOMAIN}_deprecated_elements_reported"
 
 
@@ -127,6 +129,7 @@ def _ws_deprecated_element(
     connection: ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
+    """Log a warning once per element and dashboard that it is deprecated."""
     reported: set[tuple[str, str]] = hass.data.setdefault(_REPORTED_KEY, set())
     key = (msg["element"], msg["dashboard"])
     if key not in reported:

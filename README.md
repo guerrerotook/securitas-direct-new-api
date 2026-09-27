@@ -15,7 +15,7 @@ Full alarm control: the mappings between HA's five buttons (Home/Away/Night/Vaca
 
 Smart locks, with optional auto-lock when you arm and auto-disarm when you unlock from HA. Cameras with on-demand capture and full-resolution images. Sentinel temperature/humidity/air-quality sensors. A connectivity diagnostic for the panel itself.
 
-Bundled Lovelace UI: alarm card, alarm badge, [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip, Tile open-sensor feature, camera card, activity-log card.
+Bundled Lovelace UI: Tile open-sensor feature, camera card, activity-log card, and an alarm card, alarm badge and [Mushroom](https://github.com/piitaya/lovelace-mushroom) chip (deprecated — see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip)).
 
 The activity log mirrors what you see in the Verisure app — arm/disarm, intrusions, image requests, power events — surfaced as an event entity, a sensor, a card, and an event bus. Actions you take from HA are tagged with the real HA user and deduplicated against the panel's later echo, so automations fire once.
 
@@ -76,7 +76,7 @@ After setup, change settings via **Settings → Integrations → Verisure OWA �
 | | Require PIN for lock operations | No | When enabled, the same local PIN must be supplied on every lock, unlock, or open call for any smart lock on this installation — **including from your own automations and scripts, which will fail until they pass a `code`**. No effect if no PIN is set. The integration's own [auto-lock-on-arm and auto-disarm-on-unlock](#lock-automations) automations are unaffected. See [Requiring a PIN for lock operations](#requiring-a-pin-for-lock-operations). |
 | **Force-arm notifications** | Notify service | _(none)_ | A `notify` service to call when arming is blocked. Pick a mobile app notify service to receive an actionable notification with **Force Arm** and **Cancel** buttons. |
 | | Built-in force-arm notifications | Yes | When enabled (default), the integration creates persistent and mobile notifications when arming is blocked. Disable to handle the `verisure_owa_arming_exception` event from your own automations. See [Force Arming (advanced)](#force-arming-advanced). |
-| | Offer an auto-force-arm tick box on the alarm card | No | Off by default. When enabled, the alarm card shows a **"force-arm past open sensors"** tick box; with it ticked, arming from that card auto-forces past open doors/windows instead of waiting for you to confirm. The tick is remembered per device in the browser. Leave off where your panel doesn't support force-arming (Spain has been observed). See [Auto-force-arm from the card](#auto-force-arm-from-the-card). |
+| | Offer an auto-force-arm tick box in the alarm controls | No | Off by default. When enabled, the alarm's More Info dialog (and the deprecated alarm card) shows a **"force-arm past open sensors"** tick box; with it ticked, any arm that starts while the dialog is open — including one started by an automation or another device — auto-forces past open doors/windows instead of waiting for you to confirm (the card acts only on an arm made from the card itself). The tick is remembered per device in the browser. Leave off where your panel doesn't support force-arming (Spain has been observed). See [Auto-force-arm tick box](#auto-force-arm-tick-box). |
 | **Additional sub-panels** _(only when supported)_ | Enable Perimeter-only panel | No | Adds a `Perimeter - <alias>` alarm panel that controls the perimeter circuit only. Visible only on installations with perimeter sensors. |
 | | Enable Annex-only panel | No | Adds an `Annex - <alias>` alarm panel that controls the annex circuit only. Visible only on installations with an annex zone. |
 | | Enable Interior-only panel | No | Adds an `Interior - <alias>` alarm panel that controls the interior circuit only. Visible whenever any sibling circuit is supported. |
@@ -176,7 +176,32 @@ device page and the normal HA alarm modes and PIN controls remain in place.
 When arming is blocked, the dialog adds the affected sensor names below those
 controls. **Force Arm** appears only when that panel explicitly permits it;
 otherwise the dialog shows the sensors and a **Cancel** action so they can be
-closed before retrying.
+closed before retrying. When the
+[auto-force-arm tick box](#auto-force-arm-tick-box) is enabled, the dialog also
+shows it below the arm controls.
+
+## Tile Card
+
+The stock Tile Card can keep its native **Alarm modes** controls and show the
+same open-sensor warning inline. In the Tile editor, add the
+**Verisure OWA Open Sensors** feature after **Alarm modes**. The warning stays
+hidden until an arm attempt is rejected, then lists every affected zone inside
+the Tile. On panels that permit forcing it also offers **Force Arm**; Spanish
+panels that report `allowForcing: false` show only the close-and-retry warning.
+
+The equivalent YAML is:
+
+```yaml
+type: tile
+entity: alarm_control_panel.my_alarm
+features_position: bottom
+features:
+  - type: alarm-modes
+  - type: custom:verisure-owa-arm-exception
+```
+
+The sensor list is the snapshot Verisure returns after a failed arm attempt,
+not a live view of every contact before arming.
 
 ## Replacing the deprecated alarm card, badge and chip
 
@@ -184,7 +209,7 @@ Home Assistant's own dashboard elements now show open sensors and offer Force Ar
 
 | If you use | Replace it with |
 | --- | --- |
-| **Verisure OWA Alarm Card** | A [Tile card](#tile-card) with the **Alarm modes** and **Verisure OWA Open Sensors** features, which lists the blocking sensors and offers Force Arm inside the Tile. Home Assistant's **Alarm panel card** also works: the More Info dialog opened from it offers Force Arm. |
+| **Verisure OWA Alarm Card** | A [Tile card](#tile-card) with the **Alarm modes** and **Verisure OWA Open Sensors** features, which lists the blocking sensors and offers Force Arm inside the Tile. Home Assistant's **Alarm panel card** also works: the More Info dialog opened from it offers Force Arm. The Tile card has no [auto-force-arm tick box](#auto-force-arm-tick-box); use the More Info dialog for that. |
 | **Verisure OWA Alarm Badge** | Home Assistant's own entity badge for the alarm. Tapping it opens More Info. Unlike the custom badge, it does not switch to a warning icon when arming is blocked. |
 | **Mushroom chip** (`type: verisure-owa-alarm`) | Mushroom's own alarm chip, `type: alarm-control-panel`. |
 
@@ -206,7 +231,7 @@ The custom alarm card (`verisure-owa-alarm-card`) surfaces the force-arm warning
 - **Dynamic arm buttons** — only the modes you've mapped are shown.
 - **PIN keypad** — appears automatically when you've configured a PIN. Numeric codes get a numeric keypad; alphanumeric codes get a text input. The keypad on arm only appears if you've enabled "Require PIN to arm".
 - **Force-arm UI** — when arming is blocked, the card shows the affected sensors with inline **Force Arm** / **Cancel** buttons.
-- **Auto-force-arm tick box** _(opt-in)_ — when [enabled in the settings](#settings), the card shows a tick box to force-arm past open sensors automatically. See [Auto-force-arm from the card](#auto-force-arm-from-the-card).
+- **Auto-force-arm tick box** _(opt-in)_ — when [enabled in the settings](#settings), the card shows a tick box to force-arm past open sensors automatically. See [Auto-force-arm tick box](#auto-force-arm-tick-box).
 - **Theme-aware** — works correctly in both light and dark mode.
 
 To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick your alarm panel entity.
@@ -218,7 +243,7 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 
 A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog, where Home Assistant owns the alarm modes and PIN entry. Hold and double-tap can use the supported dashboard actions described under [Gesture Actions](#gesture-actions).
 
-Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. The badge has a live preview in the picker. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; choose the time format for timestamp content; and configure tap, hold and double-tap actions.
+Add it via **Add Badge → "Verisure OWA Alarm Badge"** and pick your alarm panel entity. Its lightweight visual editor uses Home Assistant's native **Content** and **Interactions** selectors: configure the name, color, icon or entity picture; choose whether to show the name, state and icon; select state attributes to display; choose the time format for timestamp content; and configure tap, hold and double-tap actions.
 
 ### Mushroom Chip
 
@@ -250,14 +275,15 @@ The Badge offers the Home Assistant **More Info**, **Navigate**, **Perform actio
 
 #### Using the Badge with native alarm controls
 
-No YAML is required for the recommended setup:
+This describes the deprecated **Verisure OWA Alarm Badge**. For new dashboards use Home Assistant's own entity badge instead, which opens the same More Info dialog — see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
 
-1. Add **Verisure OWA Alarm Badge** and select the alarm entity.
-2. Leave **Tap action** at its default, **More Info**.
-3. Tap the Badge and choose an available arm mode, or **Disarm**, in Home Assistant's native dialog.
-4. If an arm attempt is blocked, the same dialog adds the affected sensor names and, when allowed by the panel, **Force Arm**.
+With the existing Badge:
 
-This route is recommended when the alarm requires a PIN. Home Assistant selects the supported modes and owns the code prompt; the Badge does not need to duplicate that security UI.
+1. Leave **Tap action** at its default, **More Info**.
+2. Tap the Badge and choose an available arm mode, or **Disarm**, in Home Assistant's native dialog.
+3. If an arm attempt is blocked, the same dialog adds the affected sensor names and, when allowed by the panel, **Force Arm**.
+
+Home Assistant selects the supported modes and owns the code prompt, so this also works when the alarm requires a PIN.
 
 #### Using a fixed direct action
 
@@ -344,29 +370,6 @@ chips:
 | Navigate       | `action: navigate` + `navigation_path: /path`                    |
 | Perform action | `action: perform-action` + `perform_action: domain.service`       |
 
-### Tile Card
-
-The stock Tile Card can keep its native **Alarm modes** controls and show the
-same open-sensor warning inline. In the Tile editor, add the
-**Verisure OWA Open Sensors** feature after **Alarm modes**. The warning stays
-hidden until an arm attempt is rejected, then lists every affected zone inside
-the Tile. On panels that permit forcing it also offers **Force Arm**; Spanish
-panels that report `allowForcing: false` show only the close-and-retry warning.
-
-The equivalent YAML is:
-
-```yaml
-type: tile
-entity: alarm_control_panel.my_alarm
-features_position: bottom
-features:
-  - type: alarm-modes
-  - type: custom:verisure-owa-arm-exception
-```
-
-As with the full alarm card, this is the snapshot returned by Verisure after a
-failed arm attempt, not a live view of every contact before arming.
-
 ## Sentinel Sensors
 
 If your installation includes Sentinel devices, the integration automatically creates temperature, humidity, and air quality sensors for each one.
@@ -381,7 +384,7 @@ Two community pull requests tried anyway ([#532](https://github.com/guerrerotook
 
 ### What you can see instead
 
-When arming is blocked by an open door or window, the open zones _are_ reported to you — as a notification, on the alarm card, and in the `zones` field of the [`verisure_owa_arming_exception` event](#the-verisure_owa_arming_exception-event) (see [Force Arming](#force-arming-advanced)). But that is a **snapshot taken at the moment you arm**, not a live state you can automate on (e.g. "warn me if a window has been open for 10 minutes").
+When arming is blocked by an open door or window, the open zones _are_ reported to you — as a notification, in Home Assistant's [More Info dialog](#native-alarm-more-info) and [Tile card](#tile-card) (and on the deprecated alarm card), and in the `zones` field of the [`verisure_owa_arming_exception` event](#the-verisure_owa_arming_exception-event) (see [Force Arming](#force-arming-advanced)). But that is a **snapshot taken at the moment you arm**, not a live state you can automate on (e.g. "warn me if a window has been open for 10 minutes").
 
 > [!NOTE]
 > The `door_opened` / `door_closed` events in the [activity log](#activity-log) are a **smart lock's** door opening and auto-locking again — not a door/window contact sensor.
@@ -592,23 +595,23 @@ data:
 
 ## Force Arming (advanced)
 
-Most users won't need anything below — the alarm card and built-in mobile notifications already handle the "window left open" case. This section is for people writing their own automations against the `verisure_owa_arming_exception` event, or calling `verisure_owa.force_arm` directly.
+Most users won't need anything below — Home Assistant's native More Info dialog and Tile card, and the built-in mobile notifications, already handle the "window left open" case. This section is for people writing their own automations against the `verisure_owa_arming_exception` event, or calling `verisure_owa.force_arm` directly.
 
 ### What happens when arming is blocked
 
-The arm command reverts, the entity gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). Native More Info, the custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
+The arm command reverts, the entity gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The native More Info dialog, the Tile card, the deprecated custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
 
-When force-arming is allowed, you then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from native More Info, the custom card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
+When force-arming is allowed, you then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the native More Info dialog, the Tile card, the deprecated custom card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
 
 Some panels refuse force-arming altogether (Spain has been observed). The sensor names are still shown, but there is no **Force Arm** action — close those zones and retry.
 
-### Auto-force-arm from the card
+### Auto-force-arm tick box
 
-If reacting to the "window left open" prompt every time is a chore, you can have the alarm card do it for you. Turn on **"Offer an auto-force-arm tick box on the alarm card"** in the [settings](#settings) (off by default — force-arming silently bypasses open doors/windows, and some panels don't support it at all). The card then shows a **force-arm past open sensors** tick box below the arm buttons.
+If reacting to the "window left open" prompt every time is a chore, you can have Home Assistant do it for you. Turn on **"Offer an auto-force-arm tick box in the alarm controls"** in the [settings](#settings) (off by default — force-arming silently bypasses open doors/windows, and some panels don't support it at all). The alarm's More Info dialog (and the deprecated alarm card) then shows a **force-arm past open sensors** tick box below the arm buttons.
 
-With the tick box ticked, arming from that card and hitting an open sensor force-arms automatically instead of waiting for you to confirm — the bypassed zones are still recorded in the [activity log](#activity-log) as "Armed with exceptions". The tick box is remembered per device in the browser (not synced across devices, and it doesn't change how automations or the stock alarm card arm). It only acts on an exception raised by _that card's own_ arm, so opening a dashboard that already shows a pending force-arm context never arms on its own.
+With the tick box ticked, an arm that starts while the dialog is open — including one started by an automation or another device — and hits an open sensor force-arms automatically instead of waiting for you to confirm — the bypassed zones are still recorded in the [activity log](#activity-log) as "Armed with exceptions". The tick box is remembered per device in the browser (not synced across devices). It only acts on an arm that starts while the dialog is open (for the card, an arm made from the card itself), so opening one that already shows a pending force-arm context never arms on its own.
 
-Because the choice lives in the browser, the built-in notification still fires briefly before the card force-arms and clears it; if that push bothers you, disable **Built-in force-arm notifications** in the settings.
+From the deprecated alarm card, no "arm blocked" notification is sent: the card asks for it to be skipped before it arms. The More Info dialog can only ask once it sees the alarm start arming, so the "arm blocked" notification may still flash up before a "force-armed" one replaces it; if that push bothers you, disable **Built-in force-arm notifications** in the settings.
 
 ### The `verisure_owa_arming_exception` event
 
