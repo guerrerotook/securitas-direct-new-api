@@ -270,7 +270,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._suppressed_prompt_fallback_unsub: Callable[[], None] | None = None
         self._last_handled_event_id: str | None = None
         # Monotonic deadline until which the next arming-exception prompt is
-        # suppressed. Auto-force-arm (card or More Info dialog) sets this via
+        # suppressed. Auto-force-arm (card, More Info dialog or Tile) sets this via
         # the suppress_arm_exception_prompt service for an arm it intends to
         # force through, so the user sees the "force-armed" confirmation
         # instead of a prompt that would be dismissed a beat later.

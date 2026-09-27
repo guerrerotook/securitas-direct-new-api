@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../custom_components/securitas/www/verisure-owa-alarm-chip.js";
 import { makeHass } from "../fixtures/hass.js";
 import { makeAlarmEntity } from "../fixtures/entities.js";
@@ -225,5 +225,359 @@ describe("Verisure OWA Tile Card open-sensor feature", () => {
 
     expect(notification).toHaveBeenCalledOnce();
     expect(force.disabled).toBe(false);
+  });
+});
+
+// Mirrors Home Assistant's Tile DOM: hui-tile-card's shadow root holds
+// ha-card > ha-tile-container, whose light DOM carries one hui-card-features
+// per feature position (slot "features-inline" for the first feature when the
+// Tile uses the inline position, slot "features" for the rest). Each
+// hui-card-features renders one hui-card-feature per feature in its shadow
+// root, and each hui-card-feature renders the feature element in its own.
+describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
+  const LS_KEY = `verisure-owa:auto-force-arm:${ENTITY}`;
+
+  function alarmEntity(overrides = {}) {
+    return { ...makeAlarmEntity({ autoForceArmEnabled: true, ...overrides }), entity_id: ENTITY };
+  }
+
+  function hassWith(entity, callService) {
+    return makeHass({
+      states: { [ENTITY]: entity },
+      ...(callService ? { callService } : {}),
+    });
+  }
+
+  function buildTile() {
+    const tile = document.createElement("hui-tile-card");
+    const tileRoot = tile.attachShadow({ mode: "open" });
+    const card = document.createElement("ha-card");
+    const container = document.createElement("ha-tile-container");
+    const slots = container.attachShadow({ mode: "open" });
+    for (const name of ["features-inline", "features"]) {
+      const slot = document.createElement("slot");
+      slot.name = name;
+      slots.appendChild(slot);
+    }
+    card.appendChild(container);
+    tileRoot.appendChild(card);
+    document.body.appendChild(tile);
+    const groups = {};
+    const group = (slot) => {
+      if (!groups[slot]) {
+        groups[slot] = document.createElement("hui-card-features");
+        groups[slot].slot = slot;
+        groups[slot].attachShadow({ mode: "open" });
+        container.appendChild(groups[slot]);
+      }
+      return groups[slot].shadowRoot;
+    };
+    return { tile, tileRoot, group };
+  }
+
+  function wrap(element) {
+    const wrapper = document.createElement("hui-card-feature");
+    wrapper.attachShadow({ mode: "open" }).appendChild(element);
+    return wrapper;
+  }
+
+  function addAlarmModes(tileParts, slot = "features") {
+    const modes = document.createElement("hui-alarm-modes-card-feature");
+    const select = document.createElement("ha-control-select");
+    modes.attachShadow({ mode: "open" }).appendChild(select);
+    const wrapper = wrap(modes);
+    tileParts.group(slot).appendChild(wrapper);
+    return { wrapper, select };
+  }
+
+  function addOurFeature(tileParts, hass) {
+    const feature = document.createElement("verisure-owa-arm-exception");
+    feature.setConfig({ type: "custom:verisure-owa-arm-exception" });
+    // HA assigns hass and context before the feature is connected.
+    feature.hass = hass;
+    feature.context = { entity_id: ENTITY };
+    const wrapper = wrap(feature);
+    tileParts.group("features").appendChild(wrapper);
+    return { feature, wrapper };
+  }
+
+  function mountTile({ entity = alarmEntity(), modes = "before", callService } = {}) {
+    const hass = hassWith(entity, callService || vi.fn(async () => {}));
+    const tileParts = buildTile();
+    let modesFeature = null;
+    if (modes === "before") modesFeature = addAlarmModes(tileParts);
+    if (modes === "inline") modesFeature = addAlarmModes(tileParts, "features-inline");
+    const ours = addOurFeature(tileParts, hass);
+    if (modes === "after") modesFeature = addAlarmModes(tileParts);
+    return { ...tileParts, ...ours, modes: modesFeature, hass, callService: hass.callService };
+  }
+
+  function push(feature, entity, callService) {
+    const hass = hassWith(entity, callService);
+    feature.hass = hass;
+    feature.stateObj = entity;
+    return hass;
+  }
+
+  function toggle(feature) {
+    const el = feature.shadowRoot.querySelector(".auto-force-toggle");
+    return el && !el.hidden ? el : null;
+  }
+
+  function checkbox(feature) {
+    return feature.shadowRoot.querySelector(".auto-force-checkbox");
+  }
+
+  function pressMode(select, value = "armed_away") {
+    select.dispatchEvent(
+      new CustomEvent("value-changed", { detail: { value }, bubbles: true, composed: true }),
+    );
+  }
+
+  function armWithException(feature, callService) {
+    push(feature, alarmEntity({ state: "arming" }), callService);
+    push(feature, alarmEntity({ forceArmAvailable: true, armExceptions: ["Door"] }), callService);
+  }
+
+  function autoForceCalls(callService) {
+    return callService.mock.calls
+      .map((call) => call[1])
+      .filter((service) => ["suppress_arm_exception_prompt", "force_arm"].includes(service));
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  describe("visibility", () => {
+    it("shows the labelled tick box below the Alarm modes feature while disarmed", () => {
+      const { feature, wrapper } = mountTile();
+
+      expect(toggle(feature)).not.toBeNull();
+      expect(toggle(feature).getAttribute("label")).toBe(
+        "Automatically force-arm past open sensors",
+      );
+      expect(checkbox(feature).localName).toBe("ha-checkbox");
+      expect(feature.hidden).toBe(false);
+      expect(wrapper.hidden).toBe(false);
+    });
+
+    it("finds an Alarm modes feature in the Tile's inline feature slot", () => {
+      const { feature } = mountTile({ modes: "inline" });
+      expect(toggle(feature)).not.toBeNull();
+    });
+
+    it("finds an Alarm modes feature that HA renders after this one", async () => {
+      const { feature } = mountTile({ modes: "after" });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(toggle(feature)).not.toBeNull();
+    });
+
+    it("hides the tick box and the feature row on a Tile without Alarm modes", () => {
+      const { feature, wrapper } = mountTile({ modes: "none" });
+
+      expect(toggle(feature)).toBeNull();
+      expect(wrapper.hidden).toBe(true);
+    });
+
+    it("hides the tick box when the Alarm modes feature is removed from the Tile", () => {
+      const { feature, modes, wrapper } = mountTile();
+
+      modes.wrapper.remove();
+      push(feature, alarmEntity());
+
+      expect(toggle(feature)).toBeNull();
+      expect(wrapper.hidden).toBe(true);
+    });
+
+    it("hides the tick box when the capability gate is off", () => {
+      const { feature, wrapper } = mountTile({
+        entity: alarmEntity({ autoForceArmEnabled: false }),
+      });
+
+      expect(toggle(feature)).toBeNull();
+      expect(wrapper.hidden).toBe(true);
+    });
+
+    it("hides the tick box while the alarm is not disarmed", () => {
+      const { feature, wrapper } = mountTile({ entity: alarmEntity({ state: "armed_away" }) });
+
+      expect(toggle(feature)).toBeNull();
+      expect(wrapper.hidden).toBe(true);
+    });
+
+    it("replaces the tick box with the open-sensor warning while one is active", () => {
+      const { feature, wrapper } = mountTile({
+        entity: alarmEntity({ armExceptionActive: true, armExceptions: ["Patio"] }),
+      });
+
+      expect(toggle(feature)).toBeNull();
+      expect(exceptionRoot(feature).textContent).toContain("Patio");
+      expect(wrapper.hidden).toBe(false);
+    });
+
+    it("uses the Home Assistant language for the label", () => {
+      const { feature } = mountTile();
+      feature.hass = makeHass({ language: "es", states: { [ENTITY]: alarmEntity() } });
+
+      expect(toggle(feature).getAttribute("label")).toBe(
+        "Forzar armado automáticamente con sensores abiertos",
+      );
+    });
+  });
+
+  describe("tick persistence", () => {
+    it("writes the tick to the per-device key shared with More Info", () => {
+      const { feature } = mountTile();
+      const outer = vi.fn();
+      document.body.addEventListener("change", outer);
+
+      const cb = checkbox(feature);
+      cb.checked = true;
+      cb.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+      document.body.removeEventListener("change", outer);
+
+      expect(localStorage.getItem(LS_KEY)).toBe("true");
+      expect(outer).not.toHaveBeenCalled();
+
+      cb.checked = false;
+      cb.dispatchEvent(new Event("change"));
+      expect(localStorage.getItem(LS_KEY)).toBe("false");
+    });
+
+    it("reflects a tick made in the More Info dialog", async () => {
+      await import("../../custom_components/securitas/www/verisure-owa-more-info.js");
+      const { feature } = mountTile();
+      expect(checkbox(feature).checked).toBe(false);
+
+      const moreInfo = document.createElement("more-info-verisure-owa-alarm");
+      moreInfo.hass = hassWith(alarmEntity());
+      moreInfo.stateObj = alarmEntity();
+      document.body.appendChild(moreInfo);
+      const moreInfoBox = moreInfo.shadowRoot.querySelector(".auto-force-checkbox");
+      moreInfoBox.checked = true;
+      moreInfoBox.dispatchEvent(new Event("change"));
+
+      push(feature, alarmEntity());
+      expect(checkbox(feature).checked).toBe(true);
+    });
+  });
+
+  describe("auto-force acts only on this Tile's Alarm modes buttons", () => {
+    it("force-arms an arm started from the Tile's Alarm modes feature", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, modes, callService } = mountTile();
+
+      pressMode(modes.select);
+      armWithException(feature, callService);
+
+      expect(callService).toHaveBeenCalledWith("verisure_owa", "suppress_arm_exception_prompt", {
+        entity_id: ENTITY,
+      });
+      expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+        entity_id: ENTITY,
+      });
+    });
+
+    it("force-arms an arm started from an inline Alarm modes feature", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, modes, callService } = mountTile({ modes: "inline" });
+
+      pressMode(modes.select);
+      armWithException(feature, callService);
+
+      expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+        entity_id: ENTITY,
+      });
+    });
+
+    it("does NOT force an arm started elsewhere", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, callService } = mountTile();
+
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
+    it("does NOT force an arm started from another Tile's Alarm modes", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, callService } = mountTile();
+      const otherTile = buildTile();
+      const otherModes = addAlarmModes(otherTile);
+
+      pressMode(otherModes.select);
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
+    it("ignores mode events from other features and disarm presses", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const tileParts = buildTile();
+      const modes = addAlarmModes(tileParts);
+      const other = document.createElement("hui-select-options-card-feature");
+      const otherSelect = document.createElement("ha-control-select");
+      other.attachShadow({ mode: "open" }).appendChild(otherSelect);
+      tileParts.group("features").appendChild(wrap(other));
+      const callService = vi.fn(async () => {});
+      const { feature } = addOurFeature(tileParts, hassWith(alarmEntity(), callService));
+
+      pressMode(otherSelect);
+      pressMode(modes.select, "disarmed");
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
+    it("does NOT force when the tick box is off", () => {
+      const { feature, modes, callService } = mountTile();
+
+      pressMode(modes.select);
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
+    it("does not stop the mode event, so HA's own handler still arms", () => {
+      const { modes } = mountTile();
+      const outer = vi.fn();
+      document.body.addEventListener("value-changed", outer);
+
+      pressMode(modes.select);
+      document.body.removeEventListener("value-changed", outer);
+
+      expect(outer).toHaveBeenCalledOnce();
+    });
+
+    it("stops listening once disconnected and listens again on reconnect", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, wrapper, modes, group, callService } = mountTile();
+
+      wrapper.remove();
+      pressMode(modes.select);
+      armWithException(feature, callService);
+      expect(autoForceCalls(callService)).toEqual([]);
+
+      push(feature, alarmEntity(), callService);
+      group("features").appendChild(wrapper);
+      pressMode(modes.select);
+      armWithException(feature, callService);
+      expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+        entity_id: ENTITY,
+      });
+    });
+
+    it("does not re-render after a disconnect that beats the deferred check", async () => {
+      const { feature, wrapper } = mountTile({ modes: "after" });
+      const render = vi.spyOn(feature, "_render");
+
+      wrapper.remove();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(render).not.toHaveBeenCalled();
+    });
   });
 });

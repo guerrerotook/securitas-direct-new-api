@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AUTO_FORCE_INTENT_TTL_MS,
+  AutoForceArmTracker,
   armExceptionState,
   armExceptionTranslation,
 } from "../../custom_components/securitas/www/verisure-owa-arm-exception.js";
@@ -99,5 +101,255 @@ describe("verisure-owa-arm-exception-alert public API", () => {
     expect(notification.mock.calls[0][0].detail.message).toBe(
       "The alarm action failed. Please try again.",
     );
+  });
+});
+
+describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
+  const ENTITY = "alarm_control_panel.test";
+  const CONTROL = "fake-alarm-modes";
+
+  function stateOf({
+    state = "disarmed",
+    forceArmAvailable = false,
+    autoForceArmEnabled = true,
+    entityId = ENTITY,
+  } = {}) {
+    return {
+      entity_id: entityId,
+      state,
+      attributes: {
+        force_arm_available: forceArmAvailable,
+        auto_force_arm_enabled: autoForceArmEnabled,
+      },
+    };
+  }
+
+  // A control nested in a shadow root, as HA's alarm-modes controls are: the
+  // event leaves through the host, so only composedPath() can name the control.
+  function nestedSelect(tag) {
+    const host = document.createElement(tag);
+    const root = host.attachShadow({ mode: "open" });
+    const select = document.createElement("ha-control-select");
+    root.appendChild(select);
+    document.body.appendChild(host);
+    return select;
+  }
+
+  function fire(target, value, tracker, stateObj, ticked = true) {
+    const listener = (event) => tracker.noteValueChanged(event, stateObj, ticked);
+    document.body.addEventListener("value-changed", listener);
+    target.dispatchEvent(
+      new CustomEvent("value-changed", { detail: { value }, bubbles: true, composed: true }),
+    );
+    document.body.removeEventListener("value-changed", listener);
+  }
+
+  function setup() {
+    const tracker = new AutoForceArmTracker(CONTROL);
+    const hass = makeHass();
+    const disarmed = stateOf();
+    tracker.update(disarmed, true, hass);
+    return { tracker, hass, disarmed, select: nestedSelect(CONTROL) };
+  }
+
+  function calls(hass) {
+    return hass.callService.mock.calls.map((call) => call[1]);
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("forces an arm started from its own control", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "suppress_arm_exception_prompt", {
+      entity_id: ENTITY,
+    });
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+    expect(hass.callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
+  });
+
+  it("also consumes the intent on a disarmed→pending transition", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_home", tracker, disarmed);
+    tracker.update(stateOf({ state: "pending" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
+  });
+
+  it("does not force an arm with no intent (automation, other screen)", () => {
+    const { tracker, hass } = setup();
+
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("ignores value-changed events from other controls", () => {
+    const { tracker, hass, disarmed } = setup();
+
+    fire(nestedSelect("some-other-control"), "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("ignores disarm and non-alarm values", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "disarmed", tracker, disarmed);
+    fire(select, "on", tracker, disarmed);
+    fire(select, undefined, tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("ignores an intent while the panel is not disarmed", () => {
+    const { tracker, hass, select } = setup();
+    const armedHome = stateOf({ state: "armed_home" });
+    tracker.update(armedHome, true, hass);
+
+    fire(select, "armed_away", tracker, armedHome);
+    tracker.update(stateOf(), true, hass);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("ignores an intent when the box is unticked or the gate is off", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed, false);
+    fire(select, "armed_away", tracker, stateOf({ autoForceArmEnabled: false }), true);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("keeps the intent for the PIN-entry window, then discards it", () => {
+    vi.useFakeTimers();
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    vi.advanceTimersByTime(AUTO_FORCE_INTENT_TTL_MS);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+
+    const late = setup();
+    fire(late.select, "armed_away", late.tracker, late.disarmed);
+    vi.advanceTimersByTime(AUTO_FORCE_INTENT_TTL_MS + 1);
+    late.tracker.update(stateOf({ state: "arming" }), true, late.hass);
+    late.tracker.update(stateOf({ forceArmAvailable: true }), true, late.hass);
+    expect(late.hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("uses an intent once: a later arm from elsewhere is not forced", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ state: "armed_away" }), true, hass);
+    tracker.update(stateOf(), true, hass);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("drops the intent when the panel leaves disarmed without arming", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "triggered" }), true, hass);
+    tracker.update(stateOf(), true, hass);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the gate and tick when the exception lands", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), false, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("drops the pending force once the arm settles without an exception", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf(), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("does not carry an intent across an entity swap", () => {
+    const OTHER = "alarm_control_panel.other";
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ entityId: OTHER }), true, hass);
+    tracker.update(stateOf({ entityId: OTHER, state: "arming" }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
+  it("does not carry a pending force across an entity swap", () => {
+    const OTHER = "alarm_control_panel.other";
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ entityId: OTHER, forceArmAvailable: true }), true, hass);
+
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("contains rejections from its best-effort service calls", async () => {
+    const { tracker, disarmed, select } = setup();
+    // A plain function, not vi.fn: a spy observes the promises it returns,
+    // which would mark the rejection handled and hide a missing catch.
+    const services = [];
+    const hass = makeHass({
+      callService: (_domain, service) => {
+        services.push(service);
+        return Promise.reject(new Error("offline"));
+      },
+    });
+
+    fire(select, "armed_away", tracker, disarmed);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+    // An uncaught rejection here would fail the run as an unhandled rejection.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(services).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
+  });
+
+  it("tolerates a missing state object or hass", () => {
+    const tracker = new AutoForceArmTracker(CONTROL);
+    const select = nestedSelect(CONTROL);
+
+    expect(() => tracker.update(null, true, null)).not.toThrow();
+    fire(select, "armed_away", tracker, null);
+    tracker.update(stateOf(), true, null);
+    fire(select, "armed_away", tracker, stateOf());
+    expect(() => tracker.update(stateOf({ state: "arming" }), true, null)).not.toThrow();
   });
 });

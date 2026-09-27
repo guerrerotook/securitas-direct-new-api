@@ -4,8 +4,9 @@
 // verisure-owa-alarm-card.js) so they render immediately on a cold dashboard
 // load without first downloading the full card + editor. Badge/chip taps ask
 // HA to open its native More Info dialog; the separate global More Info module
-// adds the Verisure force-arm section there. The Tile feature remains self-
-// contained in this lightweight module.
+// adds the Verisure force-arm section there. The Tile feature (open-sensor
+// warning plus the auto-force-arm tick box) remains self-contained in this
+// lightweight module.
 
 import {
   _t,
@@ -16,7 +17,13 @@ import {
   reportDeprecatedElement,
   TRANSLATIONS,
 } from "./verisure-owa-alarm-shared.js?v=5.9.0";
-import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.9.0";
+import {
+  AutoForceArmTracker,
+  armExceptionTranslation,
+  hassLanguage,
+  readAutoForce,
+  writeAutoForce,
+} from "./verisure-owa-arm-exception.js?v=5.9.0";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
@@ -37,29 +44,77 @@ function badgeCssColor(color, fallback) {
   return HA_THEME_COLORS.has(color) ? `var(--${color}-color)` : color;
 }
 
-// Tile Card feature that surfaces the open-zone snapshot inline. Home
-// Assistant forwards `hass`, the Tile's entity context and (for backwards
-// compatibility with older custom features) `stateObj` to custom features.
-// Keep this component framework-free so it stays in the lightweight
-// chip/badge bundle and is available as soon as a dashboard loads.
+const ALARM_MODES_FEATURE = "hui-alarm-modes-card-feature";
+
+// Tile Card feature that surfaces the open-zone snapshot inline and, on a Tile
+// that also has HA's Alarm modes feature, the per-device auto-force-arm tick
+// box shared with More Info. Home Assistant forwards `hass`, the Tile's entity
+// context and (for backwards compatibility with older custom features)
+// `stateObj` to custom features. Keep this component framework-free so it
+// stays in the lightweight chip/badge bundle and is available as soon as a
+// dashboard loads.
 class VerisureOwaArmExceptionFeature extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._context = {};
     this._stateObj = null;
+    this._autoForceTracker = new AutoForceArmTracker(ALARM_MODES_FEATURE);
+    this._listenScope = null;
+    this._recheckTimer = null;
+    this._toggleKey = null;
+    this._onValueChanged = (event) => {
+      this._autoForceTracker.noteValueChanged(event, this._entity(), this._ticked());
+    };
 
     const style = document.createElement("style");
     style.textContent = `
       :host { display: block; min-width: 0; }
       :host([hidden]) { display: none; }
+      .auto-force-toggle {
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
+        min-height: var(--feature-height, 42px);
+        --mdc-typography-body2-font-size: var(--ha-font-size-s, 12px);
+      }
+      .auto-force-toggle[hidden] { display: none; }
     `;
     this._alert = document.createElement("verisure-owa-arm-exception-alert");
-    this.shadowRoot.append(style, this._alert);
+
+    this._autoForceField = document.createElement("ha-formfield");
+    this._autoForceField.className = "auto-force-toggle";
+    this._autoForceField.hidden = true;
+    this._autoForceCheckbox = document.createElement("ha-checkbox");
+    this._autoForceCheckbox.className = "auto-force-checkbox";
+    this._autoForceField.appendChild(this._autoForceCheckbox);
+    this._autoForceCheckbox.addEventListener("change", (event) => {
+      event.stopPropagation();
+      const entityId = this._entityId();
+      if (entityId) writeAutoForce(entityId, this._autoForceCheckbox.checked === true);
+      this._render();
+    });
+
+    this.shadowRoot.append(style, this._alert, this._autoForceField);
   }
 
   connectedCallback() {
+    this._listenScope = this._featureScope();
+    this._listenScope?.addEventListener("value-changed", this._onValueChanged);
     this._render();
+    // HA renders each sibling feature in its own later update, so an Alarm
+    // modes feature placed after this one does not exist yet.
+    this._recheckTimer = setTimeout(() => {
+      this._recheckTimer = null;
+      this._render();
+    }, 0);
+  }
+
+  disconnectedCallback() {
+    clearTimeout(this._recheckTimer);
+    this._recheckTimer = null;
+    this._listenScope?.removeEventListener("value-changed", this._onValueChanged);
+    this._listenScope = null;
   }
 
   setConfig() {
@@ -97,11 +152,40 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     return (entityId && this._hass?.states?.[entityId]) || this._stateObj;
   }
 
+  _ticked() {
+    const entityId = this._entityId();
+    return entityId ? readAutoForce(entityId) : false;
+  }
+
+  // The card's shadow root, which holds every hui-card-features group of this
+  // Tile: HA nests card shadow > hui-card-features (one per position; with the
+  // inline position the first feature sits in its own group) > shadow >
+  // hui-card-feature > shadow > feature. Listening here hears both groups and
+  // nothing from other cards.
+  _featureScope() {
+    const wrapper = this.getRootNode().host;
+    if (wrapper?.localName !== "hui-card-feature") return null;
+    const group = wrapper.getRootNode().host;
+    if (group?.localName !== "hui-card-features") return null;
+    return group.getRootNode();
+  }
+
+  _hasAlarmModesFeature() {
+    const scope = this._listenScope;
+    if (!scope) return false;
+    for (const group of scope.querySelectorAll("hui-card-features")) {
+      for (const wrapper of group.shadowRoot?.querySelectorAll("hui-card-feature") || []) {
+        if (wrapper.shadowRoot?.querySelector(ALARM_MODES_FEATURE)) return true;
+      }
+    }
+    return false;
+  }
+
   _setVisible(visible) {
     this.hidden = !visible;
 
-    // Remove the HA feature wrapper from its grid while there is no warning;
-    // hiding only the child would leave an empty feature row in the Tile.
+    // Remove the HA feature wrapper from its grid while there is nothing to
+    // show; hiding only the child would leave an empty feature row in the Tile.
     const root = this.getRootNode();
     if (root instanceof ShadowRoot && root.host?.localName === "hui-card-feature") {
       root.host.hidden = !visible;
@@ -116,7 +200,29 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
       entityId: this._entityId(),
       presentation: "compact",
     });
-    this._setVisible(this._alert.active);
+    // Read on every render rather than cached, so a tick made in More Info
+    // shows here on the next update.
+    const ticked = this._ticked();
+    this._autoForceTracker.update(stateObj, ticked, this._hass);
+
+    // The warning replaces the tick box to keep the Tile small, and the box
+    // only makes sense beside this Tile's own arm buttons.
+    const showToggle =
+      stateObj?.attributes?.auto_force_arm_enabled === true &&
+      stateObj.state === "disarmed" &&
+      !this._alert.active &&
+      this._hasAlarmModesFeature();
+    const lang = hassLanguage(this._hass);
+    const key = `${showToggle}|${lang}|${ticked}`;
+    if (key !== this._toggleKey) {
+      this._toggleKey = key;
+      this._autoForceField.hidden = !showToggle;
+      if (showToggle) {
+        this._autoForceField.setAttribute("label", armExceptionTranslation(lang, "auto_force_arm"));
+        this._autoForceCheckbox.checked = ticked;
+      }
+    }
+    this._setVisible(this._alert.active || showToggle);
   }
 }
 

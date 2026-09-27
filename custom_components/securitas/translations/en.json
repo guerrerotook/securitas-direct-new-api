@@ -70,7 +70,7 @@
                             "auto_force_arm": "Offer an auto-force-arm tick box in the alarm controls"
                         },
                         "data_description": {
-                            "auto_force_arm": "When enabled, the alarm's More Info dialog (and the deprecated alarm card) shows a tick box that automatically force-arms past open doors/windows instead of waiting for you to confirm. The choice is remembered per device in the browser. Leave off where your panel does not support force-arming."
+                            "auto_force_arm": "When enabled, the alarm's More Info dialog and a Tile card with Alarm modes and the Verisure OWA Open Sensors feature (and the deprecated alarm card) show a tick box that automatically force-arms past open doors/windows instead of waiting for you to confirm. It acts only on an arm started from the buttons next to it. The choice is remembered per device in the browser. Leave off where your panel does not support force-arming."
                         }
                     },
                     "subpanels": {
@@ -133,7 +133,7 @@
                             "auto_force_arm": "Offer an auto-force-arm tick box in the alarm controls"
                         },
                         "data_description": {
-                            "auto_force_arm": "When enabled, the alarm's More Info dialog (and the deprecated alarm card) shows a tick box that automatically force-arms past open doors/windows instead of waiting for you to confirm. The choice is remembered per device in the browser. Leave off where your panel does not support force-arming."
+                            "auto_force_arm": "When enabled, the alarm's More Info dialog and a Tile card with Alarm modes and the Verisure OWA Open Sensors feature (and the deprecated alarm card) show a tick box that automatically force-arms past open doors/windows instead of waiting for you to confirm. It acts only on an arm started from the buttons next to it. The choice is remembered per device in the browser. Leave off where your panel does not support force-arming."
                         }
                     },
                     "subpanels": {

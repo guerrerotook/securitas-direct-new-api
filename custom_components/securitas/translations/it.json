@@ -87,7 +87,7 @@
                             "auto_force_arm": "Mostra una casella di attivazione forzata automatica nei controlli dell'allarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme (e la scheda dell'allarme deprecata) mostra una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
+                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme e una scheda Riquadro (Tile) con le modalità di allarme e la funzione Verisure OWA Open Sensors (e la scheda dell'allarme deprecata) mostrano una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. Agisce solo su un'attivazione avviata dai pulsanti accanto. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
                         }
                     },
                     "subpanels": {
@@ -150,7 +150,7 @@
                             "auto_force_arm": "Mostra una casella di attivazione forzata automatica nei controlli dell'allarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme (e la scheda dell'allarme deprecata) mostra una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
+                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme e una scheda Riquadro (Tile) con le modalità di allarme e la funzione Verisure OWA Open Sensors (e la scheda dell'allarme deprecata) mostrano una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. Agisce solo su un'attivazione avviata dai pulsanti accanto. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
                         }
                     },
                     "subpanels": {

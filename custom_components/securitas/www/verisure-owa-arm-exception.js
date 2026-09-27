@@ -57,11 +57,11 @@ export function hassLanguage(hass) {
   return hass?.language || hass?.locale?.language || "en";
 }
 
-// ── Per-device auto-force-arm preference (shared by the alarm card and the
-// native More Info dialog) ──────────────────────────────────────────────────
-// Defined here, in the module both surfaces import, so the storage key can
+// ── Per-device auto-force-arm preference (shared by the alarm card, the
+// native More Info dialog and the Tile feature) ─────────────────────────────
+// Defined here, in the module every surface imports, so the storage key can
 // never drift between them: the tick is remembered per device and shared, so
-// ticking it in either place enables it for the other.
+// ticking it in one place enables it in the others.
 export function autoForceStorageKey(entityId) {
   return `verisure-owa:auto-force-arm:${entityId}`;
 }
@@ -88,6 +88,94 @@ export function writeAutoForce(entityId, on) {
 // after an admin turns the option off.
 export function autoForceActive(stateObj, ticked) {
   return ticked === true && stateObj?.attributes?.auto_force_arm_enabled === true;
+}
+
+// Long enough to cover typing a PIN in HA's code dialog between pressing an
+// arm button and the arm service call that moves the panel to `arming`.
+export const AUTO_FORCE_INTENT_TTL_MS = 60_000;
+
+const IN_FLIGHT_STATES = new Set(["arming", "pending"]);
+
+// Auto-force for the surfaces that wrap Home Assistant's own alarm-mode
+// buttons (More Info, Tile). HA dispatches the arm, not our code, so the
+// surface feeds this tracker two things: the `value-changed` events it sees
+// from HA's modes control (an arm intent, recorded only when it came from
+// `controlTag`), and every state update. Only an arm that follows an intent is
+// forced; an arm started anywhere else (automation, another screen, the
+// Verisure app) is left alone.
+export class AutoForceArmTracker {
+  constructor(controlTag) {
+    this._controlTag = controlTag;
+    this._reset(null);
+  }
+
+  _reset(entityId) {
+    this._entityId = entityId;
+    this._intentAt = null;
+    this._pending = false;
+    this._prevState = null;
+  }
+
+  _syncEntity(stateObj) {
+    if (stateObj.entity_id !== this._entityId) this._reset(stateObj.entity_id);
+  }
+
+  // Must be called synchronously from the event listener: composedPath() is
+  // empty once dispatch has finished. The event is only read, never stopped,
+  // so HA's own handler still dispatches the arm.
+  noteValueChanged(event, stateObj, ticked) {
+    if (!stateObj) return;
+    const mode = event.detail?.value;
+    if (typeof mode !== "string" || !mode.startsWith("armed_")) return;
+    if (!event.composedPath().some((node) => node.localName === this._controlTag)) return;
+    this._syncEntity(stateObj);
+    if (stateObj.state !== "disarmed" || !autoForceActive(stateObj, ticked)) return;
+    this._intentAt = Date.now();
+  }
+
+  // Runs on every state update, including repeats of the same state.
+  update(stateObj, ticked, hass) {
+    if (!stateObj) return;
+    this._syncEntity(stateObj);
+    const s = stateObj.state;
+    const entityId = stateObj.entity_id;
+
+    if (this._intentAt !== null && this._prevState === "disarmed" && s !== "disarmed") {
+      const fresh = Date.now() - this._intentAt <= AUTO_FORCE_INTENT_TTL_MS;
+      this._intentAt = null;
+      if (fresh && IN_FLIGHT_STATES.has(s) && autoForceActive(stateObj, ticked)) {
+        this._pending = true;
+        // Fired as the arm goes in flight, before the exception lands, so the
+        // transient "force-arm required?" prompt may be skipped entirely; if
+        // it loses that race the backend still dismisses it on force-arm.
+        this._call(hass, "suppress_arm_exception_prompt", entityId);
+        this._prevState = s;
+        return;
+      }
+    }
+
+    if (this._pending) {
+      if (stateObj.attributes?.force_arm_available === true) {
+        this._pending = false;
+        // The gate or tick may have been turned off since the arm started.
+        if (autoForceActive(stateObj, ticked)) this._call(hass, "force_arm", entityId);
+      } else if (!IN_FLIGHT_STATES.has(s)) {
+        // Settled with no forceable exception (armed, or a non-forceable
+        // rejection back to disarmed): a later force context is not ours.
+        this._pending = false;
+      }
+    }
+    this._prevState = s;
+  }
+
+  // Best effort: a rejection (offline panel, missing service) only means the
+  // step did not happen, and must not surface as an unhandled rejection.
+  _call(hass, service, entityId) {
+    if (!entityId || !hass?.callService) return;
+    Promise.resolve(hass.callService("verisure_owa", service, { entity_id: entityId })).catch(
+      () => {},
+    );
+  }
 }
 
 export function armExceptionTranslation(lang, key, vars) {

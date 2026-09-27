@@ -58,6 +58,32 @@ function checkbox(element) {
   return element.shadowRoot.querySelector(".auto-force-checkbox");
 }
 
+// HA renders its mode buttons several shadow roots deep inside the wrapped
+// native control: more-info-content > more-info-alarm_control_panel >
+// ha-state-control-alarm_control_panel-modes > ha-control-select.
+function nativeModeSelect(element, controlTag = "ha-state-control-alarm_control_panel-modes") {
+  const native = element.shadowRoot.getElementById("native-control");
+  const moreInfo = document.createElement("more-info-alarm_control_panel");
+  const control = document.createElement(controlTag);
+  const select = document.createElement("ha-control-select");
+  control.attachShadow({ mode: "open" }).appendChild(select);
+  moreInfo.attachShadow({ mode: "open" }).appendChild(control);
+  native.replaceChildren(moreInfo);
+  return select;
+}
+
+// What HA's ha-control-select fires when a mode button is pressed
+// (fireEvent defaults: bubbles + composed).
+function pressMode(element, value = "armed_away", controlTag) {
+  const event = new CustomEvent("value-changed", {
+    detail: { value },
+    bubbles: true,
+    composed: true,
+  });
+  nativeModeSelect(element, controlTag).dispatchEvent(event);
+  return event;
+}
+
 beforeEach(() => {
   localStorage.clear();
 });
@@ -120,12 +146,13 @@ describe("More Info auto-force tick box persistence (localStorage)", () => {
 });
 
 describe("More Info auto-force behaviour", () => {
-  it("auto-forces after a user arm when the box is on", () => {
+  it("auto-forces an arm started from the dialog's own buttons when the box is on", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo();
 
     // HA's stock control dispatches the arm; the panel optimistically moves to
     // `arming` before the forceable exception lands.
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
     push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });
 
@@ -136,15 +163,23 @@ describe("More Info auto-force behaviour", () => {
 
   it("contains rejections from the best-effort auto-force service calls", async () => {
     // Both auto-force calls (suppress + force-arm) are fire-and-forget, so a
-    // backend rejection must resolve rather than escape as an unhandled promise
-    // rejection in the browser console.
-    const callService = vi.fn(() => Promise.reject(new Error("panel offline")));
+    // backend rejection must not escape as an unhandled promise rejection in
+    // the browser console (vitest fails the run on one). A plain function, not
+    // vi.fn, because a spy observes returned promises and marks them handled.
+    localStorage.setItem(LS_KEY, "true");
+    const services = [];
+    const callService = (_domain, service) => {
+      services.push(service);
+      return Promise.reject(new Error("panel offline"));
+    };
     const { element } = mountMoreInfo({}, { callService });
 
-    await expect(element._bestEffortCall("force_arm", ENTITY)).resolves.toBeUndefined();
-    await expect(
-      element._bestEffortCall("suppress_arm_exception_prompt", ENTITY),
-    ).resolves.toBeUndefined();
+    pressMode(element);
+    push(element, { state: "arming" }, { callService });
+    push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(services).toEqual(["suppress_arm_exception_prompt", "force_arm"]);
   });
 
   it("suppresses the arm-exception prompt when a user arm starts", () => {
@@ -154,6 +189,7 @@ describe("More Info auto-force behaviour", () => {
     // Best-effort pre-suppress fired as soon as the arm goes in-flight, so the
     // transient prompt can be skipped and only the "force-armed" confirmation
     // is shown.
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
 
     expect(callService).toHaveBeenCalledWith("verisure_owa", "suppress_arm_exception_prompt", {
@@ -165,6 +201,7 @@ describe("More Info auto-force behaviour", () => {
     localStorage.setItem(LS_KEY, "false");
     const { element, callService } = mountMoreInfo();
 
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
     push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });
 
@@ -181,6 +218,7 @@ describe("More Info auto-force behaviour", () => {
   it("does NOT suppress the prompt when the box is off", () => {
     const { element, callService } = mountMoreInfo();
 
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
 
     expect(callService).not.toHaveBeenCalledWith("verisure_owa", "suppress_arm_exception_prompt", {
@@ -192,6 +230,7 @@ describe("More Info auto-force behaviour", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo({ autoForceArmEnabled: false });
 
+    pressMode(element);
     push(element, { state: "arming", autoForceArmEnabled: false }, { callService });
     push(
       element,
@@ -208,6 +247,7 @@ describe("More Info auto-force behaviour", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo();
 
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
     push(
       element,
@@ -238,6 +278,7 @@ describe("More Info auto-force behaviour", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo();
 
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
     // Bounces back to disarmed with no forceable exception (non-forceable
     // rejection / other arm error).
@@ -254,6 +295,7 @@ describe("More Info auto-force behaviour", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo();
 
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
     push(element, { state: "armed_away" }, { callService });
     // A later, unrelated forceable exception must not auto-force.
@@ -275,6 +317,7 @@ describe("More Info auto-force behaviour", () => {
     // An arm on the first entity goes in-flight (intent armed), then HA reuses
     // the same element for a different entity that already has a live forceable
     // context — the first entity's intent must not fire for the second.
+    pressMode(element);
     push(element, { state: "arming" }, { callService });
     push(
       element,
@@ -285,5 +328,101 @@ describe("More Info auto-force behaviour", () => {
     expect(callService).not.toHaveBeenCalledWith("verisure_owa", "force_arm", {
       entity_id: OTHER,
     });
+  });
+});
+
+describe("More Info auto-force acts only on the dialog's own arm buttons", () => {
+  function autoForceCalls(callService) {
+    return callService.mock.calls
+      .map((call) => call[1])
+      .filter((service) => ["suppress_arm_exception_prompt", "force_arm"].includes(service));
+  }
+
+  function armWithException(element, callService) {
+    push(element, { state: "arming" }, { callService });
+    push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does NOT auto-force an arm started elsewhere (automation, other screen, app)", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("does NOT auto-force when the arm starts more than 60 s after the button press", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    vi.advanceTimersByTime(60_001);
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("still auto-forces when the arm starts within 60 s (PIN entry)", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    vi.advanceTimersByTime(59_000);
+    armWithException(element, callService);
+
+    expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", { entity_id: ENTITY });
+  });
+
+  it("does NOT treat a disarm press as an arm intent", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element, "disarmed");
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("ignores value-changed events from other controls", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element, "armed_away", "ha-more-info-settings");
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
+  it("does not stop the mode event, so HA's own handler still arms", () => {
+    const { element } = mountMoreInfo();
+    const outer = vi.fn();
+    document.body.addEventListener("value-changed", outer);
+
+    const event = pressMode(element);
+    document.body.removeEventListener("value-changed", outer);
+
+    expect(outer).toHaveBeenCalledWith(event);
+  });
+
+  it("keeps the tick box's change event inside the dialog and never counts it as an arm", () => {
+    const { element, callService } = mountMoreInfo();
+    const outer = vi.fn();
+    document.body.addEventListener("change", outer);
+
+    const cb = checkbox(element);
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    document.body.removeEventListener("change", outer);
+    armWithException(element, callService);
+
+    expect(outer).not.toHaveBeenCalled();
+    expect(autoForceCalls(callService)).toEqual([]);
   });
 });
