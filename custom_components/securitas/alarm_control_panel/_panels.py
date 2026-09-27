@@ -97,11 +97,12 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         coordinator refresh so other observers don't have to wait for the
         next poll to see the change.
 
-        When the coordinator can't read the current state (never polled, or an
-        unmodelled proto code like 'N' after a central-station reset), the
-        requested circuits are disarmed unconditionally rather than skipped —
-        otherwise ``alarm_state`` reads as all-OFF and the disarm silently
-        no-ops, leaving the door unlocked over an armed alarm (#550).
+        The circuits to clear are judged from the state this panel last
+        confirmed (see ``_confirmed_alarm_state``). When that is unreadable
+        (never polled, or an unmodelled proto code like 'N' after a
+        central-station reset), the requested circuits are disarmed
+        unconditionally rather than skipped, which would leave the door
+        unlocked over an armed alarm (#550).
         """
         if not circuits:
             return True
@@ -110,11 +111,11 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             await self._wait_until_idle(affected)
         except HomeAssistantError:
             return False
-        # target is set only when the current state is readable; None means the
-        # state is unknown ('N' etc.) and we disarm the circuits unconditionally.
+        # target stays None when the state is unreadable; the circuits are then
+        # disarmed unconditionally.
         target: AlarmState | None = None
-        if self.coordinator.alarm_state_known:
-            current = self.coordinator.alarm_state
+        current = self._confirmed_alarm_state()
+        if current is not None:
             target = build_partial_disarm_target(current, circuits)
             if target == current:
                 return True
@@ -161,6 +162,16 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True
+
+    async def alarm_state_when_idle(self) -> AlarmState | None:
+        """Wait for any operation running on this panel, then return the state
+        it last confirmed (None if unreadable).
+
+        Raises the translated ``operation_in_progress`` error if the wait gives
+        up.
+        """
+        await self._wait_until_idle([self])
+        return self._confirmed_alarm_state()
 
     def _affected_axis_subpanels(
         self, circuits: list[str]

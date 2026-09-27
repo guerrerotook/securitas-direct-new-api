@@ -682,6 +682,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             and self._last_proto_code in PROTO_TO_ALARM_STATE
         )
 
+    def _confirmed_alarm_state(self) -> AlarmState | None:
+        """The joint state this panel last confirmed, or None if unreadable.
+
+        Taken from ``_last_proto_code``, which the last command result or
+        applied poll set. Right after an operation this is newer than
+        ``coordinator.alarm_state``, whose refresh may not have landed yet.
+        """
+        if self._last_proto_code is None:
+            return None
+        return PROTO_TO_ALARM_STATE.get(self._last_proto_code)
+
     def _full_disarm_circuits(self) -> set[str]:
         """Circuits to clear for a full disarm when the current state is unreadable.
 

@@ -688,21 +688,28 @@ class VerisureLock(  # type: ignore[override]
         """
         if not self._unlock_disarms_circuits:
             return None
-        if self._combined_alarm_panel is None or self._alarm_coordinator is None:
+        panel = self._combined_alarm_panel
+        if panel is None:
             return None
-        if self._alarm_coordinator.alarm_state_known:
-            currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
-            targets = [c for c in self._unlock_disarms_circuits if c in currently_armed]
+        # Decided only once any arm or disarm already running on the panel has
+        # finished, from the state it confirmed: the polled state lags behind,
+        # and would show nothing armed while an arm from disarmed is in flight.
+        try:
+            current = await panel.alarm_state_when_idle()
+        except HomeAssistantError:
+            ok = False
         else:
-            # State unreadable (e.g. 'N' after a central-station reset):
-            # alarm_state falls back to all-OFF, so _armed_circuits would find
-            # nothing and skip disarm, leaving the door open over an armed
-            # alarm. Disarm every configured circuit instead — disarm is
-            # unconditional, so this is safe regardless of the real state (#550).
-            targets = list(self._unlock_disarms_circuits)
-        if not targets:
-            return None
-        ok = await self._combined_alarm_panel.execute_partial_disarm(targets)
+            if current is not None:
+                armed = _armed_circuits(current)
+                targets = [c for c in self._unlock_disarms_circuits if c in armed]
+            else:
+                # State unreadable (e.g. 'N' after a central-station reset):
+                # disarm every configured circuit — disarm is unconditional, so
+                # this is safe whatever the real state is (#550).
+                targets = list(self._unlock_disarms_circuits)
+            if not targets:
+                return None
+            ok = await panel.execute_partial_disarm(targets)
         if not ok:
             await self._fire_lock_notification(
                 title="Auto-disarm failed",

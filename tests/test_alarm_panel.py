@@ -7665,10 +7665,12 @@ class TestExecutePartialDisarm:
 
         panel = make_alarm()  # existing helper
         # Pretend alarm is currently TOTAL + perimeter ON + annex ON.
-        panel.coordinator.alarm_state = AlarmState(
-            interior=InteriorMode.TOTAL,
-            perimeter=PerimeterMode.ON,
-            annex=AnnexMode.ON,
+        panel._confirmed_alarm_state = MagicMock(
+            return_value=AlarmState(
+                interior=InteriorMode.TOTAL,
+                perimeter=PerimeterMode.ON,
+                annex=AnnexMode.ON,
+            )
         )
         panel._execute_transition = AsyncMock(
             return_value=MagicMock(protom_response="D")
@@ -7686,19 +7688,9 @@ class TestExecutePartialDisarm:
 
     async def test_returns_false_on_verisure_error(self):
         from custom_components.securitas.verisure_owa_api import VerisureOwaError
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
 
         panel = make_alarm()
-        panel.coordinator.alarm_state = AlarmState(
-            interior=InteriorMode.TOTAL,
-            perimeter=PerimeterMode.OFF,
-            annex=AnnexMode.OFF,
-        )
+        panel._last_proto_code = "T"  # interior TOTAL
         panel._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
         ok = await panel.execute_partial_disarm(["interior"])
         assert ok is False
@@ -7711,11 +7703,11 @@ class TestExecutePartialDisarm:
         panel._execute_transition.assert_not_awaited()
 
     async def test_unknown_state_disarms_requested_circuit_unconditionally(self):
-        """When the coordinator can't read the current state (e.g. 'N' after a
+        """When the panel can't read the current state (e.g. 'N' after a
         central-station reset), partial disarm must still send an unconditional
         disarm for the requested circuit instead of silently no-op'ing (#550)."""
         panel = make_alarm(has_peri=True)
-        panel.coordinator.alarm_state_known = False
+        panel._last_proto_code = "N"  # unmodelled: state unreadable
         panel.client.disarm_alarm = AsyncMock(
             return_value=OperationStatus(protom_response="D")
         )
@@ -7728,7 +7720,7 @@ class TestExecutePartialDisarm:
     async def test_unknown_state_disarm_never_arms(self):
         """The unknown-state partial-disarm path must never emit an arm command."""
         panel = make_alarm(has_peri=True)
-        panel.coordinator.alarm_state_known = False
+        panel._last_proto_code = "N"  # unmodelled: state unreadable
         panel.client.disarm_alarm = AsyncMock(
             return_value=OperationStatus(protom_response="D")
         )
@@ -7743,7 +7735,7 @@ class TestExecutePartialDisarm:
         VerisureOwaError), roll the entities out of DISARMING and report
         failure — never leave _operation_in_progress stuck True."""
         panel = make_alarm(has_peri=True)
-        panel.coordinator.alarm_state_known = False
+        panel._last_proto_code = "N"  # unmodelled: state unreadable
         panel._disarm_circuits_unconditional = AsyncMock(
             side_effect=HomeAssistantError("no supported disarm command")
         )
@@ -7762,19 +7754,8 @@ class TestExecutePartialDisarm:
             AlarmControlPanelState,
         )
 
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
-
         panel = make_alarm()
-        panel.coordinator.alarm_state = AlarmState(
-            interior=InteriorMode.TOTAL,
-            perimeter=PerimeterMode.OFF,
-            annex=AnnexMode.OFF,
-        )
+        panel._last_proto_code = "T"  # interior TOTAL
 
         observed: list[str | None] = []
 
@@ -7793,19 +7774,9 @@ class TestExecutePartialDisarm:
         """After a successful partial disarm we trigger a coordinator refresh so
         any other entity (sub-panel, lock) sees the new state immediately
         rather than waiting for the next poll."""
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
 
         panel = make_alarm()
-        panel.coordinator.alarm_state = AlarmState(
-            interior=InteriorMode.TOTAL,
-            perimeter=PerimeterMode.OFF,
-            annex=AnnexMode.OFF,
-        )
+        panel._last_proto_code = "T"  # interior TOTAL
         panel._execute_transition = AsyncMock(
             return_value=MagicMock(
                 protom_response="D", message="ok", protom_response_date=""
@@ -7826,19 +7797,9 @@ class TestExecutePartialDisarm:
         )
 
         from custom_components.securitas.const import DOMAIN
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
 
         panel = make_alarm()
-        panel.coordinator.alarm_state = AlarmState(
-            interior=InteriorMode.TOTAL,
-            perimeter=PerimeterMode.OFF,
-            annex=AnnexMode.OFF,
-        )
+        panel._last_proto_code = "T"  # interior TOTAL
 
         # A lightweight stand-in for a real Interior sub-panel — verifies the
         # combined-panel orchestration without dragging in HA's entity loader.
@@ -9366,20 +9327,8 @@ async def test_two_disarms_waiting_behind_an_arm_send_one_disarm():
 async def test_disarm_pressed_during_partial_disarm_runs_after_it():
     """A disarm pressed while the lock's partial disarm runs is carried out
     once the partial disarm finishes."""
-    from custom_components.securitas.verisure_owa_api.models import (
-        AlarmState,
-        AnnexMode,
-        InteriorMode,
-        PerimeterMode,
-    )
-
     panel = make_alarm()
     panel._last_proto_code = "T"
-    panel.coordinator.alarm_state = AlarmState(
-        interior=InteriorMode.TOTAL,
-        perimeter=PerimeterMode.OFF,
-        annex=AnnexMode.OFF,
-    )
     partial_started = asyncio.Event()
     release_partial = asyncio.Event()
     calls = 0
@@ -9420,7 +9369,6 @@ async def test_partial_disarm_unexpected_exit_rolls_back_and_frees_panels(error)
     panel._last_proto_code = "T"
     panel._state = AlarmControlPanelState.ARMED_AWAY
     interior._state = AlarmControlPanelState.ARMED_AWAY
-    panel.coordinator.alarm_state = PROTO_TO_ALARM_STATE["T"]
     panel._execute_transition = AsyncMock(side_effect=error)
 
     with pytest.raises(type(error)):
@@ -9477,12 +9425,20 @@ async def test_partial_disarm_waits_for_a_running_arm_and_queued_disarm():
     assert alarm._state == AlarmControlPanelState.DISARMED
 
 
-async def test_partial_disarm_during_arm_disarms_once_the_arm_lands():
-    """The door lock's partial disarm arriving while an arm is still at the
-    panel waits for it, then disarms what the arm armed — it does not skip
-    on the not-yet-armed state and let the arm land after the door opened."""
+@pytest.mark.parametrize(
+    "coordinator_catches_up", [True, False], ids=["refreshed", "stale_coordinator"]
+)
+async def test_partial_disarm_during_arm_disarms_once_the_arm_lands(
+    coordinator_catches_up,
+):
+    """A partial disarm started while an arm is still at the panel waits for
+    it, then disarms what the arm armed, judged by the state the arm
+    confirmed rather than the coordinator's possibly older poll."""
     alarm = make_alarm()
-    _coordinator_follows_panel(alarm)
+    if coordinator_catches_up:
+        _coordinator_follows_panel(alarm)
+    else:
+        alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE["D"]
     arm_gate = asyncio.Event()
     arm_started = asyncio.Event()
     targets, armed_away, disarmed = _record_transitions(
@@ -9553,7 +9509,6 @@ async def test_partial_disarm_gives_up_behind_a_stuck_operation():
 
     alarm = make_alarm()
     alarm.update_status_alarm(_status("T"))
-    alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE["T"]
     alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
     _record_transitions(alarm)
     alarm._operation_in_progress = True
@@ -9609,3 +9564,44 @@ async def test_disarm_gives_up_waiting_behind_a_stuck_operation(caplog):
     assert err.value.translation_key == "operation_in_progress"
     alarm._execute_transition.assert_not_awaited()
     assert "gave up waiting" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "coordinator_catches_up", [True, False], ids=["refreshed", "stale_coordinator"]
+)
+async def test_unlock_during_arm_disarms_the_circuits_once_the_arm_lands(
+    coordinator_catches_up,
+):
+    """Unlocking a door set to disarm the interior while an arm from disarmed
+    is still at the panel: once the arm lands the interior is disarmed —
+    even if the coordinator's polled state has not caught up with the arm."""
+    from tests.test_ha_platforms import make_lock
+
+    alarm = make_alarm()
+    if coordinator_catches_up:
+        _coordinator_follows_panel(alarm)
+    else:
+        alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE["D"]
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    targets, armed_away, disarmed = _record_transitions(
+        alarm, arm_gate=arm_gate, arm_started=arm_started
+    )
+    lock = make_lock(initial_status="2", poll_status="1")
+    lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+    lock._unlock_disarms_circuits = ["interior"]
+    lock._combined_alarm_panel = alarm
+    lock._alarm_coordinator = alarm.coordinator
+
+    arm_task = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await arm_started.wait()
+    unlock_task = asyncio.create_task(lock.async_unlock())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert targets == [armed_away]  # nothing sent while the arm is in flight
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, unlock_task), timeout=2)
+
+    assert targets == [armed_away, disarmed]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+    lock._client.change_lock_mode.assert_awaited_once()
