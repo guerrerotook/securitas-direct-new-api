@@ -471,9 +471,12 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
    a. Persistent notification: lists each open sensor by name, explains how to force-arm
    b. Mobile notification (if notify_group configured): short message with
       Force Arm / Cancel action buttons
-   c. If an auto-force asked for the prompt to be held back,
-      _schedule_suppressed_prompt_fallback() sends it after 15 s unless the
-      force has resolved; _wipe_force_arm_state() and entity removal cancel it
+   c. Exception: if an auto-force asked for the prompt to be held back (and
+      the panel allows forcing), a and b are NOT sent now. Instead
+      _schedule_suppressed_prompt_fallback() sends them 15 s later, unless
+      the force has resolved by then (_wipe_force_arm_state() and entity
+      removal cancel the timer), and only if force_arm_notifications is
+      still enabled when it fires
 5. State reverts to _last_state
 ```
 
