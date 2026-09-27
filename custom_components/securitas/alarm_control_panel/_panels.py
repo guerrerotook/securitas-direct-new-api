@@ -86,7 +86,8 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
     async def execute_partial_disarm(self, circuits: list[str]) -> bool:
         """Disarm the specified circuits, leaving others unchanged.
 
-        Waits first for any operation already running on the affected panels.
+        Waits first for any operation already running on any panel of the
+        installation.
         Returns True on success, False on failure (including giving up on that
         wait). Empty ``circuits`` is a no-op success.
 
@@ -97,8 +98,8 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         coordinator refresh so other observers don't have to wait for the
         next poll to see the change.
 
-        The circuits to clear are judged from the state this panel last
-        confirmed (see ``_confirmed_alarm_state``). When that is unreadable
+        The circuits to clear are judged from the installation's latest known
+        state (see ``_confirmed_alarm_state``). When that is unreadable
         (never polled, or an unmodelled proto code like 'N' after a
         central-station reset), the requested circuits are disarmed
         unconditionally rather than skipped, which would leave the door
@@ -108,7 +109,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             return True
         affected = [self, *self._affected_axis_subpanels(circuits)]
         try:
-            await self._wait_until_idle(affected)
+            await self._wait_until_idle(self._siblings_on_installation())
         except HomeAssistantError:
             return False
         # target stays None when the state is unreadable; the circuits are then
@@ -164,13 +165,14 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         return True
 
     async def alarm_state_when_idle(self) -> AlarmState | None:
-        """Wait for any operation running on this panel, then return the state
-        it last confirmed (None if unreadable).
+        """Wait for any operation running on any panel of the installation,
+        then return the installation's latest known state (None if
+        unreadable).
 
         Raises the translated ``operation_in_progress`` error if the wait gives
         up.
         """
-        await self._wait_until_idle([self])
+        await self._wait_until_idle(self._siblings_on_installation())
         return self._confirmed_alarm_state()
 
     def _affected_axis_subpanels(

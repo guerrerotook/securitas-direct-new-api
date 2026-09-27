@@ -108,6 +108,15 @@ _LOGGER = logging.getLogger(__name__)
 # state) and therefore safe to issue even when the current state is unknown.
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 
+
+def _modelled_state(proto_code: str | None) -> AlarmState | None:
+    """The AlarmState a proto code stands for, or None if it is missing or
+    one we don't model (e.g. 'N' after a central-station reset)."""
+    if proto_code is None:
+        return None
+    return PROTO_TO_ALARM_STATE.get(proto_code)
+
+
 # How long an auto-force-arm "suppress the next arm-exception prompt" request
 # stays armed. Long enough to cover the arm round-trip that follows it, short enough
 # that a stray request can't silently swallow an unrelated prompt later on.
@@ -354,9 +363,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     def _operation_in_progress(self, in_progress: bool) -> None:
         if in_progress:
             self._operation_idle.clear()
+            self.coordinator.operation_started(self)
         else:
             self._operation_kind = None
             self._operation_idle.set()
+            self.coordinator.operation_finished(self)
 
     def _operation_wait_limit(self) -> float:
         """Seconds to wait for a running operation before treating its flag as stuck."""
@@ -519,6 +530,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return False
         if is_proto_letter(status.protom_response):
             self._last_proto_code = status.protom_response
+            self.coordinator.record_confirmed_proto_code(status.protom_response)
         return True
 
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:
@@ -677,21 +689,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         reports a proto code we don't model (e.g. 'N'), so callers can treat
         the current state as unreadable in either case.
         """
-        return (
-            self._last_proto_code is not None
-            and self._last_proto_code in PROTO_TO_ALARM_STATE
-        )
+        return _modelled_state(self._last_proto_code) is not None
 
     def _confirmed_alarm_state(self) -> AlarmState | None:
-        """The joint state this panel last confirmed, or None if unreadable.
-
-        Taken from ``_last_proto_code``, which the last command result or
-        applied poll set. Right after an operation this is newer than
-        ``coordinator.alarm_state``, whose refresh may not have landed yet.
-        """
-        if self._last_proto_code is None:
-            return None
-        return PROTO_TO_ALARM_STATE.get(self._last_proto_code)
+        """The installation's latest known state (coordinator's
+        ``confirmed_proto_code``), or None if unreadable."""
+        return _modelled_state(self.coordinator.confirmed_proto_code)
 
     def _full_disarm_circuits(self) -> set[str]:
         """Circuits to clear for a full disarm when the current state is unreadable.

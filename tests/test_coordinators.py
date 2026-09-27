@@ -134,6 +134,45 @@ class TestAlarmCoordinator:
         queue.submit.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_poll_records_confirmed_proto_code(self):
+        """A poll carrying a proto letter becomes the installation's
+        confirmed state; one that doesn't leaves it alone."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        assert coord.confirmed_proto_code is None
+
+        client.get_general_status.return_value = SStatus(status="T")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "T"
+
+        client.get_general_status.return_value = SStatus(status="0")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "T"
+
+    @pytest.mark.asyncio
+    async def test_poll_during_operation_leaves_confirmed_proto_code(self):
+        """A poll landing while a panel command runs may predate the command's
+        result, so it doesn't overwrite the confirmed state; the next poll
+        after the command does."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        panel = object()
+        coord.record_confirmed_proto_code("T")
+
+        coord.operation_started(panel)
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "T"
+
+        coord.operation_finished(panel)
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "D"
+
+    @pytest.mark.asyncio
     async def test_waf_blocked_raises_update_failed(self):
         """WAFBlockedError raises UpdateFailed."""
         hass = _make_hass()

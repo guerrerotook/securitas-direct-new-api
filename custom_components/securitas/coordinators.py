@@ -48,6 +48,7 @@ from .verisure_owa_api.models import (
     SmartLockMode,
     SStatus,
     ThumbnailResponse,
+    is_proto_letter,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -246,6 +247,31 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._has_peri: bool = False
         self._has_annex: bool = False
         self._capabilities_populated: bool = False
+        self._confirmed_proto_code: str | None = None
+        self._panels_in_operation: set[object] = set()
+
+    @property
+    def confirmed_proto_code(self) -> str | None:
+        """The installation's latest known proto code, from whichever came
+        last: a poll, or any alarm panel's command result.
+
+        Right after a command this is newer than ``data``, whose refresh may
+        not have landed yet. None until either has happened.
+        """
+        return self._confirmed_proto_code
+
+    def record_confirmed_proto_code(self, proto_code: str) -> None:
+        """Record a panel command's result as the installation's state."""
+        self._confirmed_proto_code = proto_code
+
+    def operation_started(self, panel: object) -> None:
+        """Hold back polled states while ``panel`` runs a command: a poll
+        landing then may predate the command's result."""
+        self._panels_in_operation.add(panel)
+
+    def operation_finished(self, panel: object) -> None:
+        """Release the hold taken by operation_started."""
+        self._panels_in_operation.discard(panel)
 
     @property
     def has_peri(self) -> bool:
@@ -355,9 +381,13 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     async def _async_update_data(self) -> AlarmStatusData:
         """Fetch alarm status via the API queue."""
         await self._populate_capabilities()
-        return await _fetch_with_session_recovery(
+        data = await _fetch_with_session_recovery(
             self._client, self._fetch, "Alarm status"
         )
+        proto_code = data.status.status if data.status else None
+        if not self._panels_in_operation and is_proto_letter(proto_code):
+            self._confirmed_proto_code = proto_code
+        return data
 
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────

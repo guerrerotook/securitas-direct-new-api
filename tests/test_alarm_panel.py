@@ -631,6 +631,13 @@ def make_alarm(
 
     coordinator = MagicMock(spec=AlarmCoordinator)
     coordinator.data = None
+    # The installation-wide confirmed state behaves like the real coordinator's.
+    coordinator.confirmed_proto_code = None
+
+    def _record_confirmed(proto_code):
+        coordinator.confirmed_proto_code = proto_code
+
+    coordinator.record_confirmed_proto_code = MagicMock(side_effect=_record_confirmed)
     coordinator.async_request_refresh = AsyncMock()
     coordinator.has_peri = has_peri
     coordinator.has_annex = False
@@ -7690,7 +7697,7 @@ class TestExecutePartialDisarm:
         from custom_components.securitas.verisure_owa_api import VerisureOwaError
 
         panel = make_alarm()
-        panel._last_proto_code = "T"  # interior TOTAL
+        panel.coordinator.confirmed_proto_code = "T"  # interior TOTAL
         panel._execute_transition = AsyncMock(side_effect=VerisureOwaError("boom"))
         ok = await panel.execute_partial_disarm(["interior"])
         assert ok is False
@@ -7707,7 +7714,7 @@ class TestExecutePartialDisarm:
         central-station reset), partial disarm must still send an unconditional
         disarm for the requested circuit instead of silently no-op'ing (#550)."""
         panel = make_alarm(has_peri=True)
-        panel._last_proto_code = "N"  # unmodelled: state unreadable
+        panel.coordinator.confirmed_proto_code = "N"  # unmodelled: unreadable
         panel.client.disarm_alarm = AsyncMock(
             return_value=OperationStatus(protom_response="D")
         )
@@ -7720,7 +7727,7 @@ class TestExecutePartialDisarm:
     async def test_unknown_state_disarm_never_arms(self):
         """The unknown-state partial-disarm path must never emit an arm command."""
         panel = make_alarm(has_peri=True)
-        panel._last_proto_code = "N"  # unmodelled: state unreadable
+        panel.coordinator.confirmed_proto_code = "N"  # unmodelled: unreadable
         panel.client.disarm_alarm = AsyncMock(
             return_value=OperationStatus(protom_response="D")
         )
@@ -7735,7 +7742,7 @@ class TestExecutePartialDisarm:
         VerisureOwaError), roll the entities out of DISARMING and report
         failure — never leave _operation_in_progress stuck True."""
         panel = make_alarm(has_peri=True)
-        panel._last_proto_code = "N"  # unmodelled: state unreadable
+        panel.coordinator.confirmed_proto_code = "N"  # unmodelled: unreadable
         panel._disarm_circuits_unconditional = AsyncMock(
             side_effect=HomeAssistantError("no supported disarm command")
         )
@@ -7755,7 +7762,7 @@ class TestExecutePartialDisarm:
         )
 
         panel = make_alarm()
-        panel._last_proto_code = "T"  # interior TOTAL
+        panel.coordinator.confirmed_proto_code = "T"  # interior TOTAL
 
         observed: list[str | None] = []
 
@@ -7776,7 +7783,7 @@ class TestExecutePartialDisarm:
         rather than waiting for the next poll."""
 
         panel = make_alarm()
-        panel._last_proto_code = "T"  # interior TOTAL
+        panel.coordinator.confirmed_proto_code = "T"  # interior TOTAL
         panel._execute_transition = AsyncMock(
             return_value=MagicMock(
                 protom_response="D", message="ok", protom_response_date=""
@@ -7799,7 +7806,7 @@ class TestExecutePartialDisarm:
         from custom_components.securitas.const import DOMAIN
 
         panel = make_alarm()
-        panel._last_proto_code = "T"  # interior TOTAL
+        panel.coordinator.confirmed_proto_code = "T"  # interior TOTAL
 
         # A lightweight stand-in for a real Interior sub-panel — verifies the
         # combined-panel orchestration without dragging in HA's entity loader.
@@ -9328,7 +9335,7 @@ async def test_disarm_pressed_during_partial_disarm_runs_after_it():
     """A disarm pressed while the lock's partial disarm runs is carried out
     once the partial disarm finishes."""
     panel = make_alarm()
-    panel._last_proto_code = "T"
+    panel.update_status_alarm(_status("T"))
     partial_started = asyncio.Event()
     release_partial = asyncio.Event()
     calls = 0
@@ -9366,7 +9373,7 @@ async def test_partial_disarm_unexpected_exit_rolls_back_and_frees_panels(error)
     interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
     setup_alarm_entry_data(panel, sub_panels=[interior])
     panel._client.config_entry = MagicMock(entry_id="entry-id-1")
-    panel._last_proto_code = "T"
+    panel.update_status_alarm(_status("T"))
     panel._state = AlarmControlPanelState.ARMED_AWAY
     interior._state = AlarmControlPanelState.ARMED_AWAY
     panel._execute_transition = AsyncMock(side_effect=error)
@@ -9604,4 +9611,127 @@ async def test_unlock_during_arm_disarms_the_circuits_once_the_arm_lands(
 
     assert targets == [armed_away, disarmed]
     assert alarm._state == AlarmControlPanelState.DISARMED
+    lock._client.change_lock_mode.assert_awaited_once()
+
+
+def _main_and_interior_panels():
+    """A main panel and an Interior sub-panel on one installation, sharing the
+    coordinator as the real ones do, and a lock set to disarm the interior."""
+    from tests.test_ha_platforms import make_lock
+
+    main = make_alarm()
+    interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
+    interior.coordinator = main.coordinator
+    main.coordinator.alarm_state = PROTO_TO_ALARM_STATE["D"]  # polled: disarmed
+    setup_alarm_entry_data(main, sub_panels=[interior])
+    main._client.config_entry = MagicMock(entry_id="entry-id-1")
+    lock = make_lock(initial_status="2", poll_status="1")
+    lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+    lock._unlock_disarms_circuits = ["interior"]
+    lock._combined_alarm_panel = main
+    lock._alarm_coordinator = main.coordinator
+    return main, interior, lock
+
+
+async def test_unlock_during_interior_subpanel_arm_disarms_once_it_lands():
+    """An arm started from the Interior sub-panel is still at the panel when
+    the door is unlocked: nothing is sent while it runs, then the interior
+    is disarmed."""
+    main, interior, lock = _main_and_interior_panels()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    interior_targets, _, _ = _record_transitions(
+        interior, arm_gate=arm_gate, arm_started=arm_started
+    )
+    main_targets, _, disarmed = _record_transitions(main)
+
+    arm_task = asyncio.create_task(interior.set_arm_state("armed_away"))
+    await arm_started.wait()
+    unlock_task = asyncio.create_task(lock.async_unlock())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert main_targets == []  # nothing sent while the sub-panel arm runs
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, unlock_task), timeout=2)
+
+    assert len(interior_targets) == 1
+    assert main_targets == [disarmed]
+    assert main._state == AlarmControlPanelState.DISARMED
+    assert interior._state == AlarmControlPanelState.DISARMED
+
+
+async def test_unlock_after_subpanel_arm_disarms_before_the_refresh_lands():
+    """The Interior sub-panel's arm has finished but no poll has reached the
+    main panel yet (it still holds 'D'): the unlock still disarms."""
+    main, interior, lock = _main_and_interior_panels()
+    _record_transitions(interior)
+    main_targets, _, disarmed = _record_transitions(main)
+
+    await interior.set_arm_state("armed_away")
+    assert main._last_proto_code == "D"  # the main panel has not seen the arm
+    await asyncio.wait_for(lock.async_unlock(), timeout=2)
+
+    assert main_targets == [disarmed]
+    assert main._state == AlarmControlPanelState.DISARMED
+
+
+@pytest.mark.parametrize(
+    ("polled", "disarm_sent"),
+    [("D", False), ("N", True), (None, True)],
+    ids=["disarmed", "unmodelled_code", "no_data"],
+)
+async def test_unlock_at_startup_trusts_the_coordinators_first_poll(
+    polled, disarm_sent
+):
+    """The first poll can land before the panel is added to Home Assistant,
+    so the panel itself has seen nothing. An unlock then goes by that poll:
+    disarmed means nothing is sent; an unreadable code ('N') or no poll at
+    all still disarms unconditionally (#550)."""
+    from datetime import timedelta
+
+    from homeassistant.core import HomeAssistant
+
+    from custom_components.securitas.api_queue import ApiQueue
+    from custom_components.securitas.coordinators import AlarmCoordinator
+    from custom_components.securitas.verisure_owa_api.client import (
+        VerisureOwaClient,
+    )
+    from tests.test_ha_platforms import make_lock
+
+    hass = MagicMock(spec=HomeAssistant)
+    hass.data = {}
+    client = AsyncMock(spec=VerisureOwaClient)
+    client.protom_response = ""
+    queue = AsyncMock(spec=ApiQueue)
+
+    async def _submit(fn, *a, **kw):
+        return await fn(*a)
+
+    queue.submit = AsyncMock(side_effect=_submit)
+    coordinator = AlarmCoordinator(
+        hass,
+        client,
+        queue,
+        make_alarm().installation,
+        update_interval=timedelta(seconds=30),
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    if polled is not None:
+        client.get_general_status.return_value = SStatus(status=polled)
+        await coordinator._async_update_data()
+
+    panel = make_alarm(has_peri=True)
+    panel.coordinator = coordinator
+    panel._last_proto_code = None  # not yet added: no poll applied, no command
+    panel._state = None
+    panel.client.disarm_alarm = AsyncMock(return_value=_status("D"))
+    lock = make_lock(initial_status="2", poll_status="1")
+    lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+    lock._unlock_disarms_circuits = ["interior"]
+    lock._combined_alarm_panel = panel
+    lock._alarm_coordinator = coordinator
+
+    await asyncio.wait_for(lock.async_unlock(), timeout=2)
+
+    assert panel.client.disarm_alarm.called is disarm_sent
     lock._client.change_lock_mode.assert_awaited_once()
