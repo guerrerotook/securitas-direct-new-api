@@ -633,11 +633,17 @@ def make_alarm(
     coordinator.data = None
     # The installation-wide confirmed state behaves like the real coordinator's.
     coordinator.confirmed_proto_code = None
+    coordinator.confirmed_is_provisional = False
 
     def _record_confirmed(proto_code):
         coordinator.confirmed_proto_code = proto_code
+        coordinator.confirmed_is_provisional = False
+
+    def _mark_provisional():
+        coordinator.confirmed_is_provisional = True
 
     coordinator.record_confirmed_proto_code = MagicMock(side_effect=_record_confirmed)
+    coordinator.mark_confirmed_provisional = MagicMock(side_effect=_mark_provisional)
     coordinator.async_request_refresh = AsyncMock()
     coordinator.has_peri = has_peri
     coordinator.has_annex = False
@@ -9720,18 +9726,8 @@ async def test_unlock_after_subpanel_arm_disarms_before_the_refresh_lands():
     assert main._state == AlarmControlPanelState.DISARMED
 
 
-@pytest.mark.parametrize(
-    ("polled", "disarm_sent"),
-    [("D", False), ("N", True), (None, True)],
-    ids=["disarmed", "unmodelled_code", "no_data"],
-)
-async def test_unlock_at_startup_trusts_the_coordinators_first_poll(
-    polled, disarm_sent
-):
-    """The first poll can land before the panel is added to Home Assistant,
-    so the panel itself has seen nothing. An unlock then goes by that poll:
-    disarmed means nothing is sent; an unreadable code ('N') or no poll at
-    all still disarms unconditionally (#550)."""
+def _real_alarm_coordinator():
+    """A real AlarmCoordinator whose polls read ``client.get_general_status``."""
     from datetime import timedelta
 
     from homeassistant.core import HomeAssistant
@@ -9741,7 +9737,6 @@ async def test_unlock_at_startup_trusts_the_coordinators_first_poll(
     from custom_components.securitas.verisure_owa_api.client import (
         VerisureOwaClient,
     )
-    from tests.test_ha_platforms import make_lock
 
     hass = MagicMock(spec=HomeAssistant)
     hass.data = {}
@@ -9761,6 +9756,24 @@ async def test_unlock_at_startup_trusts_the_coordinators_first_poll(
         update_interval=timedelta(seconds=30),
     )
     coordinator.async_request_refresh = AsyncMock()
+    return coordinator, client
+
+
+@pytest.mark.parametrize(
+    ("polled", "disarm_sent"),
+    [("D", False), ("N", True), (None, True)],
+    ids=["disarmed", "unmodelled_code", "no_data"],
+)
+async def test_unlock_at_startup_trusts_the_coordinators_first_poll(
+    polled, disarm_sent
+):
+    """The first poll can land before the panel is added to Home Assistant,
+    so the panel itself has seen nothing. An unlock then goes by that poll:
+    disarmed means nothing is sent; an unreadable code ('N') or no poll at
+    all still disarms unconditionally (#550)."""
+    from tests.test_ha_platforms import make_lock
+
+    coordinator, client = _real_alarm_coordinator()
     if polled is not None:
         client.get_general_status.return_value = SStatus(status=polled)
         await coordinator._async_update_data()
@@ -9929,3 +9942,107 @@ async def test_arm_refused_when_the_confirmed_state_is_unreadable():
 
     assert _sent(alarm) == []
     assert alarm._state != AlarmControlPanelState.ARMED_HOME
+
+
+async def _polled_panel_and_lock(polled):
+    """A main panel on a real coordinator whose poll reported ``polled`` (the
+    panel applied it too), and a lock set to disarm the interior."""
+    from tests.test_ha_platforms import make_lock
+
+    coordinator, client = _real_alarm_coordinator()
+    client.get_general_status.return_value = SStatus(status=polled)
+    await coordinator._async_update_data()
+    panel = make_alarm()
+    panel.coordinator = coordinator
+    panel._last_proto_code = polled
+    lock = make_lock(initial_status="2", poll_status="1")
+    lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
+    lock._unlock_disarms_circuits = ["interior"]
+    lock._combined_alarm_panel = panel
+    lock._alarm_coordinator = coordinator
+    return panel, client, lock
+
+
+async def test_panel_plans_from_the_coordinators_poll():
+    """A poll the coordinator recorded is what the panel plans from, even when
+    the panel's own last code says otherwise."""
+    panel, _, _ = await _polled_panel_and_lock("T")
+    panel._last_proto_code = "D"
+    _record_transitions(panel)
+
+    await panel.async_alarm_disarm()
+
+    assert _sent(panel) == ["DARM1"]
+    assert panel.coordinator.confirmed_proto_code == "D"
+
+
+async def test_unlock_after_a_disarm_that_timed_out_still_disarms():
+    """A disarm the panel accepted but never confirmed shows disarmed, but the
+    lock does not trust it: unlocking disarms its circuits anyway (#550 path)."""
+    panel, _, lock = await _polled_panel_and_lock("T")
+    _record_transitions(
+        panel, hold="disarm", error=OperationTimeoutError("not confirmed")
+    )
+
+    await panel.async_alarm_disarm()
+    assert panel.coordinator.confirmed_proto_code == "D"  # panels plan from it
+    await asyncio.wait_for(lock.async_unlock(), timeout=2)
+
+    assert _sent(panel) == ["DARM1", "DARM1"]
+    lock._client.change_lock_mode.assert_awaited_once()
+
+
+@pytest.mark.parametrize("confirmed_by", ["poll", "command"])
+async def test_unlock_skips_once_the_timed_out_disarm_is_confirmed(confirmed_by):
+    """Once a poll or a real command result confirms the state after a
+    timed-out disarm, the lock trusts it again and sends nothing when the
+    alarm is disarmed."""
+    panel, client, lock = await _polled_panel_and_lock("T")
+    _record_transitions(
+        panel, hold="disarm", error=OperationTimeoutError("not confirmed")
+    )
+    await panel.async_alarm_disarm()
+
+    _record_transitions(panel)
+    if confirmed_by == "poll":
+        client.get_general_status.return_value = SStatus(status="D")
+        await panel.coordinator._async_update_data()
+        expected = []
+    else:
+        await panel.set_arm_state("armed_away")
+        await panel.async_alarm_disarm()
+        expected = ["ARM1", "DARM1"]
+    await asyncio.wait_for(lock.async_unlock(), timeout=2)
+
+    assert _sent(panel) == expected
+    lock._client.change_lock_mode.assert_awaited_once()
+
+
+async def test_unlock_after_an_arm_that_timed_out_still_disarms():
+    """An arm accepted but never confirmed may have armed the alarm: the
+    lock still disarms its circuits."""
+    panel, _, lock = await _polled_panel_and_lock("D")
+    _record_transitions(panel, error=OperationTimeoutError("not confirmed"))
+
+    await panel.set_arm_state("armed_away")
+    await asyncio.wait_for(lock.async_unlock(), timeout=2)
+
+    assert _sent(panel) == ["ARM1", "DARM1"]
+    lock._client.change_lock_mode.assert_awaited_once()
+
+
+async def test_timed_out_arm_to_a_state_with_no_code_keeps_the_confirmed_code():
+    """An Annex arm over total plus perimeter targets a state with no proto
+    code. If it times out, the installation keeps its confirmed code rather
+    than taking the Annex panel's own older one."""
+    main = make_alarm(has_peri=True)
+    annex = make_alarm(has_peri=True, panel_cls=AnnexVerisureOwaAlarmPanel)
+    annex.coordinator = main.coordinator
+    main.update_status_alarm(_status("A"))  # armed from the main panel
+    assert annex._last_proto_code == "D"  # no poll has reached the Annex panel
+    _record_transitions(annex, error=OperationTimeoutError("not confirmed"))
+
+    await annex.set_arm_state("armed_away")
+
+    assert _sent(annex) == ["ARMANNEX1"]
+    assert main.coordinator.confirmed_proto_code == "A"

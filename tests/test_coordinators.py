@@ -173,6 +173,37 @@ class TestAlarmCoordinator:
         assert coord.confirmed_proto_code == "D"
 
     @pytest.mark.asyncio
+    async def test_timed_out_result_stays_provisional_until_confirmed(self):
+        """A code marked provisional (a command accepted but not confirmed)
+        stays so until a real command result or a poll allowed to record
+        replaces it."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        coord.record_confirmed_proto_code("D")
+        assert coord.confirmed_is_provisional is False
+        coord.mark_confirmed_provisional()
+        assert coord.confirmed_is_provisional is True
+        coord.record_confirmed_proto_code("T")
+        assert coord.confirmed_is_provisional is False
+
+        coord.mark_confirmed_provisional()
+        panel = object()
+        coord.operation_started(panel)
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is True  # poll held back
+        coord.operation_finished(panel)
+        client.get_general_status.return_value = SStatus(status="0")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is True  # not a proto code
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is False
+        assert coord.confirmed_proto_code == "D"
+
+    @pytest.mark.asyncio
     async def test_waf_blocked_raises_update_failed(self):
         """WAFBlockedError raises UpdateFailed."""
         hass = _make_hass()

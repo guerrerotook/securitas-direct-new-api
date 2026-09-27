@@ -704,7 +704,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _confirmed_alarm_state(self) -> AlarmState | None:
         """The installation's latest known state (coordinator's
-        ``confirmed_proto_code``), or None if unreadable."""
+        ``confirmed_proto_code``), or None if unreadable or not yet confirmed
+        by the panel."""
+        if self.coordinator.confirmed_is_provisional:
+            return None
         return _modelled_state(self.coordinator.confirmed_proto_code)
 
     def _full_disarm_circuits(self) -> set[str]:
@@ -1053,11 +1056,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         Used when a command was accepted (res: OK) but the confirmation poll
         timed out: we optimistically show the target (the fail-safe direction)
-        and let the coordinator reconcile. Falls back to the last known proto
-        code, then disarmed, if the target has no modelled proto letter.
+        and let the coordinator reconcile. Falls back to the code transitions
+        are planned from, then disarmed, if the target has no proto letter.
         """
         proto = (
-            ALARM_STATE_TO_PROTO.get(target) or self._last_proto_code or PROTO_DISARMED
+            ALARM_STATE_TO_PROTO.get(target)
+            or self._planning_proto_code()
+            or PROTO_DISARMED
         )
         return OperationStatus(protom_response=proto)
 
@@ -1089,6 +1094,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._set_waf_blocked(False)
         self._set_state_provisional(True)
         self.update_status_alarm(self._optimistic_status(target))
+        self.coordinator.mark_confirmed_provisional()
         _LOGGER.warning(
             "%s not confirmed within timeout for %s; state provisional, "
             "awaiting reconciliation: %s",

@@ -248,6 +248,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._has_annex: bool = False
         self._capabilities_populated: bool = False
         self._confirmed_proto_code: str | None = None
+        self._confirmed_provisional = False
         self._panels_in_operation: set[object] = set()
 
     @property
@@ -260,9 +261,21 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         """
         return self._confirmed_proto_code
 
+    @property
+    def confirmed_is_provisional(self) -> bool:
+        """True while ``confirmed_proto_code`` is the optimistic result of a
+        command the panel accepted but never confirmed (#508)."""
+        return self._confirmed_provisional
+
     def record_confirmed_proto_code(self, proto_code: str) -> None:
         """Record a panel command's result as the installation's state."""
         self._confirmed_proto_code = proto_code
+        self._confirmed_provisional = False
+
+    def mark_confirmed_provisional(self) -> None:
+        """Flag the recorded code as unconfirmed until a real command result
+        or a poll replaces it."""
+        self._confirmed_provisional = True
 
     def operation_started(self, panel: object) -> None:
         """Hold back polled states while ``panel`` runs a command: a poll
@@ -387,6 +400,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         proto_code = data.status.status if data.status else None
         if not self._panels_in_operation and is_proto_letter(proto_code):
             self._confirmed_proto_code = proto_code
+            self._confirmed_provisional = False
         return data
 
 
