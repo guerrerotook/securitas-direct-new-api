@@ -378,7 +378,13 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
       window.dispatchEvent(
         new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
       );
-    tracker.connect(scope, { stateObj: () => stateOf(), ticked: () => true });
+    tracker.connect(scope);
+    // A press before the first update has no state to be judged against.
+    press();
+    tracker.update(stateOf(), true, hass);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(hass.callService).not.toHaveBeenCalled();
+
     tracker.update(stateOf(), true, hass);
 
     press();
@@ -402,6 +408,32 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     tracker.update(stateOf(), true, hass);
     press();
     tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
+  });
+
+  it("judges a press by the tick and state from the latest update", () => {
+    const tracker = new AutoForceArmTracker(CONTROL);
+    const hass = makeHass();
+    const select = nestedSelect(CONTROL);
+    const press = () =>
+      select.dispatchEvent(
+        new CustomEvent("value-changed", {
+          detail: { value: "armed_away" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    tracker.connect(document.body);
+
+    tracker.update(stateOf(), false, hass);
+    press();
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    expect(hass.callService).not.toHaveBeenCalled();
+
+    tracker.update(stateOf(), true, hass);
+    press();
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.disconnect();
     expect(calls(hass)).toEqual(["suppress_arm_exception_prompt"]);
   });
 

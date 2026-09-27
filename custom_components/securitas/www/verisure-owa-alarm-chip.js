@@ -101,12 +101,7 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
 
   connectedCallback() {
     this._listenScope = this._featureScope();
-    if (this._listenScope) {
-      this._autoForceTracker.connect(this._listenScope, {
-        stateObj: () => this._entity(),
-        ticked: () => this._ticked(),
-      });
-    }
+    if (this._listenScope) this._autoForceTracker.connect(this._listenScope);
     globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._render();
     // HA renders each sibling feature in its own later update, so an Alarm

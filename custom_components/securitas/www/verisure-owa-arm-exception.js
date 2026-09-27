@@ -120,7 +120,16 @@ const IN_FLIGHT_STATES = new Set(["arming", "pending"]);
 export class AutoForceArmTracker {
   constructor(controlTag) {
     this._controlTag = controlTag;
+    this._disconnect = null;
+    this._clearInputs();
     this._reset(null);
+  }
+
+  // The latest state and tick from update(), which a button press is judged
+  // against.
+  _clearInputs() {
+    this._stateObj = null;
+    this._ticked = false;
   }
 
   _reset(entityId) {
@@ -131,18 +140,13 @@ export class AutoForceArmTracker {
     this._prevState = null;
   }
 
-  // A button press belongs to the surface it was made on; once the surface is
-  // removed, a later arm cannot be one it started.
-  reset() {
-    this._reset(null);
-  }
-
   // Listens on `scope` (an ancestor of the modes control) for presses and the
   // PIN prompt opening, and on window for the prompt closing: HA renders the
-  // prompt in its own shell, outside the surface.
-  connect(scope, { stateObj, ticked }) {
+  // prompt in its own shell, outside the surface. A press before the first
+  // update() is ignored.
+  connect(scope) {
     this.disconnect();
-    const onValueChanged = (event) => this.noteValueChanged(event, stateObj(), ticked());
+    const onValueChanged = (event) => this.noteValueChanged(event, this._stateObj, this._ticked);
     const onShowDialog = (event) => this.noteShowDialog(event);
     const onDialogClosed = (event) => this.noteDialogClosed(event);
     scope.addEventListener("value-changed", onValueChanged);
@@ -155,10 +159,13 @@ export class AutoForceArmTracker {
     };
   }
 
+  // A button press belongs to the surface it was made on; once the surface is
+  // removed, a later arm cannot be one it started.
   disconnect() {
     this._disconnect?.();
     this._disconnect = null;
-    this.reset();
+    this._clearInputs();
+    this._reset(null);
   }
 
   _syncEntity(stateObj) {
@@ -195,6 +202,8 @@ export class AutoForceArmTracker {
 
   // Runs on every state update, including repeats of the same state.
   update(stateObj, ticked, hass) {
+    this._stateObj = stateObj || null;
+    this._ticked = ticked;
     if (!stateObj) return;
     this._syncEntity(stateObj);
     const s = stateObj.state;

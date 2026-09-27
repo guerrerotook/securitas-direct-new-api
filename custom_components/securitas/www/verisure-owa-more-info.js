@@ -79,10 +79,7 @@ class VerisureOwaMoreInfo extends HTMLElement {
   }
 
   connectedCallback() {
-    this._autoForceTracker.connect(this._nativeControl, {
-      stateObj: () => this._resolvedStateObj(),
-      ticked: () => this._autoForceArm,
-    });
+    this._autoForceTracker.connect(this._nativeControl);
     globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._forwardNativeProperties();
     this._syncAutoForce();
@@ -165,16 +162,15 @@ class VerisureOwaMoreInfo extends HTMLElement {
       this._autoForceArm = readAutoForce(entityId);
       this._lastSyncKey = null;
     }
+    // The tracker runs on every update (it catches a force context that
+    // appears on the same tick) and judges a button press by the last one.
+    this._autoForceTracker.update(stateObj, this._autoForceArm, this._hass);
     if (!stateObj) return;
 
-    // The state machine must run every tick (it catches a force context that
-    // appears on the same tick), but the presentation below only changes with
-    // the gate, language and tick state — memoize it so the common no-op tick,
-    // and the paired set hass/set stateObj call, skip the DOM/translation work.
-    this._autoForceTracker.update(stateObj, this._autoForceArm, this._hass);
-
     // The tick box is a pre-arm preference, offered only while the alarm can
-    // be armed and the integration capability gate is on.
+    // be armed and the integration capability gate is on. It only changes with
+    // the gate, language and tick state, so it is memoized: the common no-op
+    // update, and the paired set hass/set stateObj call, skip the DOM work.
     const gateOn = stateObj.attributes?.auto_force_arm_enabled === true;
     const show = gateOn && stateObj.state === "disarmed";
     const lang = hassLanguage(this._hass);
