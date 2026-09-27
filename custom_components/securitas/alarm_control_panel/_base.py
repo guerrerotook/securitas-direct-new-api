@@ -112,6 +112,12 @@ _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 # that a stray request can't silently swallow an unrelated prompt later on.
 _ARM_PROMPT_SUPPRESS_WINDOW = 120.0
 
+# How long a suppressed arm-blocked prompt waits for the auto-force-arm that
+# asked for the suppression. If the frontend went away before calling
+# force_arm, the prompt is sent after all rather than leaving the user
+# unaware that the alarm did not arm.
+_SUPPRESSED_PROMPT_FALLBACK_DELAY = 15.0
+
 
 def _read_unsupported_for_installation(
     config: dict[str, Any], installation_number: str
@@ -261,6 +267,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # warning cleanly.
         self._force_context: dict[str, Any] | None = None
         self._force_arm_expiry_unsub: Callable[[], None] | None = None
+        self._suppressed_prompt_fallback_unsub: Callable[[], None] | None = None
         self._last_handled_event_id: str | None = None
         # Monotonic deadline until which the next arming-exception prompt is
         # suppressed. Auto-force-arm (card or More Info dialog) sets this via
@@ -325,8 +332,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 reason=DISMISSAL_REASON_INTEGRATION_RELOAD,
                 new_mode=None,
             )
-        # Cancel the expiry timer to avoid late callbacks on a torn-down entity.
+        # Cancel the timers to avoid late callbacks on a torn-down entity.
         self._cancel_force_arm_expiry()
+        self._cancel_suppressed_prompt_fallback()
         await super().async_will_remove_from_hass()
 
     @callback
@@ -1379,6 +1387,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # cancel, sibling dismissal, expiry) — clear it so it can't swallow a
         # later, unrelated prompt.
         self._suppress_arm_prompt_until = 0.0
+        self._cancel_suppressed_prompt_fallback()
 
     def _notify_force_armed(self, bypassed: list[dict[str, Any]]) -> None:
         """Schedule the "force-armed" confirmation (sync-callable)."""
@@ -1609,10 +1618,41 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # prohibited cannot complete the auto-force flow, so its warning must
         # never be suppressed.
         if event.data.get("allow_forcing", True) and self._arm_prompt_suppressed():
+            self._schedule_suppressed_prompt_fallback(event)
             return
         if not event.data.get("allow_forcing", True):
             self._suppress_arm_prompt_until = 0.0
         self.hass.async_create_task(self._async_notify_arm_exceptions(event))
+
+    def _schedule_suppressed_prompt_fallback(self, event: Event) -> None:
+        """Send the suppressed prompt later if nobody forces the arm by then.
+
+        Every resolution of the force context (force_arm, cancel, dismissal,
+        expiry) wipes it through ``_wipe_force_arm_state``, which cancels this
+        timer.
+        """
+        self._cancel_suppressed_prompt_fallback()
+        context = self._force_context
+
+        @callback
+        def _send_prompt(_now: datetime.datetime) -> None:
+            self._suppressed_prompt_fallback_unsub = None
+            if context is None or self._force_context is not context:
+                return
+            # The auto-force is abandoned: a later Force Arm tap is the user's
+            # own choice and must not get the auto-force confirmation.
+            self._suppress_arm_prompt_until = 0.0
+            self.hass.async_create_task(self._async_notify_arm_exceptions(event))
+
+        self._suppressed_prompt_fallback_unsub = async_call_later(
+            self.hass, _SUPPRESSED_PROMPT_FALLBACK_DELAY, _send_prompt
+        )
+
+    def _cancel_suppressed_prompt_fallback(self) -> None:
+        """Cancel any pending suppressed-prompt fallback (no-op if none)."""
+        if self._suppressed_prompt_fallback_unsub is not None:
+            self._suppressed_prompt_fallback_unsub()
+            self._suppressed_prompt_fallback_unsub = None
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
         """Send translated persistent + mobile notifications for an arming exception."""
