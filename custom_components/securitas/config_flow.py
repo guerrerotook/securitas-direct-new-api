@@ -805,9 +805,13 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         installation = self._reauth_entry.data.get(CONF_INSTALLATION)
         old_username = self._reauth_entry.data.get(CONF_USERNAME, "")
-        # Verisure matches the email whatever its capitals: only another
-        # address is another account.
-        if installation and username.casefold() != old_username.casefold():
+        # Verisure matches the email whatever its capitals, so only another
+        # address is another account. The same address keeps the entry's
+        # spelling: sessions, crash counts and cached installations are keyed
+        # by it exactly.
+        if username.casefold() == old_username.casefold():
+            username = old_username
+        if installation and username != old_username:
             # Another account keeps the entry's installation number; one that
             # cannot see it would leave the entry with no devices.
             try:

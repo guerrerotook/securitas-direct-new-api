@@ -4411,6 +4411,58 @@ async def test_the_same_email_in_other_capitals_is_not_a_switch(hass):
     reauth_hub.client.list_installations.assert_not_awaited()
 
 
+async def test_the_same_email_in_other_capitals_keeps_the_entrys_spelling(hass):
+    """The crash count is kept under the email as the entry stores it, so a
+    reauth typing it in other capitals keeps that spelling and clears its
+    count: the next crash waits to retry."""
+    home = await _home_crashed_once_then_rejected(hass)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "Test@Example.com",
+        _reauth_hub_seeing("111"),
+        _crashing_login(_hub_factory()),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.data[CONF_USERNAME] == "test@example.com"
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert _crash_streaks(hass) == {"test@example.com": 1}
+
+
+async def test_the_same_email_in_other_capitals_keeps_the_shared_session(hass):
+    """Home's reload after a reauth typing the email in other capitals goes
+    back on the session Office still holds, with the installations already
+    cached: no second sign-in, no second session, no second list."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = _add_office_entry(hass)
+    assert await hass.config_entries.async_setup(office.entry_id)
+    await hass.async_block_till_done()
+    home.async_start_reauth(hass)
+    await hass.async_block_till_done()
+    reload_login = AsyncMock(return_value=_two_installation_hub())
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "Test@Example.com",
+        _reauth_hub_seeing("111"),
+        patch("custom_components.securitas._login_ipv4_first", reload_login),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.state is ConfigEntryState.LOADED
+    assert _flow_sessions(hass).keys() == {"test@example.com"}
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {
+        home.entry_id,
+        office.entry_id,
+    }
+    reload_login.assert_not_awaited()
+    hub.client.list_installations.assert_awaited_once()
+
+
 async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):
     """The account already saw the installation when the entry was set up; a
     same-account reauth costs no extra call."""
