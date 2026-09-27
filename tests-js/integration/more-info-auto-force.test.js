@@ -214,6 +214,21 @@ describe("More Info auto-force behaviour", () => {
     });
   });
 
+  it("auto-forces the next arm straight after the dialog's own box is ticked", () => {
+    const { element, callService } = mountMoreInfo();
+    const cb = checkbox(element);
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change"));
+
+    pressMode(element);
+    push(element, { state: "arming" }, { callService });
+    push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });
+
+    expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
+      entity_id: ENTITY,
+    });
+  });
+
   it("contains rejections from the best-effort auto-force service calls", async () => {
     // Both auto-force calls (suppress + force-arm) are fire-and-forget, so a
     // backend rejection must not escape as an unhandled promise rejection in

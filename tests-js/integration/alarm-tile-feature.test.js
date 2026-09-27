@@ -392,6 +392,18 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       expect(wrapper.hidden).toBe(true);
     });
 
+    it("does not search the Tile again for Alarm modes once it has found them", () => {
+      const { feature, tileRoot } = mountTile();
+      const search = vi.spyOn(tileRoot, "querySelectorAll");
+
+      push(feature, alarmEntity());
+      push(feature, alarmEntity({ state: "armed_away" }));
+      push(feature, alarmEntity());
+
+      expect(search).not.toHaveBeenCalled();
+      expect(toggle(feature)).not.toBeNull();
+    });
+
     it("hides the tick box when the capability gate is off", () => {
       const { feature, wrapper } = mountTile({
         entity: alarmEntity({ autoForceArmEnabled: false }),
@@ -459,6 +471,55 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const moreInfoBox = moreInfo.shadowRoot.querySelector(".auto-force-checkbox");
       moreInfoBox.checked = true;
       moreInfoBox.dispatchEvent(new Event("change"));
+
+      expect(checkbox(feature).checked).toBe(true);
+    });
+
+    it("redraws once per click on the tick box", () => {
+      const { feature } = mountTile();
+      const render = vi.spyOn(feature, "_render");
+
+      const cb = checkbox(feature);
+      cb.checked = true;
+      cb.dispatchEvent(new Event("change"));
+
+      expect(render).toHaveBeenCalledOnce();
+      expect(checkbox(feature).checked).toBe(true);
+    });
+
+    it("reads the saved tick when the alarm is set, not on every update", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature } = mountTile();
+      const read = vi.spyOn(globalThis.localStorage, "getItem");
+
+      push(feature, alarmEntity());
+      push(feature, alarmEntity());
+      const reads = read.mock.calls.length;
+      read.mockRestore();
+
+      expect(reads).toBe(0);
+      expect(checkbox(feature).checked).toBe(true);
+    });
+
+    it("reads the saved tick of a different alarm when the Tile switches to it", () => {
+      const OTHER = "alarm_control_panel.other";
+      localStorage.setItem(`verisure-owa:auto-force-arm:${OTHER}`, "true");
+      const { feature } = mountTile();
+      expect(checkbox(feature).checked).toBe(false);
+
+      const other = { ...alarmEntity(), entity_id: OTHER };
+      feature.hass = makeHass({ states: { [ENTITY]: alarmEntity(), [OTHER]: other } });
+      feature.context = { entity_id: OTHER };
+
+      expect(checkbox(feature).checked).toBe(true);
+    });
+
+    it("picks up a tick saved while it was removed", () => {
+      const { feature, wrapper, group } = mountTile();
+      wrapper.remove();
+
+      localStorage.setItem(LS_KEY, "true");
+      group("features").appendChild(wrapper);
 
       expect(checkbox(feature).checked).toBe(true);
     });

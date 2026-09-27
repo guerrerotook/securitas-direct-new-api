@@ -64,8 +64,15 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._listenScope = null;
     this._recheckTimer = null;
     this._toggleKey = null;
+    this._alarmModes = null;
+    this._tickedFor = undefined;
+    this._tickedValue = false;
     this._onAutoForceChanged = (event) => {
-      if (event.detail?.entityId === this._entityId()) this._render();
+      const entityId = this._entityId();
+      if (!entityId || event.detail?.entityId !== entityId) return;
+      this._tickedFor = entityId;
+      this._tickedValue = event.detail.on === true;
+      this._render();
     };
 
     const style = document.createElement("style");
@@ -92,8 +99,8 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._autoForceCheckbox.addEventListener("change", (event) => {
       event.stopPropagation();
       const entityId = this._entityId();
+      // Redrawn by _onAutoForceChanged, which hears this write.
       if (entityId) writeAutoForce(entityId, this._autoForceCheckbox.checked === true);
-      this._render();
     });
 
     this.shadowRoot.append(style, this._alert, this._autoForceField);
@@ -102,6 +109,8 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
   connectedCallback() {
     this._listenScope = this._featureScope();
     if (this._listenScope) this._autoForceTracker.connect(this._listenScope);
+    // A tick saved while this was removed was not heard.
+    this._tickedFor = undefined;
     globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._render();
     // HA renders each sibling feature in its own later update, so an Alarm
@@ -117,6 +126,7 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._recheckTimer = null;
     this._autoForceTracker.disconnect();
     this._listenScope = null;
+    this._alarmModes = null;
     globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
   }
 
@@ -155,9 +165,15 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     return (entityId && this._hass?.states?.[entityId]) || this._stateObj;
   }
 
+  // Read from storage only when the alarm changes; later ticks arrive through
+  // _onAutoForceChanged.
   _ticked() {
     const entityId = this._entityId();
-    return entityId ? readAutoForce(entityId) : false;
+    if (entityId !== this._tickedFor) {
+      this._tickedFor = entityId;
+      this._tickedValue = entityId ? readAutoForce(entityId) : false;
+    }
+    return this._tickedValue;
   }
 
   // The card's shadow root, which holds every hui-card-features group of this
@@ -173,15 +189,30 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     return group.getRootNode();
   }
 
+  // The found element is kept, and checked to still sit in this Tile, so the
+  // card is searched again only while Alarm modes is missing: HA may add it
+  // after this feature, or remove it while this one stays.
   _hasAlarmModesFeature() {
     const scope = this._listenScope;
     if (!scope) return false;
+    if (this._alarmModes && this._inScope(this._alarmModes, scope)) return true;
+    this._alarmModes = null;
     for (const group of scope.querySelectorAll("hui-card-features")) {
       for (const wrapper of group.shadowRoot?.querySelectorAll("hui-card-feature") || []) {
-        if (wrapper.shadowRoot?.querySelector(ALARM_MODES_FEATURE)) return true;
+        const modes = wrapper.shadowRoot?.querySelector(ALARM_MODES_FEATURE);
+        if (modes) {
+          this._alarmModes = modes;
+          return true;
+        }
       }
     }
     return false;
+  }
+
+  _inScope(modes, scope) {
+    const wrapper = modes.getRootNode().host;
+    const group = wrapper?.getRootNode().host;
+    return modes.isConnected && group?.getRootNode() === scope;
   }
 
   _setVisible(visible) {
@@ -203,8 +234,6 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
       entityId: this._entityId(),
       presentation: "compact",
     });
-    // Read on every render rather than cached, so a tick made in More Info
-    // shows here on the next update.
     const ticked = this._ticked();
     this._autoForceTracker.update(stateObj, ticked, this._hass);
 

@@ -63,9 +63,8 @@ class VerisureOwaMoreInfo extends HTMLElement {
     this._autoForceField.appendChild(this._autoForceCheckbox);
     this._autoForceCheckbox.addEventListener("change", (event) => {
       event.stopPropagation();
-      this._autoForceArm = this._autoForceCheckbox.checked === true;
-      if (this._entityId) writeAutoForce(this._entityId, this._autoForceArm);
-      this._lastSyncKey = null; // reflect the new tick immediately
+      // _onAutoForceChanged hears this write and takes the new tick.
+      if (this._entityId) writeAutoForce(this._entityId, this._autoForceCheckbox.checked === true);
     });
 
     this._forceExtension = document.createElement("verisure-owa-arm-exception-alert");
