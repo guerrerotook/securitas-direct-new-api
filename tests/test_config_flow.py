@@ -45,6 +45,7 @@ from custom_components.securitas import (
     DOMAIN,
     _get_or_create_session,
     _login_or_raise,
+    async_remove_entry,
     async_unload_entry,
 )
 from custom_components.securitas.config_flow import SECTION_PIN, FlowHandler
@@ -3850,6 +3851,160 @@ async def test_reauth_preserves_username_from_entry(hass):
     # The schema should have the username pre-filled
     schema = result["data_schema"]
     assert schema is not None
+
+
+async def _reauth_as_other_account(hass, entry):
+    """Sign the entry in again as another account and let the reload set it up."""
+    reauths = [
+        flow
+        for flow in hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        if flow["context"]["source"] == SOURCE_REAUTH
+    ]
+    flow_id = (
+        reauths[0]["flow_id"]
+        if reauths
+        else (await _start_reauth_flow(hass, entry))["flow_id"]
+    )
+    other_hub = _hub_factory()
+    other_hub.config = make_config_entry_data(username="other@example.com")
+    with (
+        _patches(_hub_factory()),
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=other_hub),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: "other@example.com",
+                CONF_PASSWORD: "new-password",
+            },
+        )
+        await hass.async_block_till_done()
+    assert result["reason"] == "reauth_successful"
+    assert entry.state is ConfigEntryState.LOADED
+    assert _flow_sessions(hass)["other@example.com"]["holders"] == {entry.entry_id}
+
+
+def _write_other_account_into(hass, entry):
+    """Name another account in the entry's data, as reauth does before reloading."""
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_USERNAME: "other@example.com"}
+    )
+
+
+async def _office_needing_reauth_while_holding_the_session(hass):
+    """Set Office up to be rejected after taking its hold, so it waits for
+    reauth still holding the account's session."""
+    office = _add_office_entry(hass)
+    with (
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+        patch(
+            "custom_components.securitas._fetch_and_cache_installations",
+            AsyncMock(side_effect=ConfigEntryAuthFailed("rejected")),
+        ),
+    ):
+        assert not await hass.config_entries.async_setup(office.entry_id)
+    await hass.async_block_till_done()
+    assert office.state is ConfigEntryState.SETUP_ERROR
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {office.entry_id}
+    return office
+
+
+async def test_signing_a_loaded_entry_in_as_another_account_lets_go_of_the_first(
+    hass,
+):
+    """The entry's data names the new account by the time it unloads; its hold
+    on the first account's session must still be released, and that hub must
+    save its tokens to the entry still using it."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = (await _finish_from_options(hass, await _start_user_flow(hass, hub)))[
+        "result"
+    ]
+    assert hub.config_entry is home
+    written_to = _record_persistence_target(hub)
+
+    await _reauth_as_other_account(hass, home)
+
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {office.entry_id}
+    assert hub.config_entry is office
+    assert written_to == [office]
+
+
+async def test_unloading_an_entry_renamed_to_another_account_lets_go_of_the_first(
+    hass,
+):
+    """Unloading the entry itself must release its hold, found by the hold
+    rather than the account its data now names; checked before Home Assistant's
+    unload listener gets a chance to release it instead."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = (await _finish_from_options(hass, await _start_user_flow(hass, hub)))[
+        "result"
+    ]
+    _write_other_account_into(hass, home)
+
+    assert await hass.config_entries.async_unload(home.entry_id)
+
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {office.entry_id}
+    assert hub.config_entry is office
+
+
+async def test_disabling_an_entry_renamed_while_needing_reauth_tears_down(hass):
+    """Home Assistant unloads an entry needing reauth without calling the
+    integration, so the unload listener alone must find and release its hold
+    on the account its data no longer names."""
+    office = await _office_needing_reauth_while_holding_the_session(hass)
+    _write_other_account_into(hass, office)
+
+    await _disable(hass, office)
+
+    _assert_torn_down(hass)
+
+
+async def test_removing_an_entry_renamed_while_needing_reauth_releases_its_session(
+    hass,
+):
+    """Removing the entry must release its hold even when nothing unloaded it
+    first, found by the hold rather than the account its data now names."""
+    office = await _office_needing_reauth_while_holding_the_session(hass)
+    _write_other_account_into(hass, office)
+
+    await async_remove_entry(hass, office)
+
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def test_signing_an_entry_needing_reauth_in_as_another_account_lets_go_of_the_first(
+    hass,
+):
+    """An entry whose setup failed after taking its hold waits for reauth still
+    holding the first account's session; signing in as another account must
+    not leave that session held by nobody who uses it."""
+    office = await _office_needing_reauth_while_holding_the_session(hass)
+
+    await _reauth_as_other_account(hass, office)
+
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def test_deleting_an_entry_renamed_to_another_account_releases_its_session(
+    hass,
+):
+    """Reauth writes the new account into the entry before reloading it; an
+    entry deleted in between still holds the first account's session."""
+    office = await _office_needing_reauth_while_holding_the_session(hass)
+    _write_other_account_into(hass, office)
+
+    await hass.config_entries.async_remove(office.entry_id)
+    await hass.async_block_till_done()
+
+    _assert_torn_down(hass)
 
 
 # ===================================================================

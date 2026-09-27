@@ -696,6 +696,22 @@ def _release_session_hold(
     return True
 
 
+def _held_session_username(sessions: dict[str, Any], entry: ConfigEntry) -> str | None:
+    """The account whose session ``entry`` holds, if any.
+
+    Found by the hold, not the entry's data: reauth may already have written a
+    different account into the entry by the time it lets go.
+    """
+    return next(
+        (
+            username
+            for username, session in sessions.items()
+            if entry.entry_id in session["holders"]
+        ),
+        None,
+    )
+
+
 def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
     """Save the hub's rotated refresh tokens to ``entry``, starting now.
 
@@ -725,9 +741,21 @@ async def _get_or_create_session(
     VerisureHub / VerisureOwaClient session to avoid duplicate logins
     and WAF rate-limit blocks.  The account lock stops entry setups and setup
     dialogs signing in to the same account at once.
+
+    An entry whose setup failed and that reauth then signed in to another
+    account still holds the first account's session when the reload sets it
+    up again: Home Assistant holds the entry's setup lock across the reload,
+    so ``_async_entry_unloaded`` has not released it yet. That hold is
+    released first.
     """
     username = config[CONF_USERNAME]
     sessions = hass.data[DOMAIN].setdefault("sessions", {})
+
+    previous = _held_session_username(sessions, entry)
+    if previous is not None and previous != username:
+        async with _account_lock(hass, previous):
+            if previous in sessions:
+                _release_shared_session(hass, sessions, previous, entry)
 
     async with _account_lock(hass, username):
         if username in sessions:
@@ -1626,14 +1654,15 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
     as in use; the last one to finish unloading runs the check again here.
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
-    reloaded entry set up again first and keep its session and crash count.
+    reloaded entry set up again first and keep its session and crash count
+    (or, after reauth switched its account, let go of the old one).
     """
     async with entry.setup_lock:
         if entry.state is not ConfigEntryState.NOT_LOADED:
             return
         sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
-        username: str = entry.data.get(CONF_USERNAME, "")
-        if username in sessions and entry.entry_id in sessions[username]["holders"]:
+        username = _held_session_username(sessions, entry)
+        if username is not None:
             _release_shared_session(hass, sessions, username, entry)
     await _async_teardown_domain_if_unused(hass)
 
@@ -1714,15 +1743,16 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     retry, or needing reauth) still holds the session here.
     """
     domain_data = hass.data.get(DOMAIN)
-    username = entry.data.get(CONF_USERNAME)
-    if domain_data is None or not username:
+    if domain_data is None:
         return
-    lock = domain_data.get("setup_locks", {}).get(username) or asyncio.Lock()
-    async with lock:
-        sessions = domain_data.get("sessions", {})
-        session = sessions.get(username)
-        if session is not None and entry.entry_id in session["holders"]:
-            _release_shared_session(hass, sessions, username, entry)
+    sessions = domain_data.get("sessions", {})
+    username = _held_session_username(sessions, entry)
+    if username is not None:
+        lock = domain_data.get("setup_locks", {}).get(username) or asyncio.Lock()
+        async with lock:
+            session = sessions.get(username)
+            if session is not None and entry.entry_id in session["holders"]:
+                _release_shared_session(hass, sessions, username, entry)
     await _async_teardown_domain_if_unused(hass)
 
 
@@ -1732,10 +1762,10 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
         return False
 
     # Release this entry's hold (under the same lock used for creation)
-    username = config_entry.data.get(CONF_USERNAME)
     sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
     setup_locks = hass.data.get(DOMAIN, {}).get("setup_locks", {})
-    if username and username in sessions:
+    username = _held_session_username(sessions, config_entry)
+    if username is not None:
         lock = setup_locks.get(username) or asyncio.Lock()
         async with lock:
             # A closing config flow lets go without this lock, so the session
