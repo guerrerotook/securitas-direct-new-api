@@ -339,6 +339,22 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
     push(feature, alarmEntity({ forceArmAvailable: true, armExceptions: ["Door"] }), callService);
   }
 
+  function openPinPrompt(select) {
+    select.getRootNode().host.dispatchEvent(
+      new CustomEvent("show-dialog", {
+        detail: { dialogTag: "dialog-enter-code" },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  function closePinPrompt() {
+    window.dispatchEvent(
+      new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
+    );
+  }
+
   // The keypad's tick button in HA's PIN prompt, clicked as a user would.
   function submitPin() {
     const prompt = document.createElement("dialog-enter-code");
@@ -643,17 +659,9 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature, modes, callService } = mountTile();
 
       pressMode(modes.select);
-      modes.select.getRootNode().host.dispatchEvent(
-        new CustomEvent("show-dialog", {
-          detail: { dialogTag: "dialog-enter-code" },
-          bubbles: true,
-          composed: true,
-        }),
-      );
+      openPinPrompt(modes.select);
       vi.advanceTimersByTime(3_000);
-      window.dispatchEvent(
-        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
-      );
+      closePinPrompt();
       armWithException(feature, callService);
 
       expect(autoForceCalls(callService)).toEqual([]);
@@ -665,17 +673,9 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature, modes, callService } = mountTile();
 
       pressMode(modes.select);
-      modes.select.getRootNode().host.dispatchEvent(
-        new CustomEvent("show-dialog", {
-          detail: { dialogTag: "dialog-enter-code" },
-          bubbles: true,
-          composed: true,
-        }),
-      );
+      openPinPrompt(modes.select);
       vi.advanceTimersByTime(3_000);
-      window.dispatchEvent(
-        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
-      );
+      closePinPrompt();
       vi.advanceTimersByTime(3_000);
       submitPin();
       armWithException(feature, callService);
@@ -689,19 +689,11 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature, modes, callService } = mountTile();
 
       pressMode(modes.select);
-      modes.select.getRootNode().host.dispatchEvent(
-        new CustomEvent("show-dialog", {
-          detail: { dialogTag: "dialog-enter-code" },
-          bubbles: true,
-          composed: true,
-        }),
-      );
+      openPinPrompt(modes.select);
       vi.advanceTimersByTime(30_000);
       submitPin();
       armWithException(feature, callService);
-      window.dispatchEvent(
-        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
-      );
+      closePinPrompt();
 
       expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", {
         entity_id: ENTITY,
@@ -713,13 +705,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       const { feature, modes, callService } = mountTile();
 
       pressMode(modes.select);
-      modes.select.getRootNode().host.dispatchEvent(
-        new CustomEvent("show-dialog", {
-          detail: { dialogTag: "dialog-enter-code" },
-          bubbles: true,
-          composed: true,
-        }),
-      );
+      openPinPrompt(modes.select);
       armWithException(feature, callService);
 
       expect(autoForceCalls(callService)).toEqual([]);

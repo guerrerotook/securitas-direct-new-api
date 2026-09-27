@@ -471,7 +471,7 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     expect(autoForceCalls(callService)).toEqual([]);
   });
 
-  it("does NOT auto-force when the arm starts more than 60 s after the button press while the PIN prompt is open", () => {
+  it("does NOT auto-force when the PIN is submitted more than 60 s after the button press", () => {
     vi.useFakeTimers();
     localStorage.setItem(LS_KEY, "true");
     const { element, callService } = mountMoreInfo();
@@ -479,6 +479,7 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     pressMode(element);
     openPinPrompt(element);
     vi.advanceTimersByTime(60_001);
+    submitPin();
     armWithException(element, callService);
 
     expect(autoForceCalls(callService)).toEqual([]);

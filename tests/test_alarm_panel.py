@@ -2880,6 +2880,7 @@ class TestSuppressedPromptFallback:
     async def test_blocked_prompt_sent_when_nobody_forces_the_suppressed_arm(
         self, timers
     ):
+        """A suppressed arm-blocked prompt is sent late when no force-arm follows."""
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
         assert self._blocked_prompts(alarm) == []
@@ -2892,6 +2893,7 @@ class TestSuppressedPromptFallback:
         assert "Window" in prompts[0]["message"]
 
     async def test_no_blocked_prompt_when_the_suppressed_arm_is_forced(self, timers):
+        """Forcing the suppressed arm cancels the late prompt and confirms the force."""
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
 
@@ -2905,6 +2907,7 @@ class TestSuppressedPromptFallback:
     async def test_force_arm_after_the_late_prompt_sends_no_auto_confirmation(
         self, timers
     ):
+        """A force-arm after the late prompt sends no force-armed confirmation."""
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
         await timers.advance(self._WAIT)
@@ -2916,6 +2919,7 @@ class TestSuppressedPromptFallback:
         assert self._force_armed_confirmations(alarm) == []
 
     async def test_unforceable_warning_is_sent_once_despite_suppression(self, timers):
+        """An arm that cannot be forced is warned about once, not again later."""
         alarm = self._make_panel(allow_forcing=False)
         await self._suppressed_arm_blocked(alarm)
         assert len(self._created(alarm, alarm._arming_exception_notification_id)) == 1
@@ -2926,6 +2930,7 @@ class TestSuppressedPromptFallback:
         assert len(self._created(alarm, alarm._arming_exception_notification_id)) == 1
 
     async def test_unsuppressed_prompt_is_sent_once_at_once(self, timers):
+        """Without suppression the prompt is sent immediately and not repeated."""
         alarm = self._make_panel()
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
         await self._drain(alarm)
@@ -2939,6 +2944,7 @@ class TestSuppressedPromptFallback:
     async def test_no_blocked_prompt_after_the_suppressed_arm_is_cancelled(
         self, timers
     ):
+        """Cancelling the force-arm cancels the late prompt."""
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
 
@@ -2949,6 +2955,7 @@ class TestSuppressedPromptFallback:
         assert self._blocked_prompts(alarm) == []
 
     async def test_no_blocked_prompt_after_the_force_arm_window_expires(self, timers):
+        """Expiry of the force-arm window cancels the late prompt."""
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
 
@@ -2961,6 +2968,7 @@ class TestSuppressedPromptFallback:
     async def test_no_blocked_prompt_after_a_new_arm_dismisses_the_context(
         self, timers
     ):
+        """A new arm that dismisses the force context cancels the late prompt."""
         alarm = self._make_panel()
         setup_alarm_entry_data(alarm)
         await self._suppressed_arm_blocked(alarm)
@@ -2993,6 +3001,7 @@ class TestSuppressedPromptFallback:
         assert self._blocked_prompts(alarm) == []
 
     async def test_entity_removal_cancels_the_pending_prompt(self, timers):
+        """Removing the entity cancels the late prompt."""
         alarm = self._make_panel()
         await self._suppressed_arm_blocked(alarm)
         # Removal does not wipe the context, so only the explicit cancel on
