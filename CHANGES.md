@@ -2,6 +2,8 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.9.0
+
 ## v5.8.0
 
 The headline this release is that the integration now lives in Home Assistant's **native** UI: the standard alarm **More Info dialog** and the **Tile card** both surface open sensors and offer Force Arm, so arming past an open door or window no longer needs the custom card. Huge thanks to [@foxdalas](https://github.com/foxdalas) for contributing that work ([#586](https://github.com/guerrerotook/securitas-direct-new-api/pull/586)). As a result, the custom alarm card, badge and Mushroom chip are now deprecated. Alongside it, a new optional tick box arms past open sensors for you automatically, plus a handful of fixes — including one that stops the alarm getting stuck offline after a login problem.
