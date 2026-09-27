@@ -185,7 +185,7 @@ def client(transport):
 
 class TestGetCameraDevices:
     async def test_returns_filtered_camera_list(self, client, transport):
-        """Only QR, YR, YP, QP active devices are returned."""
+        """Only active camera devices (QR, YR, YP, QP, XR) are returned."""
         transport.execute.return_value = device_list_response(
             devices=[
                 {
