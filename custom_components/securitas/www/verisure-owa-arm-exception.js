@@ -60,8 +60,9 @@ export function hassLanguage(hass) {
 // ── Per-device auto-force-arm preference (shared by the alarm card, the
 // native More Info dialog and the Tile feature) ─────────────────────────────
 // Defined here, in the module every surface imports, so the storage key can
-// never drift between them: the tick is remembered per device and shared, so
-// ticking it in one place enables it in the others.
+// never drift between them. The tick is remembered per device; More Info and
+// the Tile follow each other's ticks, while the deprecated alarm card only reads
+// it when its config loads.
 export function autoForceStorageKey(entityId) {
   return `verisure-owa:auto-force-arm:${entityId}`;
 }
@@ -74,8 +75,8 @@ export function readAutoForce(entityId) {
   }
 }
 
-// The browser only fires `storage` in other tabs, so surfaces mounted in this
-// page learn of a tick made elsewhere in it from this event.
+// The browser only fires `storage` in other tabs, so More Info and the Tile
+// learn of a tick made elsewhere in this page from this event.
 export const AUTO_FORCE_CHANGED_EVENT = "verisure-owa-auto-force-changed";
 
 export function writeAutoForce(entityId, on) {

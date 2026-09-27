@@ -376,8 +376,9 @@ async def async_setup_entry(
         {},
         "async_force_arm_cancel",
     )
-    # Frontend-only: the auto-force card fires this just before an arm it
-    # intends to force through, so the transient "force-arm required?" prompt
+    # Frontend-only: auto-force fires this for an arm it intends to force
+    # through (the deprecated card before arming; More Info and the Tile once
+    # arming starts), so the transient "force-arm required?" prompt
     # is suppressed and the "force-armed" confirmation is sent instead.
     platform.async_register_entity_service(
         "suppress_arm_exception_prompt",

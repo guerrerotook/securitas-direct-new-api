@@ -195,8 +195,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._attr_extra_state_attributes["custom_ui_more_info"] = MORE_INFO_ELEMENT
         # Advertise the auto-force-arm capability gate to the frontend.
         # Static per config (an options change reloads the entry), so it's set
-        # once here. The card and the More Info dialog only offer their
-        # per-device tick box when True.
+        # once here. The card, the More Info dialog and the Tile feature only
+        # offer their per-device tick box when True.
         self._attr_extra_state_attributes["auto_force_arm_enabled"] = bool(
             self._client.config.get(CONF_AUTO_FORCE_ARM, DEFAULT_AUTO_FORCE_ARM)
         )
@@ -283,13 +283,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         Target of the verisure_owa.suppress_arm_exception_prompt service. The
         window also gates the follow-up "force-armed" confirmation, so only an
-        auto-forced arm (card set this flag) confirms; a manual Force Arm tap
+        auto-forced arm (auto-force set this flag) confirms; a manual Force Arm tap
         does not.
         """
         self._suppress_arm_prompt_until = time.monotonic() + _ARM_PROMPT_SUPPRESS_WINDOW
 
     def _arm_prompt_suppressed(self) -> bool:
-        """True while a card-requested prompt suppression is still in effect."""
+        """True while an auto-force-requested prompt suppression is still in effect."""
         return time.monotonic() < self._suppress_arm_prompt_until
 
     async def async_added_to_hass(self) -> None:
@@ -1609,7 +1609,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # Auto-force-arm asks us to skip this prompt for an arm it will force
         # through — the follow-up "force-armed" confirmation tells the user
         # what happened instead. The card asks before it arms; the More Info
-        # dialog only once arming starts, so its request can arrive too late.
+        # dialog and the Tile only once arming starts, so their request can
+        # arrive too late.
         # The suppression window still gates that confirmation (see
         # set_arm_state), so it fires only for this auto path, never for a
         # manual Force Arm tap.
