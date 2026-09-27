@@ -5,9 +5,12 @@
 // Badge from depending on the much larger Alarm Card editor at runtime.
 
 import {
+  _t,
+  DEPRECATION_DOCS_URL,
   GESTURE_KEYS,
   migrateCompactAlarmConfig,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-rc.2";
+} from "./verisure-owa-alarm-shared.js?v=5.8.0";
+import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.8.0";
 
 const DEFAULT_CONFIG = {
   show_name: false,
@@ -46,14 +49,18 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
     style.textContent = `
       :host { display: block; }
       ha-form { display: block; width: 100%; }
+      .deprecation-notice { display: block; margin-bottom: 16px; }
     `;
+    this._notice = document.createElement("ha-alert");
+    this._notice.className = "deprecation-notice";
+    this._notice.setAttribute("alert-type", "warning");
     this._form = document.createElement("ha-form");
     this._form.id = "badge-form";
     this._form.addEventListener("value-changed", (event) => {
       event.stopPropagation();
       this._valueChanged(event.detail?.value || {});
     });
-    this.shadowRoot.append(style, this._form);
+    this.shadowRoot.append(style, this._notice, this._form);
   }
 
   setConfig(config) {
@@ -180,6 +187,13 @@ class VerisureOwaAlarmBadgeEditor extends HTMLElement {
 
   _render() {
     if (!this._hass || !this._config) return;
+    const lang = hassLanguage(this._hass);
+    const link = document.createElement("a");
+    link.href = DEPRECATION_DOCS_URL;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = _t(lang, "deprecated_how");
+    this._notice.replaceChildren(`${_t(lang, "deprecated_badge")} `, link);
     this._form.hass = this._hass;
     this._form.data = this._formData();
     this._form.schema = this._schema();

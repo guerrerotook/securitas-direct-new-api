@@ -113,21 +113,21 @@ class TestNotificationTranslationsPersistentMessageTrim:
                     f"still contains forbidden substring {forbidden!r}: {entry['message']!r}"
                 )
 
-    def test_message_still_mentions_alarm_card(self):
-        """Sanity: the alarm-card guidance must still be present per locale."""
+    def test_message_says_to_open_the_alarm(self):
+        """Sanity: the open-the-alarm guidance must be present per locale."""
         from custom_components.securitas.notification_translations import (
             NOTIFICATION_TRANSLATIONS,
         )
 
         # Translation hint per locale that should remain.
         keepers = {
-            "en": "alarm card",
-            "es": "tarjeta de la alarma",
-            "fr": "carte d'alarme",
-            "it": "card dell'allarme",
-            "pt": "cartão do alarme",
-            "pt-BR": "cartão do alarme",
-            "ca": "targeta de l'alarma",
+            "en": "open the alarm",
+            "es": "abre la alarma",
+            "fr": "ouvrez l'alarme",
+            "it": "apri l'allarme",
+            "pt": "abra o alarme",
+            "pt-BR": "abra o alarme",
+            "ca": "obre l'alarma",
         }
         for locale in self.LOCALES:
             entry = NOTIFICATION_TRANSLATIONS[locale]["arm_blocked_open_sensors"]

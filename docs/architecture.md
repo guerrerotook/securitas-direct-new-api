@@ -15,7 +15,8 @@ The integration has three layers:
 │  coordinators.py  (DataUpdateCoordinators)                           │
 │  events.py  (Activity log → bus event injection + dedup)             │
 │  discovery.py  (Background camera + lock discovery)                  │
-│  card_resources.py  (Lovelace static-path + resource registration)   │
+│  card_resources.py  (Lovelace static-path + resource registration    │
+│    + the verisure_owa/deprecated_element websocket command)          │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Integration Hub Layer                                               │
 │  __init__.py  (setup functions)                                      │
@@ -1198,6 +1199,6 @@ alongside it under `.github/workflows/`.
 | `verisure_owa_api/const.py` | 107 | `VerisureOwaState`, command/protocol mappings, defaults |
 | `verisure_owa_api/domains.py` | 50 | Country-to-URL routing |
 | `verisure_owa_api/exceptions.py` | 121 | Exception hierarchy with `http_status`, `log_detail()`, and `ArmingExceptionError` |
-| `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. (Filename `securitas-alarm-card.js` is a byte-identical copy retained indefinitely as an alias served at the `/securitas_panel/` URL prefix so old user dashboards keep loading; the card picker only offers the `custom:verisure-owa-alarm-card` form.) |
+| `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. **Deprecated since v5.8.0**, together with the badge and Mushroom chip in `www/verisure-owa-alarm-chip.js`: the card shows a notice the user can close, and each of the three reports itself once per element instance over the `verisure_owa/deprecated_element` websocket command, which `card_resources.py` registers from `async_setup` and which logs one warning per element and dashboard until Home Assistant restarts. (Filename `securitas-alarm-card.js` is a byte-identical copy retained indefinitely as an alias served at the `/securitas_panel/` URL prefix so old user dashboards keep loading; the card picker only offers the `custom:verisure-owa-alarm-card` form.) |
 | `www/verisure-owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
 | `www/verisure-owa-activity-log-card.js` | — | Custom Lovelace **Activity Log** card showing recent alarm-panel activity. |

@@ -21,12 +21,12 @@
  *   name: My Alarm          # optional — overrides friendly_name
  */
 
-import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0-rc.2";
+import { escHtml } from "./verisure-owa-card-utils.js?v=5.8.0";
 import {
   autoForceActive,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=5.8.0-rc.2";
+} from "./verisure-owa-arm-exception.js?v=5.8.0";
 import {
   _t,
   STATE_CFG,
@@ -42,7 +42,12 @@ import {
   TRANSLATIONS,
   alarmEntitySuggestion,
   _makeLegacyShim,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-rc.2";
+  DEPRECATION_DOCS_URL,
+  DEPRECATION_DISMISSED_EVENT,
+  deprecationNoticeDismissed,
+  dismissDeprecationNotice,
+  reportDeprecatedElement,
+} from "./verisure-owa-alarm-shared.js?v=5.8.0";
 
 // Re-export the public helper API so existing imports of these names from
 // this module keep working.
@@ -52,7 +57,7 @@ export {
   ARM_ACTIONS,
   defaultArmState,
   alarmEntitySuggestion,
-} from "./verisure-owa-alarm-shared.js?v=5.8.0-rc.2";
+} from "./verisure-owa-alarm-shared.js?v=5.8.0";
 
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the
@@ -79,9 +84,19 @@ class VerisureOwaAlarmCard extends HTMLElement {
     this._autoForceArm = false;
     this._pendingAutoForce = false;
     this._autoForceArming = false;
+    this._onDeprecationDismissed = () => {
+      if (this._deprecationDismissed) return;
+      this._deprecationDismissed = true;
+      this._render();
+    };
+  }
+
+  connectedCallback() {
+    window.addEventListener(DEPRECATION_DISMISSED_EVENT, this._onDeprecationDismissed);
   }
 
   disconnectedCallback() {
+    window.removeEventListener(DEPRECATION_DISMISSED_EVENT, this._onDeprecationDismissed);
     if (this._gestureCleanup) { this._gestureCleanup(); this._gestureCleanup = null; }
     // Force the next `set hass` call (which fires on reconnection) to
     // re-run `_render`. Without this, the cached `_lastKey` matches the
@@ -194,6 +209,10 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (!this._deprecationReported) {
+      this._deprecationReported = true;
+      reportDeprecatedElement(hass, "card");
+    }
     // Only re-render if the relevant entity state/attributes changed
     const stateObj = hass.states[this._config.entity];
     // Act on a pending auto-force intent before the render short-circuit, so a
@@ -284,6 +303,14 @@ class VerisureOwaAlarmCard extends HTMLElement {
         <div class="top-bar"></div>
         <div class="content">
 
+          ${this._deprecationDismissed || deprecationNoticeDismissed() ? "" : `
+            <div class="deprecation-notice" role="note">
+              <ha-icon icon="mdi:information-outline"></ha-icon>
+              <span>${_t(lang, "deprecated_card")}
+                <a href="${DEPRECATION_DOCS_URL}" target="_blank" rel="noreferrer">${_t(lang, "deprecated_how")}</a></span>
+              <button class="deprecation-dismiss" type="button" title="${_t(lang, "deprecated_dismiss")}" aria-label="${_t(lang, "deprecated_dismiss")}"><ha-icon icon="mdi:close"></ha-icon></button>
+            </div>`}
+
           <!-- ── Header ── -->
           <div class="header">
             <div class="icon-wrap">
@@ -336,6 +363,11 @@ class VerisureOwaAlarmCard extends HTMLElement {
 
         </div>
       </ha-card>`;
+
+    this.shadowRoot.querySelector(".deprecation-dismiss")?.addEventListener("click", () => {
+      this._onDeprecationDismissed();
+      dismissDeprecationNotice();
+    });
 
     const armExceptionSlot = this.shadowRoot.getElementById("arm-exception-slot");
     if (armExceptionSlot) {
@@ -579,6 +611,32 @@ class VerisureOwaAlarmCard extends HTMLElement {
       .stale-banner ha-icon {
         --mdc-icon-size: 18px;
         flex-shrink: 0;
+      }
+      .deprecation-notice {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 8px 8px 12px;
+        margin: 0 0 12px;
+        border-radius: 8px;
+        font-size: 0.85em;
+        background: rgba(var(--rgb-info-color, 3, 155, 229), 0.12);
+        color: var(--primary-text-color);
+      }
+      .deprecation-notice > ha-icon {
+        --mdc-icon-size: 18px;
+        flex-shrink: 0;
+        color: var(--info-color, #039BE5);
+      }
+      .deprecation-notice span { flex: 1; }
+      .deprecation-notice a { color: var(--primary-color); }
+      .deprecation-dismiss {
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        color: var(--secondary-text-color);
+        --mdc-icon-size: 16px;
       }
 
       /* colour accent strip at top */
@@ -1358,8 +1416,8 @@ window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === "verisure-owa-alarm-card")) {
   window.customCards.push({
     type:        "verisure-owa-alarm-card",
-    name:        TRANSLATIONS.en.card_name,
-    description: TRANSLATIONS.en.card_description,
+    name:        `${TRANSLATIONS.en.card_name} (deprecated)`,
+    description: TRANSLATIONS.en.deprecated_card,
     preview:     false,
     getEntitySuggestion: alarmEntitySuggestion,
   });
