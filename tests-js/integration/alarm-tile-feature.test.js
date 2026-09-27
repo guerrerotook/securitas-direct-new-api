@@ -524,6 +524,17 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       expect(checkbox(feature).checked).toBe(true);
     });
 
+    it("picks up a tick saved after an update while it was removed", () => {
+      const { feature, wrapper, group } = mountTile();
+      wrapper.remove();
+      push(feature, alarmEntity());
+
+      localStorage.setItem(LS_KEY, "true");
+      group("features").appendChild(wrapper);
+
+      expect(checkbox(feature).checked).toBe(true);
+    });
+
     it("stops following ticks once removed", () => {
       const { feature, wrapper, group } = mountTile();
       const other = mountTile();

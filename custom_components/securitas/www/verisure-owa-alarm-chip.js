@@ -109,7 +109,8 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
   connectedCallback() {
     this._listenScope = this._featureScope();
     if (this._listenScope) this._autoForceTracker.connect(this._listenScope);
-    // A tick saved while this was removed was not heard.
+    // A tick saved while this was removed was not heard, even if an update
+    // re-read storage before the save, so re-read it now.
     this._tickedFor = undefined;
     globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._render();

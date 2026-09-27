@@ -191,6 +191,30 @@ describe("More Info auto-force tick box persistence (localStorage)", () => {
     expect(checkbox(element).checked).toBe(false);
   });
 
+  it("picks up a tick saved while it was off the page", () => {
+    const { element, callService } = mountMoreInfo();
+    element.remove();
+    // Another tab writes storage directly; no change event reaches this page.
+    localStorage.setItem(LS_KEY, "true");
+    document.body.appendChild(element);
+
+    expect(checkbox(element).checked).toBe(true);
+    pressMode(element);
+    push(element, { state: "arming" }, { callService });
+    push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });
+    expect(callService).toHaveBeenCalledWith("verisure_owa", "force_arm", { entity_id: ENTITY });
+  });
+
+  it("picks up a tick saved after an update while it was off the page", () => {
+    const { element } = mountMoreInfo();
+    element.remove();
+    push(element, {});
+    localStorage.setItem(LS_KEY, "true");
+    document.body.appendChild(element);
+
+    expect(checkbox(element).checked).toBe(true);
+  });
+
   it("renders the box pre-checked from a stored true choice (set via the card)", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element } = mountMoreInfo();

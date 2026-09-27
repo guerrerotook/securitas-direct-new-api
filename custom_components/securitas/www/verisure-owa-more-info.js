@@ -78,6 +78,9 @@ class VerisureOwaMoreInfo extends HTMLElement {
   }
 
   connectedCallback() {
+    // A tick saved while this was removed was not heard, even if an update
+    // re-read storage before the save, so re-read it now.
+    this._entityId = null;
     this._autoForceTracker.connect(this._nativeControl);
     globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
     this._forwardNativeProperties();
