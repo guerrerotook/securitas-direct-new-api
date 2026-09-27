@@ -27,6 +27,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
     _ALIASED_SERVICES,
+    _INSTALLATIONS_CACHE,
     ALIAS_DOMAIN,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
@@ -4159,7 +4160,7 @@ async def test_an_entry_switched_to_another_account_lists_that_accounts_installa
 
     await _reauth_as_other_account(hass, home, other_hub)
 
-    assert "installations_cache_test@example.com" in hass.data[DOMAIN]
+    assert "test@example.com" in hass.data[_INSTALLATIONS_CACHE]
 
     other_hub.client.list_installations.assert_awaited_once()
     devices = hass.data[DOMAIN][home.entry_id]["devices"]
@@ -4181,7 +4182,7 @@ async def test_a_setup_dialog_for_the_second_account_offers_its_own_installation
         make_installation(number="333", alias="Holiday home"),
     )
     await _reauth_as_other_account(hass, home, other_hub)
-    assert "installations_cache_test@example.com" in hass.data[DOMAIN]
+    assert "test@example.com" in hass.data[_INSTALLATIONS_CACHE]
 
     result = await _start_user_flow(
         hass,
@@ -4204,11 +4205,9 @@ async def test_the_first_accounts_cached_list_lasts_only_its_usual_time(
     home = await _load_home_entry(hass, _two_installation_hub())
     await _reauth_as_other_account(hass, home)
     assert "test@example.com" not in _flow_sessions(hass)
-    assert "installations_cache_test@example.com" in hass.data[DOMAIN]
+    assert "test@example.com" in hass.data[_INSTALLATIONS_CACHE]
     if cache_expired:
-        hass.data[DOMAIN]["installations_cache_test@example.com"]["time"] -= (
-            API_CACHE_TTL + 1
-        )
+        hass.data[_INSTALLATIONS_CACHE]["test@example.com"]["time"] -= API_CACHE_TTL + 1
     office = _add_office_entry(hass)
     first_account_hub = _hub_factory()
     first_account_hub.client.list_installations = AsyncMock(
@@ -4357,10 +4356,13 @@ async def test_a_reauth_onto_another_account_that_cannot_list_asks_again(hass):
     assert dict(home.data) == data_before
 
 
-async def test_a_switch_lists_the_new_accounts_installations_once(hass):
+@pytest.mark.parametrize("only_entry", [True, False])
+async def test_a_switch_lists_the_new_accounts_installations_once(hass, only_entry):
     """The dialog's check already fetched the new account's list; the reload
-    that follows must use it rather than ask Verisure again."""
-    await _load_third_account_entry(hass)
+    that follows must use it rather than ask Verisure again. As the only
+    entry, Home's reload tears the integration down in between."""
+    if not only_entry:
+        await _load_third_account_entry(hass)
     home = await _load_home_entry(hass, _two_installation_hub())
     reauth_hub = _reauth_hub_seeing("111")
     reload_hub = _hub_for_other_account(make_installation(number="111"))

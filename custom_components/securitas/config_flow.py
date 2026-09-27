@@ -66,6 +66,7 @@ from . import (
     _publish_flow_capabilities,
     _release_session_hold,
     _resolve_flow_capabilities,
+    _store_installations_cache,
     _take_session_hold,
     generate_uuid,
 )
@@ -818,11 +819,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     reason="installation_not_on_account",
                     description_placeholders={"number": installation},
                 )
-            if DOMAIN in self.hass.data:
-                self.hass.data[DOMAIN][f"installations_cache_{username}"] = {
-                    "data": installations,
-                    "time": time.monotonic(),
-                }
+            _store_installations_cache(self.hass, username, installations)
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
@@ -912,10 +909,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
-        self.hass.data[DOMAIN][f"installations_cache_{username}"] = {
-            "data": installations,
-            "time": time.monotonic(),
-        }
+        _store_installations_cache(self.hass, username, installations)
 
         configured_ids = {
             entry.data.get(CONF_INSTALLATION) for entry in self._async_current_entries()

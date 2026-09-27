@@ -9,7 +9,7 @@ import socket
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -45,7 +45,13 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.core import (
+    HassJob,
+    HomeAssistant,
+    ServiceCall,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -54,6 +60,7 @@ from homeassistant.exceptions import (
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.service import (
     async_extract_entity_ids,
     async_set_service_schema,
@@ -833,6 +840,61 @@ def _get_or_create_api_queue(
     session.api_queue = api_queues[domain_url]
 
 
+# Kept outside ``hass.data[DOMAIN]``, which the clean-up discards: reloading
+# the only entry tears the integration down between a dialog listing the
+# installations and the setup that reuses the list.
+_INSTALLATIONS_CACHE = f"{DOMAIN}_installations_cache"
+_INSTALLATIONS_CACHE_EXPIRY = f"{DOMAIN}_installations_cache_expiry"
+
+
+def _store_installations_cache(
+    hass: HomeAssistant, username: str, installations: list[Installation]
+) -> None:
+    """Remember an account's installations for ``API_CACHE_TTL`` seconds.
+
+    Keyed by username so that entries for different accounts (e.g. Italian
+    and Spanish installations on separate Verisure accounts) never share each
+    other's list. The cache outlives the integration, so once the last list
+    stored has expired a timer drops them all: after the integration is
+    removed nothing reads or stores them again, and they hold addresses.
+    """
+    _live_installations_cache(hass)[username] = {
+        "data": installations,
+        "time": time.monotonic(),
+    }
+    if cancel := hass.data.pop(_INSTALLATIONS_CACHE_EXPIRY, None):
+        cancel()
+
+    @callback
+    def _forget(_now: datetime) -> None:
+        # Restarted by every store, so when it fires every list has expired.
+        hass.data.pop(_INSTALLATIONS_CACHE_EXPIRY, None)
+        hass.data.pop(_INSTALLATIONS_CACHE, None)
+
+    hass.data[_INSTALLATIONS_CACHE_EXPIRY] = async_call_later(
+        hass,
+        API_CACHE_TTL,
+        HassJob(_forget, "forget cached installations", cancel_on_shutdown=True),
+    )
+
+
+def _cached_installations(
+    hass: HomeAssistant, username: str
+) -> list[Installation] | None:
+    """The account's installations if listed within ``API_CACHE_TTL``."""
+    cached = _live_installations_cache(hass).get(username)
+    return None if cached is None else cached["data"]
+
+
+def _live_installations_cache(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """The installations cache, first dropping lists past ``API_CACHE_TTL``."""
+    cache: dict[str, dict[str, Any]] = hass.data.setdefault(_INSTALLATIONS_CACHE, {})
+    now = time.monotonic()
+    for expired in [u for u, c in cache.items() if now - c["time"] >= API_CACHE_TTL]:
+        del cache[expired]
+    return cache
+
+
 async def _fetch_and_cache_installations(
     hass: HomeAssistant,
     hub: VerisureHub,
@@ -846,26 +908,14 @@ async def _fetch_and_cache_installations(
     Returns a list of VerisureDevice wrappers for this entry's
     installations.
     """
-    # Cache keyed by username so that entries for different accounts (e.g.
-    # Italian and Spanish installations on separate Verisure accounts) do not
-    # accidentally share each other's installation list.
     username = entry.data.get(CONF_USERNAME, entry.entry_id)
-    install_cache_key = f"installations_cache_{username}"
-    install_cache = hass.data[DOMAIN].get(install_cache_key)
-    if (
-        install_cache is not None
-        and time.monotonic() - install_cache["time"] < API_CACHE_TTL
-    ):
-        all_installations: list[Installation] = install_cache["data"]
-    else:
+    all_installations = _cached_installations(hass, username)
+    if all_installations is None:
         all_installations = await hub.api_queue.submit(
             hub.client.list_installations,
             priority=ApiQueue.FOREGROUND,
         )
-        hass.data[DOMAIN][install_cache_key] = {
-            "data": all_installations,
-            "time": time.monotonic(),
-        }
+        _store_installations_cache(hass, username, all_installations)
     target_number = entry.data.get(CONF_INSTALLATION)
     if target_number:
         entry_installations = [

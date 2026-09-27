@@ -2,6 +2,7 @@
 
 import contextlib
 from collections import Counter, OrderedDict
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,9 +14,15 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from homeassistant.util.async_ import get_scheduled_timer_handles
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.securitas import (
+    _INSTALLATIONS_CACHE,
     _OPTIONS_MANAGED_FIELDS,
     CONF_CODE_ARM_REQUIRED,
     CONF_CODE_HASH,
@@ -42,7 +49,9 @@ from custom_components.securitas import (
     VerisureDevice,
     VerisureHub,
     _build_config_dict,
+    _cached_installations,
     _options_are_authoritative,
+    _store_installations_cache,
     _synced_entry_data,
     add_device_information,
     async_migrate_entry,
@@ -50,6 +59,7 @@ from custom_components.securitas import (
     async_unload_entry,
     async_update_options,
 )
+from custom_components.securitas.const import API_CACHE_TTL
 from custom_components.securitas.hub import (
     _async_notify,
     _notify,
@@ -951,12 +961,8 @@ class TestAsyncSetupEntry:
         ), js_urls
 
     async def test_two_accounts_each_fetches_own_installations(self, hass):
-        """Two entries with different usernames must not share installations_cache.
-
-        Regression test: previously installations_cache was a single global key,
-        so the second entry would reuse the first entry's (wrong) list, find no
-        matching installation number, and leave its entities unavailable.
-        """
+        """Two accounts' entries each list and keep their own installations, so
+        each finds its own installation and its entities are available."""
         italian_installation = make_installation(number="1111", alias="Gran Via")
         spanish_installation = make_installation(number="2222", alias="Rome")
 
@@ -1019,6 +1025,61 @@ class TestAsyncSetupEntry:
         assert it_devices[0].installation.number == "1111"
         assert len(es_devices) == 1
         assert es_devices[0].installation.number == "2222"
+
+    async def test_reading_the_cache_forgets_the_lists_that_expired(self, hass):
+        """A removed integration's list, which holds addresses, is dropped
+        once past its usual time by the next read of any account's list."""
+        _store_installations_cache(hass, "old@example.com", [make_installation()])
+        _store_installations_cache(hass, "fresh@example.com", [make_installation()])
+        hass.data[_INSTALLATIONS_CACHE]["old@example.com"]["time"] -= API_CACHE_TTL
+
+        assert _cached_installations(hass, "fresh@example.com") is not None
+
+        assert set(hass.data[_INSTALLATIONS_CACHE]) == {"fresh@example.com"}
+
+    async def test_storing_a_list_forgets_the_lists_that_expired(self, hass):
+        """The cached lists outlive the integration's clean-up, so storing one
+        drops those past their usual time rather than keep them forever."""
+        _store_installations_cache(hass, "old@example.com", [make_installation()])
+        _store_installations_cache(hass, "fresh@example.com", [make_installation()])
+        hass.data[_INSTALLATIONS_CACHE]["old@example.com"]["time"] -= API_CACHE_TTL
+
+        _store_installations_cache(hass, "new@example.com", [make_installation()])
+
+        assert set(hass.data[_INSTALLATIONS_CACHE]) == {
+            "fresh@example.com",
+            "new@example.com",
+        }
+
+    async def test_the_lists_are_forgotten_once_the_last_one_expires(self, hass):
+        """With nothing left to read or store them (the integration removed),
+        the lists are dropped once the most recently stored one has expired,
+        and storing another list does not add a second timer."""
+        _store_installations_cache(hass, "old@example.com", [make_installation()])
+        _store_installations_cache(hass, "new@example.com", [make_installation()])
+        assert len(_pending_installations_cache_expiries(hass)) == 1
+
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+        assert set(hass.data[_INSTALLATIONS_CACHE]) == {
+            "old@example.com",
+            "new@example.com",
+        }
+
+        async_fire_time_changed(
+            hass, dt_util.utcnow() + timedelta(seconds=API_CACHE_TTL + 1)
+        )
+        assert _INSTALLATIONS_CACHE not in hass.data
+        assert _pending_installations_cache_expiries(hass) == []
+
+
+def _pending_installations_cache_expiries(hass):
+    """The timers still set to forget the cached installation lists."""
+    return [
+        handle
+        for handle in get_scheduled_timer_handles(hass.loop)
+        if not handle.cancelled()
+        and "installations" in getattr(handle._args[-1], "name", "")
+    ]
 
 
 # ===========================================================================
