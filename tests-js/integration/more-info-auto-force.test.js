@@ -356,6 +356,18 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     expect(autoForceCalls(callService)).toEqual([]);
   });
 
+  it("forgets a button press when the dialog is removed and put back", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    element.remove();
+    document.body.appendChild(element);
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
   it("does NOT auto-force when the arm starts more than 60 s after the button press", () => {
     vi.useFakeTimers();
     localStorage.setItem(LS_KEY, "true");

@@ -570,6 +570,18 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       });
     });
 
+    it("forgets a button press when the Tile is removed and put back", () => {
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, wrapper, modes, group, callService } = mountTile();
+
+      pressMode(modes.select);
+      wrapper.remove();
+      group("features").appendChild(wrapper);
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
     it("does not re-render after a disconnect that beats the deferred check", async () => {
       const { feature, wrapper } = mountTile({ modes: "after" });
       const render = vi.spyOn(feature, "_render");

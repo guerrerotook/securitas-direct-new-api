@@ -116,6 +116,12 @@ export class AutoForceArmTracker {
     this._prevState = null;
   }
 
+  // A button press belongs to the surface it was made on; once the surface is
+  // removed, a later arm cannot be one it started.
+  reset() {
+    this._reset(null);
+  }
+
   _syncEntity(stateObj) {
     if (stateObj.entity_id !== this._entityId) this._reset(stateObj.entity_id);
   }

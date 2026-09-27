@@ -115,6 +115,7 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this._recheckTimer = null;
     this._listenScope?.removeEventListener("value-changed", this._onValueChanged);
     this._listenScope = null;
+    this._autoForceTracker.reset();
   }
 
   setConfig() {

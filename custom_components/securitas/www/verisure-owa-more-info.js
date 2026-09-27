@@ -84,6 +84,10 @@ class VerisureOwaMoreInfo extends HTMLElement {
     this._updateForceExtension();
   }
 
+  disconnectedCallback() {
+    this._autoForceTracker.reset();
+  }
+
   set hass(hass) {
     this._hass = hass;
     this._forwardNativeProperties();
