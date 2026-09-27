@@ -9,8 +9,8 @@ import {
   DEPRECATION_DOCS_URL,
   GESTURE_KEYS,
   migrateCompactAlarmConfig,
-} from "./verisure-owa-alarm-shared.js?v=5.9.0";
-import { hassLanguage } from "./verisure-owa-arm-exception.js?v=5.9.0";
+} from "./verisure-owa-alarm-shared.js?v=d47cdc80-5.9.0";
+import { hassLanguage } from "./verisure-owa-arm-exception.js?v=e826e42c-5.9.0";
 
 const DEFAULT_CONFIG = {
   show_name: false,

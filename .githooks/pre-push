@@ -95,8 +95,12 @@ if [ -n "$py_changed" ]; then
   fi
 fi
 
-# --- Step 5: frontend lint + tests (only if the card changed) ---
+# --- Step 5: frontend import stamps, lint + tests (only if the card changed) ---
 if [ -n "$fe_changed" ]; then
+  step "Card import stamps"
+  if need python3 && python3 "$ROOT/scripts/stamp_card_imports.py" --check; then pass "Card import stamps"
+  else fail "Card import stamps — run: python3 scripts/stamp_card_imports.py"; fi
+
   step "Frontend lint"
   if need npm && npm run lint; then pass "Frontend lint"
   else fail "Frontend lint — run: npm run lint:fix"; fi

@@ -96,15 +96,9 @@ jobs:
           with open(path, "w") as f:
               f.write(updated)
           PY
-          # Re-stamp the card modules' ?v= cache-bust queries to the new
-          # version so the hard-cached (cache_headers=True) bundles bust on
-          # release. Kept in sync with manifest.json by
-          # tests-js/integration/card-cache-busting.test.js and
-          # tests/test_card_cache_busting.py::test_card_import_versions_match_manifest.
-          # The pattern only matches relative "./x.js?v=..." import specifiers
-          # (not absolute/CDN URLs).
-          sed -i -E 's#("\./[A-Za-z0-9._-]+\.js)\?v=[^"]*"#\1?v='"$VERSION"'"#g' \
-            custom_components/securitas/www/*.js
+          # Re-stamp the card modules' imports for the new manifest version;
+          # tests/test_card_cache_busting.py runs this step on a copy.
+          python3 scripts/stamp_card_imports.py
           git diff --stat
           git diff
 
@@ -167,9 +161,7 @@ jobs:
           with open(path, "w") as f:
               f.write(updated)
           PY
-          # Keep the card ?v= cache-bust in sync with the rolled-forward version.
-          sed -i -E 's#("\./[A-Za-z0-9._-]+\.js)\?v=[^"]*"#\1?v='"$NEXT"'"#g' \
-            custom_components/securitas/www/*.js
+          python3 scripts/stamp_card_imports.py
           git add custom_components/securitas/manifest.json custom_components/securitas/www
           git commit -m "chore: bump version to $NEXT for development"
           git push origin "HEAD:$BRANCH"

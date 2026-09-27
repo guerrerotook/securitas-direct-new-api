@@ -758,10 +758,9 @@ class TestAsyncSetupEntry:
         """Static paths use a differential cache policy.
 
         ``/verisure-owa-panel`` (cache_headers=True): the integration only ever
-        emits cache-busted URLs here — entry points via ``_card_url``
-        (``?v=<hash>-<version>``) and their bare imports via a ``?v=<version>``
-        query stamped in the JS (enforced by
-        tests-js/integration/card-cache-busting.test.js) — so a long max-age is
+        emits cache-busted URLs here — entry points via ``_card_url`` and the
+        imports between modules via ``scripts/stamp_card_imports.py``, all
+        ``?v=<content hash>-<version>`` — so a long max-age is
         safe and gives the cold-load speed-up (the alarm chip no longer renders
         5-10s late).
 

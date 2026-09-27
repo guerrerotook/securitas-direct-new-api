@@ -1247,17 +1247,10 @@ async def _async_register_cards(hass: HomeAssistant) -> None:
             # made the alarm chip render 5-10s late on a slow network.
             #
             # Safe on THIS path because every URL the integration emits here
-            # is cache-busted:
-            #  - registered entry points via _card_url's ?v=<hash>-<version>
-            #    (content-hash — busts whenever the file changes), and
-            #  - their bare cross-module imports (shared.js, card-utils.js)
-            #    carry a ?v=<version> query stamped into the import specifiers
-            #    (enforced by card-cache-busting.test.js).
-            # The shared modules are version- (not hash-) busted, which is
-            # sufficient because users only receive new files via a HACS
-            # update, which by definition bumps the manifest version, and the
-            # test forces the stamps to track that version — so every
-            # delivered change yields new URLs and nothing is served stale.
+            # carries ?v=<content hash>-<version>: the registered entry points via
+            # const._card_url, and the relative imports between modules via
+            # stamps written into the JS by scripts/stamp_card_imports.py
+            # (enforced by tests/test_card_cache_busting.py).
             StaticPathConfig(
                 "/verisure-owa-panel",
                 panel_dir,
