@@ -523,6 +523,22 @@ describe("More Info auto-force acts only on the dialog's own arm buttons", () =>
     expect(autoForceCalls(callService)).toEqual([]);
   });
 
+  it("does NOT auto-force an arm from another PIN prompt submitted after this one was cancelled", () => {
+    vi.useFakeTimers();
+    localStorage.setItem(LS_KEY, "true");
+    const { element, callService } = mountMoreInfo();
+
+    pressMode(element);
+    openPinPrompt(element);
+    vi.advanceTimersByTime(3_000);
+    closePinPrompt();
+    vi.advanceTimersByTime(3_000);
+    submitPin();
+    armWithException(element, callService);
+
+    expect(autoForceCalls(callService)).toEqual([]);
+  });
+
   it("does NOT auto-force an arm from elsewhere after a press that was never sent", () => {
     vi.useFakeTimers();
     localStorage.setItem(LS_KEY, "true");

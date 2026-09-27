@@ -364,6 +364,20 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     expect(hass.callService).not.toHaveBeenCalled();
   });
 
+  it("does not let a Submit in a later PIN prompt revive a press whose prompt was cancelled", () => {
+    const { tracker, hass, disarmed, select } = setup();
+
+    fire(select, "armed_away", tracker, disarmed);
+    openPinPrompt(tracker);
+    closePinPrompt(tracker);
+    // Any PIN prompt on the page counts as a Submit, e.g. one opened elsewhere.
+    submitPin(tracker);
+    tracker.update(stateOf({ state: "arming" }), true, hass);
+    tracker.update(stateOf({ forceArmAvailable: true }), true, hass);
+
+    expect(hass.callService).not.toHaveBeenCalled();
+  });
+
   it("does not force an arm that starts while the PIN prompt is open and nothing was submitted", () => {
     const { tracker, hass, disarmed, select } = setup();
 

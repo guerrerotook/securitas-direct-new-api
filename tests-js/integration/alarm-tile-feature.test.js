@@ -659,6 +659,30 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       expect(autoForceCalls(callService)).toEqual([]);
     });
 
+    it("does NOT force an arm from another PIN prompt submitted after this one was cancelled", () => {
+      vi.useFakeTimers();
+      localStorage.setItem(LS_KEY, "true");
+      const { feature, modes, callService } = mountTile();
+
+      pressMode(modes.select);
+      modes.select.getRootNode().host.dispatchEvent(
+        new CustomEvent("show-dialog", {
+          detail: { dialogTag: "dialog-enter-code" },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      vi.advanceTimersByTime(3_000);
+      window.dispatchEvent(
+        new CustomEvent("dialog-closed", { detail: { dialog: "dialog-enter-code" } }),
+      );
+      vi.advanceTimersByTime(3_000);
+      submitPin();
+      armWithException(feature, callService);
+
+      expect(autoForceCalls(callService)).toEqual([]);
+    });
+
     it("still forces an arm made after typing a PIN", () => {
       vi.useFakeTimers();
       localStorage.setItem(LS_KEY, "true");
