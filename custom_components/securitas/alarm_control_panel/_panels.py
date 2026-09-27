@@ -124,6 +124,8 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 result = await self._execute_transition(target)
             else:
                 result = await self._disarm_circuits_unconditional(set(circuits))
+            for entity in affected:
+                entity.update_status_alarm(result)
         except (VerisureOwaError, HomeAssistantError) as err:
             # VerisureOwaError includes OperationTimeoutError (command accepted
             # but the confirmation poll didn't resolve): it is rolled back here
@@ -136,8 +138,6 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             # rather than leave the entities stuck in DISARMING.
             for entity in affected:
                 entity._state = entity._last_state  # pylint: disable=protected-access
-                entity._operation_in_progress = False  # pylint: disable=protected-access
-                entity.async_write_ha_state()
             detail = err.log_detail() if isinstance(err, VerisureOwaError) else err
             _LOGGER.error(
                 "Partial disarm failed for %s circuits %s: %s",
@@ -146,10 +146,12 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 detail,
             )
             return False
-        for entity in affected:
-            entity.update_status_alarm(result)
-            entity._operation_in_progress = False  # pylint: disable=protected-access
-            entity.async_write_ha_state()
+        finally:
+            # Released on every exit, even an unforeseen error: a user disarm
+            # waits for this flag and would otherwise wait for good.
+            for entity in affected:
+                entity._operation_in_progress = False  # pylint: disable=protected-access
+                entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True
 

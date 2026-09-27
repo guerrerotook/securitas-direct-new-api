@@ -9403,3 +9403,60 @@ async def test_disarm_pressed_during_partial_disarm_runs_after_it():
 
     assert calls == 2
     assert panel._state == AlarmControlPanelState.DISARMED
+
+
+async def test_partial_disarm_unexpected_error_leaves_no_panel_busy():
+    """A partial disarm that fails in an unforeseen way still releases every
+    panel it made busy, so a disarm pressed afterwards is carried out."""
+    from custom_components.securitas.verisure_owa_api.models import (
+        AlarmState,
+        AnnexMode,
+        InteriorMode,
+        PerimeterMode,
+    )
+
+    panel = make_alarm()
+    interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
+    setup_alarm_entry_data(panel, sub_panels=[interior])
+    panel._client.config_entry = MagicMock(entry_id="entry-id-1")
+    panel._last_proto_code = "T"
+    panel.coordinator.alarm_state = AlarmState(
+        interior=InteriorMode.TOTAL,
+        perimeter=PerimeterMode.OFF,
+        annex=AnnexMode.OFF,
+    )
+    panel._execute_transition = AsyncMock(side_effect=RuntimeError("bug"))
+
+    with pytest.raises(RuntimeError):
+        await panel.execute_partial_disarm(["interior"])
+
+    assert panel._operation_in_progress is False
+    assert interior._operation_in_progress is False
+    panel._execute_transition = AsyncMock(return_value=_status("D"))
+    await asyncio.wait_for(panel.async_alarm_disarm(), timeout=2)
+    panel._execute_transition.assert_awaited_once()
+    assert panel._state == AlarmControlPanelState.DISARMED
+
+
+async def test_disarm_gives_up_waiting_behind_a_stuck_operation(caplog):
+    """A disarm waiting behind an arm that never finishes gives up after the
+    limit with a translated error, instead of waiting forever."""
+    import logging
+
+    from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
+
+    alarm = make_alarm()
+    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
+    _record_transitions(alarm)
+    alarm._operation_in_progress = True
+    alarm._operation_kind = "arm"  # an arm whose flag is never released
+
+    with (
+        caplog.at_level(logging.WARNING),
+        pytest.raises(HomeAssistantError) as err,
+    ):
+        await asyncio.wait_for(alarm.async_alarm_disarm(), timeout=2)
+
+    assert err.value.translation_key == "operation_in_progress"
+    alarm._execute_transition.assert_not_awaited()
+    assert "gave up waiting" in caplog.text

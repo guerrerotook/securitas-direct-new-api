@@ -254,6 +254,9 @@
         },
         "no_supported_command": {
             "message": "Nenhum comando compatível encontrado para este painel. Verifique os mapeamentos de estado nas opções da integração (Configurações → Dispositivos e Serviços → Verisure OWA → Configurar)."
+        },
+        "operation_in_progress": {
+            "message": "O alarme está ocupado com outro comando. Tente novamente em instantes."
         }
     },
     "issues": {

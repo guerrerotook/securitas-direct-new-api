@@ -254,6 +254,9 @@
         },
         "no_supported_command": {
             "message": "No s'ha trobat cap ordre compatible per a aquest panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
+        },
+        "operation_in_progress": {
+            "message": "L'alarma està ocupada amb una altra ordre. Torna-ho a provar d'aquí a un moment."
         }
     },
     "issues": {

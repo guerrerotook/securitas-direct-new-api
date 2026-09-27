@@ -113,6 +113,13 @@ _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 # that a stray request can't silently swallow an unrelated prompt later on.
 _ARM_PROMPT_SUPPRESS_WINDOW = 120.0
 
+# Upper bound on the confirmation polls one arm makes: _execute_transition
+# tries twice, each try runs up to three steps (disarm, arm, annex), the arm
+# step can be two commands ("<arm>+PERI1"), and an open-sensor rejection adds
+# one exceptions poll — 10 in all. Two more cover the status refresh and
+# activity write that follow the arm.
+_MAX_POLLS_PER_OPERATION = 12
+
 # How long a suppressed arm-blocked prompt waits for the auto-force-arm that
 # asked for the suppression. If the frontend went away before calling
 # force_arm, the prompt is sent after all rather than leaving the user
@@ -353,6 +360,22 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         else:
             self._operation_kind = None
             self._operation_idle.set()
+
+    def _operation_wait_limit(self) -> float:
+        """Seconds a disarm may wait for a running arm before giving up.
+
+        Each of an arm's _MAX_POLLS_PER_OPERATION polls can take up to the
+        operation poll timeout (CONF_OPERATION_POLL_TIMEOUT, default
+        DEFAULT_OPERATION_POLL_TIMEOUT = 120 s, at most 300 s in the options
+        flow), so 24 minutes by default. Waiting longer means the busy flag is
+        stuck, not that the arm is slow.
+        """
+        poll_timeout = float(
+            self._client.config.get(
+                CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+            )
+        )
+        return _MAX_POLLS_PER_OPERATION * poll_timeout
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -1059,14 +1082,28 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # `self._context` ~1 s after async_set_context, and waiting for an arm
         # plus the disarm transition and state writes below take longer.
         user_context = self._context
-        while self._operation_in_progress:
-            if self._operation_kind not in ("arm", "partial_disarm"):
-                _LOGGER.debug(
-                    "Disarm ignored for %s: a disarm is already in progress",
-                    self.installation.number,
-                )
-                return
-            await self._operation_idle.wait()
+        wait_limit = self._operation_wait_limit()
+        try:
+            async with asyncio.timeout(wait_limit):
+                while self._operation_in_progress:
+                    if self._operation_kind not in ("arm", "partial_disarm"):
+                        _LOGGER.debug(
+                            "Disarm ignored for %s: a disarm is already in progress",
+                            self.installation.number,
+                        )
+                        return
+                    await self._operation_idle.wait()
+        except TimeoutError as err:
+            _LOGGER.warning(
+                "Disarm for %s gave up waiting %.0f s for a %s to finish",
+                self.installation.number,
+                wait_limit,
+                self._operation_kind,
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="operation_in_progress",
+            ) from err
         self._operation_in_progress = True
         self._operation_kind = "disarm"
         self._operation_epoch += 1

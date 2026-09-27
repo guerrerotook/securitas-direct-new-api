@@ -254,6 +254,9 @@
         },
         "no_supported_command": {
             "message": "Nessun comando compatibile trovato per questo pannello. Controlla le mappature degli stati nelle opzioni dell'integrazione (Impostazioni → Dispositivi e servizi → Verisure OWA → Configura)."
+        },
+        "operation_in_progress": {
+            "message": "L'allarme è occupato con un altro comando. Riprova tra un momento."
         }
     },
     "issues": {

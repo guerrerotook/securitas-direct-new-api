@@ -254,6 +254,9 @@
         },
         "no_supported_command": {
             "message": "Aucune commande compatible trouvée pour ce panneau. Vérifiez les correspondances d'états dans les options de l'intégration (Paramètres → Appareils et services → Verisure OWA → Configurer)."
+        },
+        "operation_in_progress": {
+            "message": "L'alarme est occupée par une autre commande. Réessayez dans un instant."
         }
     },
     "issues": {

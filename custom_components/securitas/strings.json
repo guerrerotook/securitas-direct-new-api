@@ -254,6 +254,9 @@
         },
         "no_supported_command": {
             "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Verisure OWA → Configure)."
+        },
+        "operation_in_progress": {
+            "message": "The alarm is busy with another command. Try again in a moment."
         }
     },
     "issues": {
