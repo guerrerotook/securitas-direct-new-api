@@ -9622,6 +9622,7 @@ def _main_and_interior_panels():
     main = make_alarm()
     interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
     interior.coordinator = main.coordinator
+    interior.hass = main.hass
     main.coordinator.alarm_state = PROTO_TO_ALARM_STATE["D"]  # polled: disarmed
     setup_alarm_entry_data(main, sub_panels=[interior])
     main._client.config_entry = MagicMock(entry_id="entry-id-1")
@@ -9735,3 +9736,83 @@ async def test_unlock_at_startup_trusts_the_coordinators_first_poll(
 
     assert panel.client.disarm_alarm.called is disarm_sent
     lock._client.change_lock_mode.assert_awaited_once()
+
+
+async def test_main_panel_disarm_waits_for_an_interior_panel_arm():
+    """Disarm pressed on the main panel while an arm started from the
+    Interior panel is still at the panel goes out after that arm, and the
+    installation ends disarmed."""
+    main, interior, _ = _main_and_interior_panels()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    _record_transitions(interior, arm_gate=arm_gate, arm_started=arm_started)
+    main_targets, _, disarmed = _record_transitions(main)
+
+    arm_task = asyncio.create_task(interior.set_arm_state("armed_away"))
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(main.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert main_targets == []  # not sent while the Interior arm runs
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    assert main_targets == [disarmed]
+    assert main.coordinator.confirmed_proto_code == "D"
+    assert main._state == AlarmControlPanelState.DISARMED
+
+
+async def test_interior_panel_disarm_waits_for_a_main_panel_arm():
+    """Disarm pressed on the Interior panel while an arm started from the
+    main panel is still at the panel goes out after that arm, and the
+    installation ends disarmed."""
+    main, interior, _ = _main_and_interior_panels()
+    arm_gate = asyncio.Event()
+    arm_started = asyncio.Event()
+    _record_transitions(main, arm_gate=arm_gate, arm_started=arm_started)
+    interior_targets, _, disarmed = _record_transitions(interior)
+
+    arm_task = asyncio.create_task(main.set_arm_state("armed_away"))
+    await arm_started.wait()
+    disarm_task = asyncio.create_task(interior.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert interior_targets == []  # not sent while the main-panel arm runs
+    arm_gate.set()
+    await asyncio.wait_for(asyncio.gather(arm_task, disarm_task), timeout=2)
+
+    assert interior_targets == [disarmed]
+    assert main.coordinator.confirmed_proto_code == "D"
+    assert interior._state == AlarmControlPanelState.DISARMED
+
+
+async def test_disarm_waits_for_a_disarm_running_on_another_panel():
+    """Only a disarm already running on the same panel makes a second one a
+    no-op; one running on a sibling panel is waited for instead."""
+    main, interior, _ = _main_and_interior_panels()
+    main.update_status_alarm(_status("T"))
+    interior._state = AlarmControlPanelState.ARMED_AWAY
+    gate = asyncio.Event()
+    started = asyncio.Event()
+    main_calls = []
+
+    async def main_transition(target, **_force_params):
+        main_calls.append(target)
+        started.set()
+        await gate.wait()
+        return _status("D")
+
+    main._execute_transition = AsyncMock(side_effect=main_transition)
+    interior_targets, _, _ = _record_transitions(interior)
+
+    first = asyncio.create_task(main.async_alarm_disarm())
+    await started.wait()
+    second = asyncio.create_task(interior.async_alarm_disarm())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert interior_targets == []  # waiting, not sent alongside
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
+
+    assert len(main_calls) == 1
+    assert len(interior_targets) == 1

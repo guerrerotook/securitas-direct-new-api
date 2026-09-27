@@ -382,13 +382,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self,
         entities: Sequence[BaseVerisureOwaAlarmPanel],
         *,
-        stop_behind_disarm: bool = False,
+        stop_behind_own_disarm: bool = False,
     ) -> bool:
         """Wait until none of ``entities`` is running an operation.
 
-        With ``stop_behind_disarm``, returns False as soon as one is running a
-        full disarm, rather than waiting for it. Raises the translated
-        ``operation_in_progress`` error after _operation_wait_limit().
+        With ``stop_behind_own_disarm``, returns False as soon as this panel
+        itself is running a full disarm, rather than waiting for it. Raises the
+        translated ``operation_in_progress`` error after
+        _operation_wait_limit().
         """
         # pylint: disable=protected-access
         wait_limit = self._operation_wait_limit()
@@ -398,9 +399,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 while busy := next(
                     (e for e in entities if e._operation_in_progress), None
                 ):
-                    if stop_behind_disarm and busy._operation_kind not in (
-                        "arm",
-                        "partial_disarm",
+                    if (
+                        stop_behind_own_disarm
+                        and self._operation_in_progress
+                        and self._operation_kind not in ("arm", "partial_disarm")
                     ):
                         return False
                     await busy._operation_idle.wait()
@@ -1125,7 +1127,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # `self._context` ~1 s after async_set_context, and waiting for an arm
         # plus the disarm transition and state writes below take longer.
         user_context = self._context
-        if not await self._wait_until_idle([self], stop_behind_disarm=True):
+        if not await self._wait_until_idle(
+            self._siblings_on_installation(), stop_behind_own_disarm=True
+        ):
             _LOGGER.debug(
                 "Disarm ignored for %s: a disarm is already in progress",
                 self.installation.number,
