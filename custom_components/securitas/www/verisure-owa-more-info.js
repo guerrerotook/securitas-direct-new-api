@@ -6,26 +6,16 @@
 // auto-force-arm tick box, shared with the Tile feature, that force-arms past
 // open sensors for arms started from this dialog's own mode buttons.
 
-import {
-  AUTO_FORCE_CHANGED_EVENT,
-  AutoForceArmTracker,
-  armExceptionTranslation,
-  hassLanguage,
-  readAutoForce,
-  writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=5.9.0";
+import { AutoForceTickBox } from "./verisure-owa-arm-exception.js?v=5.9.0";
 
 class VerisureOwaMoreInfo extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
 
-    this._autoForceArm = false;
-    this._autoForceTracker = new AutoForceArmTracker(
-      "ha-state-control-alarm_control_panel-modes",
-    );
-    this._entityId = null;
-    this._lastSyncKey = null;
+    this._autoForce = new AutoForceTickBox("ha-state-control-alarm_control_panel-modes", {
+      onChange: () => this._syncAutoForce(),
+    });
 
     const style = document.createElement("style");
     style.textContent = `
@@ -48,49 +38,26 @@ class VerisureOwaMoreInfo extends HTMLElement {
     `;
     this._nativeControl = document.createElement("more-info-content");
     this._nativeControl.id = "native-control";
-    this._onAutoForceChanged = (event) => {
-      if (event.detail?.entityId !== this._entityId) return;
-      this._autoForceArm = event.detail.on === true;
-      this._lastSyncKey = null;
-      this._syncAutoForce();
-    };
-
-    this._autoForceField = document.createElement("ha-formfield");
-    this._autoForceField.className = "auto-force-toggle";
-    this._autoForceField.hidden = true;
-    this._autoForceCheckbox = document.createElement("ha-checkbox");
-    this._autoForceCheckbox.className = "auto-force-checkbox";
-    this._autoForceField.appendChild(this._autoForceCheckbox);
-    this._autoForceCheckbox.addEventListener("change", (event) => {
-      event.stopPropagation();
-      // _onAutoForceChanged hears this write and takes the new tick.
-      if (this._entityId) writeAutoForce(this._entityId, this._autoForceCheckbox.checked === true);
-    });
 
     this._forceExtension = document.createElement("verisure-owa-arm-exception-alert");
     this._forceExtension.id = "force-extension";
     this.shadowRoot.append(
       style,
       this._nativeControl,
-      this._autoForceField,
+      this._autoForce.field,
       this._forceExtension,
     );
   }
 
   connectedCallback() {
-    // A tick saved while this was removed was not heard, even if an update
-    // re-read storage before the save, so re-read it now.
-    this._entityId = null;
-    this._autoForceTracker.connect(this._nativeControl);
-    globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
+    this._autoForce.connect(this._nativeControl);
     this._forwardNativeProperties();
     this._syncAutoForce();
     this._updateForceExtension();
   }
 
   disconnectedCallback() {
-    this._autoForceTracker.disconnect();
-    globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
+    this._autoForce.disconnect();
   }
 
   set hass(hass) {
@@ -152,42 +119,16 @@ class VerisureOwaMoreInfo extends HTMLElement {
 
   // ── Auto-force-arm (per-device) ──────────────────────────────────────────
   _resolvedStateObj() {
-    return (this._entityId && this._hass?.states?.[this._entityId]) || this._stateObj || null;
+    const entityId = this._autoForce.entityId;
+    return (entityId && this._hass?.states?.[entityId]) || this._stateObj || null;
   }
 
   _syncAutoForce() {
-    if (!this._autoForceField) return;
     const stateObj = this._resolvedStateObj();
-    const entityId = stateObj?.entity_id || null;
-    if (entityId && entityId !== this._entityId) {
-      this._entityId = entityId;
-      this._autoForceArm = readAutoForce(entityId);
-      this._lastSyncKey = null;
-    }
-    // The tracker runs on every update (it catches a force context that
-    // appears on the same tick) and judges a button press by the last one.
-    this._autoForceTracker.update(stateObj, this._autoForceArm, this._hass);
-    if (!stateObj) return;
-
-    // The tick box is a pre-arm preference, offered only while the alarm can
-    // be armed and the integration capability gate is on. It only changes with
-    // the gate, language and tick state, so it is memoized: the common no-op
-    // update, and the paired set hass/set stateObj call, skip the DOM work.
-    const gateOn = stateObj.attributes?.auto_force_arm_enabled === true;
-    const show = gateOn && stateObj.state === "disarmed";
-    const lang = hassLanguage(this._hass);
-    const key = `${show}|${lang}|${this._autoForceArm}`;
-    if (key === this._lastSyncKey) return;
-    this._lastSyncKey = key;
-
-    this._autoForceField.hidden = !show;
-    if (show) {
-      this._autoForceField.setAttribute(
-        "label",
-        armExceptionTranslation(lang, "auto_force_arm"),
-      );
-      this._autoForceCheckbox.checked = this._autoForceArm;
-    }
+    // An update without an alarm keeps the last alarm's tick.
+    if (stateObj?.entity_id) this._autoForce.setEntity(stateObj.entity_id);
+    this._autoForce.track(stateObj, this._hass);
+    if (stateObj) this._autoForce.render(stateObj, this._hass);
   }
 
   _updateForceExtension() {

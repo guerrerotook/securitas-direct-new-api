@@ -17,14 +17,7 @@ import {
   reportDeprecatedElement,
   TRANSLATIONS,
 } from "./verisure-owa-alarm-shared.js?v=5.9.0";
-import {
-  AUTO_FORCE_CHANGED_EVENT,
-  AutoForceArmTracker,
-  armExceptionTranslation,
-  hassLanguage,
-  readAutoForce,
-  writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=5.9.0";
+import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=5.9.0";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
@@ -60,20 +53,12 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._context = {};
     this._stateObj = null;
-    this._autoForceTracker = new AutoForceArmTracker(ALARM_MODES_FEATURE);
+    this._autoForce = new AutoForceTickBox(ALARM_MODES_FEATURE, {
+      onChange: () => this._render(),
+    });
     this._listenScope = null;
     this._recheckTimer = null;
-    this._toggleKey = null;
     this._alarmModes = null;
-    this._tickedFor = undefined;
-    this._tickedValue = false;
-    this._onAutoForceChanged = (event) => {
-      const entityId = this._entityId();
-      if (!entityId || event.detail?.entityId !== entityId) return;
-      this._tickedFor = entityId;
-      this._tickedValue = event.detail.on === true;
-      this._render();
-    };
 
     const style = document.createElement("style");
     style.textContent = `
@@ -89,30 +74,12 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
       .auto-force-toggle[hidden] { display: none; }
     `;
     this._alert = document.createElement("verisure-owa-arm-exception-alert");
-
-    this._autoForceField = document.createElement("ha-formfield");
-    this._autoForceField.className = "auto-force-toggle";
-    this._autoForceField.hidden = true;
-    this._autoForceCheckbox = document.createElement("ha-checkbox");
-    this._autoForceCheckbox.className = "auto-force-checkbox";
-    this._autoForceField.appendChild(this._autoForceCheckbox);
-    this._autoForceCheckbox.addEventListener("change", (event) => {
-      event.stopPropagation();
-      const entityId = this._entityId();
-      // Redrawn by _onAutoForceChanged, which hears this write.
-      if (entityId) writeAutoForce(entityId, this._autoForceCheckbox.checked === true);
-    });
-
-    this.shadowRoot.append(style, this._alert, this._autoForceField);
+    this.shadowRoot.append(style, this._alert, this._autoForce.field);
   }
 
   connectedCallback() {
     this._listenScope = this._featureScope();
-    if (this._listenScope) this._autoForceTracker.connect(this._listenScope);
-    // A tick saved while this was removed was not heard, even if an update
-    // re-read storage before the save, so re-read it now.
-    this._tickedFor = undefined;
-    globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
+    this._autoForce.connect(this._listenScope);
     this._render();
     // HA renders each sibling feature in its own later update, so an Alarm
     // modes feature placed after this one does not exist yet.
@@ -125,10 +92,9 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
   disconnectedCallback() {
     clearTimeout(this._recheckTimer);
     this._recheckTimer = null;
-    this._autoForceTracker.disconnect();
+    this._autoForce.disconnect();
     this._listenScope = null;
     this._alarmModes = null;
-    globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onAutoForceChanged);
   }
 
   setConfig() {
@@ -164,17 +130,6 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
   _entity() {
     const entityId = this._entityId();
     return (entityId && this._hass?.states?.[entityId]) || this._stateObj;
-  }
-
-  // Read from storage only when the alarm changes; later ticks arrive through
-  // _onAutoForceChanged.
-  _ticked() {
-    const entityId = this._entityId();
-    if (entityId !== this._tickedFor) {
-      this._tickedFor = entityId;
-      this._tickedValue = entityId ? readAutoForce(entityId) : false;
-    }
-    return this._tickedValue;
   }
 
   // The card's shadow root, which holds every hui-card-features group of this
@@ -235,26 +190,16 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
       entityId: this._entityId(),
       presentation: "compact",
     });
-    const ticked = this._ticked();
-    this._autoForceTracker.update(stateObj, ticked, this._hass);
+    this._autoForce.setEntity(this._entityId());
+    this._autoForce.track(stateObj, this._hass);
 
     // The warning replaces the tick box to keep the Tile small, and the box
     // only makes sense beside this Tile's own arm buttons.
-    const showToggle =
-      stateObj?.attributes?.auto_force_arm_enabled === true &&
-      stateObj.state === "disarmed" &&
-      !this._alert.active &&
-      this._hasAlarmModesFeature();
-    const lang = hassLanguage(this._hass);
-    const key = `${showToggle}|${lang}|${ticked}`;
-    if (key !== this._toggleKey) {
-      this._toggleKey = key;
-      this._autoForceField.hidden = !showToggle;
-      if (showToggle) {
-        this._autoForceField.setAttribute("label", armExceptionTranslation(lang, "auto_force_arm"));
-        this._autoForceCheckbox.checked = ticked;
-      }
-    }
+    const showToggle = this._autoForce.render(
+      stateObj,
+      this._hass,
+      () => !this._alert.active && this._hasAlarmModesFeature(),
+    );
     this._setVisible(this._alert.active || showToggle);
   }
 }

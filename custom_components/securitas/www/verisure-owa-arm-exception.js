@@ -306,6 +306,99 @@ export class AutoForceArmTracker {
   }
 }
 
+// The per-device auto-force-arm tick box as More Info and the Tile show it,
+// with the tracker that acts on it. The host appends `field` to its shadow
+// root, calls setEntity() and track() on every update and render() when it
+// redraws, and is told through `onChange` when a tick for its alarm is saved
+// (by this box or another surface), so it can redraw.
+export class AutoForceTickBox {
+  constructor(controlTag, { onChange } = {}) {
+    this._tracker = new AutoForceArmTracker(controlTag);
+    this._onChange = onChange;
+    this._entityId = undefined;
+    this._ticked = false;
+    this._key = null;
+
+    this.field = document.createElement("ha-formfield");
+    this.field.className = "auto-force-toggle";
+    this.field.hidden = true;
+    this.checkbox = document.createElement("ha-checkbox");
+    this.checkbox.className = "auto-force-checkbox";
+    this.field.appendChild(this.checkbox);
+    this.checkbox.addEventListener("change", (event) => {
+      event.stopPropagation();
+      // _onSaved hears this write and takes the new tick.
+      if (this._entityId) writeAutoForce(this._entityId, this.checkbox.checked === true);
+    });
+
+    this._onSaved = (event) => {
+      if (!this._entityId || event.detail?.entityId !== this._entityId) return;
+      this._ticked = event.detail.on === true;
+      this._key = null;
+      this._onChange?.();
+    };
+  }
+
+  get entityId() {
+    return this._entityId;
+  }
+
+  get ticked() {
+    return this._ticked;
+  }
+
+  // `scope` is where the tracker hears the host's own mode buttons; without
+  // one, nothing is auto-forced. A tick saved while the host was removed was
+  // not heard, so the next setEntity() reads storage again.
+  connect(scope) {
+    this._entityId = undefined;
+    if (scope) this._tracker.connect(scope);
+    globalThis.addEventListener(AUTO_FORCE_CHANGED_EVENT, this._onSaved);
+  }
+
+  disconnect() {
+    this._tracker.disconnect();
+    globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onSaved);
+  }
+
+  // Storage is read only when the alarm changes; later ticks arrive through
+  // the change event.
+  setEntity(entityId) {
+    if (entityId === this._entityId) return;
+    this._entityId = entityId;
+    this._ticked = entityId ? readAutoForce(entityId) : false;
+    this._key = null;
+  }
+
+  // Every update, including repeats: the tracker catches a force context that
+  // appears on the same tick, and judges a button press by the last one.
+  track(stateObj, hass) {
+    this._tracker.update(stateObj, this._ticked, hass);
+  }
+
+  // The box is a pre-arm preference, offered only while the alarm can be armed
+  // and the capability gate is on, and where `allowed` says so (checked last,
+  // as it may be costly). It changes only with those, the language and the
+  // tick, so a redraw with none of them changed skips the DOM work. Returns
+  // whether the box is shown.
+  render(stateObj, hass, allowed = () => true) {
+    const show =
+      stateObj?.attributes?.auto_force_arm_enabled === true &&
+      stateObj.state === "disarmed" &&
+      allowed();
+    const lang = hassLanguage(hass);
+    const key = `${show}|${lang}|${this._ticked}`;
+    if (key === this._key) return show;
+    this._key = key;
+    this.field.hidden = !show;
+    if (show) {
+      this.field.setAttribute("label", armExceptionTranslation(lang, "auto_force_arm"));
+      this.checkbox.checked = this._ticked;
+    }
+    return show;
+  }
+}
+
 export function armExceptionTranslation(lang, key, vars) {
   const table =
     ARM_EXCEPTION_TRANSLATIONS[lang] ||

@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_FORCE_ARM_START_MS,
   AUTO_FORCE_CHANGED_EVENT,
   AUTO_FORCE_INTENT_TTL_MS,
   AutoForceArmTracker,
+  AutoForceTickBox,
   writeAutoForce,
   armExceptionState,
   armExceptionTranslation,
@@ -805,5 +806,184 @@ describe("AutoForceArmTracker (own-buttons-only auto-force)", () => {
     tracker.update(stateOf(), true, null);
     fire(select, "armed_away", tracker, stateOf());
     expect(() => tracker.update(stateOf({ state: "arming" }), true, null)).not.toThrow();
+  });
+});
+
+describe("AutoForceTickBox (the tick box shared by More Info and the Tile)", () => {
+  const ENTITY = "alarm_control_panel.test";
+  const OTHER = "alarm_control_panel.other";
+  const CONTROL = "fake-alarm-modes";
+
+  function stateOf({
+    state = "disarmed",
+    autoForceArmEnabled = true,
+    forceArmAvailable = false,
+  } = {}) {
+    return {
+      entity_id: ENTITY,
+      state,
+      attributes: {
+        auto_force_arm_enabled: autoForceArmEnabled,
+        force_arm_available: forceArmAvailable,
+      },
+    };
+  }
+
+  function tickBoxFor(entityId, onChange = vi.fn()) {
+    const box = new AutoForceTickBox(CONTROL, { onChange });
+    box.connect(null);
+    box.setEntity(entityId);
+    box.render(stateOf(), makeHass());
+    return box;
+  }
+
+  function tick(box, on) {
+    box.checkbox.checked = on;
+    box.checkbox.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("reflects the stored preference for its entity", () => {
+    localStorage.setItem(`verisure-owa:auto-force-arm:${ENTITY}`, "true");
+
+    const box = tickBoxFor(ENTITY);
+    const other = tickBoxFor(OTHER);
+
+    expect(box.ticked).toBe(true);
+    expect(box.field.hidden).toBe(false);
+    expect(box.field.getAttribute("label")).toBe("Automatically force-arm past open sensors");
+    expect(box.checkbox.checked).toBe(true);
+    expect(other.ticked).toBe(false);
+    expect(other.checkbox.checked).toBe(false);
+    box.disconnect();
+    other.disconnect();
+  });
+
+  it("is offered only while disarmed with the capability gate on", () => {
+    const box = tickBoxFor(ENTITY);
+    const hass = makeHass();
+
+    expect(box.render(stateOf({ autoForceArmEnabled: false }), hass)).toBe(false);
+    expect(box.field.hidden).toBe(true);
+    expect(box.render(stateOf({ state: "armed_away" }), hass)).toBe(false);
+    expect(box.render(stateOf(), hass, () => false)).toBe(false);
+    expect(box.field.hidden).toBe(true);
+    expect(box.render(stateOf(), hass)).toBe(true);
+    expect(box.field.hidden).toBe(false);
+    box.disconnect();
+  });
+
+  it("a tick writes the preference and notifies other surfaces", () => {
+    const box = tickBoxFor(ENTITY);
+    const heard = vi.fn();
+    const outer = vi.fn();
+    window.addEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+    document.body.appendChild(box.field);
+    document.body.addEventListener("change", outer);
+
+    tick(box, true);
+    window.removeEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+    document.body.removeEventListener("change", outer);
+    box.field.remove();
+
+    expect(localStorage.getItem(`verisure-owa:auto-force-arm:${ENTITY}`)).toBe("true");
+    expect(heard).toHaveBeenCalledOnce();
+    expect(heard.mock.calls[0][0].detail).toEqual({ entityId: ENTITY, on: true });
+    expect(outer).not.toHaveBeenCalled();
+    box.disconnect();
+  });
+
+  it("saves nothing for a tick made before it knows its alarm", () => {
+    const box = new AutoForceTickBox(CONTROL);
+    const heard = vi.fn();
+    window.addEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+
+    tick(box, true);
+    window.removeEventListener(AUTO_FORCE_CHANGED_EVENT, heard);
+
+    expect(heard).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`verisure-owa:auto-force-arm:${ENTITY}`)).toBeNull();
+  });
+
+  it("follows a tick made elsewhere for the same entity and ignores other entities", () => {
+    const onChange = vi.fn();
+    const box = tickBoxFor(ENTITY, onChange);
+
+    writeAutoForce(OTHER, true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(box.ticked).toBe(false);
+
+    writeAutoForce(ENTITY, true);
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(box.ticked).toBe(true);
+    box.render(stateOf(), makeHass());
+    expect(box.checkbox.checked).toBe(true);
+    box.disconnect();
+  });
+
+  it("stops following after disconnect()", () => {
+    const onChange = vi.fn();
+    const box = tickBoxFor(ENTITY, onChange);
+
+    box.disconnect();
+    writeAutoForce(ENTITY, true);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(box.ticked).toBe(false);
+  });
+
+  it("reads storage only when its entity changes, and again after reconnecting", () => {
+    const box = tickBoxFor(ENTITY);
+    box.disconnect();
+    localStorage.setItem(`verisure-owa:auto-force-arm:${ENTITY}`, "true");
+
+    box.setEntity(ENTITY);
+    expect(box.ticked).toBe(false);
+
+    box.connect(null);
+    box.setEntity(ENTITY);
+    expect(box.ticked).toBe(true);
+    box.setEntity(null);
+    expect(box.ticked).toBe(false);
+    expect(box.entityId).toBe(null);
+    box.disconnect();
+  });
+
+  it("forces an arm started from its own control once connected", () => {
+    localStorage.setItem(`verisure-owa:auto-force-arm:${ENTITY}`, "true");
+    const hass = makeHass();
+    const scope = document.createElement("div");
+    const control = document.createElement(CONTROL);
+    const select = document.createElement("ha-control-select");
+    control.attachShadow({ mode: "open" }).appendChild(select);
+    scope.appendChild(control);
+    document.body.appendChild(scope);
+    const box = new AutoForceTickBox(CONTROL);
+    box.connect(scope);
+    box.setEntity(ENTITY);
+    box.track(stateOf(), hass);
+
+    select.dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: { value: "armed_away" },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    box.track(stateOf({ state: "arming" }), hass);
+    box.track(stateOf({ forceArmAvailable: true }), hass);
+    box.disconnect();
+
+    expect(hass.callService.mock.calls.map((call) => call[1])).toEqual([
+      "suppress_arm_exception_prompt",
+      "force_arm",
+    ]);
   });
 });
