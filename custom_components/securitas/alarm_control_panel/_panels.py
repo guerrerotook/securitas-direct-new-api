@@ -124,7 +124,8 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         target: AlarmState | None = None
         current = self._confirmed_alarm_state()
         if current is not None:
-            circuits = [c for c in circuits if c in armed_circuits(current)]
+            armed = armed_circuits(current)
+            circuits = [c for c in circuits if c in armed]
             if not circuits:
                 return None
             target = build_partial_disarm_target(current, circuits)
