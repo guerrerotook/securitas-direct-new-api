@@ -96,7 +96,11 @@ class TestVerisureRefreshButtonAsyncPress:
         alarm_entity = MagicMock()
         alarm_entity.async_manual_refresh = AsyncMock()
         button.hass.data = {  # type: ignore[attr-defined]
-            DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
+            DOMAIN: {
+                "entry-1": {
+                    "combined_alarm_panels": {button._installation.number: alarm_entity}
+                }
+            }
         }
 
         await button.async_press()
@@ -113,7 +117,11 @@ class TestVerisureRefreshButtonAsyncPress:
         alarm_entity = MagicMock()
         alarm_entity.async_manual_refresh = AsyncMock()
         button.hass.data = {  # type: ignore[attr-defined]
-            DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
+            DOMAIN: {
+                "entry-1": {
+                    "combined_alarm_panels": {button._installation.number: alarm_entity}
+                }
+            }
         }
 
         await button.async_press()
@@ -125,7 +133,11 @@ class TestVerisureRefreshButtonAsyncPress:
         alarm_entity = MagicMock()
         alarm_entity.async_manual_refresh = AsyncMock()
         button.hass.data = {  # type: ignore[attr-defined]
-            DOMAIN: {"alarm_entities": {button._installation.number: alarm_entity}}
+            DOMAIN: {
+                "entry-1": {
+                    "combined_alarm_panels": {button._installation.number: alarm_entity}
+                }
+            }
         }
 
         import logging
@@ -142,9 +154,28 @@ class TestVerisureRefreshButtonAsyncPress:
         """If the alarm entity hasn't been registered yet (race during
         startup or after config-entry unload), the press is a no-op."""
         button = make_button()
-        button.hass.data = {DOMAIN: {"alarm_entities": {}}}  # type: ignore[attr-defined]
+        button.hass.data = {DOMAIN: {"entry-1": {"combined_alarm_panels": {}}}}  # type: ignore[attr-defined]
 
         await button.async_press()  # must not raise
+
+    async def test_reaches_the_panel_another_entry_runs(self):
+        """A second entry for the installation sets up no alarm panels, so
+        its button refreshes the Main panel of the entry that does."""
+        button = make_button()
+        alarm_entity = MagicMock()
+        alarm_entity.async_manual_refresh = AsyncMock()
+        button.hass.data = {  # type: ignore[attr-defined]
+            DOMAIN: {
+                "serving": {
+                    "combined_alarm_panels": {button._installation.number: alarm_entity}
+                },
+                "skipped": {"combined_alarm_panels": {}},
+            }
+        }
+
+        await button.async_press()
+
+        alarm_entity.async_manual_refresh.assert_awaited_once_with()
 
     async def test_no_crash_when_hass_is_none(self):
         button = make_button()

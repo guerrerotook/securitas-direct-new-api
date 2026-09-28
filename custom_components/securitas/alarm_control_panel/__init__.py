@@ -59,6 +59,7 @@ __all__ = [
     "armed_circuits",
     "async_setup_entry",
     "build_partial_disarm_target",
+    "main_panel_for",
 ]
 
 
@@ -285,6 +286,26 @@ def _rewrite_tombstone_entity_id(
     deleted[key] = attr.evolve(tombstone, entity_id=canonical)
 
 
+def main_panel_for(
+    hass: HomeAssistant,
+    installation_number: str,
+    *,
+    exclude_entry_id: str | None = None,
+) -> CombinedVerisureOwaAlarmPanel | None:
+    """Return the Main panel any loaded entry runs for this installation.
+
+    Only one entry runs an installation's panels (see ``async_setup_entry``),
+    so a second entry for the same installation finds the first one's here.
+    """
+    for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
+        if entry_id == exclude_entry_id or not isinstance(entry_data, dict):
+            continue
+        panel = entry_data.get("combined_alarm_panels", {}).get(installation_number)
+        if panel is not None:
+            return panel
+    return None
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -302,7 +323,6 @@ async def async_setup_entry(
     enable_annex: bool = options.get(CONF_ENABLE_ANNEX_PANEL, False)
     enable_interior: bool = options.get(CONF_ENABLE_INTERIOR_PANEL, False)
 
-    alarms: list[CombinedVerisureOwaAlarmPanel] = []
     all_entities: list[BaseVerisureOwaAlarmPanel] = []
     securitas_devices: list[VerisureDevice] = entry_data["devices"]
     # Reclaim the canonical alarm_control_panel.<alias> entity_id for the
@@ -318,7 +338,22 @@ async def async_setup_entry(
         for suffix in ("_interior", "_perimeter", "_annex"):
             await _heal_subpanel_entity_id(hass, devices.installation, suffix)
 
+    # No await from the check to the registration below, so two entries
+    # setting up at once cannot both claim an installation.
     for devices in securitas_devices:
+        if (
+            main_panel_for(
+                hass, devices.installation.number, exclude_entry_id=entry.entry_id
+            )
+            is not None
+        ):
+            _LOGGER.warning(
+                "Another entry already runs the alarm panels for %s, so this "
+                "one sets up none: see the notice in Settings > Repairs and "
+                "remove one of the two entries",
+                devices.installation.alias,
+            )
+            continue
         combined = CombinedVerisureOwaAlarmPanel(
             devices.installation,
             client=client,
@@ -327,7 +362,6 @@ async def async_setup_entry(
         entry_data.setdefault("combined_alarm_panels", {})[
             devices.installation.number
         ] = combined
-        alarms.append(combined)
         all_entities.append(combined)
 
         # Saved toggles are the source of truth — the options flow already
@@ -368,7 +402,6 @@ async def async_setup_entry(
             axis_panels[interior_panel._AXIS] = interior_panel  # pylint: disable=protected-access
 
     async_add_entities(all_entities)
-    hass.data[DOMAIN]["alarm_entities"] = {a.installation.number: a for a in alarms}
 
     platform = async_get_current_platform()
     platform.async_register_entity_service(

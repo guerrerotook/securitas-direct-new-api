@@ -7533,11 +7533,13 @@ class TestSubPanelSetup:
         }
 
     @pytest.mark.asyncio
-    async def test_alarm_entities_lookup_only_combined(self):
-        """Combined panel is the one registered in alarm_entities for force_arm services."""
+    async def test_main_panel_lookup_only_combined(self):
+        """The Main panel, not a sub-panel, is what the Refresh button and the
+        lock find for the installation."""
         from custom_components.securitas.alarm_control_panel import (
             CombinedVerisureOwaAlarmPanel,
             async_setup_entry,
+            main_panel_for,
         )
         from custom_components.securitas.const import (
             CONF_ENABLE_ANNEX_PANEL,
@@ -7564,9 +7566,92 @@ class TestSubPanelSetup:
             "custom_components.securitas.alarm_control_panel.async_get_current_platform"
         ):
             await async_setup_entry(hass, entry, add)
-        lookup = hass.data[DOMAIN]["alarm_entities"]
+        lookup = hass.data[DOMAIN]["entry-id"]["combined_alarm_panels"]
         assert set(lookup.keys()) == {"123456"}
         assert isinstance(lookup["123456"], CombinedVerisureOwaAlarmPanel)
+        assert main_panel_for(hass, "123456") is lookup["123456"]
+
+    @pytest.mark.asyncio
+    async def test_no_panels_when_another_entry_runs_the_installation(self, caplog):
+        """A second entry for an installation would run its sub-panels with
+        its own one-command-at-a-time flag, so it sets up no panels at all."""
+        from custom_components.securitas.alarm_control_panel import (
+            async_setup_entry,
+            main_panel_for,
+        )
+        from custom_components.securitas.const import (
+            CONF_ENABLE_INTERIOR_PANEL,
+            DOMAIN,
+        )
+
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_INTERIOR_PANEL: True},
+            has_peri=False,
+            has_annex=False,
+        )
+        serving = MagicMock()
+        hass.data[DOMAIN]["serving-entry"] = {
+            "combined_alarm_panels": {"123456": serving}
+        }
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+
+        assert added == []
+        entry_data = hass.data[DOMAIN]["entry-id"]
+        assert "123456" not in entry_data.get("combined_alarm_panels", {})
+        assert "123456" not in entry_data.get("axis_alarm_panels", {})
+        assert main_panel_for(hass, "123456") is serving
+        warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert "Home" in warnings[0]
+        assert "Repairs" in warnings[0]
+
+    @pytest.mark.asyncio
+    async def test_panels_as_before_when_another_entry_runs_another_installation(
+        self,
+    ):
+        from custom_components.securitas.alarm_control_panel import (
+            CombinedVerisureOwaAlarmPanel,
+            InteriorVerisureOwaAlarmPanel,
+            async_setup_entry,
+        )
+        from custom_components.securitas.const import (
+            CONF_ENABLE_INTERIOR_PANEL,
+            DOMAIN,
+        )
+
+        hass, entry = self._setup_kwargs(
+            options={CONF_ENABLE_INTERIOR_PANEL: True},
+            has_peri=False,
+            has_annex=False,
+        )
+        hass.data[DOMAIN]["other-entry"] = {
+            "combined_alarm_panels": {"654321": MagicMock()}
+        }
+        added: list = []
+
+        def add(entities, _update_before_add=False):
+            added.extend(entities)
+
+        with patch(
+            "custom_components.securitas.alarm_control_panel.async_get_current_platform"
+        ):
+            await async_setup_entry(hass, entry, add)
+
+        assert [type(p) for p in added] == [
+            CombinedVerisureOwaAlarmPanel,
+            InteriorVerisureOwaAlarmPanel,
+        ]
+        entry_data = hass.data[DOMAIN]["entry-id"]
+        assert entry_data["combined_alarm_panels"]["123456"] is added[0]
+        assert entry_data["axis_alarm_panels"]["123456"] == {"interior": added[1]}
 
 
 # Phase F: Service / Event / Static-URL aliases

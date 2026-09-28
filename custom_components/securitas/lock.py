@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureHub
-from .alarm_control_panel import armed_circuits
+from .alarm_control_panel import armed_circuits, main_panel_for
 from .api_queue import ApiQueue
 from .const import (
     CONF_CODE_HASH,
@@ -666,7 +666,11 @@ class VerisureLock(  # type: ignore[override]
 
         The unlock always proceeds regardless of the return value.
         """
+        # Looked up now, not when added: another entry may run this
+        # installation's panels, and may set up after this lock.
         panel = self._combined_alarm_panel
+        if panel is None:
+            panel = main_panel_for(self.hass, self._installation.number)
         if panel is None:
             return None
         ok = await panel.execute_partial_disarm(list(self._unlock_disarms_circuits))

@@ -19,8 +19,16 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
+from custom_components.securitas.alarm_control_panel import (
+    CombinedVerisureOwaAlarmPanel,
+)
+from custom_components.securitas.button import VerisureRefreshButton
 from custom_components.securitas.config_flow import FlowHandler
-from custom_components.securitas.const import CONF_INSTALLATION
+from custom_components.securitas.const import (
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_INSTALLATION,
+)
+from custom_components.securitas.lock import VerisureLock
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
@@ -779,7 +787,9 @@ async def test_malformed_json_raises(
 _INSTALLATION = "123456"
 
 
-def _add_entry_for(hass: HomeAssistant, username: str) -> MockConfigEntry:
+def _add_entry_for(
+    hass: HomeAssistant, username: str, options: dict | None = None
+) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id=f"{username}_{_INSTALLATION}",
@@ -787,6 +797,7 @@ def _add_entry_for(hass: HomeAssistant, username: str) -> MockConfigEntry:
             **make_config_entry_data(username=username, delay_check_operation=0),
             CONF_INSTALLATION: _INSTALLATION,
         },
+        options=options or {},
         version=FlowHandler.VERSION,
     )
     entry.add_to_hass(hass)
@@ -914,7 +925,14 @@ async def test_the_entry_set_up_first_takes_the_installations_entities(
     ):
         try:
             await _set_up_in_turn(hass, order[first])
-            entity_count = len(_owned(hass, order[first][0])[0])
+            # The second entry sets up no alarm panels, so every other
+            # entity of the first is refused for it.
+            entity_count = sum(
+                e.domain != "alarm_control_panel"
+                for e in er.async_entries_for_config_entry(
+                    er.async_get(hass), order[first][0].entry_id
+                )
+            )
             assert _holdings(hass, older, newer) == after_first
             assert _duplicate_id_errors(caplog) == entity_count
             caplog.clear()
@@ -926,6 +944,116 @@ async def test_the_entry_set_up_first_takes_the_installations_entities(
 
             assert _holdings(hass, older, newer) == after_restart
             assert _duplicate_id_errors(caplog) == entity_count
+        finally:
+            for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+async def test_a_second_entry_for_an_installation_sets_up_no_alarm_panels(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Each entry has its own one-command-at-a-time flag, so a sub-panel only
+    the second entry switches on would arm alongside a disarm on the first
+    entry's Main panel. The second entry therefore sets up no alarm panels,
+    and the Refresh button and the lock's auto-disarm, whichever entry they
+    belong to, reach the first entry's Main panel."""
+    _queue_installation_with_a_camera(mock_server)
+    assert await async_setup_component(hass, DOMAIN, {})
+    older = _add_entry_for(hass, "User@Example.com")
+    newer = _add_entry_for(
+        hass, "user@example.com", options={CONF_ENABLE_INTERIOR_PANEL: True}
+    )
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [older, newer])
+            ent_reg = er.async_get(hass)
+            older_data = hass.data[DOMAIN][older.entry_id]
+            newer_data = hass.data[DOMAIN][newer.entry_id]
+            main = older_data["combined_alarm_panels"][_INSTALLATION]
+
+            assert hass.states.async_entity_ids("alarm_control_panel") == [
+                main.entity_id
+            ]
+            assert not [
+                e
+                for e in er.async_entries_for_config_entry(ent_reg, newer.entry_id)
+                if e.domain == "alarm_control_panel"
+            ]
+            assert _INSTALLATION not in newer_data.get("combined_alarm_panels", {})
+            assert _INSTALLATION not in newer_data.get("axis_alarm_panels", {})
+            skipped = [
+                r.getMessage()
+                for r in caplog.records
+                if r.levelname == "WARNING" and "Repairs" in r.getMessage()
+            ]
+            assert len(skipped) == 1
+            assert "Home" in skipped[0]
+            assert "example.com" not in skipped[0].lower()
+
+            older_coord = older_data["alarm_coordinator"]
+            assert {p.coordinator for p in main._siblings_on_installation()} == {
+                older_coord
+            }
+            mock_server.add_response("xSArmPanel", graphql_arm())
+            mock_server.add_response("ArmStatus", graphql_arm_status(proto="T"))
+            await hass.services.async_call(
+                "alarm_control_panel",
+                "alarm_arm_away",
+                {"entity_id": main.entity_id},
+                blocking=True,
+            )
+            assert mock_server.call_count("xSArmPanel") == 1
+            assert not newer_data["alarm_coordinator"].operation.running
+
+            refresh_id = ent_reg.async_get_entity_id(
+                "button", DOMAIN, f"v4_securitas_direct.{_INSTALLATION}_refresh_button"
+            )
+            assert refresh_id is not None
+            asked = mock_server.call_count("CheckAlarm")
+            await hass.services.async_call(
+                "button", "press", {"entity_id": refresh_id}, blocking=True
+            )
+            assert mock_server.call_count("CheckAlarm") == asked + 1
+
+            skipped_button = VerisureRefreshButton(
+                newer_data["devices"][0].installation, newer_data["hub"]
+            )
+            skipped_button.hass = hass
+            with patch.object(
+                CombinedVerisureOwaAlarmPanel, "async_manual_refresh", autospec=True
+            ) as refresh:
+                await skipped_button.async_press()
+            refresh.assert_awaited_once_with(main)
+
+            for entry, data in ((older, older_data), (newer, newer_data)):
+                lock_coordinator = MagicMock()
+                lock_coordinator.config_entry = entry
+                lock = VerisureLock(
+                    coordinator=lock_coordinator,
+                    installation=data["devices"][0].installation,
+                    client=data["hub"],
+                )
+                lock.hass = hass
+                await lock.async_added_to_hass()
+                lock._unlock_disarms_circuits = ["interior"]
+                with patch.object(
+                    CombinedVerisureOwaAlarmPanel,
+                    "execute_partial_disarm",
+                    autospec=True,
+                    return_value=True,
+                ) as disarm:
+                    assert await lock._dispatch_unlock_disarm() is True
+                disarm.assert_awaited_once_with(main, ["interior"])
+                for remove in lock._on_remove or []:
+                    remove()
         finally:
             for entry in (older, newer):
                 await hass.config_entries.async_unload(entry.entry_id)
