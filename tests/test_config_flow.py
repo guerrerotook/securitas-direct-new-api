@@ -4644,9 +4644,9 @@ def _duplicate_entry_issue_ids(hass) -> list[str]:
 
 async def _reauth_disabled_entry(hass, entry, username):
     """Submit the entry's reauth dialog as ``username`` and disable the entry
-    while the sign-in is still running. Disabling closes the dialog, but the
-    submitted step still saves the account, and the reload after it runs no
-    setup."""
+    while the sign-in is still running. The submitted step still saves the
+    account (recent Home Assistant versions also close the dialog on disable),
+    and the reload after it runs no setup for a disabled entry."""
     flow_id = (await _start_reauth_flow(hass, entry))["flow_id"]
     hub = _reauth_hub_seeing("111")
     signing_in, gate = asyncio.Event(), asyncio.Event()
@@ -4670,7 +4670,6 @@ async def _reauth_disabled_entry(hass, entry, username):
         await asyncio.wait_for(signing_in.wait(), 2)
         try:
             await _disable(hass, entry)
-            assert _reauth_flows_for(hass, entry) == []
             assert not submit.done()
         finally:
             gate.set()
