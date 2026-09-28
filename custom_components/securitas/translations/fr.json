@@ -267,7 +267,7 @@
         },
         "duplicate_entry": {
             "title": "Installation ajoutée deux fois",
-            "description": "Verisure OWA a deux entrées pour {installation} avec le même compte, ajoutées avec l'adresse e-mail saisie avec des majuscules différentes. Supprimez-en une dans Paramètres → Appareils et services → Verisure OWA. Cette notification disparaît dès qu'il n'en reste qu'une."
+            "description": "Verisure OWA a deux entrées pour {installation} avec le même compte. Supprimez-en une dans Paramètres → Appareils et services → Verisure OWA. Cette notification disparaît dès qu'il n'en reste qu'une."
         }
     },
     "entity": {

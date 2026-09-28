@@ -267,7 +267,7 @@
         },
         "duplicate_entry": {
             "title": "Instal·lació afegida dues vegades",
-            "description": "Verisure OWA té dues entrades per a {installation} amb el mateix compte, afegides amb el correu electrònic escrit amb majúscules diferents. Elimina'n una a Configuració → Dispositius i serveis → Verisure OWA. Aquest avís desapareix quan només en queda una."
+            "description": "Verisure OWA té dues entrades per a {installation} amb el mateix compte. Elimina'n una a Configuració → Dispositius i serveis → Verisure OWA. Aquest avís desapareix quan només en queda una."
         }
     },
     "entity": {

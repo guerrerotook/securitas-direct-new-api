@@ -267,7 +267,7 @@
         },
         "duplicate_entry": {
             "title": "Instalação adicionada duas vezes",
-            "description": "O Verisure OWA tem duas entradas para {installation} na mesma conta, adicionadas com o e-mail digitado com maiúsculas diferentes. Remova uma delas em Configurações → Dispositivos e Serviços → Verisure OWA. Este aviso some quando restar apenas uma."
+            "description": "O Verisure OWA tem duas entradas para {installation} na mesma conta. Remova uma delas em Configurações → Dispositivos e Serviços → Verisure OWA. Este aviso some quando restar apenas uma."
         }
     },
     "entity": {

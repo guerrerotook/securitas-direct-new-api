@@ -267,7 +267,7 @@
         },
         "duplicate_entry": {
             "title": "Installation added twice",
-            "description": "Verisure OWA has two entries for {installation} on the same account, added with the email typed in different capitals. Remove one of them in Settings → Devices & services → Verisure OWA. This notice clears once only one is left."
+            "description": "Verisure OWA has two entries for {installation} on the same account. Remove one of them in Settings → Devices & services → Verisure OWA. This notice clears once only one is left."
         }
     },
     "entity": {

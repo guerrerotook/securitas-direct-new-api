@@ -2502,8 +2502,9 @@ _CLASH_ISSUE_ID = (
 
 
 class TestDuplicateEntryIssue:
-    """One installation added twice (the email typed in other capitals) is
-    flagged in Repairs for as long as both entries exist."""
+    """One installation held by two entries on the same account (the email
+    typed in other capitals, or an entry signed in again to the account the
+    other uses) is flagged in Repairs for as long as both entries exist."""
 
     @pytest.fixture
     def mock_hub(self):
