@@ -10920,12 +10920,50 @@ async def test_arm_blocked_at_its_second_command_shows_the_first_ones_result():
         raise _OPEN_DOOR  # PERI1 blocked
 
     alarm._execute_step = AsyncMock(side_effect=step)
+    events = _record_writes_and_refreshes(alarm)
 
     await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
     assert alarm._state == AlarmControlPanelState.ARMED_HOME  # 'T' as mapped
     alarm.coordinator.async_request_refresh.assert_awaited()
+    # The refresh is asked for only once what ARM1 armed has been written.
+    assert events[-2:] == [("write", AlarmControlPanelState.ARMED_HOME), "refresh"]
     assert alarm._force_context is not None  # force-arm still offered
+
+
+def _record_writes_and_refreshes(alarm):
+    """Record, in order, each state ``alarm`` writes and each coordinator
+    refresh it asks for."""
+    events = []
+    alarm.async_write_ha_state = MagicMock(
+        side_effect=lambda: events.append(("write", alarm._state))
+    )
+    alarm.coordinator.async_request_refresh = AsyncMock(
+        side_effect=lambda: events.append("refresh")
+    )
+    return events
+
+
+async def test_interior_arm_blocked_at_its_second_command_shows_the_first_ones_result():
+    """On the Interior sub-panel, Away from Home needs a disarm first. DARM1
+    lands, then an open door blocks ARM1. The sub-panel shows the disarm
+    that did land rather than going back to Home, then asks for a refresh,
+    and still offers to force the arm."""
+    alarm = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
+    alarm.coordinator.record_confirmed_proto_code("P")
+    alarm.update_status_alarm(_status("P"))
+    assert alarm._state == AlarmControlPanelState.ARMED_HOME
+    alarm._client.disarm_alarm = AsyncMock(return_value=_status("D"))
+    alarm._client.arm_alarm = AsyncMock(side_effect=_OPEN_DOOR)
+    events = _record_writes_and_refreshes(alarm)
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    assert [c.args[1] for c in alarm._client.disarm_alarm.await_args_list] == ["DARM1"]
+    assert [c.args[1] for c in alarm._client.arm_alarm.await_args_list] == ["ARM1"]
+    assert alarm._state == AlarmControlPanelState.DISARMED
+    assert events[-2:] == [("write", AlarmControlPanelState.DISARMED), "refresh"]
+    assert alarm._force_context is not None
 
 
 async def test_arm_blocked_at_its_only_command_shows_the_previous_state():
