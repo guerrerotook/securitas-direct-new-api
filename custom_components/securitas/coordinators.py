@@ -372,26 +372,22 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
 
     async def async_shutdown(self) -> None:
         """Stop polling and take down this installation's unrecognised-state
-        Repairs issue, unless another entry for the installation still polls
-        it: once none does, nothing clears it."""
+        Repairs issue, unless another entry still runs the installation's
+        alarm panels: only that entry's coordinator has entities listening,
+        so only it keeps polling, and without a poll nothing clears the
+        issue."""
         await super().async_shutdown()
-        if not self._installation_polled_elsewhere():
+        if not self._alarm_panels_run_elsewhere():
             ir.async_delete_issue(self.hass, DOMAIN, self._unrecognised_issue_id)
 
-    def _installation_polled_elsewhere(self) -> bool:
-        """True when another loaded entry has an alarm coordinator for this
-        installation (it was added twice)."""
-        for entry_data in self.hass.data.get(DOMAIN, {}).values():
-            if not isinstance(entry_data, dict):
-                continue
-            other = entry_data.get("alarm_coordinator")
-            if (
-                isinstance(other, AlarmCoordinator)
-                and other is not self
-                and other._installation.number == self._installation.number
-            ):
-                return True
-        return False
+    def _alarm_panels_run_elsewhere(self) -> bool:
+        """True when another loaded entry for this installation (it was added
+        twice) runs its alarm panels."""
+        # Imported here: the alarm panel platform imports this module.
+        from .alarm_control_panel import main_panel_for
+
+        panel = main_panel_for(self.hass, self._installation.number)
+        return panel is not None and panel.coordinator is not self
 
     @property
     def _unrecognised_issue_id(self) -> str:

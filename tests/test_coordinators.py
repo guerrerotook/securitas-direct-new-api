@@ -440,36 +440,52 @@ class TestAlarmCoordinator:
         assert self._unknown_state_issue(hass) is None
 
     @pytest.mark.asyncio
-    async def test_shutdown_keeps_the_issue_while_another_entry_polls_the_installation(
-        self, hass: HomeAssistant
+    @pytest.mark.parametrize(
+        ("first", "kept"), [("without_panels", True), ("with_panels", False)]
+    )
+    async def test_shutdown_keeps_the_issue_while_another_entry_runs_the_panels(
+        self, hass: HomeAssistant, first: str, kept: bool
     ):
         """An installation added twice has an alarm coordinator per entry but
-        one issue. Unloading one entry (its data is gone from hass.data by
-        the time its coordinators shut down) leaves the issue to the other;
-        unloading the last takes it away. Another installation's coordinator
-        does not keep it."""
+        one issue, and only the entry running the alarm panels keeps polling
+        (the other's coordinator has no entities listening). Unloading the
+        other entry (its data is gone from hass.data by the time its
+        coordinators shut down) leaves the issue to it; unloading the entry
+        running the panels takes the issue away, as does unloading the last.
+        Another installation's panels do not keep it."""
         client = _make_client()
         installation = _make_installation()
-        older = self._make_coordinator(hass, client, _make_queue(), installation)
-        newer = self._make_coordinator(hass, client, _make_queue(), installation)
+        with_panels = self._make_coordinator(hass, client, _make_queue(), installation)
+        without_panels = self._make_coordinator(
+            hass, client, _make_queue(), installation
+        )
         elsewhere = self._make_coordinator(
             hass, client, _make_queue(), make_installation(number="654321")
         )
         hass.data[DOMAIN] = {
-            "older": {"alarm_coordinator": older},
-            "newer": {"alarm_coordinator": newer},
-            "elsewhere": {"alarm_coordinator": elsewhere},
+            "with_panels": {
+                "alarm_coordinator": with_panels,
+                "combined_alarm_panels": {"123456": MagicMock(coordinator=with_panels)},
+            },
+            "without_panels": {"alarm_coordinator": without_panels},
+            "elsewhere": {
+                "alarm_coordinator": elsewhere,
+                "combined_alarm_panels": {"654321": MagicMock(coordinator=elsewhere)},
+            },
             "sessions": {},
         }
-        newer.record_confirmed_proto_code("N")
+        coordinators = {"with_panels": with_panels, "without_panels": without_panels}
+        with_panels.record_confirmed_proto_code("N")
         assert self._unknown_state_issue(hass) is not None
 
-        hass.data[DOMAIN].pop("newer")
-        await newer.async_shutdown()
-        assert self._unknown_state_issue(hass) is not None
+        hass.data[DOMAIN].pop(first)
+        await coordinators.pop(first).async_shutdown()
+        assert (self._unknown_state_issue(hass) is not None) is kept
 
-        hass.data[DOMAIN].pop("older")
-        await older.async_shutdown()
+        ((last_id, last),) = coordinators.items()
+        last.record_confirmed_proto_code("N")
+        hass.data[DOMAIN].pop(last_id)
+        await last.async_shutdown()
         assert self._unknown_state_issue(hass) is None
 
     @pytest.mark.asyncio

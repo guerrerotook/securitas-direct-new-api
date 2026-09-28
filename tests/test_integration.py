@@ -8,6 +8,7 @@ which patch _execute_request directly.
 """
 
 import contextlib
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,7 +18,11 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
 from custom_components.securitas.alarm_control_panel import (
@@ -28,6 +33,7 @@ from custom_components.securitas.config_flow import FlowHandler
 from custom_components.securitas.const import (
     CONF_ENABLE_INTERIOR_PANEL,
     CONF_INSTALLATION,
+    DEFAULT_SCAN_INTERVAL,
 )
 from custom_components.securitas.lock import VerisureLock
 from custom_components.securitas.verisure_owa_api.exceptions import (
@@ -989,16 +995,22 @@ async def test_unloading_the_entry_clears_its_unknown_state_notice(
             await hass.async_block_till_done()
 
 
-@pytest.mark.parametrize("first_unloaded", ["older", "newer"])
-async def test_unloading_one_of_two_entries_keeps_the_unknown_state_notice(
+@pytest.mark.parametrize(
+    ("first_unloaded", "kept"), [("newer", True), ("older", False)]
+)
+async def test_the_unknown_state_notice_stays_while_an_entry_runs_the_alarm_panels(
     hass: HomeAssistant,
     mock_server: MockGraphQLServer,
     enable_custom_integrations,
     first_unloaded: str,
+    kept: bool,
 ):
-    """An installation added twice has one unknown-state notice, which the
-    entry still loaded keeps showing when the other is unloaded; unloading
-    that one too takes it away."""
+    """An installation added twice has one unknown-state notice. The older
+    entry, set up first, runs the alarm panels, and only its coordinator keeps
+    polling: the newer one has no entities listening. Unloading the newer
+    entry keeps the notice; unloading the older takes it away, since nothing
+    would clear it once the alarm reports a known state again. Unloading
+    both takes it away."""
     _queue_installation_with_a_camera(mock_server)
     mock_server.set_default_response("Status", graphql_general_status(status="N"))
     assert await async_setup_component(hass, DOMAIN, {})
@@ -1006,6 +1018,7 @@ async def test_unloading_one_of_two_entries_keeps_the_unknown_state_notice(
         "older": _add_entry_for(hass, "User@Example.com"),
         "newer": _add_entry_for(hass, "user@example.com"),
     }
+    older, newer = entries["older"], entries["newer"]
     first = entries.pop(first_unloaded)
     (second,) = entries.values()
     issue_id = f"unknown_alarm_state_{_INSTALLATION}"
@@ -1015,18 +1028,29 @@ async def test_unloading_one_of_two_entries_keeps_the_unknown_state_notice(
         return_value=mock_server.make_http_client(),
     ):
         try:
-            await _set_up_in_turn(hass, [first, second])
+            await _set_up_in_turn(hass, [older, newer])
+            assert _INSTALLATION in hass.data[DOMAIN][older.entry_id].get(
+                "combined_alarm_panels", {}
+            )
             assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
 
             assert await hass.config_entries.async_unload(first.entry_id)
             await hass.async_block_till_done()
-            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+            notice = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+            assert (notice is not None) is kept
+
+            polls = mock_server.call_count("Status")
+            async_fire_time_changed(
+                hass, dt_util.utcnow() + timedelta(seconds=DEFAULT_SCAN_INTERVAL + 1)
+            )
+            await hass.async_block_till_done()
+            assert (mock_server.call_count("Status") > polls) is kept
 
             assert await hass.config_entries.async_unload(second.entry_id)
             await hass.async_block_till_done()
             assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
         finally:
-            for entry in (first, second):
+            for entry in (older, newer):
                 await hass.config_entries.async_unload(entry.entry_id)
             await hass.async_block_till_done()
 
