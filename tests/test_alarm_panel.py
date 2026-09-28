@@ -2471,7 +2471,8 @@ class TestForceArmContext:
         assert alarm._state == AlarmControlPanelState.DISARMED
 
     def test_mobile_action_force_arm_dispatches_task(self):
-        """SECURITAS_FORCE_ARM_<num> mobile action dispatches async_force_arm."""
+        """SECURITAS_FORCE_ARM_<num> mobile action schedules the force arm as
+        one task."""
         alarm = make_alarm()
         alarm._force_context = {
             "reference_id": "ref-mobile",
@@ -11028,7 +11029,8 @@ async def test_refresh_answering_an_unmodelled_code_keeps_the_sub_panels_display
 
 async def test_refresh_during_a_command_leaves_the_state_to_the_command():
     """An answer read while a command runs on the installation may predate
-    that command's result, so Refresh records and shows nothing then."""
+    that command's result, so Refresh leaves the confirmed state and the
+    display alone then (it still moves the Repairs notice)."""
     alarm = make_alarm()
     _arm_timed_out(alarm)
     alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
