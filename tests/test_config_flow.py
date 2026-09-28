@@ -1826,6 +1826,43 @@ async def test_unique_id_includes_installation(hass):
     assert entries[0].unique_id == "test@example.com_42"
 
 
+async def test_new_entry_stores_the_email_in_lower_case(hass):
+    """Verisure's sign-in ignores capitals, so the entry and its ID keep the
+    email in lower case whatever the user typed."""
+    result = await _complete_full_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "User@Example.COM"},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.data[CONF_USERNAME] == "user@example.com"
+    assert entry.unique_id == "user@example.com_123456"
+
+
+async def test_adding_the_same_account_in_other_capitals_is_a_duplicate(hass):
+    """An installation configured while this flow waits on its options form
+    is caught by the entry ID, which must match whatever the capitals."""
+    result = await _start_user_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "USER@example.com"},
+    )
+    assert result["step_id"] == "options"
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="user@example.com_123456",
+        data=make_config_entry_data(username="user@example.com"),
+        version=FlowHandler.VERSION,
+    ).add_to_hass(hass)
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
 async def test_already_configured_filtered_out(hass):
     """Installations with existing config entries should be excluded."""
     # Pre-add a config entry for installation 111
@@ -4412,8 +4449,8 @@ async def test_the_same_email_in_other_capitals_is_not_a_switch(hass):
 
 
 async def test_the_same_email_in_other_capitals_keeps_the_entrys_spelling(hass):
-    """The crash count is kept under the email as the entry stores it, so a
-    reauth typing it in other capitals keeps that spelling and clears its
+    """The crash count is kept under the lower-case email, so a reauth
+    typing it in other capitals stores it in lower case and clears its
     count: the next crash waits to retry."""
     home = await _home_crashed_once_then_rejected(hass)
 
@@ -4461,6 +4498,76 @@ async def test_the_same_email_in_other_capitals_keeps_the_shared_session(hass):
     }
     reload_login.assert_not_awaited()
     hub.client.list_installations.assert_awaited_once()
+
+
+async def test_reauth_stores_the_email_in_lower_case(hass):
+    """Retyping the entry's email in capitals is the same account: no
+    installation check, and the entry keeps the lower-case email."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="user@example.com_111",
+        data={
+            **make_config_entry_data(username="user@example.com"),
+            CONF_INSTALLATION: "111",
+        },
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    result = await _submit_reauth(
+        hass,
+        entry,
+        "User@Example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    reauth_hub.client.list_installations.assert_not_awaited()
+    assert entry.data[CONF_USERNAME] == "user@example.com"
+    assert entry.unique_id == "user@example.com_111"
+
+
+@pytest.mark.parametrize("id_taken", [False, True])
+async def test_reauth_account_switch_moves_the_entry_id_to_the_new_email(
+    hass, id_taken
+):
+    """The entry ID is the email plus the installation, so a switch moves it
+    to the new email; if another entry already holds that ID it stays put."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    if id_taken:
+        MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="other@example.com_111",
+            data={
+                **make_config_entry_data(username="other@example.com"),
+                CONF_INSTALLATION: "111",
+            },
+            version=FlowHandler.VERSION,
+        ).add_to_hass(hass)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        _reauth_hub_seeing("111"),
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(
+                return_value=_hub_for_other_account(make_installation(number="111"))
+            ),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.data[CONF_USERNAME] == "other@example.com"
+    assert home.unique_id == (
+        "test@example.com_111" if id_taken else "other@example.com_111"
+    )
 
 
 async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):

@@ -26,6 +26,7 @@ from homeassistant.helpers.selector import (
     CountrySelectorConfig,
     selector,
 )
+from homeassistant.helpers.typing import UNDEFINED, UndefinedType
 
 from . import (
     CONF_ADVANCED,
@@ -696,6 +697,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="user", data_schema=self._user_schema())
 
         self.config = dict(user_input)
+        self.config[CONF_USERNAME] = self.config[CONF_USERNAME].lower()
 
         self.config[CONF_DELAY_CHECK_OPERATION] = DEFAULT_DELAY_CHECK_OPERATION
         self.config[CONF_DEVICE_INDIGITALL] = ""
@@ -737,7 +739,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
             self.config[CONF_USERNAME] = user_input.get(
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
-            )
+            ).lower()
 
             # Preserve existing device IDs from the entry being reauthenticated
             self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
@@ -805,13 +807,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         installation = self._reauth_entry.data.get(CONF_INSTALLATION)
         old_username = self._reauth_entry.data.get(CONF_USERNAME, "")
-        # Verisure matches the email whatever its capitals, so only another
-        # address is another account. The same address keeps the entry's
-        # spelling: sessions, crash counts and cached installations are keyed
-        # by it exactly.
-        if username.casefold() == old_username.casefold():
-            username = old_username
-        if installation and username != old_username:
+        switched = username != old_username.lower()
+        if installation and switched:
             # Another account keeps the entry's installation number; one that
             # cannot see it would leave the entry with no devices.
             try:
@@ -828,7 +825,21 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
         new_data[CONF_REFRESH_TOKEN] = refresh_token
-        self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
+        unique_id: str | UndefinedType = UNDEFINED
+        if installation and switched:
+            new_uid = f"{username}_{installation}"
+            # Home Assistant reports taking another entry's ID as an
+            # integration bug.
+            if (
+                self.hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, new_uid
+                )
+                is None
+            ):
+                unique_id = new_uid
+        self.hass.config_entries.async_update_entry(
+            self._reauth_entry, data=new_data, unique_id=unique_id
+        )
         # This sign-in proves the new token; crashes of the one it replaces
         # must not count against it.
         _clear_setup_refresh_crash(self.hass, username)
