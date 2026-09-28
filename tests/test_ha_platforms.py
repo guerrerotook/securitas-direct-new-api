@@ -2725,17 +2725,6 @@ class TestVerisureLockUnlockDisarm:
         # Unlock still proceeds.
         lock._client.change_lock_mode.assert_awaited_once()
 
-    async def test_disarm_skipped_when_no_circuits_configured(self):
-        lock = make_lock(initial_status="2", poll_status="1")
-        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
-        lock._unlock_disarms_circuits = []  # no automation
-        lock._combined_alarm_panel = self._make_alarm_panel(result=True)
-
-        await lock.async_unlock()
-
-        lock._combined_alarm_panel.execute_partial_disarm.assert_not_awaited()
-        lock._client.change_lock_mode.assert_awaited_once()
-
     async def test_lock_passes_every_configured_circuit_to_the_panel(self):
         """The lock hands every configured circuit to the panel, which decides
         which of them are armed."""

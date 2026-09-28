@@ -9847,6 +9847,27 @@ async def test_unlock_after_subpanel_arm_disarms_before_the_refresh_lands():
     assert main._state == AlarmControlPanelState.DISARMED
 
 
+async def test_unlock_with_no_circuits_to_disarm_neither_waits_nor_sends():
+    """A lock set to disarm nothing unlocks at once, even while an arm runs
+    on the installation, and asks the panel for no command."""
+    main, _, lock = _main_and_interior_panels()
+    main.coordinator.record_confirmed_proto_code("T")
+    _record_transitions(main)
+    lock._unlock_disarms_circuits = []
+    lock._fire_lock_notification = AsyncMock()
+    main.coordinator.operation.begin("arm", [main], "armed_away")
+    try:
+        result = await asyncio.wait_for(lock._dispatch_unlock_disarm(), timeout=2)
+        await asyncio.wait_for(lock.async_unlock(), timeout=2)
+    finally:
+        main.coordinator.operation.end()
+
+    assert result is None
+    assert _sent(main) == []
+    lock._fire_lock_notification.assert_not_awaited()
+    lock._client.change_lock_mode.assert_awaited_once()
+
+
 def _real_alarm_coordinator():
     """A real AlarmCoordinator whose polls read ``client.get_general_status``."""
     from datetime import timedelta

@@ -666,8 +666,6 @@ class VerisureLock(  # type: ignore[override]
 
         The unlock always proceeds regardless of the return value.
         """
-        if not self._unlock_disarms_circuits:
-            return None
         panel = self._combined_alarm_panel
         if panel is None:
             return None
