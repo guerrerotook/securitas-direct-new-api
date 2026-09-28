@@ -666,8 +666,8 @@ class VerisureLock(  # type: ignore[override]
 
         The unlock always proceeds regardless of the return value.
         """
-        # Looked up now, not when added: another entry may run this
-        # installation's panels, and may set up after this lock.
+        # This entry may run no panels (another entry for the installation
+        # does); look that one up now, as it may set up after this lock.
         panel = self._combined_alarm_panel
         if panel is None:
             panel = main_panel_for(self.hass, self._installation.number)

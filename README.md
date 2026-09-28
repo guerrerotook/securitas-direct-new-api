@@ -151,7 +151,7 @@ The mapping works both ways: when Verisure reports "Total + Perimeter" and you'v
 
 ### When the panel sits in an unmapped state
 
-If the alarm enters a Verisure state you haven't mapped (e.g. perimeter is armed from a physical keypad but you haven't mapped a HA button to it), the entity shows as **Custom Bypass**. To resolve, add a mapping or enable the relevant capability. To check which status code is being reported, [enable debug logging](#reporting-issues).
+If the alarm enters a Verisure state you haven't mapped (e.g. perimeter is armed from a physical keypad but you haven't mapped a HA button to it), the entity shows as **Custom Bypass**. To resolve, add a mapping or enable the relevant capability. To check which status code is being reported, [enable debug logging](#reporting-issues). If the code is one the integration doesn't recognise at all, you don't need debug logging: a notice in **Settings → Repairs** names it.
 
 ## Sub-panels
 
@@ -729,7 +729,7 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
 
    Then retrieve the logs from **Settings → System → Logs → three dots in the top right corner → Show full logs**.
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
-5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Verisure OWA integration log messages (after enabling debug logging and reproducing the issue).
+5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Verisure OWA integration log messages (after enabling debug logging and reproducing the issue). For a state code the integration doesn't recognise at all, the notice in **Settings → Repairs** names the code, so debug logging isn't needed.
 
 ### HAR file (for tricky bugs)
 

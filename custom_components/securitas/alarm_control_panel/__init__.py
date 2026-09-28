@@ -348,9 +348,10 @@ async def async_setup_entry(
             is not None
         ):
             _LOGGER.warning(
-                "Another entry already runs the alarm panels for %s, so this "
-                "one sets up none: see the notice in Settings > Repairs and "
-                "remove one of the two entries",
+                "Another entry already runs the alarm panels for installation "
+                "%s (%s), so this one sets up none: see the notice in "
+                "Settings → Repairs and remove one of the two entries",
+                devices.installation.number,
                 devices.installation.alias,
             )
             continue
