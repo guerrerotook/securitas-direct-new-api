@@ -1252,9 +1252,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             ) from err
         if not is_proto_letter(status.protom_response):
             raise VerisureOwaError("The panel did not report its state before arming")
-        self._last_proto_code = status.protom_response
         self.coordinator.record_confirmed_proto_code(status.protom_response)
         self._reconcile_provisional()
+        # Show the answer, then Arming again: a failed arm rolls back to the
+        # state saved by _force_state, which must be the answer, not the guess.
+        self.update_status_alarm(status)
+        self._force_state(AlarmControlPanelState.ARMING)
 
     async def set_arm_state(
         self,

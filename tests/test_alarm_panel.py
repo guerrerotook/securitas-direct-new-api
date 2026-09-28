@@ -10664,6 +10664,7 @@ async def test_interior_disarm_after_an_arm_cancelled_at_the_panel_sends_it():
 def _arm_timed_out(alarm, optimistic="T", before="D"):
     """The installation after an arm to ``optimistic`` was accepted but not
     confirmed, from ``before``."""
+    alarm.update_status_alarm(_status(optimistic))  # shown optimistically
     alarm.coordinator.record_confirmed_proto_code(optimistic)
     alarm.coordinator.mark_confirmed_provisional({before})
     alarm._last_proto_code = optimistic
@@ -10766,3 +10767,37 @@ async def test_disarm_after_unconfirmed_arm_does_not_ask_the_panel_first():
 
     alarm._client.refresh_alarm_status.assert_not_awaited()
     assert _sent(alarm) == ["DARM1"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ArmingExceptionError(
+            "ref", "suid", [{"status": "0", "deviceType": "MG", "alias": "Door"}]
+        ),
+        VerisureOwaError("arm refused"),
+    ],
+    ids=["open_sensor", "arm_error"],
+)
+@pytest.mark.parametrize(
+    "panel_cls",
+    [CombinedVerisureOwaAlarmPanel, InteriorVerisureOwaAlarmPanel],
+    ids=["combined", "interior"],
+)
+async def test_failed_arm_after_asking_the_panel_shows_what_it_answered(
+    panel_cls, error
+):
+    """An arm after an unconfirmed arm asks the panel, which answers
+    disarmed; the arm then fails. The panel shows disarmed, not the earlier
+    guess of armed."""
+    alarm = make_alarm(panel_cls=panel_cls)
+    _arm_timed_out(alarm)
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY  # the guess
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
+    _record_transitions(alarm, error=error)
+
+    with patch("custom_components.securitas.alarm_control_panel._base._notify"):
+        await alarm.set_arm_state("armed_away")
+
+    assert _sent(alarm) == ["ARM1"]
+    assert alarm._state == AlarmControlPanelState.DISARMED
