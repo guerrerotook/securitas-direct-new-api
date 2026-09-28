@@ -299,7 +299,8 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     @property
     def confirmed_proto_code(self) -> str | None:
         """The installation's latest known proto code, from whichever came
-        last: a poll, or any alarm panel's command result.
+        last: a poll, any alarm panel's command result, the status check
+        before an arm, or a manual Refresh.
 
         Right after a command this is newer than ``data``, whose refresh may
         not have landed yet. None until either has happened.
@@ -325,15 +326,16 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     def record_confirmed_proto_code(self, proto_code: str) -> None:
         """Record ``proto_code`` as the installation's state and clear any
         unconfirmed marker: a panel command's result, the status check before
-        an arm, a poll, or a timed-out command's optimistic code (which the
-        caller then marks unconfirmed)."""
+        an arm, a manual Refresh, a poll, or a timed-out command's optimistic
+        code (which the caller then marks unconfirmed)."""
         self._confirmed_proto_code = proto_code
         self._confirmed_provisional = False
         self._earlier_possible = frozenset()
 
     def mark_confirmed_provisional(self, earlier: Iterable[str | None]) -> None:
-        """Flag the recorded code as unconfirmed until a real command result
-        or a poll replaces it.
+        """Flag the recorded code as unconfirmed until a real command result,
+        the status check before an arm, a manual Refresh or a poll replaces
+        it.
 
         ``earlier`` is ``possible_proto_codes`` read before the unconfirmed
         command's optimistic code was recorded, plus None if the command's
