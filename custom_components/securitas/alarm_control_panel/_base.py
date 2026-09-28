@@ -509,7 +509,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 "[%s installation=%s] Unmapped alarm state: Verisure reports "
                 "'%s' (proto code '%s'). None of the buttons on the main "
                 "control panel are mapped to it. Map a button in Settings → "
-                "Devices & Services → Verisure OWA → Configure → Alarm State "
+                "Devices & services → Verisure OWA → Configure → Alarm State "
                 "Mappings, or HA will keep showing this as 'armed_custom_bypass'.",
                 self.entity_id,
                 self.installation.number,

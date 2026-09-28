@@ -651,7 +651,7 @@ When the built-in handler is active it:
 
 **Disabling the built-in handler:**
 
-Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & Services → Verisure OWA → Configure). The `verisure_owa_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
+Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & services → Verisure OWA → Configure). The `verisure_owa_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
 
 **Custom automation examples:**
 
