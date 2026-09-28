@@ -14,7 +14,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -219,6 +219,43 @@ async def _fetch_with_session_recovery[T](
 # ── AlarmCoordinator ─────────────────────────────────────────────────────────
 
 
+OperationKind = Literal["arm", "disarm", "partial_disarm"]
+
+
+class InstallationOperation:
+    """The one alarm command an installation runs at a time, shared by all
+    its panels: a second one waits until this one ends."""
+
+    def __init__(self) -> None:
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self.kind: OperationKind | None = None
+        self.panels: frozenset[object] = frozenset()
+
+    @property
+    def running(self) -> bool:
+        """True from ``begin`` until ``end``."""
+        return not self._idle.is_set()
+
+    def begin(self, kind: OperationKind, panels: Iterable[object]) -> None:
+        """Mark ``kind`` as running on ``panels``."""
+        # Callers check `running` and call begin with no await in between.
+        assert not self.running, "operation already running"
+        self.kind = kind
+        self.panels = frozenset(panels)
+        self._idle.clear()
+
+    def end(self) -> None:
+        """Mark the installation idle, waking every waiter."""
+        self.kind = None
+        self.panels = frozenset()
+        self._idle.set()
+
+    async def wait_idle(self) -> None:
+        """Return once no operation runs."""
+        await self._idle.wait()
+
+
 class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     """Coordinator for alarm status polling."""
 
@@ -250,7 +287,9 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._confirmed_proto_code: str | None = None
         self._confirmed_provisional = False
         self._earlier_possible: frozenset[str | None] = frozenset()
-        self._panels_in_operation: set[object] = set()
+        # Also holds back polled codes while it runs: a poll landing then may
+        # predate the command's result.
+        self.operation = InstallationOperation()
 
     @property
     def confirmed_proto_code(self) -> str | None:
@@ -294,15 +333,6 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         """
         self._confirmed_provisional = True
         self._earlier_possible = frozenset(earlier)
-
-    def operation_started(self, panel: object) -> None:
-        """Hold back polled states while ``panel`` runs a command: a poll
-        landing then may predate the command's result."""
-        self._panels_in_operation.add(panel)
-
-    def operation_finished(self, panel: object) -> None:
-        """Release the hold taken by operation_started."""
-        self._panels_in_operation.discard(panel)
 
     @property
     def has_peri(self) -> bool:
@@ -416,7 +446,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
             self._client, self._fetch, "Alarm status"
         )
         proto_code = data.status.status if data.status else None
-        if proto_code and not self._panels_in_operation and is_proto_letter(proto_code):
+        if proto_code and not self.operation.running and is_proto_letter(proto_code):
             self.record_confirmed_proto_code(proto_code)
         return data
 

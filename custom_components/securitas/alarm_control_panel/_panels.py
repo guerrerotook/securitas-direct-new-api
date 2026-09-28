@@ -113,7 +113,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             return True
         affected = [self, *self._affected_axis_subpanels(circuits)]
         try:
-            await self._wait_until_idle(self._siblings_on_installation())
+            await self._wait_until_idle()
         except HomeAssistantError:
             return False
         # target stays None when the state is unreadable; the circuits are then
@@ -126,14 +126,12 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 return True
 
         # pylint: disable=protected-access
-        taken: list[BaseVerisureOwaAlarmPanel] = []
+        switched: list[BaseVerisureOwaAlarmPanel] = []
         ok = False
+        self._operation.begin("partial_disarm", affected)
         try:
             for entity in affected:
-                entity._operation_in_progress = True
-                taken.append(entity)
-                entity._operation_kind = "partial_disarm"
-                entity._operation_epoch += 1
+                switched.append(entity)
                 entity._force_state(AlarmControlPanelState.DISARMING)
             if target is not None:
                 result = await self._execute_transition(target)
@@ -162,14 +160,14 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             return False
         finally:
             # Every exit that did not succeed (handled error, unforeseen error,
-            # cancellation) shows the circuits as still armed. Every flag is
-            # freed before any state write, which can raise: a flag left set
-            # would hold every later disarm until the wait gives up.
-            for entity in taken:
-                if not ok:
+            # cancellation) shows the circuits as still armed. The operation
+            # ends before any state write, which can raise: an operation left
+            # running would hold every later command until the wait gives up.
+            if not ok:
+                for entity in switched:
                     entity._state = entity._last_state
-                entity._operation_in_progress = False
-            for entity in taken:
+            self._operation.end()
+            for entity in switched:
                 entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True
@@ -182,7 +180,7 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         Raises the translated ``operation_in_progress`` error if the wait gives
         up.
         """
-        await self._wait_until_idle(self._siblings_on_installation())
+        await self._wait_until_idle()
         return self._confirmed_alarm_state()
 
     def _affected_axis_subpanels(

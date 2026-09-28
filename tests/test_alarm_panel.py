@@ -38,6 +38,7 @@ from custom_components.securitas.const import (
 from custom_components.securitas.coordinators import (
     AlarmCoordinator,
     AlarmStatusData,
+    InstallationOperation,
 )
 from custom_components.securitas.events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
@@ -678,6 +679,7 @@ def make_alarm(
     coordinator.async_request_refresh = AsyncMock()
     coordinator.has_peri = has_peri
     coordinator.has_annex = False
+    coordinator.operation = InstallationOperation()
 
     if initial_status is None:
         initial_status = OperationStatus(
@@ -1780,7 +1782,7 @@ class TestHandleCoordinatorUpdate:
     def test_coordinator_update_skipped_during_operation(self):
         """Coordinator update is skipped when _operation_in_progress is True."""
         alarm = make_alarm()
-        alarm._operation_in_progress = True
+        alarm.coordinator.operation.begin("arm", [alarm])
         alarm.coordinator.data = AlarmStatusData(
             status=SStatus(status="T"), protom_response="T"
         )
@@ -2110,8 +2112,6 @@ class TestForceArmContext:
     async def test_arming_exception_stores_force_context(self):
         """ArmingExceptionError during arm stores force context and reverts state."""
         alarm = make_alarm()
-        alarm._state = AlarmControlPanelState.ARMING
-        alarm._last_state = AlarmControlPanelState.DISARMED
 
         exc = self._make_arming_exception()
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
@@ -2132,8 +2132,6 @@ class TestForceArmContext:
     async def test_non_forceable_arming_exception_still_exposes_open_sensors(self):
         """Spain panels show sensor details without enabling force-arm."""
         alarm = make_alarm()
-        alarm._state = AlarmControlPanelState.ARMING
-        alarm._last_state = AlarmControlPanelState.DISARMED
         exc = ArmingExceptionError(
             "ref-exc-spain",
             "suid-spain",
@@ -4348,8 +4346,6 @@ class TestCompoundArmCommands:
     async def test_all_alternatives_fail_raises_unsupported_alarm_mode(self):
         """When all 400-failing alternatives are exhausted, raise translated HomeAssistantError."""
         alarm = make_alarm(config=_night_peri_config())
-        alarm._state = AlarmControlPanelState.ARMING
-        alarm._last_state = AlarmControlPanelState.DISARMED
 
         alarm.client.arm_alarm = AsyncMock(
             side_effect=VerisureOwaError("API error", http_status=400)
@@ -6039,7 +6035,6 @@ class TestForceArmWorkflow:
         alarm.client.arm_alarm = AsyncMock(side_effect=exc)
 
         # Step 1: initial arm fails
-        alarm._state = AlarmControlPanelState.ARMING
         await alarm.set_arm_state(AlarmControlPanelState.ARMED_HOME)
 
         assert alarm._force_context is not None
@@ -6200,6 +6195,7 @@ def _make_interior_panel(
     coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
     coordinator.capabilities = capabilities
     coordinator.alarm_state = current_state
+    coordinator.operation = InstallationOperation()
 
     installation = MagicMock()
     installation.number = "12345"
@@ -6252,6 +6248,7 @@ def _make_perimeter_panel(
     coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
     coordinator.capabilities = capabilities
     coordinator.alarm_state = current_state
+    coordinator.operation = InstallationOperation()
 
     installation = MagicMock()
     installation.number = "12345"
@@ -6891,6 +6888,7 @@ def _make_annex_panel(
     coordinator.has_annex = "ARMANNEX" in capabilities and "DARMANNEX" in capabilities
     coordinator.capabilities = capabilities
     coordinator.alarm_state = current_state
+    coordinator.operation = InstallationOperation()
 
     installation = MagicMock()
     installation.number = "12345"
@@ -7882,8 +7880,6 @@ class TestExecutePartialDisarm:
         interior = MagicMock()
         interior._state = AlarmControlPanelState.ARMED_AWAY
         interior._last_state = AlarmControlPanelState.ARMED_AWAY
-        interior._operation_in_progress = False
-        interior._operation_epoch = 0
 
         def _force_state(state):
             interior._last_state = interior._state
@@ -9173,8 +9169,7 @@ async def test_disarm_reentry_guard_ignores_overlapping_call():
 
     alarm = make_alarm()
     alarm._last_proto_code = "Q"
-    alarm._operation_in_progress = True  # simulate an in-flight disarm
-    alarm._operation_kind = "disarm"
+    alarm.coordinator.operation.begin("disarm", [alarm])  # an in-flight disarm
     alarm.client.disarm_alarm = AsyncMock()
 
     await alarm.async_alarm_disarm()
@@ -9190,7 +9185,7 @@ async def test_arm_reentry_guard_ignores_overlapping_call():
 
     alarm = make_alarm()
     alarm._last_proto_code = "D"
-    alarm._operation_in_progress = True  # simulate an in-flight operation
+    alarm.coordinator.operation.begin("arm", [alarm])  # an in-flight arm
     alarm.client.arm_alarm = AsyncMock()
 
     await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
@@ -9210,7 +9205,13 @@ def _status(proto: str) -> OperationStatus:
 
 
 # The state each arm command leaves the panel in; every disarm command leaves 'D'.
-_ARM_COMMAND_ANSWERS = {"ARM1": "T", "ARMINTEXT1": "A", "PERI1": "E", "ARMANNEX1": "X"}
+_ARM_COMMAND_ANSWERS = {
+    "ARM1": "T",
+    "ARMINTEXT1": "A",
+    "ARMDAY1": "P",
+    "PERI1": "E",
+    "ARMANNEX1": "X",
+}
 
 
 def _record_transitions(
@@ -9474,6 +9475,7 @@ async def test_partial_disarm_unexpected_exit_rolls_back_and_frees_panels(error)
     busy, so a disarm pressed afterwards is carried out."""
     panel = make_alarm()
     interior = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
+    interior.coordinator = panel.coordinator
     setup_alarm_entry_data(panel, sub_panels=[interior])
     panel._client.config_entry = MagicMock(entry_id="entry-id-1")
     panel.update_status_alarm(_status("T"))
@@ -9624,8 +9626,7 @@ async def test_partial_disarm_gives_up_behind_a_stuck_operation():
     alarm.update_status_alarm(_status("T"))
     alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
     _record_transitions(alarm)
-    alarm._operation_in_progress = True
-    alarm._operation_kind = "arm"
+    alarm.coordinator.operation.begin("arm", [alarm])
 
     ok = await asyncio.wait_for(alarm.execute_partial_disarm(["interior"]), timeout=2)
 
@@ -9665,8 +9666,7 @@ async def test_disarm_gives_up_waiting_behind_a_stuck_operation(caplog):
     alarm = make_alarm()
     alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
     _record_transitions(alarm)
-    alarm._operation_in_progress = True
-    alarm._operation_kind = "arm"  # an arm whose flag is never released
+    alarm.coordinator.operation.begin("arm", [alarm])  # an arm that never ends
 
     with (
         caplog.at_level(logging.WARNING),
@@ -10268,6 +10268,105 @@ async def test_partial_disarm_whose_final_state_write_fails_frees_every_panel():
 
     assert main._operation_in_progress is False
     assert interior._operation_in_progress is False
+
+
+async def test_perimeter_arm_waits_for_the_locks_interior_partial_disarm():
+    """The door lock's Interior disarm is at the panel when the user arms the
+    Perimeter sub-panel. The arm waits for it, then arms only the perimeter:
+    the interior is not re-armed."""
+    main, _, _ = _main_and_interior_panels(has_peri=True)
+    perimeter = _sub_panel_sharing(main, PerimeterVerisureOwaAlarmPanel)
+    main.coordinator.record_confirmed_proto_code("T")  # interior armed (total)
+    gate, started = asyncio.Event(), asyncio.Event()
+    _record_transitions(main, gate=gate, started=started, hold="partial_disarm")
+    _record_transitions(perimeter)
+
+    partial = asyncio.create_task(main.execute_partial_disarm(["interior"]))
+    await started.wait()
+    arm = asyncio.create_task(perimeter.set_arm_state("armed_away"))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert _sent(perimeter) == []  # waiting, not sent
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(partial, arm), timeout=2)
+
+    assert _sent(main) == ["DARM1"]
+    assert _sent(perimeter) == ["PERI1"]
+    assert main.coordinator.confirmed_proto_code == "E"  # perimeter only
+
+
+async def test_arm_on_one_panel_waits_for_an_arm_on_another():
+    main, interior, _ = _main_and_interior_panels()
+    gate, started = asyncio.Event(), asyncio.Event()
+    _record_transitions(main, gate=gate, started=started)
+    _record_transitions(interior)
+
+    first = asyncio.create_task(main.set_arm_state("armed_away"))
+    await started.wait()
+    second = asyncio.create_task(interior.set_arm_state("armed_home"))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert _sent(interior) == []
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=2)
+
+    assert _sent(main) == ["ARM1"]
+    assert _sent(interior) == ["DARM1", "ARMDAY1"]  # planned from the arm's result
+
+
+async def test_arm_pressed_during_a_disarm_on_the_same_panel_runs_after_it():
+    """Replaces the old rule that ignored it: the latest press wins."""
+    alarm = make_alarm()
+    alarm.coordinator.record_confirmed_proto_code("T")
+    gate, started = asyncio.Event(), asyncio.Event()
+    _record_transitions(alarm, gate=gate, started=started, hold="disarm")
+
+    disarm = asyncio.create_task(alarm.async_alarm_disarm())
+    await started.wait()
+    arm = asyncio.create_task(alarm.async_alarm_arm_away())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert alarm._state == AlarmControlPanelState.DISARMING  # arm not shown yet
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(disarm, arm), timeout=2)
+
+    assert _sent(alarm) == ["DARM1", "ARM1"]
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+
+async def test_arm_gives_up_behind_a_stuck_operation():
+    from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
+
+    alarm = make_alarm()
+    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
+    _record_transitions(alarm)
+    alarm.coordinator.operation.begin("disarm", [object()])  # never ends
+
+    with pytest.raises(HomeAssistantError) as err:
+        await asyncio.wait_for(alarm.set_arm_state("armed_away"), timeout=2)
+
+    assert err.value.translation_key == "operation_in_progress"
+    assert _sent(alarm) == []
+
+
+async def test_arm_cancelled_while_waiting_leaves_the_installation_idle():
+    alarm = make_alarm()
+    gate, started = asyncio.Event(), asyncio.Event()
+    _record_transitions(alarm, gate=gate, started=started, hold="disarm")
+    alarm.coordinator.record_confirmed_proto_code("T")
+
+    disarm = asyncio.create_task(alarm.async_alarm_disarm())
+    await started.wait()
+    arm = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await asyncio.sleep(0)
+    arm.cancel()
+    gate.set()
+    await asyncio.wait_for(disarm, timeout=2)
+    with pytest.raises(asyncio.CancelledError):
+        await arm
+
+    assert alarm.coordinator.operation.running is False
+    assert _sent(alarm) == ["DARM1"]
 
 
 def _route_through_hub(panel):

@@ -12,9 +12,9 @@ import datetime
 import logging
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any, Literal
+from typing import Any
 
 import homeassistant.components.alarm_control_panel as alarm
 from homeassistant.components.alarm_control_panel import (
@@ -52,7 +52,12 @@ from ..const import (
     MORE_INFO_ELEMENT,
     PROJECT_URL,
 )
-from ..coordinators import AlarmCoordinator, AlarmStatusData
+from ..coordinators import (
+    AlarmCoordinator,
+    AlarmStatusData,
+    InstallationOperation,
+    OperationKind,
+)
 from ..entity import VerisureEntity
 from ..events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
@@ -269,12 +274,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._update_interval: timedelta = timedelta(
             seconds=scan_seconds if scan_seconds > 0 else DEFAULT_SCAN_INTERVAL
         )
-        self._operation_idle = asyncio.Event()
-        self._operation_idle.set()
-        # Which operation holds the busy flag; a disarm waits behind an arm or
-        # a partial disarm, but not behind another full disarm.
-        self._operation_kind: Literal["arm", "disarm", "partial_disarm"] | None = None
-        self._operation_epoch: int = 0
         self._code_hash: str | None = client.config.get(CONF_CODE_HASH, None)
         self._attr_code_format: CodeFormat | None = None
         if self._code_hash:
@@ -368,18 +367,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         await super().async_will_remove_from_hass()
 
     @property
-    def _operation_in_progress(self) -> bool:
-        return not self._operation_idle.is_set()
+    def _operation(self) -> InstallationOperation:
+        return self.coordinator.operation
 
-    @_operation_in_progress.setter
-    def _operation_in_progress(self, in_progress: bool) -> None:
-        if in_progress:
-            self._operation_idle.clear()
-            self.coordinator.operation_started(self)
-        else:
-            self._operation_kind = None
-            self._operation_idle.set()
-            self.coordinator.operation_finished(self)
+    @property
+    def _operation_in_progress(self) -> bool:
+        """True while this panel takes part in the installation's running operation."""
+        return self in self._operation.panels
+
+    @property
+    def _operation_kind(self) -> OperationKind | None:
+        return self._operation.kind if self._operation_in_progress else None
 
     def _operation_wait_limit(self) -> float:
         """Seconds to wait for a running operation before treating its flag as stuck."""
@@ -391,39 +389,33 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         return _MAX_POLLS_PER_OPERATION * poll_timeout
 
     async def _wait_until_idle(
-        self,
-        entities: Sequence[BaseVerisureOwaAlarmPanel],
-        *,
-        stop_behind_own_disarm: bool = False,
+        self, *, duplicate_of: OperationKind | None = None
     ) -> bool:
-        """Wait until none of ``entities`` is running an operation.
+        """Wait until the installation runs no operation.
 
-        With ``stop_behind_own_disarm``, returns False as soon as this panel
-        itself is running a full disarm, rather than waiting for it. Raises the
+        Returns False instead, at once, when the running operation is
+        ``duplicate_of`` on this same panel: a repeated press. Raises the
         translated ``operation_in_progress`` error after
         _operation_wait_limit().
         """
-        # pylint: disable=protected-access
+        operation = self._operation
         wait_limit = self._operation_wait_limit()
-        busy: BaseVerisureOwaAlarmPanel | None = None
         try:
             async with asyncio.timeout(wait_limit):
-                while busy := next(
-                    (e for e in entities if e._operation_in_progress), None
-                ):
+                while operation.running:
                     if (
-                        stop_behind_own_disarm
-                        and self._operation_in_progress
-                        and self._operation_kind not in ("arm", "partial_disarm")
+                        duplicate_of is not None
+                        and operation.kind == duplicate_of
+                        and self in operation.panels
                     ):
                         return False
-                    await busy._operation_idle.wait()
+                    await operation.wait_idle()
         except TimeoutError as err:
             _LOGGER.warning(
                 "%s gave up waiting %.0f s for a running %s to finish",
                 self.installation.number,
                 wait_limit,
-                busy._operation_kind if busy else None,
+                operation.kind,
             )
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -613,7 +605,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 reason=DISMISSAL_REASON_USER_ARM,
                 new_mode=state,
             )
-            self._force_state(AlarmControlPanelState.ARMING)
             await self.set_arm_state(state)
 
     async def _execute_transition(
@@ -1193,24 +1184,21 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         if not self._check_code(code):
             return
         # Capture the calling user's context up-front — HA expires
-        # `self._context` ~1 s after async_set_context, and waiting for an arm
-        # plus the disarm transition and state writes below take longer.
+        # `self._context` ~1 s after async_set_context, and waiting for a
+        # running operation plus the disarm transition and state writes below
+        # take longer.
         user_context = self._context
-        if not await self._wait_until_idle(
-            self._siblings_on_installation(), stop_behind_own_disarm=True
-        ):
+        if not await self._wait_until_idle(duplicate_of="disarm"):
             _LOGGER.debug(
                 "Disarm ignored for %s: a disarm is already in progress",
                 self.installation.number,
             )
             return
-        self._operation_in_progress = True
-        self._operation_kind = "disarm"
-        self._operation_epoch += 1
         # Declared before the try so it is always bound in the except handlers
         # (pyright reportPossiblyUnbound); it is always set before the awaited
         # transition that can raise OperationTimeoutError.
         target: AlarmState | None = None
+        self._operation.begin("disarm", [self])
         try:
             await self._dismiss_pending_force_context_on_siblings(
                 reason=DISMISSAL_REASON_USER_DISARM,
@@ -1252,7 +1240,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self.async_write_ha_state()
             raise
         finally:
-            self._operation_in_progress = False
+            self._operation.end()
 
     async def set_arm_state(
         self,
@@ -1269,19 +1257,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         requests the "force-armed" confirmation notification on success — the
         counterpart to the arm-exception prompt that auto-force suppressed.
         """
-        if self._operation_in_progress:
+        # Capture the calling user's context up-front — HA expires
+        # `self._context` ~1 s after async_set_context, and waiting for a
+        # running operation plus the arm transition and state writes below
+        # take longer than that.
+        user_context = self._context
+        if not await self._wait_until_idle(duplicate_of="arm"):
             _LOGGER.debug(
-                "Arm ignored for %s: an operation is already in progress",
+                "Arm ignored for %s: an arm is already in progress",
                 self.installation.number,
             )
             return
-        # Capture the calling user's context up-front — HA expires
-        # `self._context` ~1 s after async_set_context, and the arm
-        # transition + state writes below take longer than that.
-        user_context = self._context
-        self._operation_in_progress = True
-        self._operation_kind = "arm"
-        self._operation_epoch += 1
         self._last_arm_result = OperationStatus()
 
         force_params: dict[str, str] = {}
@@ -1294,7 +1280,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # (pyright reportPossiblyUnbound); it is always set before the awaited
         # transition that can raise OperationTimeoutError.
         target: AlarmState | None = None
+        self._operation.begin("arm", [self])
         try:
+            self._force_state(AlarmControlPanelState.ARMING)
             target = self._resolve_target_state(mode)
             result = await self._execute_transition(target, **force_params)
             self._set_waf_blocked(False)
@@ -1386,7 +1374,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self.async_write_ha_state()
             raise
         finally:
-            self._operation_in_progress = False
+            self._operation.end()
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store sensor-warning and optional force-arm context."""
@@ -2023,7 +2011,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # "force-armed" confirmation replaces it.
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
-        self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(
             mode,
             force_arming_remote_id=ref_id,

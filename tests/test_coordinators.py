@@ -163,12 +163,12 @@ class TestAlarmCoordinator:
         panel = object()
         coord.record_confirmed_proto_code("T")
 
-        coord.operation_started(panel)
+        coord.operation.begin("arm", [panel])
         client.get_general_status.return_value = SStatus(status="D")
         await coord._async_update_data()
         assert coord.confirmed_proto_code == "T"
 
-        coord.operation_finished(panel)
+        coord.operation.end()
         await coord._async_update_data()
         assert coord.confirmed_proto_code == "D"
 
@@ -190,11 +190,11 @@ class TestAlarmCoordinator:
 
         coord.mark_confirmed_provisional({"D"})
         panel = object()
-        coord.operation_started(panel)
+        coord.operation.begin("arm", [panel])
         client.get_general_status.return_value = SStatus(status="D")
         await coord._async_update_data()
         assert coord.confirmed_is_provisional is True  # poll held back
-        coord.operation_finished(panel)
+        coord.operation.end()
         client.get_general_status.return_value = SStatus(status="0")
         await coord._async_update_data()
         assert coord.confirmed_is_provisional is True  # not a proto code
