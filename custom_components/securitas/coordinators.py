@@ -323,7 +323,10 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         return self._earlier_possible | {self._confirmed_proto_code}
 
     def record_confirmed_proto_code(self, proto_code: str) -> None:
-        """Record a panel command's result as the installation's state."""
+        """Record ``proto_code`` as the installation's state and clear any
+        unconfirmed marker: a panel command's result, the status check before
+        an arm, a poll, or a timed-out command's optimistic code (which the
+        caller then marks unconfirmed)."""
         self._confirmed_proto_code = proto_code
         self._confirmed_provisional = False
         self._earlier_possible = frozenset()

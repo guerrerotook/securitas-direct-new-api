@@ -385,7 +385,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         return self in self._operation.panels
 
     def _operation_wait_limit(self) -> float:
-        """Seconds to wait for a running operation before treating its flag as stuck."""
+        """Seconds to wait for a running operation before treating the running operation as stuck."""
         poll_timeout = float(
             self._client.config.get(
                 CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
@@ -654,8 +654,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         Any other transition needs a known current state to plan, so it is
         refused with the actual code surfaced for reporting. A full disarm is
         also sent unconditionally while the confirmed state is provisional (a
-        command the panel accepted but never confirmed); other transitions
-        still plan from that state, adjusted by
+        command the panel accepted but never confirmed). An arm first asks
+        the panel for its state (``_confirm_state_with_panel``); an axis
+        sub-panel's disarm plans from the provisional state, adjusted by
         ``_unconfirmed_planning_state``.
         """
         proto_code = self._planning_proto_code()
@@ -726,8 +727,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     ) -> AlarmState:
         """The state to plan ``target`` from while ``current`` is provisional.
 
-        The combined panel plans from it as it is; axis sub-panels override
-        this so a disarm is sent again rather than skipped.
+        This base version is not reached with an unconfirmed state; axis
+        sub-panels override it so a disarm is sent again rather than skipped.
         """
         return current
 

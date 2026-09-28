@@ -609,7 +609,7 @@ Most users won't need anything below — Home Assistant's native More Info dialo
 
 ### What happens when arming is blocked
 
-The arm command reverts, the entity gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The native More Info dialog, the Tile card, the deprecated custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
+The arm stops. The entity shows the state before the arm, or what the first command armed if an open sensor blocked a two-step arm at its second command. It also gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The native More Info dialog, the Tile card, the deprecated custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
 
 When force-arming is allowed, you then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the native More Info dialog, the Tile card, the deprecated custom card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
 

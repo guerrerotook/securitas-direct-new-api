@@ -119,8 +119,8 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
             await self._wait_until_idle()
         except HomeAssistantError:
             return False
-        # target stays None when the state is unreadable; the circuits are then
-        # disarmed unconditionally.
+        # target stays None when the state is unreadable or unconfirmed; the
+        # circuits are then disarmed unconditionally.
         target: AlarmState | None = None
         current = self._confirmed_alarm_state()
         if current is not None:
