@@ -1288,7 +1288,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         user_context = self._context
         self._arm_presses += 1
         press = self._arm_presses
-        if not await self._wait_until_idle(duplicate_of="arm", mode=mode):
+        # A force-arm is never a repeat press: it may arrive while the arm it
+        # completes is still finishing, and must then wait for it and run.
+        repeat_of = None if force_arming_remote_id else "arm"
+        if not await self._wait_until_idle(duplicate_of=repeat_of, mode=mode):
             _LOGGER.debug(
                 "Arm ignored for %s: an arm to %s is already in progress",
                 self.installation.number,

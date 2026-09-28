@@ -10913,3 +10913,52 @@ async def test_arms_pressed_on_two_panels_behind_a_disarm_both_run():
 
     assert _sent(main) == ["DARM1", "ARM1"]
     assert _sent(interior) == ["DARM1", "ARMDAY1"]  # planned from Away: after it
+
+
+async def test_force_arm_pressed_while_the_blocked_arm_refreshes_is_sent():
+    """An open door blocks an arm's second command, and the card's
+    auto-force calls force_arm while that arm is still refreshing. The
+    force-arm is not a repeat of the blocked arm: it waits, then is sent."""
+    from custom_components.securitas.verisure_owa_api.const import (
+        PERI_DEFAULTS,
+        VerisureOwaState,
+    )
+
+    config = dict(PERI_DEFAULTS)
+    config["map_home"] = VerisureOwaState.TOTAL.value
+    config["scan_interval"] = 120
+    alarm = make_alarm(config=config, has_peri=True)
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm._resolver.mark_unsupported("ARMINTEXT1")
+    alarm._resolver.mark_unsupported("ARM1PERI1")
+    sent = []
+
+    async def step(step, **force):
+        sent.append(force)
+        if len(sent) == 1:
+            alarm._last_arm_result = _status("T")  # ARM1 answered: total
+            alarm.coordinator.record_confirmed_proto_code("T")
+            raise _OPEN_DOOR  # PERI1 blocked
+        result = _status("A")
+        alarm._last_arm_result = result
+        alarm.coordinator.record_confirmed_proto_code("A")
+        return result
+
+    alarm._execute_step = AsyncMock(side_effect=step)
+    refreshing, release = asyncio.Event(), asyncio.Event()
+
+    async def refresh():
+        if not release.is_set():
+            refreshing.set()
+            await release.wait()
+
+    alarm.coordinator.async_request_refresh = AsyncMock(side_effect=refresh)
+
+    arm = asyncio.create_task(alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY))
+    await refreshing.wait()
+    force = asyncio.create_task(alarm.async_force_arm())
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.wait_for(asyncio.gather(arm, force), timeout=2)
+
+    assert sent == [{}, {"force_arming_remote_id": "ref", "suid": "suid"}]
