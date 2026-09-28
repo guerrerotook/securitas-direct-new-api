@@ -11519,3 +11519,56 @@ async def test_force_arm_from_the_phone_refused_on_unknown_state_is_notified(
             "doesn't recognise (code N). See Settings → Repairs"
         },
     )
+
+
+async def test_force_arm_from_the_phone_that_gives_up_waiting_is_notified(
+    hass, enable_custom_integrations
+):
+    """Force Arm tapped in the phone notification waits for a command
+    running on the installation; when that command outlasts the wait limit,
+    the refusal is sent as the Arming failed notification saying the alarm is
+    busy, instead of failing in a background task."""
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.securitas import DOMAIN
+    from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
+
+    # Loads the integration's translations, which the refusal's text needs.
+    assert await async_setup_component(hass, DOMAIN, {})
+    alarm = make_alarm()
+    alarm._force_context = {
+        "reference_id": "ref-mobile",
+        "suid": "suid-mobile",
+        "mode": AlarmControlPanelState.ARMED_AWAY,
+        "exceptions": [{"alias": "Door"}],
+        "allow_forcing": True,
+        "created_at": datetime.now(),
+    }
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001  # limit ~10 ms
+    _record_transitions(alarm)
+    alarm.coordinator.operation.begin("disarm", [object()])  # never ends
+    started = []
+    alarm.hass.async_create_task = MagicMock(side_effect=started.append)
+    event = MagicMock()
+    event.data = {"action": f"SECURITAS_FORCE_ARM_{alarm.installation.number}"}
+
+    alarm._handle_mobile_action(event)
+    with (
+        patch(
+            "custom_components.securitas.alarm_control_panel._base._notify"
+        ) as mock_notify,
+        patch(
+            "custom_components.securitas.alarm_control_panel._base.inject_ha_event",
+            new=AsyncMock(),
+        ),
+    ):
+        await asyncio.wait_for(started[0], timeout=2)
+
+    alarm._execute_transition.assert_not_awaited()
+    mock_notify.assert_called_once_with(
+        alarm.hass,
+        "arm_failed_123456",
+        "arm_failed",
+        {"error": "The alarm is busy with another command. Try again in a moment"},
+    )
