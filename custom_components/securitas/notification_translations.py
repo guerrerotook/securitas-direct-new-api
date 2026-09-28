@@ -24,6 +24,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Please remove the integration entry and re-add it."
             ),
         },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "Verisure has two entries for {installation} on the same account. "
+                "Remove one of them in Settings → Devices & Services."
+            ),
+        },
         "two_factor_required": {
             "title": "Verisure",
             "message": ("Verisure needs a 2FA verification code. Please log in again."),
@@ -125,6 +132,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "Tu configuración de Verisure usa un formato antiguo. "
                 "Por favor, elimina la integración y vuelve a añadirla."
+            ),
+        },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "Verisure tiene dos entradas para {installation} con la misma cuenta. "
+                "Elimina una de ellas en Ajustes → Dispositivos y servicios."
             ),
         },
         "two_factor_required": {
@@ -237,6 +251,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "Votre configuration Verisure utilise un ancien format. "
                 "Veuillez supprimer l'intégration et l'ajouter à nouveau."
+            ),
+        },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "Verisure a deux entrées pour {installation} avec le même compte. "
+                "Supprimez-en une dans Paramètres → Appareils et services."
             ),
         },
         "two_factor_required": {
@@ -354,6 +375,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "obsoleto. Rimuovi l'integrazione e aggiungila di nuovo."
             ),
         },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "Verisure ha due voci per {installation} con lo stesso account. "
+                "Rimuovine una in Impostazioni → Dispositivi e servizi."
+            ),
+        },
         "two_factor_required": {
             "title": "Verisure",
             "message": (
@@ -468,6 +496,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Por favor, remova a integração e adicione-a novamente."
             ),
         },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "O Verisure tem duas entradas para {installation} com a mesma conta. "
+                "Remova uma delas em Definições → Dispositivos e serviços."
+            ),
+        },
         "two_factor_required": {
             "title": "Verisure",
             "message": (
@@ -577,6 +612,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "Sua configuração do Verisure usa um formato antigo. "
                 "Por favor, remova a integração e adicione-a novamente."
+            ),
+        },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "O Verisure tem duas entradas para {installation} na mesma conta. "
+                "Remova uma delas em Configurações → Dispositivos e serviços."
             ),
         },
         "two_factor_required": {
@@ -689,6 +731,13 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "message": (
                 "La teva configuració de Verisure utilitza un format antic. "
                 "Si us plau, elimina la integració i torna-la a afegir."
+            ),
+        },
+        "duplicate_entry_found": {
+            "title": "Verisure",
+            "message": (
+                "Verisure té dues entrades per a {installation} amb el mateix compte. "
+                "Elimina'n una a Configuració → Dispositius i serveis."
             ),
         },
         "two_factor_required": {

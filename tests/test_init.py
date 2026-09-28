@@ -6,6 +6,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components import persistent_notification
 from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_PASSWORD,
@@ -14,6 +15,7 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
 from pytest_homeassistant_custom_component.common import (
@@ -2324,6 +2326,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert entry.version == 5
+        assert entry.minor_version == 2
         assert CONF_TOKEN not in entry.data
         # CONF_PASSWORD intentionally retained — first setup login removes it.
         assert CONF_PASSWORD in entry.data
@@ -2345,6 +2348,135 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert entry.version == 5
+
+
+def _minor_1_entry(hass, username, unique_id, installation="123456", title="Home"):
+    """Add a v5.1 entry (saved before emails were lower-cased) to hass."""
+    data = make_config_entry_data(username=username)
+    if username is None:
+        del data[CONF_USERNAME]
+    if installation is not None:
+        data[CONF_INSTALLATION] = installation
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        unique_id=unique_id,
+        title=title,
+        version=5,
+        minor_version=1,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+class TestLowerCaseEmailMigration:
+    """The v5.1 → v5.2 step: the saved email and the entry ID in lower case."""
+
+    async def test_minor_2_migration_lower_cases_the_email_and_entry_id(self, hass):
+        entry = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.data[CONF_USERNAME] == "user@example.com"
+        assert entry.unique_id == "user@example.com_123456"
+        assert (entry.version, entry.minor_version) == (5, 2)
+
+    async def test_minor_2_migration_rebuilds_an_entry_id_left_from_an_account_switch(
+        self, hass
+    ):
+        """An earlier release switched an entry's account on reauth without
+        moving its ID off the old email."""
+        entry = _minor_1_entry(hass, "new@example.com", "old@example.com_123456")
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.unique_id == "new@example.com_123456"
+
+    async def test_minor_2_migration_leaves_a_lower_case_entry_as_it_is(self, hass):
+        entry = _minor_1_entry(hass, "user@example.com", "user@example.com_123456")
+        data_before = dict(entry.data)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert dict(entry.data) == data_before
+        assert entry.unique_id == "user@example.com_123456"
+        assert entry.minor_version == 2
+
+    async def test_minor_2_migration_tolerates_missing_username_and_installation(
+        self, hass
+    ):
+        entry = _minor_1_entry(hass, None, "Legacy-ID", installation=None)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert CONF_USERNAME not in entry.data
+        assert entry.unique_id == "legacy-id"
+        assert entry.minor_version == 2
+
+    async def test_minor_2_migration_ignores_entries_without_an_id(self, hass):
+        """Entries with neither an email, an installation nor an entry ID
+        have nothing to clash on."""
+        first = _minor_1_entry(hass, None, None, installation=None)
+        second = _minor_1_entry(hass, None, None, installation=None)
+
+        with patch("custom_components.securitas._notify") as mock_notify:
+            assert await async_migrate_entry(hass, first) is True
+            assert await async_migrate_entry(hass, second) is True
+
+        assert (first.unique_id, second.unique_id) == (None, None)
+        assert (first.minor_version, second.minor_version) == (2, 2)
+        mock_notify.assert_not_called()
+
+    @pytest.mark.parametrize("migrate_older_first", [True, False])
+    async def test_minor_2_migration_asks_to_remove_a_duplicate_entry(
+        self, hass, migrate_older_first
+    ):
+        """The same account added twice in other capitals: whichever entry
+        set up first owns the entities, so neither is removed. Both keep
+        distinct entry IDs, and one notification asks the user to remove
+        one of them."""
+        assert await async_setup_component(hass, "persistent_notification", {})
+        older = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+        newer = _minor_1_entry(hass, "USER@example.com", "USER@example.com_123456")
+        order = [older, newer] if migrate_older_first else [newer, older]
+        second_id = order[1].unique_id
+
+        for entry in order:
+            assert await async_migrate_entry(hass, entry) is True
+        await hass.async_block_till_done()
+
+        assert {e.entry_id for e in hass.config_entries.async_entries(DOMAIN)} == {
+            older.entry_id,
+            newer.entry_id,
+        }
+        assert older.data[CONF_USERNAME] == "user@example.com"
+        assert newer.data[CONF_USERNAME] == "user@example.com"
+        assert order[0].unique_id == "user@example.com_123456"
+        assert order[1].unique_id == second_id
+        notifications = persistent_notification._async_get_or_create_notifications(hass)
+        assert [n["message"] for n in notifications.values()] == [
+            "Verisure has two entries for Home on the same account. Remove "
+            "one of them in Settings → Devices & Services."
+        ]
+
+    async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
+        """An entry already holding the lower-case ID keeps it; the entry
+        typed in capitals keeps its own."""
+        holder = _minor_1_entry(hass, "user@example.com", "user@example.com_123456")
+        mixed = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+
+        with patch("custom_components.securitas._notify") as mock_notify:
+            assert await async_migrate_entry(hass, mixed) is True
+            assert await async_migrate_entry(hass, holder) is True
+
+        assert holder.unique_id == "user@example.com_123456"
+        assert mixed.unique_id == "User@Example.com_123456"
+        assert mixed.data[CONF_USERNAME] == "user@example.com"
+        assert mock_notify.call_args.args[1:] == (
+            "duplicate_entry_found_user@example.com_123456",
+            "duplicate_entry_found",
+            {"installation": holder.title},
+        )
 
 
 class TestCodeHashMigration:

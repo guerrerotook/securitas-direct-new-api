@@ -483,6 +483,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow."""
 
     VERSION = 5
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the flow handler."""

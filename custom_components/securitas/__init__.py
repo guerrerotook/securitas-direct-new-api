@@ -8,7 +8,7 @@ import logging
 import socket
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -382,7 +382,8 @@ def _hash_legacy_plaintext_code(
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Reject pre-v3 entries; bump v3 → v4 → v5 (hash the plain-text PIN)."""
+    """Reject pre-v3 entries; bump v3 → v4 → v5 (hash the plain-text PIN) → v5.2
+    (lower-case the email and entry ID)."""
     if config_entry.version < 3:
         _LOGGER.error(
             "Config entry %s uses format v%s which is no longer supported. "
@@ -411,7 +412,53 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             config_entry, data=new_data, options=new_options, version=5
         )
 
+    if config_entry.version == 5 and config_entry.minor_version < 2:
+        _migrate_lower_case_email(hass, config_entry)
+
     return True
+
+
+def _entry_unique_id(data: Mapping[str, Any], fallback: str | None) -> str | None:
+    username = data.get(CONF_USERNAME)
+    installation = data.get(CONF_INSTALLATION)
+    if username and installation:
+        return f"{username.lower()}_{installation}"
+    return fallback.lower() if fallback else None
+
+
+@callback
+def _migrate_lower_case_email(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Verisure's sign-in ignores capitals, so store the email in lower case.
+
+    Two entries for the same account typed in other capitals would now share
+    one entry ID. Neither is removed, since whichever sets up first owns the
+    entities: the user is asked to remove one, and neither entry takes an ID
+    the other holds.
+    """
+    data = dict(entry.data)
+    if username := data.get(CONF_USERNAME):
+        data[CONF_USERNAME] = username.lower()
+    new_uid = _entry_unique_id(data, entry.unique_id)
+    uid = entry.unique_id
+    if new_uid is not None:
+        if any(
+            other.entry_id != entry.entry_id
+            and _entry_unique_id(other.data, other.unique_id) == new_uid
+            for other in hass.config_entries.async_entries(DOMAIN)
+        ):
+            # Both entries see the clash; one notification ID shows it once.
+            _notify(
+                hass,
+                f"duplicate_entry_found_{new_uid}",
+                "duplicate_entry_found",
+                {"installation": entry.title},
+            )
+        holder = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, new_uid)
+        if holder is None or holder is entry:
+            uid = new_uid
+    hass.config_entries.async_update_entry(
+        entry, data=data, unique_id=uid, minor_version=2
+    )
 
 
 def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
