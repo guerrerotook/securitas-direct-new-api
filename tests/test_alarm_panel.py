@@ -10001,6 +10001,23 @@ async def test_disarm_retry_records_the_state_the_panel_reported():
     assert alarm.coordinator.confirmed_proto_code == "E"
 
 
+async def test_panel_answer_is_recorded_when_the_retry_then_fails():
+    """The same retry with only Verisure stubbed: the panel's own answer is
+    what the installation records."""
+    alarm = make_alarm(has_peri=True)
+    alarm.update_status_alarm(_status("T"))
+    alarm.coordinator.record_confirmed_proto_code("T")
+    alarm.client.disarm_alarm = AsyncMock(
+        side_effect=[_status("E"), VerisureOwaError("Disarm command failed")]
+    )
+
+    await alarm.async_alarm_disarm()
+
+    sent = [c.args[1] for c in alarm.client.disarm_alarm.await_args_list]
+    assert sent == ["DARM1", "DARMPERI"]
+    assert alarm.coordinator.confirmed_proto_code == "E"
+
+
 async def test_disarm_with_nothing_to_send_is_not_recorded_as_confirmed():
     """Before anything is confirmed the panel plans from its own last code; a
     disarm that finds it already disarmed sends nothing, and that is not a
