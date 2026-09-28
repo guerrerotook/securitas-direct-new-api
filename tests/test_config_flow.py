@@ -4667,12 +4667,14 @@ async def _reauth_disabled_entry(hass, entry, username):
                 user_input={CONF_USERNAME: username, CONF_PASSWORD: "new-password"},
             )
         )
-        await signing_in.wait()
-        await _disable(hass, entry)
-        assert _reauth_flows_for(hass, entry) == []
-        assert not submit.done()
-        gate.set()
-        result = await submit
+        await asyncio.wait_for(signing_in.wait(), 2)
+        try:
+            await _disable(hass, entry)
+            assert _reauth_flows_for(hass, entry) == []
+            assert not submit.done()
+        finally:
+            gate.set()
+            result = await submit
     assert result["reason"] == "reauth_successful"
     assert entry.data[CONF_USERNAME] == username
     assert entry.state is ConfigEntryState.NOT_LOADED
