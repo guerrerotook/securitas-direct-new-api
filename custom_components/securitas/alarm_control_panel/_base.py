@@ -128,10 +128,6 @@ def _modelled_state(proto_code: str | None) -> AlarmState | None:
     return PROTO_TO_ALARM_STATE.get(proto_code)
 
 
-class _NoCommandStatus(OperationStatus):
-    """The answer to a transition that sent no command."""
-
-
 # How long an auto-force-arm "suppress the next arm-exception prompt" request
 # stays armed. Long enough to cover the arm round-trip that follows it, short enough
 # that a stray request can't silently swallow an unrelated prompt later on.
@@ -696,7 +692,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
             if not steps:
                 # Resolver says we're already in the target state.
-                return _NoCommandStatus(protom_response=proto_code)
+                return OperationStatus(protom_response=proto_code)
 
             for step in steps:
                 result = await self._execute_step(step, **force_params)
@@ -801,7 +797,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             result = await self._execute_step(step, **force_params)
         if result is None:
             # No axis needed disarming — report the disarmed state.
-            return _NoCommandStatus(protom_response=PROTO_DISARMED)
+            return OperationStatus(protom_response=PROTO_DISARMED)
         return result
 
     async def _execute_step(
