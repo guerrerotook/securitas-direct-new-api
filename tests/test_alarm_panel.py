@@ -10385,6 +10385,29 @@ async def test_partial_disarm_only_touches_the_armed_circuits():
     assert shown == []
 
 
+async def test_partial_disarm_with_unconfirmed_state_disarms_every_circuit():
+    """An unconfirmed state showing nothing armed may be wrong, so the
+    requested circuit is still disarmed (#550)."""
+    alarm = make_alarm()
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm.coordinator.mark_confirmed_provisional(["T"])
+    _record_transitions(alarm)
+
+    assert await alarm.execute_partial_disarm(["interior"]) is True
+    assert _sent(alarm) == ["DARM1"]
+
+
+async def test_partial_disarm_with_unreadable_state_disarms_every_circuit():
+    """With the state unreadable ('N'), every requested circuit is disarmed
+    (#550)."""
+    alarm = make_alarm(has_peri=True)
+    alarm.coordinator.record_confirmed_proto_code("N")
+    _record_transitions(alarm)
+
+    assert await alarm.execute_partial_disarm(["interior", "perimeter"]) is True
+    assert _sent(alarm) == ["DARM1DARMPERI"]
+
+
 async def test_perimeter_arm_waits_for_the_locks_interior_partial_disarm():
     """The door lock's Interior disarm is at the panel when the user arms the
     Perimeter sub-panel. The arm waits for it, then arms only the perimeter:

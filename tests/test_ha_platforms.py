@@ -2736,11 +2736,9 @@ class TestVerisureLockUnlockDisarm:
         lock._combined_alarm_panel.execute_partial_disarm.assert_not_awaited()
         lock._client.change_lock_mode.assert_awaited_once()
 
-    async def test_unknown_alarm_state_targets_all_configured_circuits(self):
-        """When the alarm state is unreadable (an unmodelled 'N' code), the
-        lock can't tell what's armed — so it must disarm every configured
-        circuit rather than skip disarm entirely, which would leave the door
-        open over an armed alarm (#550)."""
+    async def test_lock_passes_every_configured_circuit_to_the_panel(self):
+        """The lock hands every configured circuit to the panel, which decides
+        which of them are armed."""
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = ["interior", "perimeter"]
