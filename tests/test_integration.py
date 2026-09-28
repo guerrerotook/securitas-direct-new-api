@@ -13,14 +13,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
+from custom_components.securitas.config_flow import FlowHandler
+from custom_components.securitas.const import CONF_INSTALLATION
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
 
-from .conftest import make_config_entry_data
+from .conftest import make_config_entry_data, refresh_response
 from .mock_graphql import (
     FAKE_JWT,
     MockGraphQLServer,
@@ -767,3 +772,161 @@ async def test_malformed_json_raises(
 
     with pytest.raises(VerisureOwaError):
         await hub.client.check_alarm(installation)
+
+
+# ── Two entries for one installation ──────────────────────────────────────────
+
+_INSTALLATION = "123456"
+
+
+def _add_entry_for(hass: HomeAssistant, username: str) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"{username}_{_INSTALLATION}",
+        data={
+            **make_config_entry_data(username=username, delay_check_operation=0),
+            CONF_INSTALLATION: _INSTALLATION,
+        },
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _queue_installation_with_a_camera(server: MockGraphQLServer) -> None:
+    """Serve every sign-in, restart and discovery call for one installation.
+
+    The camera makes the background discovery register entities and a child
+    device too, not only the platform setup.
+    """
+    queue_standard_setup(server, numinst=_INSTALLATION)
+    server.set_default_response("mkLoginToken", graphql_login())
+    server.set_default_response("RefreshLogin", refresh_response())
+    server.set_default_response(
+        "mkInstallationList", graphql_installations(numinst=_INSTALLATION)
+    )
+    camera = {
+        "id": "1",
+        "code": "1",
+        "zoneId": "QR01",
+        "name": "Hall",
+        "type": "QR",
+        "isActive": True,
+        "serialNumber": None,
+    }
+    server.set_default_response(
+        "xSDeviceList",
+        {"data": {"xSDeviceList": {"res": "OK", "devices": [camera]}}},
+    )
+    server.set_default_response(
+        "mkGetThumbnail",
+        {"data": {"xSGetThumbnail": {"idSignal": None, "image": None}}},
+    )
+
+
+def _owned(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> tuple[set[str], set[tuple[str, str]]]:
+    """The unique IDs of the entities, and the identifiers of the devices,
+    that ``entry`` owns.
+
+    Identifiers, not device IDs: Home Assistant 2026.9 gives each entry a
+    device record of its own for the same identifier, where 2025.2 adds the
+    second entry to the one shared record.
+    """
+    entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+    return {e.unique_id for e in entities}, {i for d in devices for i in d.identifiers}
+
+
+def _holdings(
+    hass: HomeAssistant, older: MockConfigEntry, newer: MockConfigEntry
+) -> tuple[str, str]:
+    """Say, for each entry, whether it owns every entity and device, only the
+    devices, or nothing."""
+    owned = [_owned(hass, older), _owned(hass, newer)]
+    all_entities = owned[0][0] | owned[1][0]
+    all_devices = owned[0][1] | owned[1][1]
+    assert all_entities and all_devices
+
+    def describe(entities: set[str], devices: set[tuple[str, str]]) -> str:
+        if devices == all_devices:
+            if entities == all_entities:
+                return "everything"
+            if not entities:
+                return "devices"
+        if not entities and not devices:
+            return "nothing"
+        return f"entities={sorted(entities)} devices={sorted(devices)}"
+
+    return describe(*owned[0]), describe(*owned[1])
+
+
+async def _set_up_in_turn(hass: HomeAssistant, entries: list[MockConfigEntry]) -> None:
+    for entry in entries:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+def _duplicate_id_errors(caplog: pytest.LogCaptureFixture) -> int:
+    return sum(
+        "does not generate unique IDs" in r.getMessage()
+        for r in caplog.records
+        if r.levelname == "ERROR"
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "restart", "after_first", "after_restart"),
+    [
+        ("older", "older", ("everything", "nothing"), ("everything", "nothing")),
+        ("older", "newer", ("everything", "nothing"), ("devices", "everything")),
+        ("newer", "older", ("nothing", "everything"), ("everything", "devices")),
+        ("newer", "newer", ("nothing", "everything"), ("nothing", "everything")),
+    ],
+)
+async def test_the_entry_set_up_first_takes_the_installations_entities(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    caplog: pytest.LogCaptureFixture,
+    first: str,
+    restart: str,
+    after_first: tuple[str, str],
+    after_restart: tuple[str, str],
+):
+    """Two entries for one installation (the same email in other capitals)
+    share every entity and device ID. Whichever sets up first takes all the
+    entities, moving them over from the other on a restart, and every entry
+    that has ever registered the devices keeps them. The newer entry can
+    therefore own the user's entities and devices, so it cannot be removed
+    safely."""
+    _queue_installation_with_a_camera(mock_server)
+    # Loaded up front, so each async_setup below sets up only its own entry.
+    assert await async_setup_component(hass, DOMAIN, {})
+    older = _add_entry_for(hass, "User@Example.com")
+    newer = _add_entry_for(hass, "user@example.com")
+    order = {"older": [older, newer], "newer": [newer, older]}
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, order[first])
+            entity_count = len(_owned(hass, order[first][0])[0])
+            assert _holdings(hass, older, newer) == after_first
+            assert _duplicate_id_errors(caplog) == entity_count
+            caplog.clear()
+
+            for entry in (older, newer):
+                assert await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+            await _set_up_in_turn(hass, order[restart])
+
+            assert _holdings(hass, older, newer) == after_restart
+            assert _duplicate_id_errors(caplog) == entity_count
+        finally:
+            for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
