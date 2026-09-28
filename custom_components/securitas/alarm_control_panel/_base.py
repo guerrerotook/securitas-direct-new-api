@@ -1240,6 +1240,22 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         finally:
             self._operation.end()
 
+    async def _confirm_state_with_panel(self) -> None:
+        """Ask the panel for its state, when the last command was accepted but
+        never confirmed, so an arm plans from what is really armed."""
+        try:
+            status = await self._client.refresh_alarm_status(self._installation)
+        except OperationTimeoutError as err:
+            # Not this arm's own timeout: the arm was never sent.
+            raise VerisureOwaError(
+                f"Could not read the alarm state before arming: {err.message}"
+            ) from err
+        if not is_proto_letter(status.protom_response):
+            raise VerisureOwaError("The panel did not report its state before arming")
+        self._last_proto_code = status.protom_response
+        self.coordinator.record_confirmed_proto_code(status.protom_response)
+        self._reconcile_provisional()
+
     async def set_arm_state(
         self,
         mode: str,
@@ -1282,6 +1298,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._operation.begin("arm", [self], mode)
         try:
             self._force_state(AlarmControlPanelState.ARMING)
+            if self.coordinator.confirmed_is_provisional:
+                await self._confirm_state_with_panel()
             target = self._resolve_target_state(mode)
             result = await self._execute_transition(target, **force_params)
             self._set_waf_blocked(False)

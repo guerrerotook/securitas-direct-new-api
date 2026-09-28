@@ -10137,6 +10137,8 @@ async def test_unlock_skips_once_the_timed_out_disarm_is_confirmed(confirmed_by)
         await panel.coordinator._async_update_data()
         expected = []
     else:
+        # The arm first reads the unconfirmed state from the panel.
+        panel._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
         await panel.set_arm_state("armed_away")
         await panel.async_alarm_disarm()
         expected = ["ARM1", "DARM1"]
@@ -10657,3 +10659,110 @@ async def test_interior_disarm_after_an_arm_cancelled_at_the_panel_sends_it():
     await interior.async_alarm_disarm()
 
     assert _hub_commands(hub) == ["DARM1DARMPERI", "PERI1"]
+
+
+def _arm_timed_out(alarm, optimistic="T", before="D"):
+    """The installation after an arm to ``optimistic`` was accepted but not
+    confirmed, from ``before``."""
+    alarm.coordinator.record_confirmed_proto_code(optimistic)
+    alarm.coordinator.mark_confirmed_provisional({before})
+    alarm._last_proto_code = optimistic
+
+
+async def test_arm_again_after_an_unconfirmed_arm_asks_the_panel_then_arms():
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
+    _record_transitions(alarm)
+
+    await alarm.set_arm_state("armed_away")
+
+    alarm._client.refresh_alarm_status.assert_awaited_once_with(alarm.installation)
+    assert _sent(alarm) == ["ARM1"]
+    assert alarm.coordinator.confirmed_is_provisional is False
+
+
+async def test_arm_again_after_an_unconfirmed_arm_that_did_land_sends_nothing():
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("T"))
+    _record_transitions(alarm)
+
+    await alarm.set_arm_state("armed_away")
+
+    assert _sent(alarm) == []
+    assert alarm.coordinator.confirmed_proto_code == "T"
+    assert alarm.coordinator.confirmed_is_provisional is False
+
+
+async def test_arm_after_unconfirmed_arm_fails_when_status_check_times_out():
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock(
+        side_effect=OperationTimeoutError("no answer")
+    )
+    _record_transitions(alarm)
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as notify:
+        await alarm.set_arm_state("armed_away")
+
+    assert _sent(alarm) == []
+    assert notify.call_args[0][2] == "arm_failed"  # not "arm_unconfirmed"
+    assert alarm.coordinator.confirmed_is_provisional is True  # still unknown
+
+
+@pytest.mark.parametrize("answer", ["N", ""], ids=["unmodelled_state", "no_state"])
+async def test_arm_after_unconfirmed_arm_refused_when_panel_reports_unknown_state(
+    answer,
+):
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status(answer))
+    _record_transitions(alarm)
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as notify:
+        await alarm.set_arm_state("armed_away")
+
+    alarm._client.refresh_alarm_status.assert_awaited_once()
+    assert _sent(alarm) == []
+    assert notify.call_args[0][2] == "arm_failed"
+
+
+async def test_a_confirmed_status_check_clears_the_unconfirmed_notice():
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._attr_extra_state_attributes["state_provisional"] = True
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("T"))
+    _record_transitions(alarm)
+
+    await alarm.set_arm_state("armed_away")
+
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+
+
+async def test_confirmed_arm_does_not_ask_the_panel_first():
+    alarm = make_alarm()
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm._client.refresh_alarm_status = AsyncMock()
+    _record_transitions(alarm)
+
+    await alarm.set_arm_state("armed_away")
+
+    alarm._client.refresh_alarm_status.assert_not_awaited()
+    assert _sent(alarm) == ["ARM1"]
+
+
+async def test_disarm_after_unconfirmed_arm_does_not_ask_the_panel_first():
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock()
+    _record_transitions(alarm)
+
+    await alarm.async_alarm_disarm()
+
+    alarm._client.refresh_alarm_status.assert_not_awaited()
+    assert _sent(alarm) == ["DARM1"]
