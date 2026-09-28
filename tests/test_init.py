@@ -2457,7 +2457,7 @@ class TestLowerCaseEmailMigration:
         notifications = persistent_notification._async_get_or_create_notifications(hass)
         assert [n["message"] for n in notifications.values()] == [
             "Verisure has two entries for Home on the same account. Remove "
-            "one of them in Settings → Devices & Services."
+            "one of them in Settings → Devices & Services → Verisure OWA."
         ]
         assert not any("example.com" in key for key in notifications)
 

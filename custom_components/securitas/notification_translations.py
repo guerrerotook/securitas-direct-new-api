@@ -28,7 +28,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure",
             "message": (
                 "Verisure has two entries for {installation} on the same account. "
-                "Remove one of them in Settings → Devices & Services."
+                "Remove one of them in Settings → Devices & Services → Verisure OWA."
             ),
         },
         "two_factor_required": {
@@ -138,7 +138,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure",
             "message": (
                 "Verisure tiene dos entradas para {installation} con la misma cuenta. "
-                "Elimina una de ellas en Ajustes → Dispositivos y servicios."
+                "Elimina una de ellas en Configuración → Dispositivos y servicios → Verisure OWA."
             ),
         },
         "two_factor_required": {
@@ -257,7 +257,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure",
             "message": (
                 "Verisure a deux entrées pour {installation} avec le même compte. "
-                "Supprimez-en une dans Paramètres → Appareils et services."
+                "Supprimez-en une dans Paramètres → Appareils et services → Verisure OWA."
             ),
         },
         "two_factor_required": {
@@ -379,7 +379,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure",
             "message": (
                 "Verisure ha due voci per {installation} con lo stesso account. "
-                "Rimuovine una in Impostazioni → Dispositivi e servizi."
+                "Rimuovine una in Impostazioni → Dispositivi e servizi → Verisure OWA."
             ),
         },
         "two_factor_required": {
@@ -499,8 +499,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
         "duplicate_entry_found": {
             "title": "Verisure",
             "message": (
-                "O Verisure tem duas entradas para {installation} com a mesma conta. "
-                "Remova uma delas em Definições → Dispositivos e serviços."
+                "Verisure tem duas entradas para {installation} com a mesma conta. "
+                "Remova uma delas em Definições → Dispositivos e Serviços → Verisure OWA."
             ),
         },
         "two_factor_required": {
@@ -617,8 +617,8 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
         "duplicate_entry_found": {
             "title": "Verisure",
             "message": (
-                "O Verisure tem duas entradas para {installation} na mesma conta. "
-                "Remova uma delas em Configurações → Dispositivos e serviços."
+                "Verisure tem duas entradas para {installation} na mesma conta. "
+                "Remova uma delas em Configurações → Dispositivos e Serviços → Verisure OWA."
             ),
         },
         "two_factor_required": {
@@ -737,7 +737,7 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
             "title": "Verisure",
             "message": (
                 "Verisure té dues entrades per a {installation} amb el mateix compte. "
-                "Elimina'n una a Configuració → Dispositius i serveis."
+                "Elimina'n una a Configuració → Dispositius i serveis → Verisure OWA."
             ),
         },
         "two_factor_required": {
