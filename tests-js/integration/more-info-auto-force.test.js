@@ -204,6 +204,21 @@ describe("More Info auto-force tick box persistence (localStorage)", () => {
     const { element } = mountMoreInfo();
     expect(checkbox(element).checked).toBe(true);
   });
+
+  it("keeps the last alarm's tick box through an update without an alarm", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element } = mountMoreInfo();
+
+    element.hass = makeHass({ states: {} });
+    element.stateObj = undefined;
+
+    expect(toggle(element)).not.toBeNull();
+    expect(checkbox(element).checked).toBe(true);
+    const cb = checkbox(element);
+    cb.checked = false;
+    cb.dispatchEvent(new Event("change"));
+    expect(localStorage.getItem(LS_KEY)).toBe("false");
+  });
 });
 
 describe("More Info auto-force behaviour", () => {

@@ -308,9 +308,9 @@ export class AutoForceArmTracker {
 
 // The per-device auto-force-arm tick box as More Info and the Tile show it,
 // with the tracker that acts on it. The host appends `field` to its shadow
-// root, calls setEntity() and track() on every update and render() when it
-// redraws, and is told through `onChange` when a tick for its alarm is saved
-// (by this box or another surface), so it can redraw.
+// root, calls update() on every update, and is told through `onChange` when a
+// tick for its alarm is saved (by this box or another surface), so it can
+// call update() again.
 export class AutoForceTickBox {
   constructor(controlTag, { onChange } = {}) {
     this._tracker = new AutoForceArmTracker(controlTag);
@@ -349,7 +349,7 @@ export class AutoForceTickBox {
 
   // `scope` is where the tracker hears the host's own mode buttons; without
   // one, nothing is auto-forced. A tick saved while the host was removed was
-  // not heard, so the next setEntity() reads storage again.
+  // not heard, so the next update() reads storage again.
   connect(scope) {
     this._entityId = undefined;
     if (scope) this._tracker.connect(scope);
@@ -361,9 +361,19 @@ export class AutoForceTickBox {
     globalThis.removeEventListener(AUTO_FORCE_CHANGED_EVENT, this._onSaved);
   }
 
+  // Returns whether the box is shown. Without a state the box hides and
+  // follows `entityId` (null forgets the alarm), unless `keepWithoutState`,
+  // which keeps the last alarm, its tick and the box as drawn.
+  update({ entityId, stateObj, hass, allowed = () => true, keepWithoutState = false }) {
+    if (entityId || !keepWithoutState) this._setEntity(entityId);
+    this._track(stateObj, hass);
+    if (!stateObj && keepWithoutState) return !this.field.hidden;
+    return this._render(stateObj, hass, allowed);
+  }
+
   // Storage is read only when the alarm changes; later ticks arrive through
   // the change event.
-  setEntity(entityId) {
+  _setEntity(entityId) {
     if (entityId === this._entityId) return;
     this._entityId = entityId;
     this._ticked = entityId ? readAutoForce(entityId) : false;
@@ -372,7 +382,7 @@ export class AutoForceTickBox {
 
   // Every update, including repeats: the tracker catches a force context that
   // appears on the same tick, and judges a button press by the last one.
-  track(stateObj, hass) {
+  _track(stateObj, hass) {
     this._tracker.update(stateObj, this._ticked, hass);
   }
 
@@ -381,7 +391,7 @@ export class AutoForceTickBox {
   // as it may be costly). It changes only with those, the language and the
   // tick, so a redraw with none of them changed skips the DOM work. Returns
   // whether the box is shown.
-  render(stateObj, hass, allowed = () => true) {
+  _render(stateObj, hass, allowed) {
     const show =
       stateObj?.attributes?.auto_force_arm_enabled === true &&
       stateObj.state === "disarmed" &&

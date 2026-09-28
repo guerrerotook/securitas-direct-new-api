@@ -10,7 +10,7 @@ import { formatTranslation } from "./verisure-owa-card-utils.js?v=a5e83573-5.9.0
 import {
   ARM_EXCEPTION_TRANSLATIONS,
   notifyActionFailure,
-} from "./verisure-owa-arm-exception.js?v=e826e42c-5.9.0";
+} from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.0";
 
 // ── AlarmControlPanelEntityFeature bitmask values ────────────────────────────
 export const FEATURE = {

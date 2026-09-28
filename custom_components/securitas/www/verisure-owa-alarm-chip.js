@@ -16,8 +16,8 @@ import {
   migrateCompactAlarmConfig,
   reportDeprecatedElement,
   TRANSLATIONS,
-} from "./verisure-owa-alarm-shared.js?v=d47cdc80-5.9.0";
-import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=e826e42c-5.9.0";
+} from "./verisure-owa-alarm-shared.js?v=464dde8f-5.9.0";
+import { AutoForceTickBox, hassLanguage } from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.0";
 
 const BADGE_DEFAULT_CONFIG = {
   show_name: false,
@@ -190,16 +190,14 @@ class VerisureOwaArmExceptionFeature extends HTMLElement {
       entityId: this._entityId(),
       presentation: "compact",
     });
-    this._autoForce.setEntity(this._entityId());
-    this._autoForce.track(stateObj, this._hass);
-
     // The warning replaces the tick box to keep the Tile small, and the box
     // only makes sense beside this Tile's own arm buttons.
-    const showToggle = this._autoForce.render(
+    const showToggle = this._autoForce.update({
+      entityId: this._entityId(),
       stateObj,
-      this._hass,
-      () => !this._alert.active && this._hasAlarmModesFeature(),
-    );
+      hass: this._hass,
+      allowed: () => !this._alert.active && this._hasAlarmModesFeature(),
+    });
     this._setVisible(this._alert.active || showToggle);
   }
 }
@@ -381,7 +379,7 @@ class VerisureOwaAlarmBadge extends HTMLElement {
   getCardSize() { return 1; }
 
   static async getConfigElement() {
-    await import("./verisure-owa-alarm-badge-editor.js?v=85e35aaa-5.9.0");
+    await import("./verisure-owa-alarm-badge-editor.js?v=55206f8b-5.9.0");
     return document.createElement("verisure-owa-alarm-badge-editor");
   }
 

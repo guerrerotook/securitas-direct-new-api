@@ -26,7 +26,7 @@ import {
   autoForceActive,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=e826e42c-5.9.0";
+} from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.0";
 import {
   _t,
   STATE_CFG,
@@ -47,7 +47,7 @@ import {
   deprecationNoticeDismissed,
   dismissDeprecationNotice,
   reportDeprecatedElement,
-} from "./verisure-owa-alarm-shared.js?v=d47cdc80-5.9.0";
+} from "./verisure-owa-alarm-shared.js?v=464dde8f-5.9.0";
 
 // Re-export the public helper API so existing imports of these names from
 // this module keep working.
@@ -57,7 +57,7 @@ export {
   ARM_ACTIONS,
   defaultArmState,
   alarmEntitySuggestion,
-} from "./verisure-owa-alarm-shared.js?v=d47cdc80-5.9.0";
+} from "./verisure-owa-alarm-shared.js?v=464dde8f-5.9.0";
 
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the

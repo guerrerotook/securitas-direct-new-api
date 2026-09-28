@@ -348,6 +348,15 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
       expect(toggle(feature)).not.toBeNull();
     });
 
+    it("hides the tick box and the feature row when the alarm drops out of Home Assistant", () => {
+      const { feature, wrapper } = mountTile();
+
+      feature.hass = makeHass({ states: {} });
+
+      expect(toggle(feature)).toBeNull();
+      expect(wrapper.hidden).toBe(true);
+    });
+
     it("hides the tick box when the capability gate is off", () => {
       const { feature, wrapper } = mountTile({
         entity: alarmEntity({ autoForceArmEnabled: false }),

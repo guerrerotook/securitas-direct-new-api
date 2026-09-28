@@ -6,7 +6,7 @@
 // auto-force-arm tick box, shared with the Tile feature, that force-arms past
 // open sensors for arms started from this dialog's own mode buttons.
 
-import { AutoForceTickBox } from "./verisure-owa-arm-exception.js?v=e826e42c-5.9.0";
+import { AutoForceTickBox } from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.0";
 
 class VerisureOwaMoreInfo extends HTMLElement {
   constructor() {
@@ -125,10 +125,12 @@ class VerisureOwaMoreInfo extends HTMLElement {
 
   _syncAutoForce() {
     const stateObj = this._resolvedStateObj();
-    // An update without an alarm keeps the last alarm's tick.
-    if (stateObj?.entity_id) this._autoForce.setEntity(stateObj.entity_id);
-    this._autoForce.track(stateObj, this._hass);
-    if (stateObj) this._autoForce.render(stateObj, this._hass);
+    this._autoForce.update({
+      entityId: stateObj?.entity_id,
+      stateObj,
+      hass: this._hass,
+      keepWithoutState: true,
+    });
   }
 
   _updateForceExtension() {
