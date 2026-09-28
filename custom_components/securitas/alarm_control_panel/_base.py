@@ -1368,9 +1368,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
-            self._state = self._last_state
+            if self._last_arm_result.protom_response:
+                self.update_status_alarm(self._last_arm_result)
+            else:
+                self._state = self._last_state
             self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
+            if self._last_arm_result.protom_response:
+                await self.coordinator.async_request_refresh()
             # Surface the rejection in the activity timeline as well — the
             # polled record (~60 s later) will be a 5802; this gives the
             # user immediate feedback with the offending zones.

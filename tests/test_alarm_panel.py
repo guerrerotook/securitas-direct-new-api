@@ -10817,3 +10817,54 @@ async def test_failed_arm_after_asking_the_panel_shows_what_it_answered(
 
     assert _sent(alarm) == ["ARM1"]
     assert alarm._state == AlarmControlPanelState.DISARMED
+
+
+_OPEN_DOOR = ArmingExceptionError(
+    reference_id="ref",
+    suid="suid",
+    exceptions=[{"status": "0", "deviceType": "MG", "alias": "Door"}],
+)
+
+
+async def test_arm_blocked_at_its_second_command_shows_the_first_ones_result():
+    """Away (total + perimeter) from disarmed on a panel that needs two
+    commands: ARM1 lands, then PERI1 is blocked by an open door. The panel
+    shows what ARM1 armed straight away, not disarmed."""
+    from custom_components.securitas.verisure_owa_api.const import (
+        PERI_DEFAULTS,
+        VerisureOwaState,
+    )
+
+    config = dict(PERI_DEFAULTS)
+    config["map_home"] = VerisureOwaState.TOTAL.value  # so 'T' has an HA state
+    config["scan_interval"] = 120
+    alarm = make_alarm(config=config, has_peri=True)
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm._resolver.mark_unsupported("ARMINTEXT1")
+    alarm._resolver.mark_unsupported("ARM1PERI1")
+
+    async def step(step, **_force):
+        assert step.commands[0] == "ARM1+PERI1"
+        result = _status("T")  # ARM1 answered: total
+        alarm._last_arm_result = result
+        alarm.coordinator.record_confirmed_proto_code("T")
+        raise _OPEN_DOOR  # PERI1 blocked
+
+    alarm._execute_step = AsyncMock(side_effect=step)
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    assert alarm._state == AlarmControlPanelState.ARMED_HOME  # 'T' as mapped
+    alarm.coordinator.async_request_refresh.assert_awaited()
+    assert alarm._force_context is not None  # force-arm still offered
+
+
+async def test_arm_blocked_at_its_only_command_shows_the_previous_state():
+    alarm = make_alarm()
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm._execute_step = AsyncMock(side_effect=_OPEN_DOOR)
+
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
+
+    assert alarm._state == AlarmControlPanelState.DISARMED
+    alarm.coordinator.async_request_refresh.assert_not_awaited()
