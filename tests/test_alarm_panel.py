@@ -665,7 +665,7 @@ def make_alarm(
         lambda c: c.earlier_possible | {c.confirmed_proto_code}
     )
 
-    def _record_confirmed(proto_code):
+    def _record_confirmed(proto_code, *, optimistic=False):
         coordinator.confirmed_proto_code = proto_code
         coordinator.confirmed_is_provisional = False
         coordinator.earlier_possible = frozenset()
@@ -10008,11 +10008,11 @@ async def test_unlock_with_no_circuits_to_disarm_neither_waits_nor_sends():
     lock._client.change_lock_mode.assert_awaited_once()
 
 
-def _real_alarm_coordinator():
+def _real_alarm_coordinator(hass=None):
     """A real AlarmCoordinator whose polls read ``client.get_general_status``.
 
-    Its Repairs registry is a mock: the real one needs a running Home
-    Assistant."""
+    Without ``hass`` (a running Home Assistant) its Repairs registry is a
+    mock."""
     from datetime import timedelta
 
     from homeassistant.core import HomeAssistant
@@ -10024,8 +10024,9 @@ def _real_alarm_coordinator():
         VerisureOwaClient,
     )
 
-    hass = MagicMock(spec=HomeAssistant)
-    hass.data = {ir.DATA_REGISTRY: MagicMock()}
+    if hass is None:
+        hass = MagicMock(spec=HomeAssistant)
+        hass.data = {ir.DATA_REGISTRY: MagicMock()}
     client = AsyncMock(spec=VerisureOwaClient)
     client.protom_response = ""
     queue = AsyncMock(spec=ApiQueue)
@@ -11408,3 +11409,35 @@ async def test_a_repeat_press_does_not_cancel_a_waiting_arm():
 
     assert _sent(alarm) == ["ARM1", "DARM1", "ARMDAY1"]
     assert alarm._state == AlarmControlPanelState.ARMED_HOME
+
+
+def _unknown_state_issue(hass):
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.securitas import DOMAIN
+
+    return ir.async_get(hass).async_get_issue(DOMAIN, "unknown_alarm_state_123456")
+
+
+async def test_a_timed_out_arm_leaves_the_unknown_state_notice(hass):
+    """A timed-out command's optimistic code is a guess, not a code the alarm
+    reported, so the Repairs notice for the unknown code it last reported
+    stays."""
+    coordinator, client = _real_alarm_coordinator(hass)
+    alarm = make_alarm()
+    alarm.coordinator = coordinator
+    coordinator.record_confirmed_proto_code("D")
+    coordinator.operation.begin("disarm", [object()])
+    client.get_general_status.return_value = SStatus(status="N")
+    await coordinator._async_update_data()
+    coordinator.operation.end()
+    assert _unknown_state_issue(hass) is not None
+    _record_transitions(alarm, error=OperationTimeoutError("not confirmed"))
+
+    await alarm.set_arm_state("armed_away")
+
+    assert coordinator.confirmed_proto_code == "T"
+    assert coordinator.confirmed_is_provisional is True
+    issue = _unknown_state_issue(hass)
+    assert issue is not None
+    assert (issue.translation_placeholders or {})["code"] == "N"

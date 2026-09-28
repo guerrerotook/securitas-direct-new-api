@@ -325,15 +325,21 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         state that is not known."""
         return self._earlier_possible | {self._confirmed_proto_code}
 
-    def record_confirmed_proto_code(self, proto_code: str) -> None:
+    def record_confirmed_proto_code(
+        self, proto_code: str, *, optimistic: bool = False
+    ) -> None:
         """Record ``proto_code`` as the installation's state and clear any
         unconfirmed marker: a panel command's result, the status check before
-        an arm, a manual Refresh, a poll, or a timed-out command's optimistic
-        code (which the caller then marks unconfirmed)."""
+        an arm, a manual Refresh, a poll, or a timed-out command's
+        ``optimistic`` code (which the caller then marks unconfirmed).
+
+        An optimistic code is a guess, not a code the alarm reported, so it
+        leaves the unrecognised-state Repairs issue as it is."""
         self._confirmed_proto_code = proto_code
         self._confirmed_provisional = False
         self._earlier_possible = frozenset()
-        self._track_unrecognised_code(proto_code)
+        if not optimistic:
+            self._track_unrecognised_code(proto_code)
 
     def _track_unrecognised_code(self, proto_code: str) -> None:
         """Keep the Repairs issue for a state code this integration doesn't

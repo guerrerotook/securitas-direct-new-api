@@ -1181,7 +1181,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             earlier |= {None}
         optimistic = self._optimistic_status(target)
         self.update_status_alarm(optimistic)
-        self.coordinator.record_confirmed_proto_code(optimistic.protom_response)
+        self.coordinator.record_confirmed_proto_code(
+            optimistic.protom_response, optimistic=True
+        )
         self.coordinator.mark_confirmed_provisional(earlier)
         _LOGGER.warning(
             "%s not confirmed within timeout for %s; state provisional, "
