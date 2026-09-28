@@ -404,7 +404,7 @@ The module also provides `verisure_device_info()` and `camera_device_info()` hel
 
 ### Alarm control panel (`alarm_control_panel/`)
 
-The alarm-panel platform is split into a package: `_base.py` carries `BaseVerisureOwaAlarmPanel` (state mapping, transition orchestration, force-arm context, PIN, WAF tracking) and the shared `build_partial_disarm_target` helper; `_panels.py` defines the four concrete entity classes (`CombinedVerisureOwaAlarmPanel` and the three axis sub-panels via `_AxisSubPanelMixin`); `alarm_control_panel/__init__.py` is the platform's `async_setup_entry` plus the entity-service registrations. All four classes are re-exported from the package root for backwards compatibility.
+The alarm-panel platform is split into a package: `_base.py` carries `BaseVerisureOwaAlarmPanel` (state mapping, transition orchestration, force-arm context, PIN, WAF tracking) and the shared `build_partial_disarm_target` and `armed_circuits` helpers, which the package root re-exports for the lock; `_panels.py` defines the four concrete entity classes (`CombinedVerisureOwaAlarmPanel` and the three axis sub-panels via `_AxisSubPanelMixin`); `alarm_control_panel/__init__.py` is the platform's `async_setup_entry` plus the entity-service registrations. All four classes are re-exported from the package root for backwards compatibility.
 
 The main entity is `CombinedVerisureOwaAlarmPanel` — one per installation. Inherits from `CoordinatorEntity[AlarmCoordinator]` and `AlarmControlPanelEntity`. The entity starts with `_state = None` (renders as "unknown" in HA) until the first successful coordinator update populates the real alarm state. This avoids showing a false "disarmed" state at startup.
 

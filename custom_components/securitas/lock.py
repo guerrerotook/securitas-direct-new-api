@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureHub
-from .alarm_control_panel._base import armed_circuits
+from .alarm_control_panel import armed_circuits
 from .api_queue import ApiQueue
 from .const import (
     CONF_CODE_HASH,

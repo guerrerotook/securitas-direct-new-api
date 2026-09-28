@@ -1622,9 +1622,7 @@ class TestVerisureLockAlarmListener:
         assert lock._state == "1"
 
     def test_armed_circuits_helper_excludes_off_modes(self):
-        from custom_components.securitas.alarm_control_panel._base import (
-            armed_circuits,
-        )
+        from custom_components.securitas.alarm_control_panel import armed_circuits
         from custom_components.securitas.const import (
             CIRCUIT_ANNEX,
             CIRCUIT_INTERIOR,

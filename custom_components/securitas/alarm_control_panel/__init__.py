@@ -34,7 +34,11 @@ from ..const import (
 )
 from ..coordinators import AlarmCoordinator
 from ..verisure_owa_api.models import Installation
-from ._base import BaseVerisureOwaAlarmPanel, build_partial_disarm_target
+from ._base import (
+    BaseVerisureOwaAlarmPanel,
+    armed_circuits,
+    build_partial_disarm_target,
+)
 from ._panels import (
     AnnexVerisureOwaAlarmPanel,
     CombinedVerisureOwaAlarmPanel,
@@ -52,6 +56,7 @@ __all__ = [
     "PerimeterVerisureOwaAlarmPanel",
     "_heal_combined_panel_entity_id",
     "_heal_subpanel_entity_id",
+    "armed_circuits",
     "async_setup_entry",
     "build_partial_disarm_target",
 ]
