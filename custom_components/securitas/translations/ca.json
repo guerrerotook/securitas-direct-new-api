@@ -264,6 +264,10 @@
         "orphan_verisure_owa_directory": {
             "title": "Carpeta verisure_owa sobrant",
             "description": "S'ha trobat una carpeta obsoleta `verisure_owa` a `{path}` d'una actualització anterior. Ja no fa res i es pot esborrar amb seguretat. Elimina-la i reinicia Home Assistant per amagar aquest avís."
+        },
+        "duplicate_entry": {
+            "title": "Instal·lació afegida dues vegades",
+            "description": "Verisure OWA té dues entrades per a {installation} amb el mateix compte, afegides amb el correu electrònic escrit amb majúscules diferents. Elimina'n una a Configuració → Dispositius i serveis → Verisure OWA. Aquest avís desapareix quan només en queda una."
         }
     },
     "entity": {

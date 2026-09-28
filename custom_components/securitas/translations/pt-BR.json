@@ -264,6 +264,10 @@
         "orphan_verisure_owa_directory": {
             "title": "Pasta verisure_owa obsoleta",
             "description": "Uma pasta obsoleta `verisure_owa` ficou em `{path}` de uma atualização anterior. Não faz mais nada e pode ser apagada com segurança. Apague a pasta e reinicie o Home Assistant para limpar este aviso."
+        },
+        "duplicate_entry": {
+            "title": "Instalação adicionada duas vezes",
+            "description": "O Verisure OWA tem duas entradas para {installation} na mesma conta, adicionadas com o e-mail digitado com maiúsculas diferentes. Remova uma delas em Configurações → Dispositivos e Serviços → Verisure OWA. Este aviso some quando restar apenas uma."
         }
     },
     "entity": {

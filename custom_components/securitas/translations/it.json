@@ -264,6 +264,10 @@
         "orphan_verisure_owa_directory": {
             "title": "Cartella verisure_owa obsoleta",
             "description": "Una cartella obsoleta `verisure_owa` è rimasta in `{path}` da un precedente aggiornamento. Non fa più nulla e può essere eliminata in sicurezza. Eliminala e riavvia Home Assistant per rimuovere questo avviso."
+        },
+        "duplicate_entry": {
+            "title": "Installazione aggiunta due volte",
+            "description": "Verisure OWA ha due voci per {installation} con lo stesso account, aggiunte con l'indirizzo email scritto con maiuscole diverse. Rimuovine una in Impostazioni → Dispositivi e servizi → Verisure OWA. Questo avviso scompare quando ne rimane solo una."
         }
     },
     "entity": {

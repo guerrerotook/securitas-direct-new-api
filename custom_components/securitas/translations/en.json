@@ -264,6 +264,10 @@
         "orphan_verisure_owa_directory": {
             "title": "Leftover verisure_owa folder",
             "description": "An obsolete `verisure_owa` directory was left at `{path}` by an earlier (broken) upgrade. It does nothing now and can be safely deleted. Remove the directory and restart Home Assistant to clear this notice."
+        },
+        "duplicate_entry": {
+            "title": "Installation added twice",
+            "description": "Verisure OWA has two entries for {installation} on the same account, added with the email typed in different capitals. Remove one of them in Settings → Devices & services → Verisure OWA. This notice clears once only one is left."
         }
     },
     "entity": {

@@ -264,6 +264,10 @@
         "orphan_verisure_owa_directory": {
             "title": "Dossier verisure_owa obsolète",
             "description": "Un dossier obsolète `verisure_owa` a été laissé dans `{path}` par une mise à jour précédente. Il ne sert plus à rien et peut être supprimé sans risque. Supprimez le dossier et redémarrez Home Assistant pour effacer cette notification."
+        },
+        "duplicate_entry": {
+            "title": "Installation ajoutée deux fois",
+            "description": "Verisure OWA a deux entrées pour {installation} avec le même compte, ajoutées avec l'adresse e-mail saisie avec des majuscules différentes. Supprimez-en une dans Paramètres → Appareils et services → Verisure OWA. Cette notification disparaît dès qu'il n'en reste qu'une."
         }
     },
     "entity": {

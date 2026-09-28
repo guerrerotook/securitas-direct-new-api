@@ -16,6 +16,7 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
@@ -58,6 +59,7 @@ from custom_components.securitas import (
     _synced_entry_data,
     add_device_information,
     async_migrate_entry,
+    async_remove_entry,
     async_setup_entry,
     async_unload_entry,
     async_update_options,
@@ -2429,13 +2431,13 @@ class TestLowerCaseEmailMigration:
         mock_notify.assert_not_called()
 
     @pytest.mark.parametrize("migrate_older_first", [True, False])
-    async def test_minor_2_migration_asks_to_remove_a_duplicate_entry(
+    async def test_minor_2_migration_keeps_both_entries_of_a_duplicate(
         self, hass, migrate_older_first
     ):
         """The same account added twice in other capitals: whichever entry
         set up first owns the entities, so neither is removed. Both keep
-        distinct entry IDs, and one notification asks the user to remove
-        one of them."""
+        distinct entry IDs, and the migration posts no notification: a
+        Repairs issue raised at setup asks the user to remove one."""
         assert await async_setup_component(hass, "persistent_notification", {})
         older = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
         newer = _minor_1_entry(hass, "USER@example.com", "USER@example.com_123456")
@@ -2454,12 +2456,7 @@ class TestLowerCaseEmailMigration:
         assert newer.data[CONF_USERNAME] == "user@example.com"
         assert order[0].unique_id == "user@example.com_123456"
         assert order[1].unique_id == second_id
-        notifications = persistent_notification._async_get_or_create_notifications(hass)
-        assert [n["message"] for n in notifications.values()] == [
-            "Verisure has two entries for Home on the same account. Remove "
-            "one of them in Settings → Devices & Services → Verisure OWA."
-        ]
-        assert not any("@" in key for key in notifications)
+        assert persistent_notification._async_get_or_create_notifications(hass) == {}
 
     async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
         """An entry already holding the lower-case ID keeps it; the entry
@@ -2474,17 +2471,144 @@ class TestLowerCaseEmailMigration:
         assert holder.unique_id == "user@example.com_123456"
         assert mixed.unique_id == "User@Example.com_123456"
         assert mixed.data[CONF_USERNAME] == "user@example.com"
-        clash_id = hashlib.sha256(b"user@example.com_123456").hexdigest()[:12]
-        assert [c.args[1:] for c in mock_notify.call_args_list] == [
-            (
-                f"duplicate_entry_found_{clash_id}",
-                "duplicate_entry_found",
-                {"installation": entry.title},
-            )
-            for entry in (mixed, holder)
-        ]
-        # The ID goes into Home Assistant's event history and debug log.
-        assert "example.com" not in mock_notify.call_args.args[1]
+        mock_notify.assert_not_called()
+
+
+def _entry_for(hass, username, installation="123456", title="Home"):
+    """Add an entry for one installation on one account to hass."""
+    data = make_config_entry_data(username=username)
+    data[CONF_INSTALLATION] = installation
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        unique_id=f"{username}_{installation}",
+        title=title,
+        version=5,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _duplicate_entry_issues(hass):
+    return {
+        issue_id: issue
+        for (domain, issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue_id.startswith("duplicate_entry_")
+    }
+
+
+_CLASH_ISSUE_ID = (
+    "duplicate_entry_" + hashlib.sha256(b"user@example.com_123456").hexdigest()[:12]
+)
+
+
+class TestDuplicateEntryIssue:
+    """One installation added twice (the email typed in other capitals) is
+    flagged in Repairs for as long as both entries exist."""
+
+    @pytest.fixture
+    def mock_hub(self):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    @pytest.fixture
+    def set_up(self, hass, mock_hub):
+        async def _set_up(*entries):
+            with (
+                _patch_hub(mock_hub),
+                patch("custom_components.securitas.async_get_clientsession"),
+                patch.object(
+                    hass.config_entries,
+                    "async_forward_entry_setups",
+                    new_callable=AsyncMock,
+                ),
+            ):
+                for entry in entries:
+                    assert await async_setup_entry(hass, entry) is True
+
+        return _set_up
+
+    async def test_two_entries_for_one_installation_raise_one_issue(self, hass, set_up):
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+
+        await set_up(first, second)
+
+        issues = _duplicate_entry_issues(hass)
+        assert list(issues) == [_CLASH_ISSUE_ID]
+        issue = issues[_CLASH_ISSUE_ID]
+        assert issue.is_fixable is False
+        assert issue.is_persistent is False
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.translation_key == "duplicate_entry"
+        assert issue.translation_placeholders == {"installation": "Home"}
+        # Home Assistant saves issue IDs and data; the email must stay out.
+        assert "@" not in _CLASH_ISSUE_ID
+
+    async def test_removing_one_of_the_entries_clears_the_issue(
+        self, hass, set_up, enable_custom_integrations
+    ):
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+        await set_up(first, second)
+        assert list(_duplicate_entry_issues(hass)) == [_CLASH_ISSUE_ID]
+
+        await hass.config_entries.async_remove(second.entry_id)
+        await hass.async_block_till_done()
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_the_entry_being_removed_no_longer_counts(self, hass, set_up):
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+        await set_up(first, second)
+        assert list(_duplicate_entry_issues(hass)) == [_CLASH_ISSUE_ID]
+
+        await async_remove_entry(hass, second)
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_different_installations_raise_no_issue(self, hass, set_up):
+        home = _entry_for(hass, "user@example.com", "123456", "Home")
+        office = _entry_for(hass, "user@example.com", "654321", "Office")
+
+        await set_up(home, office)
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_a_single_entry_raises_no_issue(self, hass, set_up):
+        await set_up(_entry_for(hass, "user@example.com"))
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_entries_without_an_id_do_not_clash(self, hass, set_up):
+        """Entries with neither an email, an installation nor an entry ID
+        have nothing to clash on."""
+        for _ in range(2):
+            MockConfigEntry(
+                domain=DOMAIN, data={}, version=5, minor_version=2
+            ).add_to_hass(hass)
+
+        await set_up(_entry_for(hass, "user@example.com"))
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_a_stale_issue_is_cleared_on_the_next_setup(self, hass, set_up):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            _CLASH_ISSUE_ID,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="duplicate_entry",
+            translation_placeholders={"installation": "Home"},
+        )
+
+        await set_up(_entry_for(hass, "user@example.com"))
+
+        assert _duplicate_entry_issues(hass) == {}
 
 
 class TestCodeHashMigration:

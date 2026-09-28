@@ -904,8 +904,6 @@ async def test_the_entry_set_up_first_takes_the_installations_entities(
     _queue_installation_with_a_camera(mock_server)
     # Loaded up front, so each async_setup below sets up only its own entry.
     assert await async_setup_component(hass, DOMAIN, {})
-    # Home Assistant always loads it; the startup migration notifies the clash.
-    assert await async_setup_component(hass, "persistent_notification", {})
     older = _add_entry_for(hass, "User@Example.com")
     newer = _add_entry_for(hass, "user@example.com")
     order = {"older": [older, newer], "newer": [newer, older]}

@@ -58,6 +58,7 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
     HomeAssistantError,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_component import EntityComponent
@@ -438,8 +439,8 @@ def _migrate_lower_case_email(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     Two entries for the same account typed in other capitals would now share
     one entry ID. Neither is removed, since whichever sets up first owns the
-    entities: the user is asked to remove one, and neither entry takes an ID
-    the other holds.
+    entities, and neither takes an ID the other holds: the Repairs issue from
+    ``_async_update_duplicate_entry_issues`` asks the user to remove one.
     """
     data = dict(entry.data)
     if username := data.get(CONF_USERNAME):
@@ -447,26 +448,57 @@ def _migrate_lower_case_email(hass: HomeAssistant, entry: ConfigEntry) -> None:
     new_uid = _entry_unique_id(data, entry.unique_id)
     uid = entry.unique_id
     if new_uid is not None:
-        if any(
-            other.entry_id != entry.entry_id
-            and _entry_unique_id(other.data, other.unique_id) == new_uid
-            for other in hass.config_entries.async_entries(DOMAIN)
-        ):
-            # Both entries see the clash; one notification ID shows it once.
-            # Hashed: the ID is saved in the event history, the email must not be.
-            clash = hashlib.sha256(new_uid.encode()).hexdigest()[:12]
-            _notify(
-                hass,
-                f"duplicate_entry_found_{clash}",
-                "duplicate_entry_found",
-                {"installation": entry.title},
-            )
         holder = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, new_uid)
         if holder is None or holder is entry:
             uid = new_uid
     hass.config_entries.async_update_entry(
         entry, data=data, unique_id=uid, minor_version=2
     )
+
+
+_DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"
+
+
+@callback
+def _async_update_duplicate_entry_issues(
+    hass: HomeAssistant, removing: ConfigEntry | None = None
+) -> None:
+    """Keep one Repairs issue per installation that has two entries.
+
+    ``removing`` is the entry being deleted, which must not count.
+    """
+    by_id: dict[str, list[ConfigEntry]] = {}
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if removing is not None and entry.entry_id == removing.entry_id:
+            continue
+        if (uid := _entry_unique_id(entry.data, entry.unique_id)) is not None:
+            by_id.setdefault(uid, []).append(entry)
+    wanted = {
+        # Hashed: Home Assistant saves issue IDs, and the email must not be.
+        _DUPLICATE_ENTRY_ISSUE + hashlib.sha256(uid.encode()).hexdigest()[:12]: (
+            entries[0].title
+        )
+        for uid, entries in by_id.items()
+        if len(entries) > 1
+    }
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith(_DUPLICATE_ENTRY_ISSUE)
+            and issue_id not in wanted
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+    for issue_id, installation in wanted.items():
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="duplicate_entry",
+            translation_placeholders={"installation": installation},
+        )
 
 
 def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
@@ -1318,8 +1350,6 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
     """
     orphan = Path(hass.config.path("custom_components", "verisure_owa"))
     if orphan.is_dir():
-        from homeassistant.helpers import issue_registry as ir
-
         ir.async_create_issue(
             hass,
             DOMAIN,
@@ -1413,6 +1443,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # get duplicated entities with _2 suffixes. Idempotent; safe to run
     # on every setup.
     await migrate_unique_ids(hass, entry)
+    _async_update_duplicate_entry_issues(hass)
 
     config, need_sign_in = _build_config_dict(entry)
 
@@ -1841,12 +1872,14 @@ async def _async_teardown_domain(
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Release a deleted entry's hold on its session if unloading did not.
+    """Release a deleted entry's hold on its session if unloading did not,
+    and clear the duplicate-entry issue the deletion resolves.
 
     Home Assistant calls ``async_unload_entry`` only for a loaded entry before
     deleting it. An entry whose setup failed after taking its hold (waiting to
     retry, or needing reauth) still holds the session here.
     """
+    _async_update_duplicate_entry_issues(hass, removing=entry)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
