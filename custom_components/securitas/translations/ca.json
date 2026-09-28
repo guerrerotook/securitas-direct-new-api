@@ -258,6 +258,9 @@
         },
         "operation_in_progress": {
             "message": "L'alarma està ocupada amb una altra ordre. Torna-ho a provar d'aquí a un moment."
+        },
+        "arm_refused_unknown_state": {
+            "message": "No es pot armar {installation}: l'alarma indica un estat que aquesta integració no reconeix (codi {code}). Consulta Configuració → Reparacions."
         }
     },
     "issues": {
@@ -268,6 +271,10 @@
         "duplicate_entry": {
             "title": "Instal·lació afegida dues vegades",
             "description": "Verisure OWA té dues entrades per a {installation} amb el mateix compte. Elimina'n una a Configuració → Dispositius i serveis → Verisure OWA. Aquest avís desapareix quan només en queda una."
+        },
+        "unknown_alarm_state": {
+            "title": "Estat d'alarma no reconegut",
+            "description": "Verisure indica el codi d'estat d'alarma {code} per a {installation}, que aquesta integració encara no reconeix. Desarmar continua funcionant, però armar es rebutja fins que l'alarma indiqui un estat conegut. Informa del codi a {url} perquè es pugui afegir. Aquest avís desapareix quan torna un estat conegut."
         }
     },
     "entity": {

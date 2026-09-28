@@ -258,6 +258,9 @@
         },
         "operation_in_progress": {
             "message": "L'alarme est occupée par une autre commande. Réessayez dans un instant."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Impossible d'armer {installation} : l'alarme signale un état que cette intégration ne reconnaît pas (code {code}). Consultez Paramètres → Réparations."
         }
     },
     "issues": {
@@ -268,6 +271,10 @@
         "duplicate_entry": {
             "title": "Installation ajoutée deux fois",
             "description": "Verisure OWA a deux entrées pour {installation} avec le même compte. Supprimez-en une dans Paramètres → Appareils et services → Verisure OWA. Cette notification disparaît dès qu'il n'en reste qu'une."
+        },
+        "unknown_alarm_state": {
+            "title": "État d'alarme non reconnu",
+            "description": "Verisure signale le code d'état d'alarme {code} pour {installation}, que cette intégration ne reconnaît pas encore. Le désarmement fonctionne toujours, mais l'armement est refusé tant que l'alarme ne signale pas un état connu. Signalez ce code sur {url} pour qu'il puisse être pris en charge. Cette notification disparaît dès qu'un état connu revient."
         }
     },
     "entity": {

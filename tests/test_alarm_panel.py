@@ -5403,23 +5403,63 @@ class TestExecuteTransitionRefusesUnknownState:
             in excinfo.value.message
         )
 
-    async def test_arm_via_public_api_fires_arm_failed_notification(self):
-        """set_arm_state with unknown current state surfaces translated notification."""
+    async def test_arm_via_public_api_raises_translated_error(self):
+        """set_arm_state with unknown current state raises a translated error
+        naming the code, in place of the arm_failed notification."""
         alarm = make_alarm()
         alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
         alarm._last_proto_code = "Z"
         alarm.client.arm_alarm = AsyncMock()
 
-        with patch(
-            "custom_components.securitas.alarm_control_panel._base._notify"
-        ) as mock_notify:
+        with (
+            patch(
+                "custom_components.securitas.alarm_control_panel._base._notify"
+            ) as mock_notify,
+            pytest.raises(HomeAssistantError) as excinfo,
+        ):
             await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)
 
         alarm.client.arm_alarm.assert_not_called()
-        mock_notify.assert_called_once()
-        args, _ = mock_notify.call_args
-        assert args[2] == "arm_failed"
-        assert "'Z'" in args[3]["error"]
+        mock_notify.assert_not_called()
+        assert excinfo.value.translation_key == "arm_refused_unknown_state"
+        assert (excinfo.value.translation_placeholders or {})["code"] == "Z"
+
+    async def test_arm_refused_on_unknown_state_is_shown_on_screen_only(self):
+        """Arm pressed while the alarm reports a code this integration doesn't
+        model: a translated error for the person pressing it, nothing sent,
+        no Arming failed notification or activity entry, the display put
+        back and the installation free for the next command."""
+        from custom_components.securitas import DOMAIN
+
+        alarm = make_alarm()
+        alarm.coordinator.record_confirmed_proto_code("N")
+        alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        alarm.client.arm_alarm = AsyncMock()
+
+        with (
+            patch(
+                "custom_components.securitas.alarm_control_panel._base._notify"
+            ) as mock_notify,
+            patch(
+                "custom_components.securitas.alarm_control_panel._base.inject_ha_event",
+                new=AsyncMock(),
+            ) as mock_inject,
+            pytest.raises(HomeAssistantError) as excinfo,
+        ):
+            await alarm.async_alarm_arm_away()
+
+        assert excinfo.value.translation_domain == DOMAIN
+        assert excinfo.value.translation_key == "arm_refused_unknown_state"
+        assert excinfo.value.translation_placeholders == {
+            "code": "N",
+            "installation": "Home",
+        }
+        alarm.client.arm_alarm.assert_not_called()
+        mock_notify.assert_not_called()
+        mock_inject.assert_not_awaited()
+        assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
+        assert alarm.coordinator.operation.running is False
+        assert alarm._force_context is None
 
     async def test_arm_failure_injects_arming_failed_event(self):
         """When the API rejects an arm, inject a HA-side ARMING_FAILED
@@ -9954,10 +9994,14 @@ async def test_unlock_with_no_circuits_to_disarm_neither_waits_nor_sends():
 
 
 def _real_alarm_coordinator():
-    """A real AlarmCoordinator whose polls read ``client.get_general_status``."""
+    """A real AlarmCoordinator whose polls read ``client.get_general_status``.
+
+    Its Repairs registry is a mock: the real one needs a running Home
+    Assistant."""
     from datetime import timedelta
 
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers import issue_registry as ir
 
     from custom_components.securitas.api_queue import ApiQueue
     from custom_components.securitas.coordinators import AlarmCoordinator
@@ -9966,7 +10010,7 @@ def _real_alarm_coordinator():
     )
 
     hass = MagicMock(spec=HomeAssistant)
-    hass.data = {}
+    hass.data = {ir.DATA_REGISTRY: MagicMock()}
     client = AsyncMock(spec=VerisureOwaClient)
     client.protom_response = ""
     queue = AsyncMock(spec=ApiQueue)
@@ -10191,8 +10235,10 @@ async def test_arm_refused_when_the_confirmed_state_is_unreadable():
     alarm.coordinator.confirmed_proto_code = "N"
     _record_transitions(alarm, answer="P")
 
-    await alarm.set_arm_state("armed_home")
+    with pytest.raises(HomeAssistantError) as excinfo:
+        await alarm.set_arm_state("armed_home")
 
+    assert excinfo.value.translation_key == "arm_refused_unknown_state"
     assert _sent(alarm) == []
     assert alarm._state != AlarmControlPanelState.ARMED_HOME
 
@@ -10896,11 +10942,19 @@ async def test_arm_after_unconfirmed_arm_refused_when_panel_reports_unknown_stat
     with patch(
         "custom_components.securitas.alarm_control_panel._base._notify"
     ) as notify:
-        await alarm.set_arm_state("armed_away")
+        if answer == "N":
+            with pytest.raises(HomeAssistantError) as excinfo:
+                await alarm.set_arm_state("armed_away")
+        else:
+            await alarm.set_arm_state("armed_away")
 
     alarm._client.refresh_alarm_status.assert_awaited_once()
     assert _sent(alarm) == []
-    assert notify.call_args[0][2] == "arm_failed"
+    if answer == "N":
+        assert excinfo.value.translation_key == "arm_refused_unknown_state"
+        notify.assert_not_called()
+    else:
+        assert notify.call_args[0][2] == "arm_failed"
 
 
 async def test_a_confirmed_status_check_clears_the_unconfirmed_notice():
@@ -11186,13 +11240,17 @@ async def test_interior_arm_refused_on_an_unmodelled_answer_still_shows_armed():
     alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("N"))
     _record_transitions(alarm)
 
-    with patch(
-        "custom_components.securitas.alarm_control_panel._base._notify"
-    ) as notify:
+    with (
+        patch(
+            "custom_components.securitas.alarm_control_panel._base._notify"
+        ) as notify,
+        pytest.raises(HomeAssistantError) as excinfo,
+    ):
         await alarm.set_arm_state("armed_away")
 
     assert _sent(alarm) == []
-    assert notify.call_args[0][2] == "arm_failed"
+    assert excinfo.value.translation_key == "arm_refused_unknown_state"
+    notify.assert_not_called()
     assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
 

@@ -11,9 +11,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.securitas.api_queue import ApiQueue
+from custom_components.securitas.const import DOMAIN, PROJECT_URL
 from custom_components.securitas.coordinators import (
     ActivityCoordinator,
     ActivityData,
@@ -55,9 +57,14 @@ from .conftest import make_installation
 
 
 def _make_hass() -> MagicMock:
-    """Create a minimal mock HomeAssistant instance."""
+    """Create a minimal mock HomeAssistant instance.
+
+    Its Repairs registry is a mock: every alarm poll with a proto code keeps
+    the unrecognised-state issue in step, and the real registry needs a
+    running Home Assistant (tests of the issue itself use the ``hass``
+    fixture)."""
     hass = MagicMock(spec=HomeAssistant)
-    hass.data = {}
+    hass.data = {ir.DATA_REGISTRY: MagicMock()}
 
     def _close_coro(coro: Coroutine[Any, Any, Any]) -> None:
         coro.close()
@@ -333,6 +340,141 @@ class TestAlarmCoordinator:
         await coord._async_update_data()
         assert coord.confirmed_is_provisional is False
         assert coord.possible_proto_codes == {"T"}
+
+    @staticmethod
+    def _unknown_state_issue(hass: HomeAssistant) -> ir.IssueEntry | None:
+        return ir.async_get(hass).async_get_issue(DOMAIN, "unknown_alarm_state_123456")
+
+    @pytest.mark.asyncio
+    async def test_polled_unrecognised_code_raises_repairs_issue_until_known(
+        self, hass: HomeAssistant
+    ):
+        """A poll reporting a code this integration doesn't model raises a
+        Repairs issue naming the code and installation; the next poll with a
+        known code removes it."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+
+        client.get_general_status.return_value = SStatus(status="N")
+        await coord._async_update_data()
+
+        issue = self._unknown_state_issue(hass)
+        assert issue is not None
+        assert issue.translation_key == "unknown_alarm_state"
+        assert issue.translation_placeholders == {
+            "code": "N",
+            "installation": "Home",
+            "url": f"{PROJECT_URL}/issues",
+        }
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.is_fixable is False
+        assert issue.is_persistent is False
+
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_poll_during_operation_still_moves_the_repairs_issue(
+        self, hass: HomeAssistant
+    ):
+        """A poll held back from the confirmed state while a command runs still
+        decides the issue: it follows the latest code seen."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+        coord.operation.begin("arm", [object()], "armed_away")
+
+        client.get_general_status.return_value = SStatus(status="N")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code is None
+        assert self._unknown_state_issue(hass) is not None
+
+        client.get_general_status.return_value = SStatus(status="T")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_recorded_unrecognised_code_raises_repairs_issue_until_known(
+        self, hass: HomeAssistant
+    ):
+        """A command answer or the status check before an arm recording an
+        unmodelled code raises the issue; recording a known code clears it."""
+        coord = self._make_coordinator(
+            hass, _make_client(), _make_queue(), _make_installation()
+        )
+
+        coord.record_confirmed_proto_code("N")
+        issue = self._unknown_state_issue(hass)
+        assert issue is not None
+        assert (issue.translation_placeholders or {})["code"] == "N"
+
+        coord.record_confirmed_proto_code("Z")
+        issue = self._unknown_state_issue(hass)
+        assert issue is not None
+        assert (issue.translation_placeholders or {})["code"] == "Z"
+
+        coord.record_confirmed_proto_code("T")
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_reloaded_coordinator_clears_the_earlier_repairs_issue(
+        self, hass: HomeAssistant
+    ):
+        """Reloading the entry builds a new coordinator while Home Assistant
+        keeps the issue the old one raised; the new one's first known code
+        still clears it."""
+        client = _make_client()
+        installation = _make_installation()
+        old = self._make_coordinator(hass, client, _make_queue(), installation)
+        old.record_confirmed_proto_code("N")
+        assert self._unknown_state_issue(hass) is not None
+
+        new = self._make_coordinator(hass, client, _make_queue(), installation)
+        client.get_general_status.return_value = SStatus(status="D")
+        await new._async_update_data()
+
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", ["X", "E", "D"])
+    async def test_recognised_code_raises_no_repairs_issue(
+        self, hass: HomeAssistant, code: str
+    ):
+        """A code the integration models is not this issue, even one no
+        button on the Main panel is mapped to (that stays a log warning)."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+
+        client.get_general_status.return_value = SStatus(status=code)
+        await coord._async_update_data()
+        coord.record_confirmed_proto_code(code)
+
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_status_without_a_proto_code_leaves_the_repairs_issue(
+        self, hass: HomeAssistant
+    ):
+        """A status that is not a proto code says nothing about the state, so
+        it neither raises nor clears the issue."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+
+        client.get_general_status.return_value = SStatus(status="0")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is None
+
+        coord.record_confirmed_proto_code("N")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is not None
 
     @pytest.mark.asyncio
     async def test_waf_blocked_raises_update_failed(self):

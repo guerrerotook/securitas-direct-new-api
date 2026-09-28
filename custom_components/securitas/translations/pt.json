@@ -258,6 +258,9 @@
         },
         "operation_in_progress": {
             "message": "O alarme está ocupado com outro comando. Tente novamente dentro de momentos."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Não é possível armar {installation}: o alarme indica um estado que esta integração não reconhece (código {code}). Consulte Definições → Reparações."
         }
     },
     "issues": {
@@ -268,6 +271,10 @@
         "duplicate_entry": {
             "title": "Instalação adicionada duas vezes",
             "description": "O Verisure OWA tem duas entradas para {installation} com a mesma conta. Remova uma delas em Definições → Dispositivos e Serviços → Verisure OWA. Este aviso desaparece quando só restar uma."
+        },
+        "unknown_alarm_state": {
+            "title": "Estado do alarme não reconhecido",
+            "description": "A Verisure indica o código de estado do alarme {code} para {installation}, que esta integração ainda não reconhece. Desarmar continua a funcionar, mas armar é recusado até o alarme indicar um estado conhecido. Comunique o código em {url} para que possa ser suportado. Este aviso desaparece quando voltar um estado conhecido."
         }
     },
     "entity": {

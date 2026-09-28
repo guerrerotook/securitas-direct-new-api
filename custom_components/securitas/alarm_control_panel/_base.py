@@ -114,6 +114,19 @@ _LOGGER = logging.getLogger(__name__)
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 
 
+class _UnrecognisedStateError(VerisureOwaError):
+    """A transition refused because the alarm reports a state code this
+    integration doesn't model."""
+
+    def __init__(self, proto_code: str) -> None:
+        super().__init__(
+            f"Alarm is in unknown state '{proto_code}'. "
+            f"Please open an issue at {PROJECT_URL}/issues "
+            "including this state code."
+        )
+        self.proto_code = proto_code
+
+
 def _cancel_timer(unsub: Callable[[], None] | None) -> None:
     """Cancel a pending ``async_call_later`` timer, if any."""
     if unsub is not None:
@@ -672,11 +685,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     "Alarm state not yet known. "
                     "Please wait for the first status poll and try again."
                 )
-            raise VerisureOwaError(
-                f"Alarm is in unknown state '{proto_code}'. "
-                f"Please open an issue at {PROJECT_URL}/issues "
-                "including this state code."
-            )
+            raise _UnrecognisedStateError(proto_code)
 
         assert proto_code is not None  # current is modelled, so it has a code
         if provisional:
@@ -1360,7 +1369,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             if self.coordinator.confirmed_is_provisional:
                 await self._confirm_state_with_panel()
             target = self._resolve_target_state(mode)
-            result = await self._execute_transition(target, **force_params)
+            try:
+                result = await self._execute_transition(target, **force_params)
+            except _UnrecognisedStateError as err:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="arm_refused_unknown_state",
+                    translation_placeholders={
+                        "installation": self.installation.alias,
+                        "code": err.proto_code,
+                    },
+                ) from err
             self._set_waf_blocked(False)
             self.update_status_alarm(result)
             # A plain arm that succeeds while a force context is still pending

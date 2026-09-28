@@ -258,6 +258,9 @@
         },
         "operation_in_progress": {
             "message": "The alarm is busy with another command. Try again in a moment."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Can't arm {installation}: the alarm reports a state this integration doesn't recognise (code {code}). See Settings → Repairs."
         }
     },
     "issues": {
@@ -268,6 +271,10 @@
         "duplicate_entry": {
             "title": "Installation added twice",
             "description": "Verisure OWA has two entries for {installation} on the same account. Remove one of them in Settings → Devices & services → Verisure OWA. This notice clears once only one is left."
+        },
+        "unknown_alarm_state": {
+            "title": "Unrecognised alarm state",
+            "description": "Verisure reports alarm state code {code} for {installation}, which this integration doesn't recognise yet. Disarming still works, but arming is refused until the alarm reports a known state. Please report the code at {url} so it can be supported. This notice clears when a known state returns."
         }
     },
     "entity": {

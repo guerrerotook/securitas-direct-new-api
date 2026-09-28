@@ -258,6 +258,9 @@
         },
         "operation_in_progress": {
             "message": "L'allarme è occupato con un altro comando. Riprova tra un momento."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Impossibile inserire {installation}: l'allarme segnala uno stato che questa integrazione non riconosce (codice {code}). Vedi Impostazioni → Riparazioni."
         }
     },
     "issues": {
@@ -268,6 +271,10 @@
         "duplicate_entry": {
             "title": "Installazione aggiunta due volte",
             "description": "Verisure OWA ha due voci per {installation} con lo stesso account. Rimuovine una in Impostazioni → Dispositivi e servizi → Verisure OWA. Questo avviso scompare quando ne rimane solo una."
+        },
+        "unknown_alarm_state": {
+            "title": "Stato dell'allarme non riconosciuto",
+            "description": "Verisure segnala il codice di stato dell'allarme {code} per {installation}, che questa integrazione non riconosce ancora. Il disinserimento funziona ancora, ma l'inserimento viene rifiutato finché l'allarme non segnala uno stato noto. Segnala il codice su {url} perché possa essere supportato. Questo avviso scompare quando torna uno stato noto."
         }
     },
     "entity": {

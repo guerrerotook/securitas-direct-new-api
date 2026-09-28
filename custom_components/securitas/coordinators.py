@@ -19,10 +19,12 @@ from typing import Any, Literal, NoReturn
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
+from .const import DOMAIN, PROJECT_URL
 from .events import HA_INJECTABLE_CATEGORIES
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
 from .verisure_owa_api.client import VerisureOwaClient
@@ -331,6 +333,34 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._confirmed_proto_code = proto_code
         self._confirmed_provisional = False
         self._earlier_possible = frozenset()
+        self._track_unrecognised_code(proto_code)
+
+    def _track_unrecognised_code(self, proto_code: str) -> None:
+        """Keep the Repairs issue for a state code this integration doesn't
+        model in step with the latest code seen. Anything that is not a proto
+        letter says nothing about the state and leaves the issue as it is."""
+        if not is_proto_letter(proto_code):
+            return
+        issue_id = f"unknown_alarm_state_{self._installation.number}"
+        # Always ask the registry rather than remember what this coordinator
+        # raised: a reload builds a new coordinator, but the issue stays.
+        if proto_code in PROTO_TO_ALARM_STATE:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="unknown_alarm_state",
+            translation_placeholders={
+                "code": proto_code,
+                "installation": self._installation.alias,
+                "url": f"{PROJECT_URL}/issues",
+            },
+        )
 
     def mark_confirmed_provisional(self, earlier: Iterable[str | None]) -> None:
         """Flag the recorded code as unconfirmed until a real command result,
@@ -456,7 +486,12 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
             self._client, self._fetch, "Alarm status"
         )
         proto_code = data.status.status if data.status else None
-        if proto_code and not self.operation.running and is_proto_letter(proto_code):
+        if not is_proto_letter(proto_code):
+            return data
+        assert proto_code is not None  # narrowed by is_proto_letter
+        if self.operation.running:
+            self._track_unrecognised_code(proto_code)
+        else:
             self.record_confirmed_proto_code(proto_code)
         return data
 
