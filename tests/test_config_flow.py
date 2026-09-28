@@ -4534,7 +4534,8 @@ async def test_reauth_stores_the_email_in_lower_case(hass):
 
 async def test_reauth_lower_cases_an_email_saved_in_capitals(hass):
     """An entry saved in capitals, re-entered with the same capitals, is the
-    same account: no installation check, and it is stored in lower case."""
+    same account: no installation check, it is stored in lower case, and the
+    entry keeps its ID."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="Test@Example.com_111",
@@ -4562,6 +4563,10 @@ async def test_reauth_lower_cases_an_email_saved_in_capitals(hass):
     assert result["reason"] == "reauth_successful"
     reauth_hub.client.list_installations.assert_not_awaited()
     assert entry.data[CONF_USERNAME] == "test@example.com"
+    # Only an account switch moves the entry ID; lower-casing it is the
+    # startup migration's job, which leaves an ID alone when another entry
+    # holds the lower-case one.
+    assert entry.unique_id == "Test@Example.com_111"
 
 
 @pytest.mark.parametrize("id_taken", [False, True])
