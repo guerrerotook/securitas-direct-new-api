@@ -11467,3 +11467,55 @@ async def test_refresh_during_a_command_still_moves_the_unknown_state_notice(
 
     assert coordinator.confirmed_proto_code == before
     assert (_unknown_state_issue(hass) is not None) is notice
+
+
+async def test_force_arm_from_the_phone_refused_on_unknown_state_is_notified(
+    hass, enable_custom_integrations
+):
+    """Force Arm tapped in the phone notification has no screen to show a
+    refusal on, so an arm refused because the alarm reports an unrecognised
+    code sends the Arming failed notification, with the refusal's text,
+    instead of failing in a background task."""
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.securitas import DOMAIN
+
+    # Loads the integration's translations, which the refusal's text needs.
+    assert await async_setup_component(hass, DOMAIN, {})
+    alarm = make_alarm()
+    alarm._force_context = {
+        "reference_id": "ref-mobile",
+        "suid": "suid-mobile",
+        "mode": AlarmControlPanelState.ARMED_AWAY,
+        "exceptions": [{"alias": "Door"}],
+        "allow_forcing": True,
+        "created_at": datetime.now(),
+    }
+    alarm.coordinator.record_confirmed_proto_code("N")
+    started = []
+    alarm.hass.async_create_task = MagicMock(side_effect=started.append)
+    event = MagicMock()
+    event.data = {"action": f"SECURITAS_FORCE_ARM_{alarm.installation.number}"}
+
+    alarm._handle_mobile_action(event)
+    with (
+        patch(
+            "custom_components.securitas.alarm_control_panel._base._notify"
+        ) as mock_notify,
+        patch(
+            "custom_components.securitas.alarm_control_panel._base.inject_ha_event",
+            new=AsyncMock(),
+        ),
+    ):
+        await started[0]
+
+    alarm.client.arm_alarm.assert_not_called()
+    mock_notify.assert_called_once_with(
+        alarm.hass,
+        "arm_failed_123456",
+        "arm_failed",
+        {
+            "error": "Can't arm Home: the alarm reports a state this integration "
+            "doesn't recognise (code N). See Settings → Repairs"
+        },
+    )

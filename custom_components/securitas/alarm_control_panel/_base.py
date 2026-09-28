@@ -369,9 +369,23 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         action = event.data.get("action")
         num = self.installation.number
         if action == f"SECURITAS_FORCE_ARM_{num}":
-            self.hass.async_create_task(self.async_force_arm())
+            self.hass.async_create_task(self._async_force_arm_from_notification())
         elif action == f"SECURITAS_CANCEL_FORCE_ARM_{num}":
             self.hass.async_create_task(self.async_force_arm_cancel())
+
+    async def _async_force_arm_from_notification(self) -> None:
+        """Force-arm for the phone notification's button. No screen shows a
+        refused arm there, so the refusal is sent as the Arming failed
+        notification instead."""
+        try:
+            await self.async_force_arm()
+        except HomeAssistantError as err:
+            _notify(
+                self.hass,
+                f"arm_failed_{self.installation.number}",
+                "arm_failed",
+                {"error": str(err)},
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister event listeners when removed from HA."""
