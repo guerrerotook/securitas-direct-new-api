@@ -61,6 +61,7 @@ from . import (
     VerisureHub,
     _account_lock,
     _async_teardown_domain_if_unused,
+    _async_update_duplicate_entry_issues,
     _clear_setup_refresh_crash,
     _login_ipv4_then_any,
     _new_session_record,
@@ -842,6 +843,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.hass.config_entries.async_update_entry(
             self._reauth_entry, data=new_data, unique_id=unique_id
         )
+        # The reload below runs no setup for a disabled entry.
+        _async_update_duplicate_entry_issues(self.hass)
         # This sign-in proves the new token; crashes of the one it replaces
         # must not count against it.
         _clear_setup_refresh_crash(self.hass, username)

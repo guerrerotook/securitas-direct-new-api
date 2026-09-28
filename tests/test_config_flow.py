@@ -22,6 +22,7 @@ from homeassistant.const import (
 )
 from homeassistant.data_entry_flow import FlowResultType, section
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -4605,6 +4606,107 @@ async def test_reauth_account_switch_moves_the_entry_id_to_the_new_email(
     assert home.unique_id == (
         "test@example.com_111" if id_taken else "other@example.com_111"
     )
+
+
+async def _load_installation_111_entries(hass, *usernames) -> list:
+    """One entry per email for installation 111, all set up."""
+    entries = []
+    for username in usernames:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id=f"{username}_111",
+            data={
+                **make_config_entry_data(username=username),
+                CONF_INSTALLATION: "111",
+            },
+            version=FlowHandler.VERSION,
+            minor_version=FlowHandler.MINOR_VERSION,
+        )
+        entry.add_to_hass(hass)
+        entries.append(entry)
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=_two_installation_hub()),
+    ):
+        assert await async_setup_component(hass, DOMAIN, {})
+        await hass.async_block_till_done()
+    assert all(entry.state is ConfigEntryState.LOADED for entry in entries)
+    return entries
+
+
+def _duplicate_entry_issue_ids(hass) -> list[str]:
+    return [
+        issue_id
+        for domain, issue_id in ir.async_get(hass).issues
+        if domain == DOMAIN and issue_id.startswith("duplicate_entry_")
+    ]
+
+
+async def _reauth_disabled_entry(hass, entry, username):
+    """Submit the entry's reauth dialog as ``username`` and disable the entry
+    while the sign-in is still running. Disabling closes the dialog, but the
+    submitted step still saves the account, and the reload after it runs no
+    setup."""
+    flow_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    hub = _reauth_hub_seeing("111")
+    signing_in, gate = asyncio.Event(), asyncio.Event()
+    sign_in = hub.login.side_effect
+
+    async def _sign_in_after_gate():
+        signing_in.set()
+        await gate.wait()
+        await sign_in()
+
+    hub.login = AsyncMock(side_effect=_sign_in_after_gate)
+    with _patches(hub), patch("custom_components.securitas._login_ipv4_first"):
+        # Untracked, so the wait for Home Assistant to settle after the
+        # disable does not wait for the held sign-in.
+        submit = asyncio.create_task(
+            hass.config_entries.flow.async_configure(
+                flow_id,
+                user_input={CONF_USERNAME: username, CONF_PASSWORD: "new-password"},
+            )
+        )
+        await signing_in.wait()
+        await _disable(hass, entry)
+        assert _reauth_flows_for(hass, entry) == []
+        assert not submit.done()
+        gate.set()
+        result = await submit
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_USERNAME] == username
+    assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_a_reauth_moving_a_disabled_entry_off_a_shared_id_clears_the_repair(
+    hass,
+):
+    """Two entries for one installation raise a Repairs issue; signing one in
+    to another account ends the clash, and the issue goes even though the
+    entry is disabled and never sets up again."""
+    first, _ = await _load_installation_111_entries(
+        hass, "User@Example.com", "user@example.com"
+    )
+    assert len(_duplicate_entry_issue_ids(hass)) == 1
+
+    await _reauth_disabled_entry(hass, first, "other@example.com")
+
+    assert _duplicate_entry_issue_ids(hass) == []
+
+
+async def test_a_reauth_moving_a_disabled_entry_onto_a_shared_id_raises_the_repair(
+    hass,
+):
+    """Signing a disabled entry in to the account another entry already uses
+    for the same installation raises the Repairs issue straight away."""
+    _, second = await _load_installation_111_entries(
+        hass, "user@example.com", "other@example.com"
+    )
+    assert _duplicate_entry_issue_ids(hass) == []
+
+    await _reauth_disabled_entry(hass, second, "user@example.com")
+
+    assert len(_duplicate_entry_issue_ids(hass)) == 1
 
 
 async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):
