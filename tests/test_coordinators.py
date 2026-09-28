@@ -421,12 +421,12 @@ class TestAlarmCoordinator:
         assert self._unknown_state_issue(hass) is None
 
     @pytest.mark.asyncio
-    async def test_reloaded_coordinator_clears_the_earlier_repairs_issue(
+    async def test_a_coordinator_clears_an_issue_another_one_raised(
         self, hass: HomeAssistant
     ):
-        """Reloading the entry builds a new coordinator while Home Assistant
-        keeps the issue the old one raised; the new one's first known code
-        still clears it."""
+        """Another coordinator for the installation can leave the issue behind
+        (a second entry's, or one that never shut down, e.g. after a crash);
+        this one's first known code still clears it."""
         client = _make_client()
         installation = _make_installation()
         old = self._make_coordinator(hass, client, _make_queue(), installation)

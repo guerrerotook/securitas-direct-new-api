@@ -350,8 +350,8 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         if not is_proto_letter(proto_code):
             return
         issue_id = self._unrecognised_issue_id
-        # Always ask the registry rather than remember what this coordinator
-        # raised: a reload builds a new coordinator, but the issue stays.
+        # Not only an issue this coordinator raised: another coordinator for
+        # the installation (a second entry's) may have raised it.
         if proto_code in PROTO_TO_ALARM_STATE:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
