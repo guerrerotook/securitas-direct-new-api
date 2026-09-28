@@ -10830,6 +10830,75 @@ async def test_a_confirmed_status_check_clears_the_unconfirmed_notice():
     assert "state_provisional" not in alarm._attr_extra_state_attributes
 
 
+async def test_refresh_after_an_unconfirmed_arm_confirms_the_panels_answer():
+    """Refresh after an arm that was never confirmed records and shows the
+    panel's answer, so the next arm plans from it without asking again."""
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._attr_extra_state_attributes["state_provisional"] = True
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
+
+    await alarm.async_manual_refresh()
+
+    assert alarm.coordinator.confirmed_proto_code == "D"
+    assert alarm.coordinator.confirmed_is_provisional is False
+    assert alarm.state == AlarmControlPanelState.DISARMED
+    assert "state_provisional" not in alarm._attr_extra_state_attributes
+
+    alarm._client.refresh_alarm_status.reset_mock()
+    _record_transitions(alarm)
+    await alarm.set_arm_state("armed_away")
+
+    alarm._client.refresh_alarm_status.assert_not_awaited()
+    assert _sent(alarm) == ["ARM1"]
+
+
+async def test_refresh_answering_an_unmodelled_code_keeps_the_sub_panels_display():
+    """A code the Interior panel can't show leaves its display as it was, as a
+    poll does, rather than going back to the state before its last arm."""
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    main.update_status_alarm(_status("D"))
+    main.coordinator.record_confirmed_proto_code("D")
+    _record_transitions(interior, error=OperationTimeoutError("not confirmed"))
+    await interior.set_arm_state("armed_away")
+    assert interior.state == AlarmControlPanelState.ARMED_AWAY
+    interior._client.refresh_alarm_status = AsyncMock(return_value=_status("N"))
+
+    await interior.async_manual_refresh()
+
+    assert interior.state == AlarmControlPanelState.ARMED_AWAY
+    assert main.coordinator.confirmed_proto_code == "N"
+    assert main.coordinator.confirmed_is_provisional is False
+
+
+async def test_refresh_during_a_command_leaves_the_state_to_the_command():
+    """An answer read while a command runs on the installation may predate
+    that command's result, so Refresh records and shows nothing then."""
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("D"))
+    alarm.coordinator.operation.begin("arm", [object()], "armed_home")
+    try:
+        await alarm.async_manual_refresh()
+    finally:
+        alarm.coordinator.operation.end()
+
+    assert alarm.coordinator.confirmed_proto_code == "T"
+    assert alarm.coordinator.confirmed_is_provisional is True
+    assert alarm.state == AlarmControlPanelState.ARMED_AWAY
+
+
+async def test_refresh_without_a_state_keeps_the_arm_unconfirmed():
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status(""))
+
+    await alarm.async_manual_refresh()
+
+    assert alarm.coordinator.confirmed_proto_code == "T"
+    assert alarm.coordinator.confirmed_is_provisional is True
+
+
 async def test_confirmed_arm_does_not_ask_the_panel_first():
     alarm = make_alarm()
     alarm.coordinator.record_confirmed_proto_code("D")

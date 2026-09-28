@@ -1041,6 +1041,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 alarm_status.protom_response,
                 self._installation.number,
             )
+            # As for a poll: an answer read while a command runs may predate
+            # that command's result.
+            if not self.coordinator.operation.running and is_proto_letter(
+                alarm_status.protom_response
+            ):
+                self._apply_panel_answer(alarm_status)
             self._set_refresh_failed(False)
             self.async_write_ha_state()
             self.async_schedule_update_ha_state(force_refresh=True)
@@ -1282,15 +1288,22 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             ) from err
         if not is_proto_letter(status.protom_response):
             raise VerisureOwaError("The panel did not report its state before arming")
-        self.coordinator.record_confirmed_proto_code(status.protom_response)
-        self._reconcile_provisional()
-        # Show the answer, then Arming again: a failed arm rolls back to the
-        # state saved by _force_state, which must be the answer, not the guess.
-        self._show_state_check_answer(status)
+        # Show the answer in place of what was shown before Arming, then Arming
+        # again: a failed arm rolls back to the state saved by _force_state,
+        # which must be the answer, not the guess.
+        self._state = self._last_state
+        self._apply_panel_answer(status)
         self._force_state(AlarmControlPanelState.ARMING)
 
+    def _apply_panel_answer(self, status: OperationStatus) -> None:
+        """Take the panel's answer to a status check as the installation's
+        confirmed state, and show it."""
+        self.coordinator.record_confirmed_proto_code(status.protom_response)
+        self._reconcile_provisional()
+        self._show_state_check_answer(status)
+
     def _show_state_check_answer(self, status: OperationStatus) -> None:
-        """Show the panel's answer to the status check made before an arm."""
+        """Show the panel's answer to a status check."""
         self.update_status_alarm(status)
 
     async def set_arm_state(
