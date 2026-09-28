@@ -10868,3 +10868,25 @@ async def test_arm_blocked_at_its_only_command_shows_the_previous_state():
 
     assert alarm._state == AlarmControlPanelState.DISARMED
     alarm.coordinator.async_request_refresh.assert_not_awaited()
+
+
+async def test_interior_arm_refused_on_an_unmodelled_answer_still_shows_armed():
+    """An Interior arm after an unconfirmed arm asks the panel, which answers
+    a state this integration does not model, so the arm is refused. The
+    Interior panel keeps showing armed, as a poll with that answer would,
+    not disarmed from the last poll."""
+    alarm = make_alarm(panel_cls=InteriorVerisureOwaAlarmPanel)
+    alarm.coordinator.alarm_state = PROTO_TO_ALARM_STATE["D"]  # last poll
+    _arm_timed_out(alarm)
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY  # the guess
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status("N"))
+    _record_transitions(alarm)
+
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base._notify"
+    ) as notify:
+        await alarm.set_arm_state("armed_away")
+
+    assert _sent(alarm) == []
+    assert notify.call_args[0][2] == "arm_failed"
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY

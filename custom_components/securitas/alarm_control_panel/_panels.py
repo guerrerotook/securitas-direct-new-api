@@ -349,6 +349,16 @@ class _AxisSubPanelMixin:
         )
         self._state = self._extract_state(joint)  # type: ignore[attr-defined]
 
+    def _show_state_check_answer(self, status: OperationStatus) -> None:
+        """Keep the display from before the arm when the answer is a code we
+        don't model, as a poll does: update_status_alarm's fallback (the last
+        poll, or all off) could show an armed axis as disarmed."""
+        if status.protom_response in PROTO_TO_ALARM_STATE:
+            super()._show_state_check_answer(status)  # type: ignore[misc]
+            return
+        self._store_operation_status_metadata(status)  # type: ignore[attr-defined]
+        self._state = self._last_state  # type: ignore[attr-defined]
+
     async def async_added_to_hass(self) -> None:  # type: ignore[override]
         """Sync the entity registry with the resolver-hydrated feature set.
 

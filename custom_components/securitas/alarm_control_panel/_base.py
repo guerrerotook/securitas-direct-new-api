@@ -1259,8 +1259,12 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._reconcile_provisional()
         # Show the answer, then Arming again: a failed arm rolls back to the
         # state saved by _force_state, which must be the answer, not the guess.
-        self.update_status_alarm(status)
+        self._show_state_check_answer(status)
         self._force_state(AlarmControlPanelState.ARMING)
+
+    def _show_state_check_answer(self, status: OperationStatus) -> None:
+        """Show the panel's answer to the status check made before an arm."""
+        self.update_status_alarm(status)
 
     async def set_arm_state(
         self,
