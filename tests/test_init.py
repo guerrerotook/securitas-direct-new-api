@@ -1,6 +1,7 @@
 """Tests for custom_components/verisure_owa/__init__.py."""
 
 import contextlib
+import hashlib
 from collections import Counter, OrderedDict
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -2458,6 +2459,7 @@ class TestLowerCaseEmailMigration:
             "Verisure has two entries for Home on the same account. Remove "
             "one of them in Settings → Devices & Services."
         ]
+        assert not any("example.com" in key for key in notifications)
 
     async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
         """An entry already holding the lower-case ID keeps it; the entry
@@ -2472,11 +2474,17 @@ class TestLowerCaseEmailMigration:
         assert holder.unique_id == "user@example.com_123456"
         assert mixed.unique_id == "User@Example.com_123456"
         assert mixed.data[CONF_USERNAME] == "user@example.com"
-        assert mock_notify.call_args.args[1:] == (
-            "duplicate_entry_found_user@example.com_123456",
-            "duplicate_entry_found",
-            {"installation": holder.title},
-        )
+        clash_id = hashlib.sha256(b"user@example.com_123456").hexdigest()[:12]
+        assert [c.args[1:] for c in mock_notify.call_args_list] == [
+            (
+                f"duplicate_entry_found_{clash_id}",
+                "duplicate_entry_found",
+                {"installation": entry.title},
+            )
+            for entry in (mixed, holder)
+        ]
+        # The ID goes into Home Assistant's event history and debug log.
+        assert "example.com" not in mock_notify.call_args.args[1]
 
 
 class TestCodeHashMigration:

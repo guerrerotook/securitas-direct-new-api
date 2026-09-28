@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import socket
@@ -447,9 +448,11 @@ def _migrate_lower_case_email(hass: HomeAssistant, entry: ConfigEntry) -> None:
             for other in hass.config_entries.async_entries(DOMAIN)
         ):
             # Both entries see the clash; one notification ID shows it once.
+            # Hashed: the ID is saved in the event history, the email must not be.
+            clash = hashlib.sha256(new_uid.encode()).hexdigest()[:12]
             _notify(
                 hass,
-                f"duplicate_entry_found_{new_uid}",
+                f"duplicate_entry_found_{clash}",
                 "duplicate_entry_found",
                 {"installation": entry.title},
             )
