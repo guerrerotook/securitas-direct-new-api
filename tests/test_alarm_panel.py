@@ -10890,3 +10890,26 @@ async def test_interior_arm_refused_on_an_unmodelled_answer_still_shows_armed():
     assert _sent(alarm) == []
     assert notify.call_args[0][2] == "arm_failed"
     assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+
+async def test_arms_pressed_on_two_panels_behind_a_disarm_both_run():
+    """Away on the main panel, then Home on the Interior panel, both pressed
+    while a disarm runs: each is the latest press on its own panel, so both
+    are sent, in the order pressed."""
+    main, interior, _ = _main_and_interior_panels()
+    main.coordinator.record_confirmed_proto_code("T")
+    gate, started = asyncio.Event(), asyncio.Event()
+    _record_transitions(main, gate=gate, started=started, hold="disarm")
+    _record_transitions(interior)
+
+    disarm = asyncio.create_task(main.async_alarm_disarm())
+    await started.wait()
+    away = asyncio.create_task(main.set_arm_state("armed_away"))
+    await asyncio.sleep(0)
+    home = asyncio.create_task(interior.set_arm_state("armed_home"))
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(disarm, away, home), timeout=2)
+
+    assert _sent(main) == ["DARM1", "ARM1"]
+    assert _sent(interior) == ["DARM1", "ARMDAY1"]  # planned from Away: after it
