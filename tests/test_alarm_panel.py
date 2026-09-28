@@ -704,9 +704,6 @@ def make_alarm(
         alarm.hass = hass
     # Apply the initial status to set default state (e.g. DISARMED)
     alarm.update_status_alarm(initial_status)
-    # Nothing confirmed yet: a test that sets _last_proto_code plans from it
-    # until a command result is recorded.
-    coordinator.confirmed_proto_code = None
     # Keep the patches alive on the instance for later calls in tests
     alarm.async_schedule_update_ha_state = MagicMock()
     alarm.async_write_ha_state = MagicMock()
@@ -9204,6 +9201,20 @@ def _status(proto: str) -> OperationStatus:
     )
 
 
+def test_showing_an_operation_result_does_not_record_it_as_confirmed():
+    """Only a panel answer records the installation's state; showing a
+    result on the entity (which also happens for optimistic results) does
+    not."""
+    alarm = make_alarm()
+    alarm.coordinator.record_confirmed_proto_code("D")
+    alarm.coordinator.record_confirmed_proto_code.reset_mock()
+
+    alarm.update_status_alarm(_status("T"))
+
+    alarm.coordinator.record_confirmed_proto_code.assert_not_called()
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY
+
+
 # The state each arm command leaves the panel in; every disarm command leaves 'D'.
 _ARM_COMMAND_ANSWERS = {
     "ARM1": "T",
@@ -9249,6 +9260,7 @@ def _record_transitions(
             result = _status("D")
         else:
             result = _status(answer or _ARM_COMMAND_ANSWERS[command])
+        alarm.coordinator.record_confirmed_proto_code(result.protom_response)
         alarm._last_arm_result = result
         return result
 
@@ -9445,6 +9457,7 @@ async def test_disarm_pressed_during_partial_disarm_runs_after_it():
     once the partial disarm finishes."""
     panel = make_alarm()
     panel.update_status_alarm(_status("T"))
+    panel.coordinator.record_confirmed_proto_code("T")
     partial_started = asyncio.Event()
     release_partial = asyncio.Event()
     targets, _, disarmed = _record_transitions(
@@ -9479,6 +9492,7 @@ async def test_partial_disarm_unexpected_exit_rolls_back_and_frees_panels(error)
     setup_alarm_entry_data(panel, sub_panels=[interior])
     panel._client.config_entry = MagicMock(entry_id="entry-id-1")
     panel.update_status_alarm(_status("T"))
+    panel.coordinator.record_confirmed_proto_code("T")
     panel._state = AlarmControlPanelState.ARMED_AWAY
     interior._state = AlarmControlPanelState.ARMED_AWAY
     panel._execute_step = AsyncMock(side_effect=error)
@@ -9512,6 +9526,7 @@ async def test_partial_disarm_waits_for_a_running_arm_and_queued_disarm():
     disarm finds nothing left to do. The alarm ends disarmed."""
     alarm = make_alarm()
     alarm.update_status_alarm(_status("Q"))  # armed night
+    alarm.coordinator.record_confirmed_proto_code("Q")
     _coordinator_follows_panel(alarm)
     arm_gate = asyncio.Event()
     arm_started = asyncio.Event()
@@ -9598,6 +9613,7 @@ async def test_partial_disarm_during_full_disarm_keeps_second_disarm_ignored():
             await disarm_gate.wait()
         await asyncio.sleep(0)
         in_flight -= 1
+        alarm.coordinator.record_confirmed_proto_code("D")
         return _status("D")
 
     alarm._execute_step = AsyncMock(side_effect=step)
@@ -9624,6 +9640,7 @@ async def test_partial_disarm_gives_up_behind_a_stuck_operation():
 
     alarm = make_alarm()
     alarm.update_status_alarm(_status("T"))
+    alarm.coordinator.record_confirmed_proto_code("T")
     alarm.client.config[CONF_OPERATION_POLL_TIMEOUT] = 0.001
     _record_transitions(alarm)
     alarm.coordinator.operation.begin("arm", [alarm])
@@ -9936,6 +9953,7 @@ async def test_disarm_waits_for_a_disarm_running_on_another_panel():
     no-op; one running on a sibling panel is waited for instead."""
     main, interior, _ = _main_and_interior_panels()
     main.update_status_alarm(_status("T"))
+    main.coordinator.record_confirmed_proto_code("T")
     interior._state = AlarmControlPanelState.ARMED_AWAY
     gate = asyncio.Event()
     started = asyncio.Event()
@@ -9965,9 +9983,17 @@ async def test_disarm_retry_records_the_state_the_panel_reported():
     confirmed state is what the panel reported, not the stale plan."""
     alarm = make_alarm(has_peri=True)
     alarm.update_status_alarm(_status("T"))
-    alarm._execute_step = AsyncMock(
-        side_effect=[_status("E"), VerisureOwaError("Disarm command failed")]
-    )
+    alarm.coordinator.record_confirmed_proto_code("T")
+    answers = [_status("E"), VerisureOwaError("Disarm command failed")]
+
+    async def step(_step, **_force_params):
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        alarm.coordinator.record_confirmed_proto_code(answer.protom_response)
+        return answer
+
+    alarm._execute_step = AsyncMock(side_effect=step)
 
     await alarm.async_alarm_disarm()
 
@@ -10100,6 +10126,7 @@ async def test_timed_out_arm_to_a_state_with_no_code_keeps_the_confirmed_code():
     annex = make_alarm(has_peri=True, panel_cls=AnnexVerisureOwaAlarmPanel)
     annex.coordinator = main.coordinator
     main.update_status_alarm(_status("A"))  # armed from the main panel
+    main.coordinator.record_confirmed_proto_code("A")
     assert annex._last_proto_code == "D"  # no poll has reached the Annex panel
     _record_transitions(annex, error=OperationTimeoutError("not confirmed"))
 
@@ -10143,6 +10170,7 @@ async def test_interior_disarm_again_after_one_that_timed_out_sends_it():
     again, keeping the perimeter armed."""
     main, interior, _ = _main_and_interior_panels(has_peri=True)
     main.update_status_alarm(_status("A"))  # interior total + perimeter
+    main.coordinator.record_confirmed_proto_code("A")
     _record_transitions(
         interior, hold="disarm", error=OperationTimeoutError("not confirmed")
     )
@@ -10180,6 +10208,7 @@ async def test_interior_disarm_after_a_perimeter_arm_timed_out_sends_nothing():
     main, interior, _ = _main_and_interior_panels(has_peri=True)
     perimeter = _sub_panel_sharing(main, PerimeterVerisureOwaAlarmPanel)
     main.update_status_alarm(_status("D"))
+    main.coordinator.record_confirmed_proto_code("D")
     _record_transitions(perimeter, error=OperationTimeoutError("not confirmed"))
     await perimeter.set_arm_state("armed_away")
     assert _sent(perimeter) == ["PERI1"]
@@ -10200,6 +10229,7 @@ async def test_interior_disarm_after_an_annex_arm_timed_out_sends_nothing():
     annex = _sub_panel_sharing(main, AnnexVerisureOwaAlarmPanel)
     interior = _sub_panel_sharing(main, InteriorVerisureOwaAlarmPanel)
     main.update_status_alarm(_status("D"))
+    main.coordinator.record_confirmed_proto_code("D")
     _record_transitions(annex, error=OperationTimeoutError("not confirmed"))
     await annex.set_arm_state("armed_away")
     assert _sent(annex) == ["ARMANNEX1"]
@@ -10219,6 +10249,7 @@ async def test_interior_disarm_after_an_arm_and_a_disarm_both_timed_out_sends_it
     the perimeter armed."""
     main, interior, _ = _main_and_interior_panels(has_peri=True)
     main.update_status_alarm(_status("E"))  # perimeter only
+    main.coordinator.record_confirmed_proto_code("E")
     timeout = OperationTimeoutError("not confirmed")
     _record_transitions(interior, error=timeout)
     await interior.set_arm_state("armed_away")
@@ -10239,6 +10270,7 @@ async def test_partial_disarm_that_fails_as_it_starts_frees_every_panel():
     so a later disarm does not wait for it."""
     main, interior, _ = _main_and_interior_panels()
     main.update_status_alarm(_status("T"))
+    main.coordinator.record_confirmed_proto_code("T")
     main._force_state = MagicMock(side_effect=RuntimeError("state write failed"))
 
     with pytest.raises(RuntimeError, match="state write failed"):
@@ -10253,12 +10285,14 @@ async def test_partial_disarm_whose_final_state_write_fails_frees_every_panel():
     every panel it touched free."""
     main, interior, _ = _main_and_interior_panels()
     main.update_status_alarm(_status("T"))
+    main.coordinator.record_confirmed_proto_code("T")
     _record_transitions(main)
 
     async def disarm_then_break_state_writes(step, **_kwargs):
         main.async_write_ha_state = MagicMock(
             side_effect=RuntimeError("state write failed")
         )
+        main.coordinator.record_confirmed_proto_code("D")
         return _status("D")
 
     main._execute_step = AsyncMock(side_effect=disarm_then_break_state_writes)
@@ -10394,6 +10428,7 @@ async def test_disarm_waiting_behind_an_arm_cancelled_at_the_panel_still_disarms
     the disarm rather than trusting the old disarmed state."""
     panel = make_alarm()
     panel.update_status_alarm(_status("D"))
+    panel.coordinator.record_confirmed_proto_code("D")
     hub = _route_through_hub(panel)
     accepted, never = asyncio.Event(), asyncio.Event()
 
@@ -10423,6 +10458,7 @@ async def test_arm_cancelled_while_queued_leaves_the_confirmed_state_trusted():
 
     panel = make_alarm()
     panel.update_status_alarm(_status("D"))
+    panel.coordinator.record_confirmed_proto_code("D")
     hub = _route_through_hub(panel)
     hub.client.arm = AsyncMock(return_value=_status("T"))
     release = asyncio.Event()
@@ -10448,6 +10484,7 @@ async def test_arm_cancelled_before_its_command_is_sent_leaves_the_state_trusted
     command is handed to the hub leaves the confirmed state trusted."""
     panel = make_alarm()
     panel.update_status_alarm(_status("D"))
+    panel.coordinator.record_confirmed_proto_code("D")
     waiting, never = asyncio.Event(), asyncio.Event()
 
     async def stuck_before_sending(*_args, **_kwargs):
@@ -10495,6 +10532,7 @@ async def test_disarm_cancelled_between_its_commands_keeps_the_first_ones_result
 
     main, interior, _ = _main_and_interior_panels(has_peri=True)
     main.update_status_alarm(_status("A"))  # interior total + perimeter
+    main.coordinator.record_confirmed_proto_code("A")
     hub = _route_through_hub(interior)
     _answer_like_a_panel(hub)
     release = asyncio.Event()
@@ -10539,6 +10577,7 @@ async def test_annex_disarm_after_an_arm_to_an_unmodelled_state_timed_out_sends_
     main.coordinator.has_annex = True
     annex = _sub_panel_sharing(main, AnnexVerisureOwaAlarmPanel)
     main.update_status_alarm(_status("E"))  # perimeter only
+    main.coordinator.record_confirmed_proto_code("E")
     _record_transitions(annex, error=OperationTimeoutError("not confirmed"))
     await annex.set_arm_state("armed_away")
     assert _sent(annex) == ["ARMANNEX1"]
@@ -10556,6 +10595,7 @@ async def test_interior_disarm_after_an_arm_cancelled_at_the_panel_sends_it():
     Interior Disarm disarms it and re-arms the perimeter."""
     main, interior, _ = _main_and_interior_panels(has_peri=True)
     main.update_status_alarm(_status("E"))  # perimeter only
+    main.coordinator.record_confirmed_proto_code("E")
     hub = _route_through_hub(interior)
     _answer_like_a_panel(hub)
     accepted, never = asyncio.Event(), asyncio.Event()

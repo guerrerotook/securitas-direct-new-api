@@ -129,9 +129,7 @@ def _modelled_state(proto_code: str | None) -> AlarmState | None:
 
 
 class _NoCommandStatus(OperationStatus):
-    """The answer to a transition that sent no command. It is shown like any
-    result but, not being a panel response, never recorded as the
-    installation's confirmed state."""
+    """The answer to a transition that sent no command."""
 
 
 # How long an auto-force-arm "suppress the next arm-exception prompt" request
@@ -536,8 +534,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             return False
         if is_proto_letter(status.protom_response):
             self._last_proto_code = status.protom_response
-            if not isinstance(status, _NoCommandStatus):
-                self.coordinator.record_confirmed_proto_code(status.protom_response)
         return True
 
     def update_status_alarm(self, status: OperationStatus | None = None) -> None:
@@ -687,7 +683,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     proto_code = actual_proto
                     current = actual_state
                     self._last_proto_code = actual_proto
-                    self.coordinator.record_confirmed_proto_code(actual_proto)
                     continue
 
             # No proto code to compare, or second attempt — accept as-is.
@@ -1138,7 +1133,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             # The optimistic code falls back to an earlier one, so the state
             # the command may have reached is recorded as unknown.
             earlier |= {None}
-        self.update_status_alarm(self._optimistic_status(target))
+        optimistic = self._optimistic_status(target)
+        self.update_status_alarm(optimistic)
+        self.coordinator.record_confirmed_proto_code(optimistic.protom_response)
         self.coordinator.mark_confirmed_provisional(earlier)
         _LOGGER.warning(
             "%s not confirmed within timeout for %s; state provisional, "
