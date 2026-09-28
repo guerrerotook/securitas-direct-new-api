@@ -387,13 +387,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         return _MAX_POLLS_PER_OPERATION * poll_timeout
 
     async def _wait_until_idle(
-        self, *, duplicate_of: OperationKind | None = None
+        self, *, duplicate_of: OperationKind | None = None, mode: str | None = None
     ) -> bool:
         """Wait until the installation runs no operation.
 
         Returns False instead, at once, when the running operation is
-        ``duplicate_of`` on this same panel: a repeated press. Raises the
-        translated ``operation_in_progress`` error after
+        ``duplicate_of`` for ``mode`` on this same panel: a repeated press.
+        Raises the translated ``operation_in_progress`` error after
         _operation_wait_limit().
         """
         operation = self._operation
@@ -404,6 +404,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     if (
                         duplicate_of is not None
                         and operation.kind == duplicate_of
+                        and operation.mode == mode
                         and self in operation.panels
                     ):
                         return False
@@ -1259,10 +1260,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # running operation plus the arm transition and state writes below
         # take longer than that.
         user_context = self._context
-        if not await self._wait_until_idle(duplicate_of="arm"):
+        if not await self._wait_until_idle(duplicate_of="arm", mode=mode):
             _LOGGER.debug(
-                "Arm ignored for %s: an arm is already in progress",
+                "Arm ignored for %s: an arm to %s is already in progress",
                 self.installation.number,
+                mode,
             )
             return
         self._last_arm_result = OperationStatus()
@@ -1277,7 +1279,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # (pyright reportPossiblyUnbound); it is always set before the awaited
         # transition that can raise OperationTimeoutError.
         target: AlarmState | None = None
-        self._operation.begin("arm", [self])
+        self._operation.begin("arm", [self], mode)
         try:
             self._force_state(AlarmControlPanelState.ARMING)
             target = self._resolve_target_state(mode)

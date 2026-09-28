@@ -231,24 +231,29 @@ class InstallationOperation:
         self._idle.set()
         self.kind: OperationKind | None = None
         self.panels: frozenset[object] = frozenset()
+        self.mode: str | None = None
 
     @property
     def running(self) -> bool:
         """True from ``begin`` until ``end``."""
         return not self._idle.is_set()
 
-    def begin(self, kind: OperationKind, panels: Iterable[object]) -> None:
-        """Mark ``kind`` as running on ``panels``."""
+    def begin(
+        self, kind: OperationKind, panels: Iterable[object], mode: str | None = None
+    ) -> None:
+        """Mark ``kind`` as running on ``panels``; ``mode`` is an arm's mode."""
         # Callers check `running` and call begin with no await in between.
         assert not self.running, "operation already running"
         self.kind = kind
         self.panels = frozenset(panels)
+        self.mode = mode
         self._idle.clear()
 
     def end(self) -> None:
         """Mark the installation idle, waking every waiter."""
         self.kind = None
         self.panels = frozenset()
+        self.mode = None
         self._idle.set()
 
     async def wait_idle(self) -> None:
