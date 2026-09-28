@@ -1372,6 +1372,19 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             try:
                 result = await self._execute_transition(target, **force_params)
             except _UnrecognisedStateError as err:
+                _LOGGER.warning(
+                    "Arm refused for %s: the alarm reports state code '%s', "
+                    "which this integration doesn't recognise",
+                    self.installation.number,
+                    err.proto_code,
+                )
+                await inject_ha_event(
+                    self.hass,
+                    self._installation,
+                    category=ActivityCategory.ARMING_FAILED,
+                    alias=f"Arm failed: {err}",
+                    context=user_context,
+                )
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
                     translation_key="arm_refused_unknown_state",

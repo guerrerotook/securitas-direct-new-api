@@ -341,7 +341,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         letter says nothing about the state and leaves the issue as it is."""
         if not is_proto_letter(proto_code):
             return
-        issue_id = f"unknown_alarm_state_{self._installation.number}"
+        issue_id = self._unrecognised_issue_id
         # Always ask the registry rather than remember what this coordinator
         # raised: a reload builds a new coordinator, but the issue stays.
         if proto_code in PROTO_TO_ALARM_STATE:
@@ -361,6 +361,16 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
                 "url": f"{PROJECT_URL}/issues",
             },
         )
+
+    async def async_shutdown(self) -> None:
+        """Stop polling and take down this installation's unrecognised-state
+        Repairs issue: once the entry is unloaded nothing clears it."""
+        await super().async_shutdown()
+        ir.async_delete_issue(self.hass, DOMAIN, self._unrecognised_issue_id)
+
+    @property
+    def _unrecognised_issue_id(self) -> str:
+        return f"unknown_alarm_state_{self._installation.number}"
 
     def mark_confirmed_provisional(self, earlier: Iterable[str | None]) -> None:
         """Flag the recorded code as unconfirmed until a real command result,

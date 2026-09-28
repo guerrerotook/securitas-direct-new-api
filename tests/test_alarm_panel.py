@@ -5424,17 +5424,27 @@ class TestExecuteTransitionRefusesUnknownState:
         assert excinfo.value.translation_key == "arm_refused_unknown_state"
         assert (excinfo.value.translation_placeholders or {})["code"] == "Z"
 
-    async def test_arm_refused_on_unknown_state_is_shown_on_screen_only(self):
+    async def test_arm_refused_on_unknown_state_is_shown_on_screen_and_logged(
+        self,
+    ):
         """Arm pressed while the alarm reports a code this integration doesn't
-        model: a translated error for the person pressing it, nothing sent,
-        no Arming failed notification or activity entry, the display put
-        back and the installation free for the next command."""
+        model: a translated error for the person pressing it and an Arm failed
+        entry in the activity log attributed to them, but nothing sent, no
+        Arming failed notification, the display put back and the installation
+        free for the next command."""
+        from homeassistant.core import Context
+
         from custom_components.securitas import DOMAIN
+        from custom_components.securitas.verisure_owa_api.models import (
+            ActivityCategory,
+        )
 
         alarm = make_alarm()
         alarm.coordinator.record_confirmed_proto_code("N")
         alarm._state = AlarmControlPanelState.ARMED_CUSTOM_BYPASS
         alarm.client.arm_alarm = AsyncMock()
+        user_context = Context(user_id="user-1")
+        alarm._context = user_context
 
         with (
             patch(
@@ -5454,9 +5464,14 @@ class TestExecuteTransitionRefusesUnknownState:
             "code": "N",
             "installation": "Home",
         }
+        mock_inject.assert_awaited_once()
+        kwargs = mock_inject.await_args.kwargs
+        assert kwargs["category"] == ActivityCategory.ARMING_FAILED
+        assert kwargs["alias"].startswith("Arm failed: ")
+        assert "'N'" in kwargs["alias"]
+        assert kwargs["context"] is user_context
         alarm.client.arm_alarm.assert_not_called()
         mock_notify.assert_not_called()
-        mock_inject.assert_not_awaited()
         assert alarm._state == AlarmControlPanelState.ARMED_CUSTOM_BYPASS
         assert alarm.coordinator.operation.running is False
         assert alarm._force_context is None

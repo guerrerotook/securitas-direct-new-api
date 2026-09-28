@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -43,6 +44,7 @@ from .mock_graphql import (
     graphql_check_alarm,
     graphql_disarm,
     graphql_disarm_status,
+    graphql_general_status,
     graphql_installations,
     graphql_login,
     graphql_login_error,
@@ -946,6 +948,43 @@ async def test_the_entry_set_up_first_takes_the_installations_entities(
             assert _duplicate_id_errors(caplog) == entity_count
         finally:
             for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("how", ["unload", "remove"])
+async def test_unloading_the_entry_clears_its_unknown_state_notice(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    how: str,
+):
+    """The Repairs notice for an unrecognised alarm state belongs to the
+    entry whose coordinator raised it: unloading or removing the entry
+    takes it away rather than leaving it until Home Assistant restarts."""
+    queue_standard_setup(mock_server, numinst=_INSTALLATION)
+    mock_server.set_default_response("Status", graphql_general_status(status="N"))
+    assert await async_setup_component(hass, DOMAIN, {})
+    entry = _add_entry_for(hass, "user@example.com")
+    issue_id = f"unknown_alarm_state_{_INSTALLATION}"
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [entry])
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+            if how == "unload":
+                assert await hass.config_entries.async_unload(entry.entry_id)
+            else:
+                await hass.config_entries.async_remove(entry.entry_id)
+            await hass.async_block_till_done()
+
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+        finally:
+            if hass.config_entries.async_get_entry(entry.entry_id) is not None:
                 await hass.config_entries.async_unload(entry.entry_id)
             await hass.async_block_till_done()
 
