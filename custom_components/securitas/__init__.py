@@ -419,11 +419,16 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
+def _unique_id_for(username: str, installation: str) -> str:
+    """The config entry's unique ID for one installation on one account."""
+    return f"{username}_{installation}"
+
+
 def _entry_unique_id(data: Mapping[str, Any], fallback: str | None) -> str | None:
     username = data.get(CONF_USERNAME)
     installation = data.get(CONF_INSTALLATION)
     if username and installation:
-        return f"{username.lower()}_{installation}"
+        return _unique_id_for(username.lower(), installation)
     return fallback.lower() if fallback else None
 
 

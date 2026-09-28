@@ -69,6 +69,7 @@ from . import (
     _resolve_flow_capabilities,
     _store_installations_cache,
     _take_session_hold,
+    _unique_id_for,
     generate_uuid,
 )
 from .api_queue import ApiQueue
@@ -512,7 +513,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Register a new entry, persisting the refresh token (not the password)."""
         username = self.config[CONF_USERNAME]
-        unique_id = f"{username}_{installation.number}"
+        unique_id = _unique_id_for(username, installation.number)
         await self.async_set_unique_id(unique_id)
         # HA 2026.6: opt out of implicit reload to avoid deprecated double-reload
         # with the entry-update listener registered in __init__.async_setup_entry.
@@ -828,7 +829,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         new_data[CONF_REFRESH_TOKEN] = refresh_token
         unique_id: str | UndefinedType = UNDEFINED
         if installation and switched:
-            new_uid = f"{username}_{installation}"
+            new_uid = _unique_id_for(username, installation)
             # Home Assistant reports taking another entry's ID as an
             # integration bug.
             if (
