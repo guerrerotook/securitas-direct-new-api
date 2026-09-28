@@ -4448,7 +4448,7 @@ async def test_the_same_email_in_other_capitals_is_not_a_switch(hass):
     reauth_hub.client.list_installations.assert_not_awaited()
 
 
-async def test_the_same_email_in_other_capitals_keeps_the_entrys_spelling(hass):
+async def test_the_same_email_in_other_capitals_clears_the_crash_count(hass):
     """The crash count is kept under the lower-case email, so a reauth
     typing it in other capitals stores it in lower case and clears its
     count: the next crash waits to retry."""
@@ -4530,6 +4530,38 @@ async def test_reauth_stores_the_email_in_lower_case(hass):
     reauth_hub.client.list_installations.assert_not_awaited()
     assert entry.data[CONF_USERNAME] == "user@example.com"
     assert entry.unique_id == "user@example.com_111"
+
+
+async def test_reauth_lower_cases_an_email_saved_in_capitals(hass):
+    """An entry saved in capitals, re-entered with the same capitals, is the
+    same account: no installation check, and it is stored in lower case."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="Test@Example.com_111",
+        data={
+            **make_config_entry_data(username="Test@Example.com"),
+            CONF_INSTALLATION: "111",
+        },
+        version=FlowHandler.VERSION,
+        minor_version=FlowHandler.MINOR_VERSION,
+    )
+    entry.add_to_hass(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    result = await _submit_reauth(
+        hass,
+        entry,
+        "Test@Example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    reauth_hub.client.list_installations.assert_not_awaited()
+    assert entry.data[CONF_USERNAME] == "test@example.com"
 
 
 @pytest.mark.parametrize("id_taken", [False, True])
