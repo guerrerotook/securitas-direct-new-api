@@ -460,21 +460,41 @@ The recorded code becomes unconfirmed (`mark_confirmed_provisional()`) after a c
 **Disarm flow** (`async_alarm_disarm`):
 ```
 1. _check_code(code) — raises ServiceValidationError if wrong
-2. _wait_until_idle(duplicate_of="disarm") — a full disarm already running on
-   this panel? return; then operation.begin("disarm", [self])
-3. _force_state(DISARMING)
-4. _execute_transition(AlarmState(OFF, OFF)):
-   a. resolver.resolve(current, disarmed) returns CommandStep with ordered
-      alternatives based on current state:
-      - Both armed? → [DARM1DARMPERI, DARM1]
+2. _wait_until_idle(duplicate_of="disarm") — waits until no panel of the
+   installation runs a command; returns at once, sending nothing, when a
+   disarm is already running on this same panel (checked each time the wait
+   wakes, so two disarms queued behind one command send one)
+3. operation.begin("disarm", [self])
+4. Dismiss any pending force-arm context on this panel and its siblings
+5. _force_state(DISARMING)
+6. target = _resolve_target_state("disarmed"): all axes off on the Main
+   panel; a sub-panel turns off its own axis and keeps the others as the
+   installation's planning state has them (when that is unreadable, as the
+   last poll has them, or all off)
+7. _execute_transition(target):
+   a. Planning state (_planning_proto_code()) unreadable (never polled, or an
+      unmodelled code like N), or the confirmed state provisional, and the
+      target is all off? → _disarm_circuits_unconditional(_full_disarm_circuits()):
+      resolver.resolve_disarm_only() emits only DARM commands (DARM1 /
+      DARM1DARMPERI / DARMANNEX1) for every axis the Main panel owns, or just
+      a sub-panel's own axis, whatever the current state (#550)
+   b. Otherwise, provisional? a sub-panel plans from _unconfirmed_planning_state():
+      its axis counts as armed when any possible state has it armed or is
+      unknown, so a disarm that timed out is sent again
+   c. resolver.resolve(current, target) returns steps with ordered
+      alternatives based on what is armed:
+      - Interior and perimeter? → [DARM1DARMPERI, DARM1]
       - Only perimeter? → [DARMPERI, DARM1]
       - Only interior? → [DARM1]
-   b. _execute_step() tries alternatives, marks failed ones unsupported
-   c. 409 errors re-raised (server busy, not unsupported)
-   d. Error on all attempts? → _notify_error() with short message, restore
-      _last_state
-5. update_status_alarm() with the response
-6. finally: operation.end()
+      - Annex armed? → DARMANNEX1 appended
+      - Nothing armed? → no steps, nothing sent (_NoCommandStatus)
+   d. _execute_step() tries alternatives, marks failed ones unsupported;
+      409 errors re-raised (server busy, not unsupported)
+   e. Answer differs from the target? replan once from the answer
+8. Success → update_status_alarm(result), coordinator refresh, activity event
+   Timeout → _handle_operation_timeout(): show the target, state provisional
+   Error → restore _last_state, _handle_arm_disarm_error() notifies
+9. finally: operation.end()
 ```
 
 **Arming exception flow** (open sensors blocking arm):
