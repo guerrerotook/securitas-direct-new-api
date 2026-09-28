@@ -385,7 +385,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         return self in self._operation.panels
 
     def _operation_wait_limit(self) -> float:
-        """Seconds to wait for a running operation before treating the running operation as stuck."""
+        """Seconds to wait for a running operation before treating it as stuck."""
         poll_timeout = float(
             self._client.config.get(
                 CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
@@ -1313,8 +1313,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # running operation plus the arm transition and state writes below
         # take longer than that.
         user_context = self._context
-        # Checked once, at press time, before the press takes a number: an
-        # ignored repeat must not cancel an arm waiting on this panel. A
+        # Checked at press time (again here for direct callers), before the
+        # press takes a number: an ignored repeat must not cancel an arm waiting on this panel. A
         # force-arm is never a repeat: it may arrive while the arm it
         # completes is still finishing, and then waits for it.
         if not force_arming_remote_id and self._ignores_repeat_arm(mode):
@@ -1399,10 +1399,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
-            partly_armed = self._show_last_arm_result()
+            answered = self._show_last_arm_result()
             self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
-            if partly_armed:
+            if answered:
                 await self.coordinator.async_request_refresh()
             # Surface the rejection in the activity timeline as well — the
             # polled record (~60 s later) will be a 5802; this gives the

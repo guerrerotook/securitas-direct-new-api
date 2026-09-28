@@ -91,8 +91,9 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
     async def execute_partial_disarm(self, circuits: list[str]) -> bool | None:
         """Disarm those of ``circuits`` that are armed, leaving others unchanged.
 
-        Waits first for any operation already running on any panel of the
-        installation, then judges what is armed from the installation's latest
+        Returns None at once when ``circuits`` is empty; otherwise waits first
+        for any operation already running on any panel of the installation,
+        then judges what is armed from the installation's latest
         known state (see ``_confirmed_alarm_state``).
 
         Returns:
