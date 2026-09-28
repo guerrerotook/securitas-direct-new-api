@@ -440,6 +440,39 @@ class TestAlarmCoordinator:
         assert self._unknown_state_issue(hass) is None
 
     @pytest.mark.asyncio
+    async def test_shutdown_keeps_the_issue_while_another_entry_polls_the_installation(
+        self, hass: HomeAssistant
+    ):
+        """An installation added twice has an alarm coordinator per entry but
+        one issue. Unloading one entry (its data is gone from hass.data by
+        the time its coordinators shut down) leaves the issue to the other;
+        unloading the last takes it away. Another installation's coordinator
+        does not keep it."""
+        client = _make_client()
+        installation = _make_installation()
+        older = self._make_coordinator(hass, client, _make_queue(), installation)
+        newer = self._make_coordinator(hass, client, _make_queue(), installation)
+        elsewhere = self._make_coordinator(
+            hass, client, _make_queue(), make_installation(number="654321")
+        )
+        hass.data[DOMAIN] = {
+            "older": {"alarm_coordinator": older},
+            "newer": {"alarm_coordinator": newer},
+            "elsewhere": {"alarm_coordinator": elsewhere},
+            "sessions": {},
+        }
+        newer.record_confirmed_proto_code("N")
+        assert self._unknown_state_issue(hass) is not None
+
+        hass.data[DOMAIN].pop("newer")
+        await newer.async_shutdown()
+        assert self._unknown_state_issue(hass) is not None
+
+        hass.data[DOMAIN].pop("older")
+        await older.async_shutdown()
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("code", ["X", "E", "D"])
     async def test_recognised_code_raises_no_repairs_issue(
         self, hass: HomeAssistant, code: str

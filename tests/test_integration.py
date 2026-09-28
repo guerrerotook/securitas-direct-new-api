@@ -959,9 +959,9 @@ async def test_unloading_the_entry_clears_its_unknown_state_notice(
     enable_custom_integrations,
     how: str,
 ):
-    """The Repairs notice for an unrecognised alarm state belongs to the
-    entry whose coordinator raised it: unloading or removing the entry
-    takes it away rather than leaving it until Home Assistant restarts."""
+    """The Repairs notice for an unrecognised alarm state lasts only while an
+    entry polls the installation: unloading or removing its only entry takes
+    it away rather than leaving it until Home Assistant restarts."""
     queue_standard_setup(mock_server, numinst=_INSTALLATION)
     mock_server.set_default_response("Status", graphql_general_status(status="N"))
     assert await async_setup_component(hass, DOMAIN, {})
@@ -985,6 +985,48 @@ async def test_unloading_the_entry_clears_its_unknown_state_notice(
             assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
         finally:
             if hass.config_entries.async_get_entry(entry.entry_id) is not None:
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("first_unloaded", ["older", "newer"])
+async def test_unloading_one_of_two_entries_keeps_the_unknown_state_notice(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    first_unloaded: str,
+):
+    """An installation added twice has one unknown-state notice, which the
+    entry still loaded keeps showing when the other is unloaded; unloading
+    that one too takes it away."""
+    _queue_installation_with_a_camera(mock_server)
+    mock_server.set_default_response("Status", graphql_general_status(status="N"))
+    assert await async_setup_component(hass, DOMAIN, {})
+    entries = {
+        "older": _add_entry_for(hass, "User@Example.com"),
+        "newer": _add_entry_for(hass, "user@example.com"),
+    }
+    first = entries.pop(first_unloaded)
+    (second,) = entries.values()
+    issue_id = f"unknown_alarm_state_{_INSTALLATION}"
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [first, second])
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+            assert await hass.config_entries.async_unload(first.entry_id)
+            await hass.async_block_till_done()
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+            assert await hass.config_entries.async_unload(second.entry_id)
+            await hass.async_block_till_done()
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+        finally:
+            for entry in (first, second):
                 await hass.config_entries.async_unload(entry.entry_id)
             await hass.async_block_till_done()
 

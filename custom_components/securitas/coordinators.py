@@ -370,9 +370,26 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
 
     async def async_shutdown(self) -> None:
         """Stop polling and take down this installation's unrecognised-state
-        Repairs issue: once the entry is unloaded nothing clears it."""
+        Repairs issue, unless another entry for the installation still polls
+        it: once none does, nothing clears it."""
         await super().async_shutdown()
-        ir.async_delete_issue(self.hass, DOMAIN, self._unrecognised_issue_id)
+        if not self._installation_polled_elsewhere():
+            ir.async_delete_issue(self.hass, DOMAIN, self._unrecognised_issue_id)
+
+    def _installation_polled_elsewhere(self) -> bool:
+        """True when another loaded entry has an alarm coordinator for this
+        installation (it was added twice)."""
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            if not isinstance(entry_data, dict):
+                continue
+            other = entry_data.get("alarm_coordinator")
+            if (
+                isinstance(other, AlarmCoordinator)
+                and other is not self
+                and other._installation.number == self._installation.number
+            ):
+                return True
+        return False
 
     @property
     def _unrecognised_issue_id(self) -> str:
