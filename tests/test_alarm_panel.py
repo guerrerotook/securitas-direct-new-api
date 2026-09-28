@@ -7768,7 +7768,7 @@ class TestExecutePartialDisarm:
         panel = make_alarm()
         panel._execute_transition = AsyncMock()
         ok = await panel.execute_partial_disarm([])
-        assert ok is True
+        assert ok is None
         panel._execute_transition.assert_not_awaited()
 
     async def test_unknown_state_disarms_requested_circuit_unconditionally(self):
@@ -9590,7 +9590,7 @@ async def test_partial_disarm_waits_for_a_running_arm_and_queued_disarm():
     assert targets == [armed_away, disarmed]
     # Night to away is disarm-then-arm; then the user's disarm.
     assert _sent(alarm) == ["DARM1", "ARM1", "DARM1"]
-    assert partial_ok is True
+    assert partial_ok is None
     assert alarm._state == AlarmControlPanelState.DISARMED
 
 
@@ -10361,6 +10361,28 @@ async def test_partial_disarm_whose_final_state_write_fails_frees_every_panel():
 
     assert main._operation_in_progress is False
     assert interior._operation_in_progress is False
+
+
+async def test_partial_disarm_with_nothing_armed_reports_nothing_to_do():
+    alarm = make_alarm()
+    alarm.coordinator.record_confirmed_proto_code("D")
+    _record_transitions(alarm)
+
+    assert await alarm.execute_partial_disarm(["interior"]) is None
+    assert _sent(alarm) == []
+
+
+async def test_partial_disarm_only_touches_the_armed_circuits():
+    """Interior and perimeter configured, only the perimeter armed: the
+    Interior sub-panel is not shown as disarming."""
+    main, interior, _ = _main_and_interior_panels(has_peri=True)
+    main.coordinator.record_confirmed_proto_code("E")  # perimeter only
+    _record_transitions(main)
+    shown = []
+    interior._force_state = MagicMock(side_effect=shown.append)
+
+    assert await main.execute_partial_disarm(["interior", "perimeter"]) is True
+    assert shown == []
 
 
 async def test_perimeter_arm_waits_for_the_locks_interior_partial_disarm():

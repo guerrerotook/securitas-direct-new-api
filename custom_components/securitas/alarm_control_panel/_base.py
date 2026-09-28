@@ -189,6 +189,18 @@ def build_partial_disarm_target(current: AlarmState, circuits: list[str]) -> Ala
     )
 
 
+def armed_circuits(state: AlarmState) -> set[str]:
+    """Return the set of circuit labels currently armed (mode != OFF)."""
+    armed: set[str] = set()
+    if state.interior != InteriorMode.OFF:
+        armed.add(CIRCUIT_INTERIOR)
+    if state.perimeter != PerimeterMode.OFF:
+        armed.add(CIRCUIT_PERIMETER)
+    if state.annex != AnnexMode.OFF:
+        armed.add(CIRCUIT_ANNEX)
+    return armed
+
+
 class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     VerisureEntity,
     CoordinatorEntity[AlarmCoordinator],

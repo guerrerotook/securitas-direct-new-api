@@ -41,6 +41,7 @@ from ..verisure_owa_api.command_resolver import (
 from ._base import (
     BaseVerisureOwaAlarmPanel,
     _modelled_state,
+    armed_circuits,
     build_partial_disarm_target,
 )
 
@@ -87,31 +88,33 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                     return None
         return None
 
-    async def execute_partial_disarm(self, circuits: list[str]) -> bool:
-        """Disarm the specified circuits, leaving others unchanged.
+    async def execute_partial_disarm(self, circuits: list[str]) -> bool | None:
+        """Disarm those of ``circuits`` that are armed, leaving others unchanged.
 
         Waits first for any operation already running on any panel of the
-        installation.
-        Returns True on success, False on failure (including giving up on that
-        wait). Empty ``circuits`` is a no-op success.
+        installation, then judges what is armed from the installation's latest
+        known state (see ``_confirmed_alarm_state``).
+
+        Returns:
+            None  — nothing among ``circuits`` was armed; no command was sent.
+            True  — the armed circuits were disarmed.
+            False — the disarm failed, or the wait gave up.
 
         Drives the same optimistic-state lifecycle as a user-initiated disarm
         on each affected entity (this combined panel + any registered axis
-        sub-panel for the listed circuits): DISARMING during the transition,
-        post-result state on success, rollback on failure. Concludes with a
-        coordinator refresh so other observers don't have to wait for the
-        next poll to see the change.
+        sub-panel for the circuits being disarmed): DISARMING during the
+        transition, post-result state on success, rollback on failure.
+        Concludes with a coordinator refresh so other observers don't have to
+        wait for the next poll to see the change.
 
-        The circuits to clear are judged from the installation's latest known
-        state (see ``_confirmed_alarm_state``). When that is unreadable
-        (never polled, or an unmodelled proto code like 'N' after a
-        central-station reset), the requested circuits are disarmed
+        When that state is unreadable or not yet confirmed by the panel (never
+        polled, an unmodelled proto code like 'N' after a central-station
+        reset, or an unconfirmed answer), every requested circuit is disarmed
         unconditionally rather than skipped, which would leave the door
         unlocked over an armed alarm (#550).
         """
         if not circuits:
-            return True
-        affected = [self, *self._affected_axis_subpanels(circuits)]
+            return None
         try:
             await self._wait_until_idle()
         except HomeAssistantError:
@@ -121,9 +124,11 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
         target: AlarmState | None = None
         current = self._confirmed_alarm_state()
         if current is not None:
+            circuits = [c for c in circuits if c in armed_circuits(current)]
+            if not circuits:
+                return None
             target = build_partial_disarm_target(current, circuits)
-            if target == current:
-                return True
+        affected = [self, *self._affected_axis_subpanels(circuits)]
 
         # pylint: disable=protected-access
         switched: list[BaseVerisureOwaAlarmPanel] = []
@@ -171,17 +176,6 @@ class CombinedVerisureOwaAlarmPanel(BaseVerisureOwaAlarmPanel):
                 entity.async_write_ha_state()
         await self.coordinator.async_request_refresh()
         return True
-
-    async def alarm_state_when_idle(self) -> AlarmState | None:
-        """Wait for any operation running on any panel of the installation,
-        then return the installation's latest known state (None if
-        unreadable).
-
-        Raises the translated ``operation_in_progress`` error if the wait gives
-        up.
-        """
-        await self._wait_until_idle()
-        return self._confirmed_alarm_state()
 
     def _affected_axis_subpanels(
         self, circuits: list[str]

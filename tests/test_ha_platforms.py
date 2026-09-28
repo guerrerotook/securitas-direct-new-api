@@ -1622,25 +1622,27 @@ class TestVerisureLockAlarmListener:
         assert lock._state == "1"
 
     def test_armed_circuits_helper_excludes_off_modes(self):
+        from custom_components.securitas.alarm_control_panel._base import (
+            armed_circuits,
+        )
         from custom_components.securitas.const import (
             CIRCUIT_ANNEX,
             CIRCUIT_INTERIOR,
             CIRCUIT_PERIMETER,
         )
-        from custom_components.securitas.lock import _armed_circuits
 
         s = self._state(i="OFF", p="ON", a="OFF")
-        assert _armed_circuits(s) == {CIRCUIT_PERIMETER}
+        assert armed_circuits(s) == {CIRCUIT_PERIMETER}
         s = self._state(i="DAY", p="OFF", a="ON")
-        assert _armed_circuits(s) == {CIRCUIT_INTERIOR, CIRCUIT_ANNEX}
+        assert armed_circuits(s) == {CIRCUIT_INTERIOR, CIRCUIT_ANNEX}
         s = self._state(i="TOTAL", p="ON", a="ON")
-        assert _armed_circuits(s) == {
+        assert armed_circuits(s) == {
             CIRCUIT_INTERIOR,
             CIRCUIT_PERIMETER,
             CIRCUIT_ANNEX,
         }
         s = self._state()  # all OFF
-        assert _armed_circuits(s) == set()
+        assert armed_circuits(s) == set()
 
 
 # ===========================================================================
@@ -2654,26 +2656,11 @@ class TestTsIsNewer:
 class TestVerisureLockUnlockDisarm:
     """Tests for unlock→disarm flow (success paths)."""
 
-    def _state(self, *, i="OFF", p="OFF", a="OFF"):
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
-
-        return AlarmState(
-            interior=getattr(InteriorMode, i),
-            perimeter=getattr(PerimeterMode, p),
-            annex=getattr(AnnexMode, a),
-        )
-
-    def _make_alarm_panel(self, *, success=True, state=None):
-        """A combined panel whose last confirmed state is ``state`` (None:
-        unreadable)."""
+    def _make_alarm_panel(self, *, result=True):
+        """A combined panel whose partial disarm answers ``result``: None
+        (nothing armed), True (disarmed) or False (failed)."""
         panel = MagicMock()
-        panel.alarm_state_when_idle = AsyncMock(return_value=state)
-        panel.execute_partial_disarm = AsyncMock(return_value=success)
+        panel.execute_partial_disarm = AsyncMock(return_value=result)
         return panel
 
     async def test_disarm_and_unlock_run_in_parallel(self):
@@ -2687,9 +2674,7 @@ class TestVerisureLockUnlockDisarm:
 
         lock = make_lock(initial_status="2", poll_status="1")
         lock._unlock_disarms_circuits = ["interior"]
-        lock._combined_alarm_panel = self._make_alarm_panel(
-            success=True, state=self._state(i="TOTAL")
-        )
+        lock._combined_alarm_panel = self._make_alarm_panel(result=True)
 
         disarm_started = asyncio.Event()
         unlock_started = asyncio.Event()
@@ -2722,14 +2707,21 @@ class TestVerisureLockUnlockDisarm:
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = ["interior"]
-        # Alarm already fully disarmed.
-        lock._combined_alarm_panel = self._make_alarm_panel(
-            success=True, state=self._state()
-        )
+        # Alarm already fully disarmed: the panel finds nothing to disarm.
+        lock._combined_alarm_panel = self._make_alarm_panel(result=None)
+        lock.hass.services.async_call = AsyncMock()
 
         await lock.async_unlock()
 
-        lock._combined_alarm_panel.execute_partial_disarm.assert_not_awaited()
+        panel = lock._combined_alarm_panel
+        panel.execute_partial_disarm.assert_awaited_once_with(["interior"])
+        # Nothing else asked of the panel, and no failure reported.
+        assert [c[0] for c in panel.mock_calls] == ["execute_partial_disarm"]
+        assert not [
+            c
+            for c in lock.hass.services.async_call.await_args_list
+            if c.args[:2] == ("persistent_notification", "create")
+        ]
         # Unlock still proceeds.
         lock._client.change_lock_mode.assert_awaited_once()
 
@@ -2737,9 +2729,7 @@ class TestVerisureLockUnlockDisarm:
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = []  # no automation
-        lock._combined_alarm_panel = self._make_alarm_panel(
-            success=True, state=self._state(i="TOTAL")
-        )
+        lock._combined_alarm_panel = self._make_alarm_panel(result=True)
 
         await lock.async_unlock()
 
@@ -2754,8 +2744,7 @@ class TestVerisureLockUnlockDisarm:
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = ["interior", "perimeter"]
-        # The real state is unknown ('N').
-        lock._combined_alarm_panel = self._make_alarm_panel(success=True, state=None)
+        lock._combined_alarm_panel = self._make_alarm_panel(result=True)
 
         await lock.async_unlock()
 
@@ -2768,9 +2757,7 @@ class TestVerisureLockUnlockDisarm:
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = ["interior"]
-        lock._combined_alarm_panel = self._make_alarm_panel(
-            success=True, state=self._state(i="TOTAL")
-        )
+        lock._combined_alarm_panel = self._make_alarm_panel(result=True)
 
         await lock.async_open()
 
@@ -2797,24 +2784,9 @@ class TestVerisureLockUnlockDisarm:
 class TestVerisureLockUnlockDisarmFailure:
     """Tests for unlock-disarm failure surfaces."""
 
-    def _state(self, *, i="OFF", p="OFF", a="OFF"):
-        from custom_components.securitas.verisure_owa_api.models import (
-            AlarmState,
-            AnnexMode,
-            InteriorMode,
-            PerimeterMode,
-        )
-
-        return AlarmState(
-            interior=getattr(InteriorMode, i),
-            perimeter=getattr(PerimeterMode, p),
-            annex=getattr(AnnexMode, a),
-        )
-
     def _make_alarm_panel(self, *, success):
-        """A combined panel with the interior confirmed armed."""
+        """A combined panel whose partial disarm succeeds or fails."""
         panel = MagicMock()
-        panel.alarm_state_when_idle = AsyncMock(return_value=self._state(i="TOTAL"))
         panel.execute_partial_disarm = AsyncMock(return_value=success)
         return panel
 
@@ -2844,16 +2816,14 @@ class TestVerisureLockUnlockDisarmFailure:
         lock = make_lock(initial_status="2", poll_status="1")
         lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
         lock._unlock_disarms_circuits = ["interior"]
-        panel = self._make_alarm_panel(success=True)
-        panel.alarm_state_when_idle = AsyncMock(
-            side_effect=HomeAssistantError("operation_in_progress")
-        )
+        # The panel gives up waiting and reports the partial disarm failed.
+        panel = self._make_alarm_panel(success=False)
         lock._combined_alarm_panel = panel
         lock.hass.services.async_call = AsyncMock()
 
         await lock.async_unlock()
 
-        panel.execute_partial_disarm.assert_not_awaited()
+        panel.execute_partial_disarm.assert_awaited_once_with(["interior"])
         notif_calls = [
             c
             for c in lock.hass.services.async_call.await_args_list
