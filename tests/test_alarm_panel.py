@@ -9432,26 +9432,42 @@ async def test_arm_pressed_while_disarm_waits_is_still_ignored():
     assert alarm._state == AlarmControlPanelState.DISARMED
 
 
-async def test_arm_for_another_mode_waits_its_turn_and_the_last_press_wins():
-    """Away then Home pressed on one panel while a disarm runs: Home is a
-    different arm, not a repeat of Away, so it runs after Away."""
-    alarm = make_alarm()
+async def _press_arms_behind_a_disarm(alarm, modes):
+    """Press each arm mode in turn on ``alarm`` while a disarm is held, then
+    let everything finish."""
     alarm.coordinator.record_confirmed_proto_code("T")
     gate, started = asyncio.Event(), asyncio.Event()
     _record_transitions(alarm, gate=gate, started=started, hold="disarm")
 
     disarm = asyncio.create_task(alarm.async_alarm_disarm())
     await started.wait()
-    away = asyncio.create_task(alarm.set_arm_state("armed_away"))
-    await asyncio.sleep(0)
-    home = asyncio.create_task(alarm.set_arm_state("armed_home"))
-    await asyncio.sleep(0)
+    arms = []
+    for mode in modes:
+        arms.append(asyncio.create_task(alarm.set_arm_state(mode)))
+        await asyncio.sleep(0)
     gate.set()
-    await asyncio.wait_for(asyncio.gather(disarm, away, home), timeout=2)
+    await asyncio.wait_for(asyncio.gather(disarm, *arms), timeout=2)
 
-    # Away to Home goes through disarmed on this panel.
-    assert _sent(alarm) == ["DARM1", "ARM1", "DARM1", "ARMDAY1"]
+
+async def test_a_newer_arm_press_overtakes_one_still_waiting():
+    """Away then Home pressed on one panel while a disarm runs: only Home,
+    the last press, is sent."""
+    alarm = make_alarm()
+
+    await _press_arms_behind_a_disarm(alarm, ["armed_away", "armed_home"])
+
+    assert _sent(alarm) == ["DARM1", "ARMDAY1"]
     assert alarm._state == AlarmControlPanelState.ARMED_HOME
+
+
+async def test_the_last_arm_press_wins_even_when_it_repeats_an_earlier_one():
+    """Away, Home, Away pressed while a disarm runs: the panel ends in Away."""
+    alarm = make_alarm()
+
+    await _press_arms_behind_a_disarm(alarm, ["armed_away", "armed_home", "armed_away"])
+
+    assert _sent(alarm) == ["DARM1", "ARM1"]
+    assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
 
 async def test_two_disarms_waiting_behind_an_arm_send_one_disarm():

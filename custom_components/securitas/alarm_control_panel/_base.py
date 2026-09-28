@@ -286,6 +286,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         )
 
         self._last_arm_result: OperationStatus | None = None
+        # Counts arm presses on this panel; a waiting arm that is no longer
+        # the latest press has been overtaken and is dropped.
+        self._arm_presses = 0
 
         # Arming-exception context: stored when arming is blocked by sensors
         # (e.g. an open window).  ``allow_forcing`` controls whether it can be
@@ -1279,11 +1282,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # running operation plus the arm transition and state writes below
         # take longer than that.
         user_context = self._context
+        self._arm_presses += 1
+        press = self._arm_presses
         if not await self._wait_until_idle(duplicate_of="arm", mode=mode):
             _LOGGER.debug(
                 "Arm ignored for %s: an arm to %s is already in progress",
                 self.installation.number,
                 mode,
+            )
+            return
+        if press != self._arm_presses:
+            _LOGGER.debug(
+                "Arm to %s dropped for %s: a later arm was pressed on this panel",
+                mode,
+                self.installation.number,
             )
             return
         self._last_arm_result = OperationStatus()
