@@ -23,7 +23,7 @@ from homeassistant.components.alarm_control_panel import (
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.const import CONF_SCAN_INTERVAL
-from homeassistant.core import Event, callback
+from homeassistant.core import Context, Event, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -1397,13 +1397,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     self.installation.number,
                     err.proto_code,
                 )
-                await inject_ha_event(
-                    self.hass,
-                    self._installation,
-                    category=ActivityCategory.ARMING_FAILED,
-                    alias=f"Arm failed: {err}",
-                    context=user_context,
-                )
+                await self._log_arm_failed(err, user_context)
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
                     translation_key="arm_refused_unknown_state",
@@ -1488,19 +1482,25 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
             self._handle_arm_disarm_error(err, "arm_failed")
             self.async_write_ha_state()
-            await inject_ha_event(
-                self.hass,
-                self._installation,
-                category=ActivityCategory.ARMING_FAILED,
-                alias=f"Arm failed: {err}",
-                context=user_context,
-            )
+            await self._log_arm_failed(err, user_context)
         except HomeAssistantError:
             self._state = self._last_state
             self.async_write_ha_state()
             raise
         finally:
             self._operation.end()
+
+    async def _log_arm_failed(
+        self, err: VerisureOwaError, context: Context | None
+    ) -> None:
+        """Add an "Arm failed" entry to the activity log."""
+        await inject_ha_event(
+            self.hass,
+            self._installation,
+            category=ActivityCategory.ARMING_FAILED,
+            alias=f"Arm failed: {err}",
+            context=context,
+        )
 
     def _show_last_arm_result(self) -> bool:
         """Show the state the arm's last answered command reached, or the
