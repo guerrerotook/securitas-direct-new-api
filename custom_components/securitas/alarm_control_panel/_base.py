@@ -389,13 +389,24 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         )
         return _MAX_POLLS_PER_OPERATION * poll_timeout
 
+    def _repeats_running(self, kind: OperationKind, mode: str | None = None) -> bool:
+        """True when the running operation is ``kind`` (for ``mode``, an arm's
+        mode) on this same panel: pressing it again is a repeat press."""
+        operation = self._operation
+        return (
+            operation.running
+            and operation.kind == kind
+            and operation.mode == mode
+            and self in operation.panels
+        )
+
     async def _wait_until_idle(
-        self, *, duplicate_of: OperationKind | None = None, mode: str | None = None
+        self, *, duplicate_of: OperationKind | None = None
     ) -> bool:
         """Wait until the installation runs no operation.
 
         Returns False instead, at once, when the running operation is
-        ``duplicate_of`` for ``mode`` on this same panel: a repeated press.
+        ``duplicate_of`` on this same panel (see _repeats_running).
         Raises the translated ``operation_in_progress`` error after
         _operation_wait_limit().
         """
@@ -404,12 +415,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         try:
             async with asyncio.timeout(wait_limit):
                 while operation.running:
-                    if (
-                        duplicate_of is not None
-                        and operation.kind == duplicate_of
-                        and operation.mode == mode
-                        and self in operation.panels
-                    ):
+                    if duplicate_of is not None and self._repeats_running(duplicate_of):
                         return False
                     await operation.wait_idle()
         except TimeoutError as err:
@@ -1286,18 +1292,20 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # running operation plus the arm transition and state writes below
         # take longer than that.
         user_context = self._context
-        self._arm_presses += 1
-        press = self._arm_presses
-        # A force-arm is never a repeat press: it may arrive while the arm it
-        # completes is still finishing, and must then wait for it and run.
-        repeat_of = None if force_arming_remote_id else "arm"
-        if not await self._wait_until_idle(duplicate_of=repeat_of, mode=mode):
+        # Checked once, at press time, before the press takes a number: an
+        # ignored repeat must not cancel an arm waiting on this panel. A
+        # force-arm is never a repeat: it may arrive while the arm it
+        # completes is still finishing, and then waits for it.
+        if not force_arming_remote_id and self._repeats_running("arm", mode):
             _LOGGER.debug(
                 "Arm ignored for %s: an arm to %s is already in progress",
                 self.installation.number,
                 mode,
             )
             return
+        self._arm_presses += 1
+        press = self._arm_presses
+        await self._wait_until_idle()
         if press != self._arm_presses:
             _LOGGER.debug(
                 "Arm to %s dropped for %s: a later arm was pressed on this panel",

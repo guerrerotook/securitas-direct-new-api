@@ -10915,10 +10915,11 @@ async def test_arms_pressed_on_two_panels_behind_a_disarm_both_run():
     assert _sent(interior) == ["DARM1", "ARMDAY1"]  # planned from Away: after it
 
 
-async def test_force_arm_pressed_while_the_blocked_arm_refreshes_is_sent():
-    """An open door blocks an arm's second command, and the card's
-    auto-force calls force_arm while that arm is still refreshing. The
-    force-arm is not a repeat of the blocked arm: it waits, then is sent."""
+def _blocked_arm_with_its_refresh_held():
+    """A two-step Away arm whose second command (PERI1) an open door blocks;
+    its refresh then waits for ``release``, having set ``refreshing``. A
+    force-arm afterwards answers 'A'. ``sent`` collects each step's force
+    parameters."""
     from custom_components.securitas.verisure_owa_api.const import (
         PERI_DEFAULTS,
         VerisureOwaState,
@@ -10953,6 +10954,14 @@ async def test_force_arm_pressed_while_the_blocked_arm_refreshes_is_sent():
             await release.wait()
 
     alarm.coordinator.async_request_refresh = AsyncMock(side_effect=refresh)
+    return alarm, sent, refreshing, release
+
+
+async def test_force_arm_pressed_while_the_blocked_arm_refreshes_is_sent():
+    """An open door blocks an arm's second command, and the card's
+    auto-force calls force_arm while that arm is still refreshing. The
+    force-arm is not a repeat of the blocked arm: it waits, then is sent."""
+    alarm, sent, refreshing, release = _blocked_arm_with_its_refresh_held()
 
     arm = asyncio.create_task(alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY))
     await refreshing.wait()
@@ -10962,3 +10971,42 @@ async def test_force_arm_pressed_while_the_blocked_arm_refreshes_is_sent():
     await asyncio.wait_for(asyncio.gather(arm, force), timeout=2)
 
     assert sent == [{}, {"force_arming_remote_id": "ref", "suid": "suid"}]
+
+
+async def test_a_repeat_press_does_not_cancel_a_waiting_force_arm():
+    """While the blocked arm refreshes, the force-arm waits behind it and the
+    user presses Away again. That press repeats the running arm and is
+    ignored, so the waiting force-arm is still sent."""
+    alarm, sent, refreshing, release = _blocked_arm_with_its_refresh_held()
+
+    arm = asyncio.create_task(alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY))
+    await refreshing.wait()
+    force = asyncio.create_task(alarm.async_force_arm())
+    await asyncio.sleep(0)
+    await alarm.set_arm_state(AlarmControlPanelState.ARMED_AWAY)  # repeat
+    release.set()
+    await asyncio.wait_for(asyncio.gather(arm, force), timeout=2)
+
+    assert sent == [{}, {"force_arming_remote_id": "ref", "suid": "suid"}]
+
+
+async def test_a_repeat_press_does_not_cancel_a_waiting_arm():
+    """Away runs; a disarm and then Home wait behind it; Away is pressed
+    again. That press repeats the running arm and is ignored, so Home, the
+    last press that was not ignored, still runs after the disarm."""
+    alarm = make_alarm()
+    gate, started = asyncio.Event(), asyncio.Event()
+    _record_transitions(alarm, gate=gate, started=started)
+
+    away = asyncio.create_task(alarm.set_arm_state("armed_away"))
+    await started.wait()
+    disarm = asyncio.create_task(alarm.async_alarm_disarm())
+    await asyncio.sleep(0)
+    home = asyncio.create_task(alarm.set_arm_state("armed_home"))
+    await asyncio.sleep(0)
+    await alarm.set_arm_state("armed_away")  # repeat
+    gate.set()
+    await asyncio.wait_for(asyncio.gather(away, disarm, home), timeout=2)
+
+    assert _sent(alarm) == ["ARM1", "DARM1", "ARMDAY1"]
+    assert alarm._state == AlarmControlPanelState.ARMED_HOME
