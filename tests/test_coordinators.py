@@ -21,6 +21,7 @@ from custom_components.securitas.coordinators import (
     AlarmStatusData,
     CameraCoordinator,
     CameraData,
+    InstallationOperation,
     LockCoordinator,
     LockData,
     SentinelCoordinator,
@@ -90,6 +91,111 @@ def _make_queue() -> AsyncMock:
 
 def _make_installation() -> Installation:
     return make_installation()
+
+
+# ── InstallationOperation ────────────────────────────────────────────────────
+
+
+class TestInstallationOperation:
+    """Tests for InstallationOperation, the one command an installation runs."""
+
+    def test_starts_idle(self):
+        operation = InstallationOperation()
+
+        assert operation.running is False
+        assert operation.kind is None
+        assert operation.panels == frozenset()
+        assert operation.mode is None
+
+    def test_begin_records_the_operation(self):
+        operation = InstallationOperation()
+        main, interior = object(), object()
+
+        operation.begin("arm", (p for p in [main, interior, main]), "armed_away")
+
+        assert operation.running is True
+        assert operation.kind == "arm"
+        assert operation.panels == frozenset({main, interior})
+        assert operation.mode == "armed_away"
+
+    def test_begin_without_a_mode_records_none(self):
+        operation = InstallationOperation()
+        panel = object()
+
+        operation.begin("partial_disarm", [panel])
+
+        assert operation.kind == "partial_disarm"
+        assert operation.panels == frozenset({panel})
+        assert operation.mode is None
+
+    def test_end_clears_the_operation(self):
+        operation = InstallationOperation()
+        operation.begin("arm", [object()], "armed_home")
+
+        operation.end()
+
+        assert operation.running is False
+        assert operation.kind is None
+        assert operation.panels == frozenset()
+        assert operation.mode is None
+
+    def test_begin_while_running_is_refused_and_keeps_the_running_one(self):
+        operation = InstallationOperation()
+        panel = object()
+        operation.begin("arm", [panel], "armed_away")
+
+        with pytest.raises(AssertionError, match="operation already running"):
+            operation.begin("disarm", [object()])
+
+        assert operation.kind == "arm"
+        assert operation.panels == frozenset({panel})
+        assert operation.mode == "armed_away"
+
+    def test_begin_after_end_starts_a_new_operation(self):
+        operation = InstallationOperation()
+        operation.begin("arm", [object()], "armed_away")
+        operation.end()
+        panel = object()
+
+        operation.begin("disarm", [panel])
+
+        assert operation.running is True
+        assert operation.kind == "disarm"
+        assert operation.panels == frozenset({panel})
+        assert operation.mode is None
+
+    @pytest.mark.asyncio
+    async def test_wait_idle_returns_at_once_when_idle(self):
+        await asyncio.wait_for(InstallationOperation().wait_idle(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_end_wakes_every_waiter(self):
+        operation = InstallationOperation()
+        operation.begin("arm", [object()], "armed_away")
+        waiters = [asyncio.create_task(operation.wait_idle()) for _ in range(3)]
+        await asyncio.sleep(0)
+        assert not any(w.done() for w in waiters)
+
+        operation.end()
+
+        await asyncio.wait_for(asyncio.gather(*waiters), timeout=1)
+
+    def test_each_alarm_coordinator_has_its_own(self):
+        """Two installations never wait for each other's commands."""
+        first, second = (
+            AlarmCoordinator(
+                _make_hass(),
+                _make_client(),
+                _make_queue(),
+                _make_installation(),
+                update_interval=timedelta(seconds=30),
+            )
+            for _ in range(2)
+        )
+        first.operation.begin("arm", [object()], "armed_away")
+
+        assert isinstance(first.operation, InstallationOperation)
+        assert second.operation.running is False
 
 
 # ── AlarmCoordinator ─────────────────────────────────────────────────────────
