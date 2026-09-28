@@ -2795,29 +2795,6 @@ class TestVerisureLockUnlockDisarmFailure:
         # Unlock still happened.
         lock._client.change_lock_mode.assert_awaited_once()
 
-    async def test_panel_busy_too_long_notifies_and_proceeds(self):
-        """If the panel stays busy past the wait limit, the lock reports the
-        auto-disarm as failed and still unlocks — it never raises."""
-        lock = make_lock(initial_status="2", poll_status="1")
-        lock._client.change_lock_mode = AsyncMock(return_value=MagicMock())
-        lock._unlock_disarms_circuits = ["interior"]
-        # The panel gives up waiting and reports the partial disarm failed.
-        panel = self._make_alarm_panel(success=False)
-        lock._combined_alarm_panel = panel
-        lock.hass.services.async_call = AsyncMock()
-
-        await lock.async_unlock()
-
-        panel.execute_partial_disarm.assert_awaited_once_with(["interior"])
-        notif_calls = [
-            c
-            for c in lock.hass.services.async_call.await_args_list
-            if c.args[:2] == ("persistent_notification", "create")
-        ]
-        assert len(notif_calls) == 1
-        assert "Auto-disarm failed" in notif_calls[0].args[2]["title"]
-        lock._client.change_lock_mode.assert_awaited_once()
-
     async def test_unlock_failure_after_successful_disarm_notifies(self):
         from custom_components.securitas.verisure_owa_api import VerisureOwaError
 

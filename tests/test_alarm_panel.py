@@ -1522,7 +1522,7 @@ class TestForceState:
         assert alarm._state == AlarmControlPanelState.ARMED_AWAY
 
     async def test_disarm_sets_operation_in_progress_during_api_call(self):
-        """async_alarm_disarm sets _operation_in_progress=True while the API call runs."""
+        """_operation_in_progress reads True while async_alarm_disarm's API call runs."""
         alarm = make_alarm()
         alarm._state = AlarmControlPanelState.ARMED_AWAY
         alarm._last_proto_code = "T"  # resolver needs armed proto
@@ -1555,7 +1555,7 @@ class TestForceState:
         assert alarm._operation_in_progress is False
 
     async def test_arm_sets_operation_in_progress_during_api_call(self):
-        """set_arm_state sets _operation_in_progress=True while the API call runs."""
+        """_operation_in_progress reads True while set_arm_state's API call runs."""
         alarm = make_alarm()
 
         observed_flags = []
@@ -9175,7 +9175,7 @@ async def test_disarm_reentry_guard_ignores_overlapping_call():
 
 
 async def test_arm_reentry_guard_ignores_overlapping_call():
-    """A second arm while one is in progress is ignored (no duplicate command)."""
+    """Pressing the same arm mode again while that arm runs is ignored (no duplicate command)."""
     from unittest.mock import AsyncMock
 
     from homeassistant.components.alarm_control_panel import AlarmControlPanelState
@@ -9412,8 +9412,8 @@ async def test_waiting_disarm_is_attributed_to_the_user_who_pressed_it():
 
 
 async def test_arm_pressed_while_disarm_waits_is_still_ignored():
-    """Only the disarm waits: an arm pressed while another arm runs is ignored,
-    and the queued disarm still runs afterwards."""
+    """A repeat of the running arm's mode is ignored, and the disarm queued
+    behind that arm still runs afterwards."""
     alarm = make_alarm()
     arm_gate = asyncio.Event()
     arm_started = asyncio.Event()
@@ -9678,7 +9678,7 @@ async def test_partial_disarm_during_full_disarm_keeps_second_disarm_ignored():
 
 async def test_partial_disarm_gives_up_behind_a_stuck_operation():
     """A partial disarm waiting behind an arm that never finishes reports
-    failure to the lock after the limit — and leaves the arm's flag alone."""
+    failure to the lock after the limit — and leaves the running arm alone."""
     from custom_components.securitas.const import CONF_OPERATION_POLL_TIMEOUT
 
     alarm = make_alarm()
@@ -10477,7 +10477,7 @@ async def test_arm_on_one_panel_waits_for_an_arm_on_another():
 
 
 async def test_arm_pressed_during_a_disarm_on_the_same_panel_runs_after_it():
-    """Replaces the old rule that ignored it: the latest press wins."""
+    """An arm pressed while a disarm runs on the same panel runs after it."""
     alarm = make_alarm()
     alarm.coordinator.record_confirmed_proto_code("T")
     gate, started = asyncio.Event(), asyncio.Event()
