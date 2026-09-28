@@ -1398,13 +1398,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
-            if self._last_arm_result.protom_response:
-                self.update_status_alarm(self._last_arm_result)
-            else:
-                self._state = self._last_state
+            partly_armed = self._show_last_arm_result()
             self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
-            if self._last_arm_result.protom_response:
+            if partly_armed:
                 await self.coordinator.async_request_refresh()
             # Surface the rejection in the activity timeline as well — the
             # polled record (~60 s later) will be a 5802; this gives the
@@ -1420,10 +1417,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 ],
             )
         except VerisureOwaError as err:
-            if self._last_arm_result.protom_response:
-                self.update_status_alarm(self._last_arm_result)
-            else:
-                self._state = self._last_state
+            self._show_last_arm_result()
             _LOGGER.error(
                 "Arm failed for %s: %s", self.installation.number, err.log_detail()
             )
@@ -1442,6 +1436,16 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             raise
         finally:
             self._operation.end()
+
+    def _show_last_arm_result(self) -> bool:
+        """Show the state the arm's last answered command reached, or the
+        state from before the arm when none answered. True when one did."""
+        result = self._last_arm_result
+        if result is not None and result.protom_response:
+            self.update_status_alarm(result)
+            return True
+        self._state = self._last_state
+        return False
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store sensor-warning and optional force-arm context."""
