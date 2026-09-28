@@ -1397,7 +1397,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                     self.installation.number,
                     err.proto_code,
                 )
-                await self._log_arm_failed(err, user_context)
+                await self._add_arm_failed_activity(err, user_context)
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,
                     translation_key="arm_refused_unknown_state",
@@ -1482,7 +1482,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             )
             self._handle_arm_disarm_error(err, "arm_failed")
             self.async_write_ha_state()
-            await self._log_arm_failed(err, user_context)
+            await self._add_arm_failed_activity(err, user_context)
         except HomeAssistantError:
             self._state = self._last_state
             self.async_write_ha_state()
@@ -1490,7 +1490,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         finally:
             self._operation.end()
 
-    async def _log_arm_failed(
+    async def _add_arm_failed_activity(
         self, err: VerisureOwaError, context: Context | None
     ) -> None:
         """Add an "Arm failed" entry to the activity log."""
