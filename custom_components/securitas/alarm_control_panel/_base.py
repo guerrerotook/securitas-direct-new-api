@@ -412,6 +412,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             and self in operation.panels
         )
 
+    def _ignores_repeat_arm(self, mode: str) -> bool:
+        """True, logging why, when an arm to ``mode`` repeats the running one."""
+        if not self._repeats_running("arm", mode):
+            return False
+        _LOGGER.debug(
+            "Arm ignored for %s: an arm to %s is already in progress",
+            self.installation.number,
+            mode,
+        )
+        return True
+
     async def _wait_until_idle(
         self, *, duplicate_of: OperationKind | None = None
     ) -> bool:
@@ -618,12 +629,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self, state: AlarmControlPanelState, code: str | None = None
     ) -> None:
         """Arm the alarm in the specified mode."""
-        if self._check_code_for_arm_if_required(code):
-            await self._dismiss_pending_force_context_on_siblings(
-                reason=DISMISSAL_REASON_USER_ARM,
-                new_mode=state,
-            )
-            await self.set_arm_state(state)
+        if not self._check_code_for_arm_if_required(code):
+            return
+        # An ignored repeat press must leave the running arm's Force Arm
+        # prompt in place, so it is caught before the dismissal.
+        if self._ignores_repeat_arm(state):
+            return
+        await self._dismiss_pending_force_context_on_siblings(
+            reason=DISMISSAL_REASON_USER_ARM,
+            new_mode=state,
+        )
+        await self.set_arm_state(state)
 
     async def _execute_transition(
         self,
@@ -1308,12 +1324,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # ignored repeat must not cancel an arm waiting on this panel. A
         # force-arm is never a repeat: it may arrive while the arm it
         # completes is still finishing, and then waits for it.
-        if not force_arming_remote_id and self._repeats_running("arm", mode):
-            _LOGGER.debug(
-                "Arm ignored for %s: an arm to %s is already in progress",
-                self.installation.number,
-                mode,
-            )
+        if not force_arming_remote_id and self._ignores_repeat_arm(mode):
             return
         self._arm_presses += 1
         press = self._arm_presses

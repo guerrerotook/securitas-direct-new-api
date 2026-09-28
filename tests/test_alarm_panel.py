@@ -11035,6 +11035,27 @@ async def test_a_repeat_press_does_not_cancel_a_waiting_force_arm():
     assert sent == [{}, {"force_arming_remote_id": "ref", "suid": "suid"}]
 
 
+async def test_a_repeat_press_keeps_the_blocked_arms_force_arm_prompt():
+    """An open door blocks an Away arm's second command, and Away is pressed
+    again while that arm is still refreshing. The press repeats the running
+    arm, so it is ignored: it does not take a press number, and the Force Arm
+    prompt the blocked arm left stays."""
+    alarm, sent, refreshing, release = _blocked_arm_with_its_refresh_held()
+
+    arm = asyncio.create_task(alarm.async_alarm_arm_away())
+    await refreshing.wait()
+    force_context = dict(alarm._force_context)
+    presses = alarm._arm_presses
+    await alarm.async_alarm_arm_away()  # repeat
+    release.set()
+    await asyncio.wait_for(arm, timeout=2)
+
+    assert alarm._arm_presses == presses
+    assert alarm._force_context == force_context
+    assert alarm._attr_extra_state_attributes["force_arm_available"] is True
+    assert sent == [{}]
+
+
 async def test_a_repeat_press_does_not_cancel_a_waiting_arm():
     """Away runs; a disarm and then Home wait behind it; Away is pressed
     again. That press repeats the running arm and is ignored, so Home, the
