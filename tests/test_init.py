@@ -2459,7 +2459,7 @@ class TestLowerCaseEmailMigration:
             "Verisure has two entries for Home on the same account. Remove "
             "one of them in Settings → Devices & Services → Verisure OWA."
         ]
-        assert not any("example.com" in key for key in notifications)
+        assert not any("@" in key for key in notifications)
 
     async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
         """An entry already holding the lower-case ID keeps it; the entry
