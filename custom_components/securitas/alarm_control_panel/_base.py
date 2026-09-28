@@ -384,10 +384,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """True while this panel takes part in the installation's running operation."""
         return self in self._operation.panels
 
-    @property
-    def _operation_kind(self) -> OperationKind | None:
-        return self._operation.kind if self._operation_in_progress else None
-
     def _operation_wait_limit(self) -> float:
         """Seconds to wait for a running operation before treating its flag as stuck."""
         poll_timeout = float(

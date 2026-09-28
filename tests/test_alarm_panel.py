@@ -9250,7 +9250,9 @@ def _record_transitions(
     async def step(step, **_force_params):
         command = step.commands[0]
         is_disarm = command.startswith("D")
-        if alarm._operation_kind == hold and (hold != "arm" or not is_disarm):
+        if alarm.coordinator.operation.kind == hold and (
+            hold != "arm" or not is_disarm
+        ):
             if started is not None:
                 started.set()
             if gate is not None:
@@ -9581,7 +9583,8 @@ async def test_partial_disarm_waits_for_a_running_arm_and_queued_disarm():
     for _ in range(5):
         await asyncio.sleep(0)
     assert targets == [armed_away]  # nothing runs while the arm is in flight
-    assert alarm._operation_kind == "arm"
+    assert alarm._operation_in_progress is True
+    assert alarm.coordinator.operation.kind == "arm"
     arm_gate.set()
     _, _, partial_ok = await asyncio.wait_for(
         asyncio.gather(arm_task, disarm_task, partial_task), timeout=2
@@ -9690,7 +9693,7 @@ async def test_partial_disarm_gives_up_behind_a_stuck_operation():
     assert ok is False
     alarm._execute_transition.assert_not_awaited()
     assert alarm._operation_in_progress is True
-    assert alarm._operation_kind == "arm"
+    assert alarm.coordinator.operation.kind == "arm"
 
 
 async def test_queued_disarm_leaves_displayed_state_alone_while_it_waits():
