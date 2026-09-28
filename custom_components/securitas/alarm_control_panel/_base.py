@@ -1051,11 +1051,14 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 self._installation.number,
             )
             # As for a poll: an answer read while a command runs may predate
-            # that command's result.
-            if not self.coordinator.operation.running and is_proto_letter(
-                alarm_status.protom_response
-            ):
-                self._apply_panel_answer(alarm_status)
+            # that command's result, but is still the latest code seen.
+            if is_proto_letter(alarm_status.protom_response):
+                if self.coordinator.operation.running:
+                    self.coordinator.track_unrecognised_code(
+                        alarm_status.protom_response
+                    )
+                else:
+                    self._apply_panel_answer(alarm_status)
             self._set_refresh_failed(False)
             self.async_write_ha_state()
             self.async_schedule_update_ha_state(force_refresh=True)

@@ -339,12 +339,14 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._confirmed_provisional = False
         self._earlier_possible = frozenset()
         if not optimistic:
-            self._track_unrecognised_code(proto_code)
+            self.track_unrecognised_code(proto_code)
 
-    def _track_unrecognised_code(self, proto_code: str) -> None:
+    def track_unrecognised_code(self, proto_code: str) -> None:
         """Keep the Repairs issue for a state code this integration doesn't
-        model in step with the latest code seen. Anything that is not a proto
-        letter says nothing about the state and leaves the issue as it is."""
+        model in step with the latest code the alarm reported, including one
+        a poll or a manual Refresh read while a command runs, which is kept
+        out of ``confirmed_proto_code``. Anything that is not a proto letter
+        says nothing about the state and leaves the issue as it is."""
         if not is_proto_letter(proto_code):
             return
         issue_id = self._unrecognised_issue_id
@@ -523,7 +525,7 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
             return data
         assert proto_code is not None  # narrowed by is_proto_letter
         if self.operation.running:
-            self._track_unrecognised_code(proto_code)
+            self.track_unrecognised_code(proto_code)
         else:
             self.record_confirmed_proto_code(proto_code)
         return data

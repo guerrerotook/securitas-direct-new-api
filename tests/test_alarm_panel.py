@@ -11441,3 +11441,29 @@ async def test_a_timed_out_arm_leaves_the_unknown_state_notice(hass):
     issue = _unknown_state_issue(hass)
     assert issue is not None
     assert (issue.translation_placeholders or {})["code"] == "N"
+
+
+@pytest.mark.parametrize(
+    ("before", "answer", "notice"),
+    [("D", "N", True), ("N", "D", False)],
+    ids=["raises", "clears"],
+)
+async def test_refresh_during_a_command_still_moves_the_unknown_state_notice(
+    hass, before, answer, notice
+):
+    """A Refresh answer read while a command runs is kept out of the
+    confirmed state, but it is still the latest code the alarm reported, so
+    it raises or clears the Repairs notice as a poll landing then does."""
+    coordinator, _ = _real_alarm_coordinator(hass)
+    alarm = make_alarm()
+    alarm.coordinator = coordinator
+    coordinator.record_confirmed_proto_code(before)
+    alarm._client.refresh_alarm_status = AsyncMock(return_value=_status(answer))
+    coordinator.operation.begin("arm", [object()], "armed_home")
+    try:
+        await alarm.async_manual_refresh()
+    finally:
+        coordinator.operation.end()
+
+    assert coordinator.confirmed_proto_code == before
+    assert (_unknown_state_issue(hass) is not None) is notice
