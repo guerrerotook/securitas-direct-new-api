@@ -7,7 +7,6 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.components import persistent_notification
 from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_PASSWORD,
@@ -17,7 +16,6 @@ from homeassistant.const import (
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from homeassistant.util.async_ import get_scheduled_timer_handles
 from pytest_homeassistant_custom_component.common import (
@@ -2418,7 +2416,7 @@ class TestLowerCaseEmailMigration:
 
     async def test_minor_2_migration_ignores_entries_without_an_id(self, hass):
         """Entries with neither an email, an installation nor an entry ID
-        have nothing to clash on."""
+        keep no ID and still move to 5.2."""
         first = _minor_1_entry(hass, None, None, installation=None)
         second = _minor_1_entry(hass, None, None, installation=None)
 
@@ -2438,15 +2436,15 @@ class TestLowerCaseEmailMigration:
         set up first owns the entities, so neither is removed. Both keep
         distinct entry IDs, and the migration posts no notification: a
         Repairs issue raised at setup asks the user to remove one."""
-        assert await async_setup_component(hass, "persistent_notification", {})
         older = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
         newer = _minor_1_entry(hass, "USER@example.com", "USER@example.com_123456")
         order = [older, newer] if migrate_older_first else [newer, older]
         second_id = order[1].unique_id
 
-        for entry in order:
-            assert await async_migrate_entry(hass, entry) is True
-        await hass.async_block_till_done()
+        with patch("custom_components.securitas._notify") as mock_notify:
+            for entry in order:
+                assert await async_migrate_entry(hass, entry) is True
+            await hass.async_block_till_done()
 
         assert {e.entry_id for e in hass.config_entries.async_entries(DOMAIN)} == {
             older.entry_id,
@@ -2456,7 +2454,7 @@ class TestLowerCaseEmailMigration:
         assert newer.data[CONF_USERNAME] == "user@example.com"
         assert order[0].unique_id == "user@example.com_123456"
         assert order[1].unique_id == second_id
-        assert persistent_notification._async_get_or_create_notifications(hass) == {}
+        mock_notify.assert_not_called()
 
     async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
         """An entry already holding the lower-case ID keeps it; the entry
