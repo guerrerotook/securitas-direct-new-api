@@ -10899,6 +10899,49 @@ async def test_refresh_without_a_state_keeps_the_arm_unconfirmed():
     assert alarm.coordinator.confirmed_is_provisional is True
 
 
+async def test_a_command_starting_while_refresh_waits_keeps_its_state():
+    """A command that starts while Refresh waits for the panel's answer keeps
+    the state: Refresh checks for a running command after the answer arrives,
+    not before asking."""
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+
+    async def _answer(_inst):
+        alarm.coordinator.operation.begin("arm", [object()], "armed_home")
+        return _status("D")
+
+    alarm._client.refresh_alarm_status = AsyncMock(side_effect=_answer)
+    try:
+        await alarm.async_manual_refresh()
+    finally:
+        alarm.coordinator.operation.end()
+
+    assert alarm.coordinator.confirmed_proto_code == "T"
+    assert alarm.coordinator.confirmed_is_provisional is True
+
+
+@pytest.mark.parametrize(
+    "error", [OperationTimeoutError("not confirmed"), VerisureOwaError("API down")]
+)
+async def test_a_refresh_that_fails_keeps_the_arm_unconfirmed(error):
+    """A Refresh that times out or fails records nothing: the arm stays
+    unconfirmed and the panel keeps showing the mode that was asked for."""
+    alarm = make_alarm()
+    _arm_timed_out(alarm)
+    alarm._attr_extra_state_attributes["state_provisional"] = True
+    alarm._client.refresh_alarm_status = AsyncMock(side_effect=error)
+    with patch(
+        "custom_components.securitas.alarm_control_panel._base.inject_ha_event",
+        new=AsyncMock(),
+    ):
+        await alarm.async_manual_refresh()
+
+    assert alarm.coordinator.confirmed_proto_code == "T"
+    assert alarm.coordinator.confirmed_is_provisional is True
+    assert alarm._attr_extra_state_attributes.get("state_provisional") is True
+    assert alarm.state == AlarmControlPanelState.ARMED_AWAY
+
+
 async def test_confirmed_arm_does_not_ask_the_panel_first():
     alarm = make_alarm()
     alarm.coordinator.record_confirmed_proto_code("D")
