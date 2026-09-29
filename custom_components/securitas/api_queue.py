@@ -8,6 +8,7 @@ requests and lets foreground (user-initiated) requests preempt background
 import asyncio
 import logging
 import time
+from collections import deque
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -28,7 +29,9 @@ class ApiQueue:
 
     Both levels share the same minimum gap (interval).  Foreground requests
     preempt queued background work.  In-flight API calls are never
-    cancelled — preemption happens between calls.
+    cancelled — preemption happens between calls.  Within a level, callers
+    are served in the order they arrived: a caller submitting back to back
+    must not starve one that queued before its next call.
     """
 
     FOREGROUND = 0
@@ -39,11 +42,20 @@ class ApiQueue:
         interval: float = DEFAULT_INTERVAL,
     ) -> None:
         self._interval: float = interval
-        self._lock = asyncio.Lock()
         self._last_api_time: float = 0
-        self._pending_foreground: int = 0
-        self._bg_event = asyncio.Event()
-        self._bg_event.set()  # initially no foreground work pending
+        self._waiting: dict[int, deque[object]] = {
+            self.FOREGROUND: deque(),
+            self.BACKGROUND: deque(),
+        }
+        self._busy: bool = False
+        self._turn = asyncio.Condition()
+
+    def _is_next(self, ticket: object, priority: int) -> bool:
+        if self._busy:
+            return False
+        if priority == self.BACKGROUND and self._waiting[self.FOREGROUND]:
+            return False
+        return self._waiting[priority][0] is ticket
 
     async def submit(
         self,
@@ -68,55 +80,38 @@ class ApiQueue:
         """
         if label is None:
             label = getattr(coro_fn, "__name__", str(coro_fn))
-        # Safe without lock: asyncio is single-threaded and these are
-        # synchronous operations with no await in between.
-        if priority == self.FOREGROUND:
-            self._pending_foreground += 1
-            self._bg_event.clear()
-
+        ticket = object()
+        line = self._waiting[priority]
+        line.append(ticket)
         try:
             while True:
-                # Background callers wait while foreground work is pending
-                if priority == self.BACKGROUND:
-                    while self._pending_foreground > 0:
-                        await self._bg_event.wait()
+                async with self._turn:
+                    await self._turn.wait_for(lambda: self._is_next(ticket, priority))
+                    delay = self._interval - (time.monotonic() - self._last_api_time)
+                    if delay <= 0:
+                        line.popleft()
+                        self._busy = True
+                        break
+                # Sleep out the gap without holding the turn, then check again:
+                # foreground work may have arrived in the meantime.
+                _LOGGER.debug(
+                    "[queue] Throttling %.1fs (%s) for %s",
+                    delay,
+                    "fg" if priority == self.FOREGROUND else "bg",
+                    label,
+                )
+                await asyncio.sleep(delay)
+        except BaseException:
+            if ticket in line:
+                line.remove(ticket)
+                async with self._turn:
+                    self._turn.notify_all()
+            raise
 
-                # Compute throttle delay outside the lock so we don't block
-                # other callers (especially foreground) during the sleep.
-                interval = self._interval
-                elapsed = time.monotonic() - self._last_api_time
-                if elapsed < interval:
-                    delay = interval - elapsed
-                    _LOGGER.debug(
-                        "[queue] Throttling %.1fs (%s) for %s",
-                        delay,
-                        "fg" if priority == self.FOREGROUND else "bg",
-                        label,
-                    )
-                    await asyncio.sleep(delay)
-
-                async with self._lock:
-                    # Background must re-check after acquiring lock — foreground
-                    # may have arrived while we were waiting on the lock.
-                    if priority == self.BACKGROUND and self._pending_foreground > 0:
-                        # Release lock and loop back to yield to foreground
-                        continue
-
-                    # Re-check throttle after acquiring lock — another caller
-                    # may have made a request while we were sleeping/waiting.
-                    elapsed = time.monotonic() - self._last_api_time
-                    if elapsed < interval:
-                        # Need to wait more — release lock and loop back
-                        continue
-
-                    try:
-                        result = await coro_fn(*args)
-                    finally:
-                        self._last_api_time = time.monotonic()
-
-                    return result
+        try:
+            return await coro_fn(*args)
         finally:
-            if priority == self.FOREGROUND:
-                self._pending_foreground -= 1
-                if self._pending_foreground == 0:
-                    self._bg_event.set()
+            self._last_api_time = time.monotonic()
+            self._busy = False
+            async with self._turn:
+                self._turn.notify_all()

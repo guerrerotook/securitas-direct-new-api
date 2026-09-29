@@ -10742,9 +10742,9 @@ async def test_arm_cancelled_while_queued_leaves_the_confirmed_state_trusted():
     busy = asyncio.create_task(
         hub.api_queue.submit(release.wait, priority=ApiQueue.FOREGROUND)
     )
-    await _until(lambda: hub.api_queue._pending_foreground == 1)
+    await _until(lambda: hub.api_queue._busy)
     arm = asyncio.create_task(panel.set_arm_state("armed_away"))
-    await _until(lambda: hub.api_queue._pending_foreground == 2)
+    await _until(lambda: len(hub.api_queue._waiting[ApiQueue.FOREGROUND]) == 1)
 
     arm.cancel()
     await asyncio.gather(arm, return_exceptions=True)
@@ -10822,14 +10822,14 @@ async def test_disarm_cancelled_between_its_commands_keeps_the_first_ones_result
                 hub.api_queue.submit(release.wait, priority=ApiQueue.FOREGROUND)
             )
         )
-        await _until(lambda: hub.api_queue._pending_foreground == 2)
+        await _until(lambda: len(hub.api_queue._waiting[ApiQueue.FOREGROUND]) == 1)
         disarmed.set()
         return _status("D")
 
     hub.client.disarm = AsyncMock(side_effect=disarm_then_hold_the_queue)
     disarm = asyncio.create_task(interior.async_alarm_disarm())
     await disarmed.wait()
-    await _until(lambda: hub.api_queue._pending_foreground == 2)
+    await _until(lambda: len(hub.api_queue._waiting[ApiQueue.FOREGROUND]) == 1)
 
     disarm.cancel()
     await asyncio.gather(disarm, return_exceptions=True)
