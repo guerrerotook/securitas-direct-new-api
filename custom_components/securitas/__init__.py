@@ -71,7 +71,9 @@ from homeassistant.helpers.service import (
 from .api_queue import ApiQueue
 from .card_resources import (
     _register_card_resource,
+    _register_page_module,
     _unregister_card_resource,
+    _unregister_page_module,
     async_register_deprecation_command,
 )
 from .const import (  # noqa: F401 — re-exported for backwards compatibility
@@ -1424,12 +1426,7 @@ async def _async_register_cards(hass: HomeAssistant) -> None:
         ACTIVITY_LOG_CARD_URL,
         "activity_log_card_resource_id",
     )
-    await _register_card_resource(
-        hass,
-        MORE_INFO_BASE_URL,
-        MORE_INFO_MODULE_URL,
-        "more_info_resource_id",
-    )
+    await _register_page_module(hass, MORE_INFO_BASE_URL, MORE_INFO_MODULE_URL)
     hass.data.setdefault(DOMAIN, {})["card_registered"] = True
 
 
@@ -1852,7 +1849,7 @@ async def _async_teardown_domain(
     await _unregister_card_resource(
         hass, ACTIVITY_LOG_CARD_URL, "activity_log_card_resource_id"
     )
-    await _unregister_card_resource(hass, MORE_INFO_MODULE_URL, "more_info_resource_id")
+    _unregister_page_module(hass, MORE_INFO_MODULE_URL)
 
     # A setup dialog or entry may have started using the integration while
     # the cards were being removed.

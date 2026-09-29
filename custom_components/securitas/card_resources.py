@@ -5,7 +5,11 @@ alarm card, the lightweight alarm chip/badge/Tile feature, the camera card, and 
 activity-log card). Each one is
 registered as a Lovelace resource (preferred) so it survives HA restarts,
 or — if the resources storage isn't available — falls back to
-add_extra_js_url for the lifetime of the running session.
+add_extra_js_url for the lifetime of the running session. The More Info
+module is instead loaded on every page with add_extra_js_url (by
+_register_page_module, which also deletes the Lovelace resource earlier
+versions registered for it), because HA loads Lovelace resources only on
+dashboards.
 """
 
 from __future__ import annotations
@@ -69,6 +73,38 @@ async def _register_card_resource(
         # Both the Lovelace-resource registration AND this fallback failed, so
         # the module never loads and the UI silently breaks — surface it.
         _LOGGER.warning("[setup] Could not register %s via add_extra_js_url", base_url)
+
+
+async def _register_page_module(
+    hass: HomeAssistant, base_url: str, module_url: str
+) -> None:
+    """Load a module on every frontend page, not only on dashboards.
+
+    Also removes the Lovelace resource earlier versions registered for it.
+    The module must define its elements only once HA's own ``home-assistant``
+    element exists: it can run before HA replaces ``window.customElements``.
+    """
+    try:
+        resources = getattr(hass.data.get("lovelace"), "resources", None)
+        if resources is not None and hasattr(resources, "async_delete_item"):
+            if not resources.loaded:
+                await resources.async_load()
+                resources.loaded = True
+            for item in resources.async_items():
+                if item.get("url", "").startswith(base_url):
+                    await resources.async_delete_item(item["id"])
+    except Exception:  # pylint: disable=broad-exception-caught
+        _LOGGER.debug("[setup] Could not remove the Lovelace resource %s", base_url)
+    try:
+        frontend.add_extra_js_url(hass, module_url)
+    except Exception:  # pylint: disable=broad-exception-caught
+        _LOGGER.warning("[setup] Could not register %s via add_extra_js_url", base_url)
+
+
+def _unregister_page_module(hass: HomeAssistant, module_url: str) -> None:
+    """Stop loading a module registered by ``_register_page_module``."""
+    with contextlib.suppress(Exception):
+        frontend.remove_extra_js_url(hass, module_url)
 
 
 async def _unregister_card_resource(

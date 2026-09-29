@@ -884,41 +884,37 @@ class TestAsyncSetupEntry:
             for u in js_urls
         )
 
-    async def test_setup_registers_more_info_as_lovelace_resource(self, hass, mock_hub):
-        """The More Info module registers as a Lovelace resource, not extra JS.
+    class _FakeResources:
+        """Minimal stand-in for HA's Lovelace ResourceStorageCollection."""
 
-        On a cold load HA swaps window.customElements for a fresh registry on
-        first Lovelace render, dropping any element defined by a module loaded
-        via add_extra_js_url (which runs at page load, pre-swap). The alarm
-        entity's custom More Info control (custom_ui_more_info) then resolves to
-        an undefined element and the dialog body renders empty. Registering the
-        module as a Lovelace resource (loaded post-swap during Lovelace init)
-        fixes it, matching how the four card modules are registered.
-        """
+        def __init__(self, items=()):
+            self.loaded = False
+            self._items = [dict(item) for item in items]
+            self._next_id = len(self._items)
 
-        class _FakeResources:
-            """Minimal stand-in for HA's Lovelace ResourceStorageCollection."""
+        async def async_load(self):
+            self.loaded = True
 
-            def __init__(self):
-                self.loaded = False
-                self._items = []
-                self._next_id = 0
+        def async_items(self):
+            return list(self._items)
 
-            async def async_load(self):
-                self.loaded = True
+        async def async_create_item(self, data):
+            self._next_id += 1
+            item = {"id": f"res-{self._next_id}", **data}
+            self._items.append(item)
+            return item
 
-            def async_items(self):
-                return list(self._items)
+        async def async_update_item(self, item_id, data):
+            item = next(i for i in self._items if i["id"] == item_id)
+            item.update(data)
+            return item
 
-            async def async_create_item(self, data):
-                self._next_id += 1
-                item = {"id": f"res-{self._next_id}", **data}
-                self._items.append(item)
-                return item
+        async def async_delete_item(self, item_id):
+            self._items = [i for i in self._items if i["id"] != item_id]
 
-        fake_resources = _FakeResources()
+    async def _setup_with_resources(self, hass, mock_hub, resources):
         lovelace_data = MagicMock()
-        lovelace_data.resources = fake_resources
+        lovelace_data.resources = resources
         hass.data["lovelace"] = lovelace_data
 
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
@@ -939,29 +935,48 @@ class TestAsyncSetupEntry:
                 "custom_components.securitas.frontend.add_extra_js_url"
             ) as mock_add_js,
         ):
-            result = await async_setup_entry(hass, entry)
+            assert await async_setup_entry(hass, entry)
+        return [call[0][1] for call in mock_add_js.call_args_list]
 
-        assert result is True
+    async def test_setup_loads_more_info_on_every_page(self, hass, mock_hub):
+        """The More Info module is injected into every page, not a dashboard
+        resource: HA loads dashboard resources only on dashboards, so opening
+        the alarm from the Home, Security or Settings pages showed an empty
+        dialog (#624)."""
+        resources = self._FakeResources()
 
-        # The More Info module is registered as a Lovelace resource of type
-        # "module" (loaded post-swap during Lovelace init) ...
-        registered = fake_resources.async_items()
-        more_info = [
-            item
-            for item in registered
-            if item["url"].startswith(
-                "/verisure-owa-panel/verisure-owa-more-info.js?v="
-            )
-        ]
-        assert len(more_info) == 1, [item["url"] for item in registered]
-        assert more_info[0]["res_type"] == "module"
+        js_urls = await self._setup_with_resources(hass, mock_hub, resources)
 
-        # ... and NOT via the add_extra_js_url fallback (which runs pre-swap).
-        js_urls = [call[0][1] for call in mock_add_js.call_args_list]
-        assert not any(
+        assert any(
             u.startswith("/verisure-owa-panel/verisure-owa-more-info.js?v=")
             for u in js_urls
         ), js_urls
+        assert not any(
+            "verisure-owa-more-info.js" in item["url"]
+            for item in resources.async_items()
+        ), resources.async_items()
+
+    async def test_setup_removes_the_more_info_resource_of_earlier_versions(
+        self, hass, mock_hub
+    ):
+        """v5.8 registered More Info as a dashboard resource; left in place it
+        would load the old module on dashboards alongside the new one."""
+        resources = self._FakeResources(
+            [
+                {
+                    "id": "old-more-info",
+                    "res_type": "module",
+                    "url": "/verisure-owa-panel/verisure-owa-more-info.js?v=abc-5.8.0",
+                },
+                {"id": "someone-else", "res_type": "module", "url": "/local/x.js"},
+            ]
+        )
+
+        await self._setup_with_resources(hass, mock_hub, resources)
+
+        urls = [item["url"] for item in resources.async_items()]
+        assert not any("verisure-owa-more-info.js" in u for u in urls), urls
+        assert "/local/x.js" in urls
 
     async def test_two_accounts_each_fetches_own_installations(self, hass):
         """Two accounts' entries each list and keep their own installations, so
