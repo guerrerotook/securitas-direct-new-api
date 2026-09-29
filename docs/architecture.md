@@ -1067,7 +1067,7 @@ tests/
 ├── conftest.py              Shared fixtures (API client, JWT helpers, response factories)
 ├── mock_graphql.py          Mock HTTP transport for integration tests (see below)
 ├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
-├── test_api_queue.py        ApiQueue priority, throttling, preemption
+├── test_api_queue.py        ApiQueue priority, throttling, arrival order, cancellation
 ├── test_architecture.py     Structural tests (imports, file existence, module patterns)
 ├── test_auth.py             Login, refresh, 2FA, token lifecycle (HA-level)
 ├── test_binary_sensor.py    WiFi connection binary sensor (coordinator-driven)

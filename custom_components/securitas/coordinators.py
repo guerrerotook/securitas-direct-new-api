@@ -560,12 +560,8 @@ class SentinelCoordinator(DataUpdateCoordinator[SentinelData]):
     async def _fetch_data(self) -> SentinelData:
         """Fetch sentinel and air quality data via the API queue.
 
-        Both submits are dispatched together via ``asyncio.gather`` so the
-        second is queued the moment the first frees the queue, but the
-        ``ApiQueue`` itself serialises the actual API calls (single shared
-        lock). End result: back-to-back rather than truly concurrent —
-        this still saves the round-trip latency between sequential awaits
-        in the coordinator.
+        ``asyncio.gather`` submits both calls at once; the ``ApiQueue`` runs
+        them one after the other, sentinel first.
         """
         sentinel, air_quality = await asyncio.gather(
             self._queue.submit(
