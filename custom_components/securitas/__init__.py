@@ -385,7 +385,7 @@ def _hash_legacy_plaintext_code(
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Reject pre-v3 entries; bump v3 → v4 → v5 (hash the plain-text PIN) → v5.2
-    (lower-case the email and entry ID)."""
+    (rebuild the entry ID from the saved login)."""
     if config_entry.version < 3:
         _LOGGER.error(
             "Config entry %s uses format v%s which is no longer supported. "
@@ -415,7 +415,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         )
 
     if config_entry.version == 5 and config_entry.minor_version < 2:
-        _migrate_lower_case_email(hass, config_entry)
+        _migrate_entry_unique_id(hass, config_entry)
 
     return True
 
@@ -429,31 +429,28 @@ def _entry_unique_id(data: Mapping[str, Any], fallback: str | None) -> str | Non
     username = data.get(CONF_USERNAME)
     installation = data.get(CONF_INSTALLATION)
     if username and installation:
-        return _unique_id_for(username.lower(), installation)
-    return fallback.lower() if fallback else None
+        return _unique_id_for(username, installation)
+    return fallback
 
 
 @callback
-def _migrate_lower_case_email(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Verisure's sign-in ignores capitals, so store the email in lower case.
+def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Rebuild an entry ID an earlier reauth account switch left on the old login.
 
-    Two entries for the same account typed in other capitals would now share
-    one entry ID. Neither is removed, since whichever sets up first owns the
-    entities, and neither takes an ID the other holds: the Repairs issue from
-    ``_async_update_duplicate_entry_issues`` asks the user to remove one.
+    The login is kept exactly as typed: Verisure Italy rejects a registered
+    email typed in other capitals. Two entries switched to the same account
+    would share one entry ID. Neither is removed, since whichever sets up first
+    owns the entities, and neither takes an ID the other holds: the Repairs
+    issue from ``_async_update_duplicate_entry_issues`` asks the user to remove
+    one.
     """
-    data = dict(entry.data)
-    if username := data.get(CONF_USERNAME):
-        data[CONF_USERNAME] = username.lower()
-    new_uid = _entry_unique_id(data, entry.unique_id)
+    new_uid = _entry_unique_id(entry.data, entry.unique_id)
     uid = entry.unique_id
     if new_uid is not None:
         holder = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, new_uid)
         if holder is None or holder is entry:
             uid = new_uid
-    hass.config_entries.async_update_entry(
-        entry, data=data, unique_id=uid, minor_version=2
-    )
+    hass.config_entries.async_update_entry(entry, unique_id=uid, minor_version=2)
 
 
 _DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"

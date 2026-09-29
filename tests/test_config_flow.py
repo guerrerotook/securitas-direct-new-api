@@ -1827,24 +1827,27 @@ async def test_unique_id_includes_installation(hass):
     assert entries[0].unique_id == "test@example.com_42"
 
 
-async def test_new_entry_stores_the_email_in_lower_case(hass):
-    """Verisure's sign-in ignores capitals, so the entry and its ID keep the
-    email in lower case whatever the user typed."""
-    result = await _complete_full_flow(
-        hass,
-        _hub_factory(),
-        credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "User@Example.COM"},
-    )
+async def test_new_entry_signs_in_and_stores_the_login_as_typed(hass):
+    """Verisure Italy rejects a registered email typed in other capitals, so
+    the login is sent, stored and used in the entry ID exactly as typed."""
+    with _patches(_hub_factory()) as hub_cls:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_USER},
+            data={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "User@Example.COM"},
+        )
+    result = await _finish_from_options(hass, result)
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert hub_cls.call_args.args[0][CONF_USERNAME] == "User@Example.COM"
     entry = result["result"]
-    assert entry.data[CONF_USERNAME] == "user@example.com"
-    assert entry.unique_id == "user@example.com_123456"
+    assert entry.data[CONF_USERNAME] == "User@Example.COM"
+    assert entry.unique_id == "User@Example.COM_123456"
 
 
-async def test_adding_the_same_account_in_other_capitals_is_a_duplicate(hass):
-    """An installation configured while this flow waits on its options form
-    is caught by the entry ID, which must match whatever the capitals."""
+async def test_a_login_in_other_capitals_is_another_login(hass):
+    """Two spellings Verisure both accepts are two logins, so an entry for
+    one does not make the other already configured."""
     result = await _start_user_flow(
         hass,
         _hub_factory(),
@@ -1860,8 +1863,8 @@ async def test_adding_the_same_account_in_other_capitals_is_a_duplicate(hass):
 
     result = await _finish_from_options(hass, result)
 
-    assert result["type"] == FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "USER@example.com_123456"
 
 
 async def test_already_configured_filtered_out(hass):
@@ -4428,82 +4431,10 @@ async def test_a_switch_lists_the_new_accounts_installations_once(hass, only_ent
     ] == ["111"]
 
 
-async def test_the_same_email_in_other_capitals_is_not_a_switch(hass):
-    """Verisure treats the email the same whatever its capitals, so retyping
-    it differently is the same account: no installation check is made."""
-    home = await _home_crashed_once_then_rejected(hass)
-    reauth_hub = _reauth_hub_seeing("111")
-
-    result = await _submit_reauth(
-        hass,
-        home,
-        "Test@Example.com",
-        reauth_hub,
-        patch(
-            "custom_components.securitas._login_ipv4_first",
-            AsyncMock(return_value=_two_installation_hub()),
-        ),
-    )
-
-    assert result["reason"] == "reauth_successful"
-    reauth_hub.client.list_installations.assert_not_awaited()
-
-
-async def test_the_same_email_in_other_capitals_clears_the_crash_count(hass):
-    """The crash count is kept under the lower-case email, so a reauth
-    typing it in other capitals stores it in lower case and clears its
-    count: the next crash waits to retry."""
-    home = await _home_crashed_once_then_rejected(hass)
-
-    result = await _submit_reauth(
-        hass,
-        home,
-        "Test@Example.com",
-        _reauth_hub_seeing("111"),
-        _crashing_login(_hub_factory()),
-    )
-
-    assert result["reason"] == "reauth_successful"
-    assert home.data[CONF_USERNAME] == "test@example.com"
-    assert home.state is ConfigEntryState.SETUP_RETRY
-    assert _crash_streaks(hass) == {"test@example.com": 1}
-
-
-async def test_the_same_email_in_other_capitals_keeps_the_shared_session(hass):
-    """Home's reload after a reauth typing the email in other capitals goes
-    back on the session Office still holds, with the installations already
-    cached: no second sign-in, no second session, no second list."""
-    hub = _two_installation_hub()
-    home = await _load_home_entry(hass, hub)
-    office = _add_office_entry(hass)
-    assert await hass.config_entries.async_setup(office.entry_id)
-    await hass.async_block_till_done()
-    home.async_start_reauth(hass)
-    await hass.async_block_till_done()
-    reload_login = AsyncMock(return_value=_two_installation_hub())
-
-    result = await _submit_reauth(
-        hass,
-        home,
-        "Test@Example.com",
-        _reauth_hub_seeing("111"),
-        patch("custom_components.securitas._login_ipv4_first", reload_login),
-    )
-
-    assert result["reason"] == "reauth_successful"
-    assert home.state is ConfigEntryState.LOADED
-    assert _flow_sessions(hass).keys() == {"test@example.com"}
-    assert _flow_sessions(hass)["test@example.com"]["holders"] == {
-        home.entry_id,
-        office.entry_id,
-    }
-    reload_login.assert_not_awaited()
-    hub.client.list_installations.assert_awaited_once()
-
-
-async def test_reauth_stores_the_email_in_lower_case(hass):
-    """Retyping the entry's email in capitals is the same account: no
-    installation check, and the entry keeps the lower-case email."""
+async def test_a_login_in_other_capitals_is_an_account_switch(hass):
+    """Verisure Italy rejects a registered email typed in other capitals, so
+    a spelling that signs in is another login: it is sent as typed, the
+    installation is checked, and the entry moves to it."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="user@example.com_111",
@@ -4512,31 +4443,35 @@ async def test_reauth_stores_the_email_in_lower_case(hass):
             CONF_INSTALLATION: "111",
         },
         version=FlowHandler.VERSION,
+        minor_version=FlowHandler.MINOR_VERSION,
     )
     entry.add_to_hass(hass)
     reauth_hub = _reauth_hub_seeing("111")
+    flow_id = (await _start_reauth_flow(hass, entry))["flow_id"]
 
-    result = await _submit_reauth(
-        hass,
-        entry,
-        "User@Example.com",
-        reauth_hub,
+    with (
+        _patches(reauth_hub) as hub_cls,
         patch(
             "custom_components.securitas._login_ipv4_first",
             AsyncMock(return_value=_two_installation_hub()),
         ),
-    )
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_USERNAME: "User@Example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.async_block_till_done()
 
     assert result["reason"] == "reauth_successful"
-    reauth_hub.client.list_installations.assert_not_awaited()
-    assert entry.data[CONF_USERNAME] == "user@example.com"
-    assert entry.unique_id == "user@example.com_111"
+    assert hub_cls.call_args.args[0][CONF_USERNAME] == "User@Example.com"
+    reauth_hub.client.list_installations.assert_awaited_once()
+    assert entry.data[CONF_USERNAME] == "User@Example.com"
+    assert entry.unique_id == "User@Example.com_111"
 
 
-async def test_reauth_lower_cases_an_email_saved_in_capitals(hass):
-    """An entry saved in capitals, re-entered with the same capitals, is the
-    same account: no installation check, it is stored in lower case, and the
-    entry keeps its ID."""
+async def test_reauth_keeps_a_login_saved_in_capitals(hass):
+    """Re-entering the saved login with its capitals is the same account: no
+    installation check, and the entry keeps the login and its ID."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="Test@Example.com_111",
@@ -4563,10 +4498,7 @@ async def test_reauth_lower_cases_an_email_saved_in_capitals(hass):
 
     assert result["reason"] == "reauth_successful"
     reauth_hub.client.list_installations.assert_not_awaited()
-    assert entry.data[CONF_USERNAME] == "test@example.com"
-    # Only an account switch moves the entry ID; lower-casing it is the
-    # startup migration's job, which leaves an ID alone when another entry
-    # holds the lower-case one.
+    assert entry.data[CONF_USERNAME] == "Test@Example.com"
     assert entry.unique_id == "Test@Example.com_111"
 
 
@@ -4609,12 +4541,14 @@ async def test_reauth_account_switch_moves_the_entry_id_to_the_new_email(
 
 
 async def _load_installation_111_entries(hass, *usernames) -> list:
-    """One entry per email for installation 111, all set up."""
+    """One entry per email for installation 111, all set up. An email given
+    as ``(email, entry ID)`` keeps an ID left from an earlier account switch."""
     entries = []
-    for username in usernames:
+    for spec in usernames:
+        username, unique_id = spec if isinstance(spec, tuple) else (spec, None)
         entry = MockConfigEntry(
             domain=DOMAIN,
-            unique_id=f"{username}_111",
+            unique_id=unique_id or f"{username}_111",
             data={
                 **make_config_entry_data(username=username),
                 CONF_INSTALLATION: "111",
@@ -4686,7 +4620,7 @@ async def test_a_reauth_moving_a_disabled_entry_off_a_shared_id_clears_the_repai
     to another account ends the clash, and the issue goes even though the
     entry is disabled and never sets up again."""
     first, _ = await _load_installation_111_entries(
-        hass, "User@Example.com", "user@example.com"
+        hass, ("user@example.com", "old@example.com_111"), "user@example.com"
     )
     assert len(_duplicate_entry_issue_ids(hass)) == 1
 
