@@ -10,11 +10,12 @@ import {
   pressMode as pressModeOn,
   submitPin,
 } from "../fixtures/ha-alarm-dom.js";
+import { importMoreInfo } from "../fixtures/more-info.js";
 
 const ENTITY = "alarm_control_panel.test";
 const LS_KEY = `verisure-owa:auto-force-arm:${ENTITY}`;
 
-await import("../../custom_components/securitas/www/verisure-owa-more-info.js");
+await importMoreInfo();
 
 function makeState({
   state = "disarmed",

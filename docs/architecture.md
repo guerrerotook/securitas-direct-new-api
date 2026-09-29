@@ -16,7 +16,8 @@ The integration has three layers:
 │  events.py  (Activity log → bus event injection + dedup)             │
 │  discovery.py  (Background camera + lock discovery)                  │
 │  card_resources.py  (Lovelace static-path + resource registration    │
-│    + the verisure_owa/deprecated_element websocket command)          │
+│    + the verisure_owa/deprecated_element websocket command           │
+│    + the More Info module loaded on every page)                      │
 ├──────────────────────────────────────────────────────────────────────┤
 │  Integration Hub Layer                                               │
 │  __init__.py  (setup functions)                                      │

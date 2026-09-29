@@ -5,6 +5,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components import frontend
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
     SOURCE_USER,
@@ -2911,11 +2912,17 @@ async def test_a_dialog_opened_while_the_integration_tears_down_keeps_it(hass):
 
     other_hub.client.list_installations = AsyncMock(side_effect=slow_listing)
     try:
-        with patch(
-            "custom_components.securitas._register_card_resource", AsyncMock()
-        ) as register_card:
+        with (
+            patch(
+                "custom_components.securitas._register_card_resource", AsyncMock()
+            ) as register_card,
+            patch(
+                "custom_components.securitas._register_page_module", AsyncMock()
+            ) as register_page_module,
+        ):
             home = await _load_home_entry(hass, _two_installation_hub())
-            assert register_card.await_count == 5
+            assert register_card.await_count == 4
+            assert register_page_module.await_count == 1
             with patch(
                 "custom_components.securitas._unregister_card_resource",
                 side_effect=slow_card_removal,
@@ -2953,7 +2960,8 @@ async def test_a_dialog_opened_while_the_integration_tears_down_keeps_it(hass):
                 entry.entry_id
             }
             assert hass.data[DOMAIN]["log_filter"] in handler.filters
-            assert register_card.await_count == 10
+            assert register_card.await_count == 8
+            assert register_page_module.await_count == 2
     finally:
         logging.getLogger().removeHandler(handler)
 
@@ -3251,6 +3259,8 @@ async def test_an_entry_needing_reauth_keeps_the_cards_registered(hass):
 def _serve_card_resources(hass):
     resources = _FakeLovelaceResources()
     hass.data["lovelace"] = MagicMock(resources=resources)
+    resources.page_modules = frontend.UrlManager(lambda *_: None, [])
+    hass.data[frontend.DATA_EXTRA_MODULE_URL] = resources.page_modules
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
     return resources
@@ -3278,7 +3288,7 @@ async def test_closing_the_reauth_dialog_keeps_the_cards_for_the_entry_needing_i
     or deleted."""
     resources = _serve_card_resources(hass)
     other = await _other_account_needing_reauth(hass)
-    assert len(resources.items) == 5
+    assert len(resources.loaded_urls()) == 5
     reauths = [
         flow
         for flow in hass.config_entries.flow.async_progress_by_handler(DOMAIN)
@@ -3289,13 +3299,13 @@ async def test_closing_the_reauth_dialog_keeps_the_cards_for_the_entry_needing_i
     hass.config_entries.flow.async_abort(reauths[0]["flow_id"])
     await hass.async_block_till_done()
 
-    assert len(resources.items) == 5
+    assert len(resources.loaded_urls()) == 5
     assert _alias_services(hass)
 
     await hass.config_entries.async_remove(other.entry_id)
     await hass.async_block_till_done()
 
-    assert not resources.items
+    assert not resources.loaded_urls()
     _assert_torn_down(hass)
 
 
@@ -3306,12 +3316,12 @@ async def test_unloading_an_entry_keeps_the_cards_for_one_needing_reauth(hass):
     resources = _serve_card_resources(hass)
     home = await _load_home_entry(hass, _two_installation_hub())
     await _other_account_needing_reauth(hass)
-    assert len(resources.items) == 5
+    assert len(resources.loaded_urls()) == 5
 
     assert await hass.config_entries.async_unload(home.entry_id)
     await hass.async_block_till_done()
 
-    assert len(resources.items) == 5
+    assert len(resources.loaded_urls()) == 5
     assert _alias_services(hass)
 
 
@@ -3364,6 +3374,11 @@ class _FakeLovelaceResources:
     def async_items(self):
         return list(self.items.values())
 
+    def loaded_urls(self):
+        """URLs the frontend loads: dashboard resources and page-wide modules."""
+        urls = {item["url"] for item in self.items.values()}
+        return urls | set(self.page_modules.urls)
+
     async def async_create_item(self, data):
         self._next_id += 1
         item = {**data, "id": str(self._next_id)}
@@ -3383,7 +3398,7 @@ class _FakeLovelaceResources:
 async def test_an_entry_set_up_while_the_cards_are_being_removed_keeps_all_five(hass):
     resources = _serve_card_resources(hass)
     home = await _load_home_entry(hass, _two_installation_hub())
-    assert len(resources.items) == 5
+    assert len(resources.loaded_urls()) == 5
 
     resources.pause_deletes.clear()
     unload = asyncio.create_task(hass.config_entries.async_unload(home.entry_id))
@@ -3397,7 +3412,7 @@ async def test_an_entry_set_up_while_the_cards_are_being_removed_keeps_all_five(
     await hass.async_block_till_done()
 
     assert other_entry.state is ConfigEntryState.LOADED
-    assert len(resources.items) == 5
+    assert len(resources.loaded_urls()) == 5
     assert _alias_services(hass)
 
 

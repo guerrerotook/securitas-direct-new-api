@@ -15,6 +15,7 @@ import {
   submitPin,
   wrapFeature,
 } from "../fixtures/ha-alarm-dom.js";
+import { importMoreInfo } from "../fixtures/more-info.js";
 
 const ENTITY = "alarm_control_panel.test";
 
@@ -422,7 +423,7 @@ describe("Verisure OWA Tile feature auto-force-arm tick box", () => {
     });
 
     it("reflects a tick made in the More Info dialog", async () => {
-      await import("../../custom_components/securitas/www/verisure-owa-more-info.js");
+      await importMoreInfo();
       const { feature } = mountTile();
       expect(checkbox(feature).checked).toBe(false);
 

@@ -144,8 +144,13 @@ class VerisureOwaMoreInfo extends HTMLElement {
   }
 }
 
-/* v8 ignore start -- defensive duplicate-registration guard. */
-if (!customElements.get("more-info-verisure-owa-alarm")) {
-  customElements.define("more-info-verisure-owa-alarm", VerisureOwaMoreInfo);
-}
-/* v8 ignore stop */
+// Loaded on every page, this can run before HA's app script replaces
+// window.customElements; an element defined earlier is missing from the
+// registry HA reads, and the More Info dialog renders empty.
+customElements.whenDefined("home-assistant").then(() => {
+  /* v8 ignore start -- defensive duplicate-registration guard. */
+  if (!customElements.get("more-info-verisure-owa-alarm")) {
+    customElements.define("more-info-verisure-owa-alarm", VerisureOwaMoreInfo);
+  }
+  /* v8 ignore stop */
+});

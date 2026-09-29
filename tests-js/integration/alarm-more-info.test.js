@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeHass } from "../fixtures/hass.js";
+import { importMoreInfo } from "../fixtures/more-info.js";
 
 const ENTITY = "alarm_control_panel.test";
 
-await import("../../custom_components/securitas/www/verisure-owa-more-info.js");
+await importMoreInfo();
 
 function makeState({
   state = "disarmed",
