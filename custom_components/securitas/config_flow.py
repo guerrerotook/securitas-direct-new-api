@@ -700,7 +700,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="user", data_schema=self._user_schema())
 
         self.config = dict(user_input)
-        self.config[CONF_USERNAME] = self.config[CONF_USERNAME].lower()
 
         self.config[CONF_DELAY_CHECK_OPERATION] = DEFAULT_DELAY_CHECK_OPERATION
         self.config[CONF_DEVICE_INDIGITALL] = ""
@@ -742,7 +741,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
             self.config[CONF_USERNAME] = user_input.get(
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
-            ).lower()
+            )
 
             # Preserve existing device IDs from the entry being reauthenticated
             self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
@@ -810,7 +809,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         username = self.config[CONF_USERNAME]
         installation = self._reauth_entry.data.get(CONF_INSTALLATION)
         old_username = self._reauth_entry.data.get(CONF_USERNAME, "")
-        switched = username != old_username.lower()
+        switched = username != old_username
         if installation and switched:
             # Another account keeps the entry's installation number; one that
             # cannot see it would leave the entry with no devices.

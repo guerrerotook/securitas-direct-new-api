@@ -914,7 +914,7 @@ async def test_the_entry_set_up_first_takes_the_installations_entities(
     after_first: tuple[str, str],
     after_restart: tuple[str, str],
 ):
-    """Two entries for one installation (the same email in other capitals)
+    """Two entries for one installation (two logins that can both see it)
     share every entity and device ID. Whichever sets up first takes all the
     entities, moving them over from the other on a restart, and every entry
     that has ever registered the devices keeps them. The newer entry can

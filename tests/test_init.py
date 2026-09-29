@@ -2352,7 +2352,7 @@ class TestAsyncMigrateEntry:
 
 
 def _minor_1_entry(hass, username, unique_id, installation="123456", title="Home"):
-    """Add a v5.1 entry (saved before emails were lower-cased) to hass."""
+    """Add a v5.1 entry (saved before the 5.2 entry-ID migration) to hass."""
     data = make_config_entry_data(username=username)
     if username is None:
         del data[CONF_USERNAME]
@@ -2370,16 +2370,20 @@ def _minor_1_entry(hass, username, unique_id, installation="123456", title="Home
     return entry
 
 
-class TestLowerCaseEmailMigration:
-    """The v5.1 → v5.2 step: the saved email and the entry ID in lower case."""
+class TestEntryIdMigration:
+    """The v5.1 → v5.2 step: the entry ID rebuilt from the saved login, which
+    is kept exactly as typed."""
 
-    async def test_minor_2_migration_lower_cases_the_email_and_entry_id(self, hass):
+    async def test_minor_2_migration_keeps_the_login_as_typed(self, hass):
+        """Verisure Italy rejects a registered email typed in other capitals,
+        so lower-casing a saved login could stop it signing in."""
         entry = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+        data_before = dict(entry.data)
 
         assert await async_migrate_entry(hass, entry) is True
 
-        assert entry.data[CONF_USERNAME] == "user@example.com"
-        assert entry.unique_id == "user@example.com_123456"
+        assert dict(entry.data) == data_before
+        assert entry.unique_id == "User@Example.com_123456"
         assert (entry.version, entry.minor_version) == (5, 2)
 
     async def test_minor_2_migration_rebuilds_an_entry_id_left_from_an_account_switch(
@@ -2387,21 +2391,11 @@ class TestLowerCaseEmailMigration:
     ):
         """An earlier release switched an entry's account on reauth without
         moving its ID off the old email."""
-        entry = _minor_1_entry(hass, "new@example.com", "old@example.com_123456")
+        entry = _minor_1_entry(hass, "New@example.com", "old@example.com_123456")
 
         assert await async_migrate_entry(hass, entry) is True
 
-        assert entry.unique_id == "new@example.com_123456"
-
-    async def test_minor_2_migration_leaves_a_lower_case_entry_as_it_is(self, hass):
-        entry = _minor_1_entry(hass, "user@example.com", "user@example.com_123456")
-        data_before = dict(entry.data)
-
-        assert await async_migrate_entry(hass, entry) is True
-
-        assert dict(entry.data) == data_before
-        assert entry.unique_id == "user@example.com_123456"
-        assert entry.minor_version == 2
+        assert entry.unique_id == "New@example.com_123456"
 
     async def test_minor_2_migration_tolerates_missing_username_and_installation(
         self, hass
@@ -2411,7 +2405,7 @@ class TestLowerCaseEmailMigration:
         assert await async_migrate_entry(hass, entry) is True
 
         assert CONF_USERNAME not in entry.data
-        assert entry.unique_id == "legacy-id"
+        assert entry.unique_id == "Legacy-ID"
         assert entry.minor_version == 2
 
     async def test_minor_2_migration_ignores_entries_without_an_id(self, hass):
@@ -2432,12 +2426,12 @@ class TestLowerCaseEmailMigration:
     async def test_minor_2_migration_keeps_both_entries_of_a_duplicate(
         self, hass, migrate_older_first
     ):
-        """The same account added twice in other capitals: whichever entry
-        set up first owns the entities, so neither is removed. Both keep
-        distinct entry IDs, and the migration posts no notification: a
-        Repairs issue raised at setup asks the user to remove one."""
-        older = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
-        newer = _minor_1_entry(hass, "USER@example.com", "USER@example.com_123456")
+        """Two entries switched on reauth to the same account: whichever set
+        up first owns the entities, so neither is removed. Both keep distinct
+        entry IDs, and the migration posts no notification: a Repairs issue
+        raised at setup asks the user to remove one."""
+        older = _minor_1_entry(hass, "user@example.com", "old@example.com_123456")
+        newer = _minor_1_entry(hass, "user@example.com", "other@example.com_123456")
         order = [older, newer] if migrate_older_first else [newer, older]
         second_id = order[1].unique_id
 
@@ -2450,36 +2444,34 @@ class TestLowerCaseEmailMigration:
             older.entry_id,
             newer.entry_id,
         }
-        assert older.data[CONF_USERNAME] == "user@example.com"
-        assert newer.data[CONF_USERNAME] == "user@example.com"
         assert order[0].unique_id == "user@example.com_123456"
         assert order[1].unique_id == second_id
         mock_notify.assert_not_called()
 
     async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
-        """An entry already holding the lower-case ID keeps it; the entry
-        typed in capitals keeps its own."""
+        """An entry already holding the rebuilt ID keeps it; the entry left
+        with an old ID keeps its own."""
         holder = _minor_1_entry(hass, "user@example.com", "user@example.com_123456")
-        mixed = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+        switched = _minor_1_entry(hass, "user@example.com", "old@example.com_123456")
 
         with patch("custom_components.securitas._notify") as mock_notify:
-            assert await async_migrate_entry(hass, mixed) is True
+            assert await async_migrate_entry(hass, switched) is True
             assert await async_migrate_entry(hass, holder) is True
 
         assert holder.unique_id == "user@example.com_123456"
-        assert mixed.unique_id == "User@Example.com_123456"
-        assert mixed.data[CONF_USERNAME] == "user@example.com"
+        assert switched.unique_id == "old@example.com_123456"
         mock_notify.assert_not_called()
 
 
-def _entry_for(hass, username, installation="123456", title="Home"):
-    """Add an entry for one installation on one account to hass."""
+def _entry_for(hass, username, installation="123456", title="Home", unique_id=None):
+    """Add an entry for one installation on one account to hass; ``unique_id``
+    stands in for one left from an earlier account switch."""
     data = make_config_entry_data(username=username)
     data[CONF_INSTALLATION] = installation
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=data,
-        unique_id=f"{username}_{installation}",
+        unique_id=unique_id or f"{username}_{installation}",
         title=title,
         version=5,
         minor_version=2,
@@ -2502,9 +2494,9 @@ _CLASH_ISSUE_ID = (
 
 
 class TestDuplicateEntryIssue:
-    """One installation held by two entries on the same account (the email
-    typed in other capitals, or an entry signed in again to the account the
-    other uses) is flagged in Repairs for as long as both entries exist."""
+    """One installation held by two entries on the same account (an entry
+    signed in again to the account the other uses) is flagged in Repairs for
+    as long as both entries exist."""
 
     @pytest.fixture
     def mock_hub(self):
@@ -2530,7 +2522,7 @@ class TestDuplicateEntryIssue:
         return _set_up
 
     async def test_two_entries_for_one_installation_raise_one_issue(self, hass, set_up):
-        first = _entry_for(hass, "User@Example.com")
+        first = _entry_for(hass, "user@example.com", unique_id="old@example.com_123456")
         second = _entry_for(hass, "user@example.com")
 
         await set_up(first, second)
@@ -2549,7 +2541,7 @@ class TestDuplicateEntryIssue:
     async def test_removing_one_of_the_entries_clears_the_issue(
         self, hass, set_up, enable_custom_integrations
     ):
-        first = _entry_for(hass, "User@Example.com")
+        first = _entry_for(hass, "user@example.com", unique_id="old@example.com_123456")
         second = _entry_for(hass, "user@example.com")
         await set_up(first, second)
         assert list(_duplicate_entry_issues(hass)) == [_CLASH_ISSUE_ID]
@@ -2560,12 +2552,22 @@ class TestDuplicateEntryIssue:
         assert _duplicate_entry_issues(hass) == {}
 
     async def test_the_entry_being_removed_no_longer_counts(self, hass, set_up):
-        first = _entry_for(hass, "User@Example.com")
+        first = _entry_for(hass, "user@example.com", unique_id="old@example.com_123456")
         second = _entry_for(hass, "user@example.com")
         await set_up(first, second)
         assert list(_duplicate_entry_issues(hass)) == [_CLASH_ISSUE_ID]
 
         await async_remove_entry(hass, second)
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_logins_in_other_capitals_raise_no_issue(self, hass, set_up):
+        """Two spellings Verisure both accepts are two logins, not one
+        account added twice."""
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+
+        await set_up(first, second)
 
         assert _duplicate_entry_issues(hass) == {}
 
