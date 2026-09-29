@@ -3259,7 +3259,6 @@ async def test_an_entry_needing_reauth_keeps_the_cards_registered(hass):
 def _serve_card_resources(hass):
     resources = _FakeLovelaceResources()
     hass.data["lovelace"] = MagicMock(resources=resources)
-    resources.page_modules = frontend.UrlManager(lambda *_: None, [])
     hass.data[frontend.DATA_EXTRA_MODULE_URL] = resources.page_modules
     hass.http = MagicMock()
     hass.http.async_register_static_paths = AsyncMock()
@@ -3361,10 +3360,12 @@ async def test_two_entries_unloading_at_once_tear_down_after_the_last(hass):
 
 
 class _FakeLovelaceResources:
-    """The Lovelace resource store, with a delete that can be paused."""
+    """The Lovelace resource store, with a delete that can be paused, and the
+    list of modules loaded on every page (add_extra_js_url)."""
 
     def __init__(self):
         self.loaded = True
+        self.page_modules = frontend.UrlManager(lambda *_: None, [])
         self.items: dict[str, dict] = {}
         self._next_id = 0
         self.pause_deletes = asyncio.Event()

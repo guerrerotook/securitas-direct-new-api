@@ -5,7 +5,11 @@ alarm card, the lightweight alarm chip/badge/Tile feature, the camera card, and 
 activity-log card). Each one is
 registered as a Lovelace resource (preferred) so it survives HA restarts,
 or — if the resources storage isn't available — falls back to
-add_extra_js_url for the lifetime of the running session.
+add_extra_js_url for the lifetime of the running session. The More Info
+module is instead loaded on every page with add_extra_js_url (by
+_register_page_module, which also deletes the Lovelace resource earlier
+versions registered for it), because HA loads Lovelace resources only on
+dashboards.
 """
 
 from __future__ import annotations
