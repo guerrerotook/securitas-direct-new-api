@@ -313,10 +313,10 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 **Algorithm:**
 1. `submit(coro_fn, *args, priority, label)` accepts an async callable + args. The optional `label` overrides the function name in throttle log messages.
-2. The call joins the end of its level's line (`_waiting[priority]`)
-3. It waits on the `_turn` condition until no call is running, it is first in its line, and (for background) the foreground line is empty
-4. If the minimum gap (`interval - elapsed_since_last_api_time`) hasn't passed, it sleeps it out without holding its turn and checks again, so foreground arriving meanwhile goes first
-5. It leaves the line, runs the coroutine, updates `_last_api_time` and wakes the waiters; a caller cancelled while waiting leaves the line and wakes them too
+2. The call joins the end of its level's line (`_waiting[priority]`) with its own wake-up event
+3. Only the call that goes next is woken (`_wake_next`): the first in the foreground line, else the first in the background line, and only while no call is running. A woken call that is no longer next (foreground arrived meanwhile) goes back to waiting
+4. If the minimum gap (`interval - elapsed_since_last_api_time`) hasn't passed, it sleeps it out and checks again
+5. It leaves the line, runs the coroutine, updates `_last_api_time` and wakes the next call; a caller cancelled while waiting leaves the line and wakes the next one too
 
 ### Setup flow (`async_setup_entry`)
 

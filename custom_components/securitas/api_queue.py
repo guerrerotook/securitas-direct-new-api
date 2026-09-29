@@ -43,19 +43,19 @@ class ApiQueue:
     ) -> None:
         self._interval: float = interval
         self._last_api_time: float = 0
-        self._waiting: dict[int, deque[object]] = {
+        self._waiting: dict[int, deque[asyncio.Event]] = {
             self.FOREGROUND: deque(),
             self.BACKGROUND: deque(),
         }
         self._busy: bool = False
-        self._turn = asyncio.Condition()
 
-    def _is_next(self, ticket: object, priority: int) -> bool:
-        if self._busy:
-            return False
-        if priority == self.BACKGROUND and self._waiting[self.FOREGROUND]:
-            return False
-        return self._waiting[priority][0] is ticket
+    def _next_ticket(self) -> asyncio.Event | None:
+        line = self._waiting[self.FOREGROUND] or self._waiting[self.BACKGROUND]
+        return line[0] if line else None
+
+    def _wake_next(self) -> None:
+        if not self._busy and (ticket := self._next_ticket()) is not None:
+            ticket.set()
 
     async def submit(
         self,
@@ -80,19 +80,22 @@ class ApiQueue:
         """
         if label is None:
             label = getattr(coro_fn, "__name__", str(coro_fn))
-        ticket = object()
+        ticket = asyncio.Event()
         line = self._waiting[priority]
         line.append(ticket)
+        self._wake_next()
         try:
             while True:
-                async with self._turn:
-                    await self._turn.wait_for(lambda: self._is_next(ticket, priority))
-                    delay = self._interval - (time.monotonic() - self._last_api_time)
-                    if delay <= 0:
-                        line.popleft()
-                        self._busy = True
-                        break
-                # Sleep out the gap without holding the turn, then check again:
+                await ticket.wait()
+                if self._busy or self._next_ticket() is not ticket:
+                    ticket.clear()
+                    continue
+                delay = self._interval - (time.monotonic() - self._last_api_time)
+                if delay <= 0:
+                    line.popleft()
+                    self._busy = True
+                    break
+                # Sleep out the gap still first in line, then check again:
                 # foreground work may have arrived in the meantime.
                 _LOGGER.debug(
                     "[queue] Throttling %.1fs (%s) for %s",
@@ -104,8 +107,7 @@ class ApiQueue:
         except BaseException:
             if ticket in line:
                 line.remove(ticket)
-                async with self._turn:
-                    self._turn.notify_all()
+                self._wake_next()
             raise
 
         try:
@@ -113,5 +115,4 @@ class ApiQueue:
         finally:
             self._last_api_time = time.monotonic()
             self._busy = False
-            async with self._turn:
-                self._turn.notify_all()
+            self._wake_next()

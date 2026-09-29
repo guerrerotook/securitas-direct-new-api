@@ -2,9 +2,11 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from custom_components.securitas import api_queue
 from custom_components.securitas.api_queue import ApiQueue
 
 
@@ -262,6 +264,37 @@ class TestApiQueueArrivalOrder:
         release.set()
         await asyncio.gather(blocker_task, bg_task, fg_task)
         assert order == ["fg", "bg"]
+
+    async def test_foreground_arriving_during_the_gap_goes_first(self, monkeypatch):
+        """Background already sitting out the gap still yields to foreground,
+        even when it wakes first."""
+        clock = SimpleNamespace(skew=0.0)
+        monkeypatch.setattr(
+            api_queue,
+            "time",
+            SimpleNamespace(monotonic=lambda: time.monotonic() + clock.skew),
+        )
+        queue = ApiQueue(interval=0.05)
+        order = []
+
+        async def call(name):
+            order.append(name)
+
+        await queue.submit(call, "done", priority=ApiQueue.BACKGROUND)
+        bg_task = asyncio.create_task(
+            queue.submit(call, "bg", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.01)
+        # Foreground reckons its gap on a clock 20 ms slow, so it wakes about
+        # 20 ms after background; by then the gap has long passed for both.
+        clock.skew = -0.02
+        fg_task = asyncio.create_task(
+            queue.submit(call, "fg", priority=ApiQueue.FOREGROUND)
+        )
+        await asyncio.sleep(0)
+        clock.skew = 1.0
+        await asyncio.gather(bg_task, fg_task)
+        assert order == ["done", "fg", "bg"]
 
     @pytest.mark.parametrize(
         "first_priority", [ApiQueue.BACKGROUND, ApiQueue.FOREGROUND]
