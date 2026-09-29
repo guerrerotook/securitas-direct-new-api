@@ -7,6 +7,7 @@ inherit the bulk of their behaviour from BaseVerisureOwaAlarmPanel here.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import time
@@ -22,7 +23,7 @@ from homeassistant.components.alarm_control_panel import (
 )
 from homeassistant.components.alarm_control_panel.const import AlarmControlPanelState
 from homeassistant.const import CONF_SCAN_INTERVAL
-from homeassistant.core import Event, callback
+from homeassistant.core import Context, Event, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -51,7 +52,12 @@ from ..const import (
     MORE_INFO_ELEMENT,
     PROJECT_URL,
 )
-from ..coordinators import AlarmCoordinator, AlarmStatusData
+from ..coordinators import (
+    AlarmCoordinator,
+    AlarmStatusData,
+    InstallationOperation,
+    OperationKind,
+)
 from ..entity import VerisureEntity
 from ..events import (
     ARMING_EXCEPTION_DISMISSED_EVENT_TYPE,
@@ -107,10 +113,42 @@ _LOGGER = logging.getLogger(__name__)
 # state) and therefore safe to issue even when the current state is unknown.
 _FULLY_DISARMED = PROTO_TO_ALARM_STATE[PROTO_DISARMED]
 
+
+class _UnrecognisedStateError(VerisureOwaError):
+    """A transition refused because the alarm reports a state code this
+    integration doesn't model."""
+
+    def __init__(self, proto_code: str) -> None:
+        super().__init__(
+            f"Alarm is in unknown state '{proto_code}'. "
+            f"Please open an issue at {PROJECT_URL}/issues "
+            "including this state code."
+        )
+        self.proto_code = proto_code
+
+
+def _cancel_timer(unsub: Callable[[], None] | None) -> None:
+    """Cancel a pending ``async_call_later`` timer, if any."""
+    if unsub is not None:
+        unsub()
+
+
+def _modelled_state(proto_code: str | None) -> AlarmState | None:
+    """The AlarmState a proto code stands for, or None if it is missing or
+    one we don't model (e.g. 'N' after a central-station reset)."""
+    if proto_code is None:
+        return None
+    return PROTO_TO_ALARM_STATE.get(proto_code)
+
+
 # How long an auto-force-arm "suppress the next arm-exception prompt" request
 # stays armed. Long enough to cover the arm round-trip that follows it, short enough
 # that a stray request can't silently swallow an unrelated prompt later on.
 _ARM_PROMPT_SUPPRESS_WINDOW = 120.0
+
+# A generous multiple of the poll timeout: an arm makes several confirmation
+# polls (see _execute_transition's retries and the resolver's steps).
+_MAX_POLLS_PER_OPERATION = 12
 
 # How long a suppressed arm-blocked prompt waits for the auto-force-arm that
 # asked for the suppression. If the frontend went away before calling
@@ -158,6 +196,18 @@ def build_partial_disarm_target(current: AlarmState, circuits: list[str]) -> Ala
         ),
         annex=(AnnexMode.OFF if CIRCUIT_ANNEX in circuits else current.annex),
     )
+
+
+def armed_circuits(state: AlarmState) -> set[str]:
+    """Return the set of circuit labels currently armed (mode != OFF)."""
+    armed: set[str] = set()
+    if state.interior != InteriorMode.OFF:
+        armed.add(CIRCUIT_INTERIOR)
+    if state.perimeter != PerimeterMode.OFF:
+        armed.add(CIRCUIT_PERIMETER)
+    if state.annex != AnnexMode.OFF:
+        armed.add(CIRCUIT_ANNEX)
+    return armed
 
 
 class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
@@ -243,8 +293,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._update_interval: timedelta = timedelta(
             seconds=scan_seconds if scan_seconds > 0 else DEFAULT_SCAN_INTERVAL
         )
-        self._operation_in_progress: bool = False
-        self._operation_epoch: int = 0
         self._code_hash: str | None = client.config.get(CONF_CODE_HASH, None)
         self._attr_code_format: CodeFormat | None = None
         if self._code_hash:
@@ -259,6 +307,9 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         )
 
         self._last_arm_result: OperationStatus | None = None
+        # Counts arm presses on this panel; a waiting arm that is no longer
+        # the latest press has been overtaken and is dropped.
+        self._arm_presses = 0
 
         # Arming-exception context: stored when arming is blocked by sensors
         # (e.g. an open window).  ``allow_forcing`` controls whether it can be
@@ -318,9 +369,23 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         action = event.data.get("action")
         num = self.installation.number
         if action == f"SECURITAS_FORCE_ARM_{num}":
-            self.hass.async_create_task(self.async_force_arm())
+            self.hass.async_create_task(self._async_force_arm_from_notification())
         elif action == f"SECURITAS_CANCEL_FORCE_ARM_{num}":
             self.hass.async_create_task(self.async_force_arm_cancel())
+
+    async def _async_force_arm_from_notification(self) -> None:
+        """Force-arm for the phone notification's button. No screen shows a
+        refused arm there, so the refusal is sent as the Arming failed
+        notification instead."""
+        try:
+            await self.async_force_arm()
+        except HomeAssistantError as err:
+            _notify(
+                self.hass,
+                f"arm_failed_{self.installation.number}",
+                "arm_failed",
+                {"error": str(err)},
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         """Unregister event listeners when removed from HA."""
@@ -336,6 +401,77 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self._cancel_force_arm_expiry()
         self._cancel_suppressed_prompt_fallback()
         await super().async_will_remove_from_hass()
+
+    @property
+    def _operation(self) -> InstallationOperation:
+        return self.coordinator.operation
+
+    @property
+    def _operation_in_progress(self) -> bool:
+        """True while this panel takes part in the installation's running operation."""
+        return self in self._operation.panels
+
+    def _operation_wait_limit(self) -> float:
+        """Seconds to wait for a running operation before treating it as stuck."""
+        poll_timeout = float(
+            self._client.config.get(
+                CONF_OPERATION_POLL_TIMEOUT, DEFAULT_OPERATION_POLL_TIMEOUT
+            )
+        )
+        return _MAX_POLLS_PER_OPERATION * poll_timeout
+
+    def _repeats_running(self, kind: OperationKind, mode: str | None = None) -> bool:
+        """True when the running operation is ``kind`` (for ``mode``, an arm's
+        mode) on this same panel: pressing it again is a repeat press."""
+        operation = self._operation
+        return (
+            operation.running
+            and operation.kind == kind
+            and operation.mode == mode
+            and self in operation.panels
+        )
+
+    def _ignores_repeat_arm(self, mode: str) -> bool:
+        """True, logging why, when an arm to ``mode`` repeats the running one."""
+        if not self._repeats_running("arm", mode):
+            return False
+        _LOGGER.debug(
+            "Arm ignored for %s: an arm to %s is already in progress",
+            self.installation.number,
+            mode,
+        )
+        return True
+
+    async def _wait_until_idle(
+        self, *, duplicate_of: OperationKind | None = None
+    ) -> bool:
+        """Wait until the installation runs no operation.
+
+        Returns False instead, at once, when the running operation is
+        ``duplicate_of`` on this same panel (see _repeats_running).
+        Raises the translated ``operation_in_progress`` error after
+        _operation_wait_limit().
+        """
+        operation = self._operation
+        wait_limit = self._operation_wait_limit()
+        try:
+            async with asyncio.timeout(wait_limit):
+                while operation.running:
+                    if duplicate_of is not None and self._repeats_running(duplicate_of):
+                        return False
+                    await operation.wait_idle()
+        except TimeoutError as err:
+            _LOGGER.warning(
+                "%s gave up waiting %.0f s for a running %s to finish",
+                self.installation.number,
+                wait_limit,
+                operation.kind,
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="operation_in_progress",
+            ) from err
+        return True
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -400,7 +536,7 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 "[%s installation=%s] Unmapped alarm state: Verisure reports "
                 "'%s' (proto code '%s'). None of the buttons on the main "
                 "control panel are mapped to it. Map a button in Settings → "
-                "Devices & Services → Verisure OWA → Configure → Alarm State "
+                "Devices & services → Verisure OWA → Configure → Alarm State "
                 "Mappings, or HA will keep showing this as 'armed_custom_bypass'.",
                 self.entity_id,
                 self.installation.number,
@@ -512,13 +648,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         self, state: AlarmControlPanelState, code: str | None = None
     ) -> None:
         """Arm the alarm in the specified mode."""
-        if self._check_code_for_arm_if_required(code):
-            await self._dismiss_pending_force_context_on_siblings(
-                reason=DISMISSAL_REASON_USER_ARM,
-                new_mode=state,
-            )
-            self._force_state(AlarmControlPanelState.ARMING)
-            await self.set_arm_state(state)
+        if not self._check_code_for_arm_if_required(code):
+            return
+        # An ignored repeat press must leave the running arm's Force Arm
+        # prompt in place, so it is caught before the dismissal.
+        if self._ignores_repeat_arm(state):
+            return
+        await self._dismiss_pending_force_context_on_siblings(
+            reason=DISMISSAL_REASON_USER_ARM,
+            new_mode=state,
+        )
+        await self.set_arm_state(state)
 
     async def _execute_transition(
         self,
@@ -527,10 +667,10 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
     ) -> OperationStatus:
         """Execute a state transition, retrying once if state was stale.
 
-        After executing the resolved command sequence, checks whether the
-        panel's actual state matches the target.  If not (e.g. because
-        ``_last_proto_code`` was stale), updates the proto code from the
-        real response and retries with the corrected current state.
+        Plans from ``_planning_proto_code()``. After executing the resolved
+        command sequence, checks whether the panel's actual state matches the
+        target.  If not (the planned-from code was stale), records the real
+        response and retries with the corrected current state.
 
         When the panel's current state is unknown (no poll seen yet, or a
         proto code we don't model like 'N' after a central-station reset), a
@@ -539,33 +679,35 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         (#550).  This is not the #441 silent no-op: we send the disarm rather
         than letting the resolver compute nothing off a state it can't read.
         Any other transition needs a known current state to plan, so it is
-        refused with the actual code surfaced for reporting.
+        refused with the actual code surfaced for reporting. A full disarm is
+        also sent unconditionally while the confirmed state is provisional (a
+        command the panel accepted but never confirmed). An arm first asks
+        the panel for its state (``_confirm_state_with_panel``); an axis
+        sub-panel's disarm plans from the provisional state, adjusted by
+        ``_unconfirmed_planning_state``.
         """
-        if not self._current_proto_modeled():
-            if target == _FULLY_DISARMED:
-                return await self._disarm_circuits_unconditional(
-                    self._full_disarm_circuits(), **force_params
-                )
-            if self._last_proto_code is None:
+        proto_code = self._planning_proto_code()
+        current = _modelled_state(proto_code)
+        provisional = self.coordinator.confirmed_is_provisional
+        if target == _FULLY_DISARMED and (current is None or provisional):
+            return await self._disarm_circuits_unconditional(
+                self._full_disarm_circuits(), **force_params
+            )
+        if current is None:
+            if proto_code is None:
                 raise VerisureOwaError(
                     "Alarm state not yet known. "
                     "Please wait for the first status poll and try again."
                 )
-            raise VerisureOwaError(
-                f"Alarm is in unknown state '{self._last_proto_code}'. "
-                f"Please open an issue at {PROJECT_URL}/issues "
-                "including this state code."
-            )
+            raise _UnrecognisedStateError(proto_code)
+
+        assert proto_code is not None  # current is modelled, so it has a code
+        if provisional:
+            current = self._unconfirmed_planning_state(current, target)
 
         result: OperationStatus | None = None
 
         for attempt in range(2):
-            # Guarded above: past the refusal block the code is modelled, so
-            # it is non-None and in PROTO_TO_ALARM_STATE. Re-read each pass —
-            # the retry below may have corrected it.
-            proto_code = self._last_proto_code
-            assert proto_code is not None
-            current = PROTO_TO_ALARM_STATE[proto_code]
             steps = self._resolver.resolve(current, target)
 
             if not steps:
@@ -592,6 +734,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                         actual_state,
                         actual_proto,
                     )
+                    proto_code = actual_proto
+                    current = actual_state
                     self._last_proto_code = actual_proto
                     continue
 
@@ -601,17 +745,34 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         assert result is not None
         return result
 
-    def _current_proto_modeled(self) -> bool:
-        """Return True if the last polled proto code maps to a known AlarmState.
+    def _unconfirmed_planning_state(  # pylint: disable=unused-argument
+        self, current: AlarmState, target: AlarmState
+    ) -> AlarmState:
+        """The state to plan ``target`` from while ``current`` is provisional.
 
-        False both when nothing has been polled (``None``) and when the panel
-        reports a proto code we don't model (e.g. 'N'), so callers can treat
-        the current state as unreadable in either case.
+        This base version is not reached with an unconfirmed state; axis
+        sub-panels override it so a disarm is sent again rather than skipped.
         """
-        return (
-            self._last_proto_code is not None
-            and self._last_proto_code in PROTO_TO_ALARM_STATE
-        )
+        return current
+
+    def _planning_proto_code(self) -> str | None:
+        """The proto code transitions are planned from: the installation's
+        confirmed code, which a command on any panel updates, or this panel's
+        own last code while nothing has been confirmed."""
+        confirmed = self.coordinator.confirmed_proto_code
+        return self._last_proto_code if confirmed is None else confirmed
+
+    def _planning_state(self) -> AlarmState | None:
+        """``_planning_proto_code()`` as an AlarmState, or None if unreadable."""
+        return _modelled_state(self._planning_proto_code())
+
+    def _confirmed_alarm_state(self) -> AlarmState | None:
+        """The installation's latest known state (coordinator's
+        ``confirmed_proto_code``), or None if unreadable or not yet confirmed
+        by the panel."""
+        if self.coordinator.confirmed_is_provisional:
+            return None
+        return _modelled_state(self.coordinator.confirmed_proto_code)
 
     def _full_disarm_circuits(self) -> set[str]:
         """Circuits to clear for a full disarm when the current state is unreadable.
@@ -777,10 +938,35 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         command: str,
         **force_params: str,
     ) -> OperationStatus:
-        """Send a single arm or disarm command to the API."""
-        if command.startswith("D"):
-            return await self.client.disarm_alarm(self.installation, command)
-        return await self.client.arm_alarm(self.installation, command, **force_params)
+        """Send a single arm or disarm command to the API, recording the state
+        the panel confirms so a transition cut short between its commands
+        leaves the real state behind."""
+        sent = False
+
+        def _mark_sent() -> None:
+            nonlocal sent
+            sent = True
+
+        try:
+            if command.startswith("D"):
+                result = await self.client.disarm_alarm(
+                    self.installation, command, on_start=_mark_sent
+                )
+            else:
+                result = await self.client.arm_alarm(
+                    self.installation, command, on_start=_mark_sent, **force_params
+                )
+        except asyncio.CancelledError:
+            # Once sent, the panel may have accepted the command before its
+            # confirmation was cancelled, so its state is no longer known.
+            if sent:
+                self.coordinator.mark_confirmed_provisional(
+                    self.coordinator.possible_proto_codes | {None}
+                )
+            raise
+        if is_proto_letter(result.protom_response):
+            self.coordinator.record_confirmed_proto_code(result.protom_response)
+        return result
 
     def _persist_unsupported(self) -> None:
         """Write the resolver's unsupported set to entry.data and refresh state.
@@ -878,6 +1064,15 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 alarm_status.protom_response,
                 self._installation.number,
             )
+            # As for a poll: an answer read while a command runs may predate
+            # that command's result, but is still the latest code seen.
+            if is_proto_letter(alarm_status.protom_response):
+                if self.coordinator.operation.running:
+                    self.coordinator.track_unrecognised_code(
+                        alarm_status.protom_response
+                    )
+                else:
+                    self._apply_panel_answer(alarm_status)
             self._set_refresh_failed(False)
             self.async_write_ha_state()
             self.async_schedule_update_ha_state(force_refresh=True)
@@ -959,11 +1154,13 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
         Used when a command was accepted (res: OK) but the confirmation poll
         timed out: we optimistically show the target (the fail-safe direction)
-        and let the coordinator reconcile. Falls back to the last known proto
-        code, then disarmed, if the target has no modelled proto letter.
+        and let the coordinator reconcile. Falls back to the code transitions
+        are planned from, then disarmed, if the target has no proto letter.
         """
         proto = (
-            ALARM_STATE_TO_PROTO.get(target) or self._last_proto_code or PROTO_DISARMED
+            ALARM_STATE_TO_PROTO.get(target)
+            or self._planning_proto_code()
+            or PROTO_DISARMED
         )
         return OperationStatus(protom_response=proto)
 
@@ -994,7 +1191,17 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """
         self._set_waf_blocked(False)
         self._set_state_provisional(True)
-        self.update_status_alarm(self._optimistic_status(target))
+        earlier = self.coordinator.possible_proto_codes
+        if target not in ALARM_STATE_TO_PROTO:
+            # The optimistic code falls back to an earlier one, so the state
+            # the command may have reached is recorded as unknown.
+            earlier |= {None}
+        optimistic = self._optimistic_status(target)
+        self.update_status_alarm(optimistic)
+        self.coordinator.record_confirmed_proto_code(
+            optimistic.protom_response, optimistic=True
+        )
+        self.coordinator.mark_confirmed_provisional(earlier)
         _LOGGER.warning(
             "%s not confirmed within timeout for %s; state provisional, "
             "awaiting reconciliation: %s",
@@ -1038,28 +1245,28 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         """Send disarm command."""
         if not self._check_code(code):
             return
-        if self._operation_in_progress:
+        # Capture the calling user's context up-front — HA expires
+        # `self._context` ~1 s after async_set_context, and waiting for a
+        # running operation plus the disarm transition and state writes below
+        # take longer.
+        user_context = self._context
+        if not await self._wait_until_idle(duplicate_of="disarm"):
             _LOGGER.debug(
-                "Disarm ignored for %s: an operation is already in progress",
+                "Disarm ignored for %s: a disarm is already in progress",
                 self.installation.number,
             )
             return
-        await self._dismiss_pending_force_context_on_siblings(
-            reason=DISMISSAL_REASON_USER_DISARM,
-            new_mode="disarmed",
-        )
-        # Capture the calling user's context up-front — HA expires
-        # `self._context` ~1 s after async_set_context, and the disarm
-        # transition + state writes below take longer than that.
-        user_context = self._context
-        self._force_state(AlarmControlPanelState.DISARMING)
-        self._operation_in_progress = True
-        self._operation_epoch += 1
         # Declared before the try so it is always bound in the except handlers
         # (pyright reportPossiblyUnbound); it is always set before the awaited
         # transition that can raise OperationTimeoutError.
         target: AlarmState | None = None
+        self._operation.begin("disarm", [self])
         try:
+            await self._dismiss_pending_force_context_on_siblings(
+                reason=DISMISSAL_REASON_USER_DISARM,
+                new_mode="disarmed",
+            )
+            self._force_state(AlarmControlPanelState.DISARMING)
             target = self._resolve_target_state("disarmed")
             result = await self._execute_transition(target)
             self._set_waf_blocked(False)
@@ -1095,7 +1302,37 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             self.async_write_ha_state()
             raise
         finally:
-            self._operation_in_progress = False
+            self._operation.end()
+
+    async def _confirm_state_with_panel(self) -> None:
+        """Ask the panel for its state, when the last command was accepted but
+        never confirmed, so an arm plans from what is really armed."""
+        try:
+            status = await self._client.refresh_alarm_status(self._installation)
+        except OperationTimeoutError as err:
+            # Not this arm's own timeout: the arm was never sent.
+            raise VerisureOwaError(
+                f"Could not read the alarm state before arming: {err.message}"
+            ) from err
+        if not is_proto_letter(status.protom_response):
+            raise VerisureOwaError("The panel did not report its state before arming")
+        # Show the answer in place of what was shown before Arming, then Arming
+        # again: a failed arm rolls back to the state saved by _force_state,
+        # which must be the answer, not the guess.
+        self._state = self._last_state
+        self._apply_panel_answer(status)
+        self._force_state(AlarmControlPanelState.ARMING)
+
+    def _apply_panel_answer(self, status: OperationStatus) -> None:
+        """Take the panel's answer to a status check as the installation's
+        confirmed state, and show it."""
+        self.coordinator.record_confirmed_proto_code(status.protom_response)
+        self._reconcile_provisional()
+        self._show_state_check_answer(status)
+
+    def _show_state_check_answer(self, status: OperationStatus) -> None:
+        """Show the panel's answer to a status check."""
+        self.update_status_alarm(status)
 
     async def set_arm_state(
         self,
@@ -1112,18 +1349,27 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         requests the "force-armed" confirmation notification on success — the
         counterpart to the arm-exception prompt that auto-force suppressed.
         """
-        if self._operation_in_progress:
+        # Capture the calling user's context up-front — HA expires
+        # `self._context` ~1 s after async_set_context, and waiting for a
+        # running operation plus the arm transition and state writes below
+        # take longer than that.
+        user_context = self._context
+        # Checked at press time (again here for direct callers), before the
+        # press takes a number: an ignored repeat must not cancel an arm waiting on this panel. A
+        # force-arm is never a repeat: it may arrive while the arm it
+        # completes is still finishing, and then waits for it.
+        if not force_arming_remote_id and self._ignores_repeat_arm(mode):
+            return
+        self._arm_presses += 1
+        press = self._arm_presses
+        await self._wait_until_idle()
+        if press != self._arm_presses:
             _LOGGER.debug(
-                "Arm ignored for %s: an operation is already in progress",
+                "Arm to %s dropped for %s: a later arm was pressed on this panel",
+                mode,
                 self.installation.number,
             )
             return
-        # Capture the calling user's context up-front — HA expires
-        # `self._context` ~1 s after async_set_context, and the arm
-        # transition + state writes below take longer than that.
-        user_context = self._context
-        self._operation_in_progress = True
-        self._operation_epoch += 1
         self._last_arm_result = OperationStatus()
 
         force_params: dict[str, str] = {}
@@ -1136,9 +1382,30 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # (pyright reportPossiblyUnbound); it is always set before the awaited
         # transition that can raise OperationTimeoutError.
         target: AlarmState | None = None
+        self._operation.begin("arm", [self], mode)
         try:
+            self._force_state(AlarmControlPanelState.ARMING)
+            if self.coordinator.confirmed_is_provisional:
+                await self._confirm_state_with_panel()
             target = self._resolve_target_state(mode)
-            result = await self._execute_transition(target, **force_params)
+            try:
+                result = await self._execute_transition(target, **force_params)
+            except _UnrecognisedStateError as err:
+                _LOGGER.warning(
+                    "Arm refused for %s: the alarm reports state code '%s', "
+                    "which this integration doesn't recognise",
+                    self.installation.number,
+                    err.proto_code,
+                )
+                await self._add_arm_failed_activity(err, user_context)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="arm_refused_unknown_state",
+                    translation_placeholders={
+                        "installation": self.installation.alias,
+                        "code": err.proto_code,
+                    },
+                ) from err
             self._set_waf_blocked(False)
             self.update_status_alarm(result)
             # A plain arm that succeeds while a force context is still pending
@@ -1190,9 +1457,11 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
             await self._handle_operation_timeout(err, verb="arm", target=target)
         except ArmingExceptionError as exc:
             self._set_force_context(exc, mode)
-            self._state = self._last_state
+            answered = self._show_last_arm_result()
             self._fire_arming_exception_event(exc, mode)
             self.async_write_ha_state()
+            if answered:
+                await self.coordinator.async_request_refresh()
             # Surface the rejection in the activity timeline as well — the
             # polled record (~60 s later) will be a 5802; this gives the
             # user immediate feedback with the offending zones.
@@ -1207,28 +1476,41 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
                 ],
             )
         except VerisureOwaError as err:
-            if self._last_arm_result.protom_response:
-                self.update_status_alarm(self._last_arm_result)
-            else:
-                self._state = self._last_state
+            self._show_last_arm_result()
             _LOGGER.error(
                 "Arm failed for %s: %s", self.installation.number, err.log_detail()
             )
             self._handle_arm_disarm_error(err, "arm_failed")
             self.async_write_ha_state()
-            await inject_ha_event(
-                self.hass,
-                self._installation,
-                category=ActivityCategory.ARMING_FAILED,
-                alias=f"Arm failed: {err}",
-                context=user_context,
-            )
+            await self._add_arm_failed_activity(err, user_context)
         except HomeAssistantError:
             self._state = self._last_state
             self.async_write_ha_state()
             raise
         finally:
-            self._operation_in_progress = False
+            self._operation.end()
+
+    async def _add_arm_failed_activity(
+        self, err: VerisureOwaError, context: Context | None
+    ) -> None:
+        """Add an "Arm failed" entry to the activity log."""
+        await inject_ha_event(
+            self.hass,
+            self._installation,
+            category=ActivityCategory.ARMING_FAILED,
+            alias=f"Arm failed: {err}",
+            context=context,
+        )
+
+    def _show_last_arm_result(self) -> bool:
+        """Show the state the arm's last answered command reached, or the
+        state from before the arm when none answered. True when one did."""
+        result = self._last_arm_result
+        if result is not None and result.protom_response:
+            self.update_status_alarm(result)
+            return True
+        self._state = self._last_state
+        return False
 
     def _set_force_context(self, exc: ArmingExceptionError, mode: str) -> None:
         """Store sensor-warning and optional force-arm context."""
@@ -1334,9 +1616,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _cancel_force_arm_expiry(self) -> None:
         """Cancel any pending expiry timer (no-op if not scheduled)."""
-        if self._force_arm_expiry_unsub is not None:
-            self._force_arm_expiry_unsub()
-            self._force_arm_expiry_unsub = None
+        _cancel_timer(self._force_arm_expiry_unsub)
+        self._force_arm_expiry_unsub = None
 
     async def _async_handle_force_arm_expiry(self, _now: datetime.datetime) -> None:
         """Timer callback: fire expired event + side effects if context still alive.
@@ -1655,9 +1936,8 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
 
     def _cancel_suppressed_prompt_fallback(self) -> None:
         """Cancel any pending suppressed-prompt fallback (no-op if none)."""
-        if self._suppressed_prompt_fallback_unsub is not None:
-            self._suppressed_prompt_fallback_unsub()
-            self._suppressed_prompt_fallback_unsub = None
+        _cancel_timer(self._suppressed_prompt_fallback_unsub)
+        self._suppressed_prompt_fallback_unsub = None
 
     async def _async_notify_arm_exceptions(self, event: Event) -> None:
         """Send translated persistent + mobile notifications for an arming exception."""
@@ -1867,7 +2147,6 @@ class BaseVerisureOwaAlarmPanel(  # type: ignore[override]
         # "force-armed" confirmation replaces it.
         if self._notifications_enabled:
             self._dismiss_arming_exception_notification()
-        self._force_state(AlarmControlPanelState.ARMING)
         await self.set_arm_state(
             mode,
             force_arming_remote_id=ref_id,

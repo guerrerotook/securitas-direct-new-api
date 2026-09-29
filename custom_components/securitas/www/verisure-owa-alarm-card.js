@@ -21,12 +21,12 @@
  *   name: My Alarm          # optional — overrides friendly_name
  */
 
-import { escHtml } from "./verisure-owa-card-utils.js?v=5.9.0";
+import { escHtml } from "./verisure-owa-card-utils.js?v=a5e83573-5.9.0";
 import {
   autoForceActive,
   readAutoForce,
   writeAutoForce,
-} from "./verisure-owa-arm-exception.js?v=5.9.0";
+} from "./verisure-owa-arm-exception.js?v=7a72e318-5.9.0";
 import {
   _t,
   STATE_CFG,
@@ -47,7 +47,7 @@ import {
   deprecationNoticeDismissed,
   dismissDeprecationNotice,
   reportDeprecatedElement,
-} from "./verisure-owa-alarm-shared.js?v=5.9.0";
+} from "./verisure-owa-alarm-shared.js?v=464dde8f-5.9.0";
 
 // Re-export the public helper API so existing imports of these names from
 // this module keep working.
@@ -57,16 +57,14 @@ export {
   ARM_ACTIONS,
   defaultArmState,
   alarmEntitySuggestion,
-} from "./verisure-owa-alarm-shared.js?v=5.9.0";
+} from "./verisure-owa-alarm-shared.js?v=464dde8f-5.9.0";
 
 // The lightweight chip/badge are defined in verisure-owa-alarm-chip.js, which
 // the integration registers as a SEPARATE Lovelace resource so the
 // always-visible alarm chip renders without waiting for this heavier card
-// bundle. It is deliberately NOT imported here: a relative import would resolve
-// to a different URL than the registered chip resource (the resource carries
-// _card_url's ?v=<hash>-<version>), so importing it would just fetch chip.js a
-// second time for no benefit. Badge/chip taps now open HA's native More Info
-// dialog; this custom card remains available as an explicit Lovelace card.
+// bundle. This card does not use the chip module, so it does not import it.
+// Badge/chip taps open HA's native More Info dialog; this custom card remains
+// available as an explicit Lovelace card.
 
 class VerisureOwaAlarmCard extends HTMLElement {
   constructor() {

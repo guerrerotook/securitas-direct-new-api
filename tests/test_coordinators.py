@@ -11,9 +11,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.securitas.api_queue import ApiQueue
+from custom_components.securitas.const import DOMAIN, PROJECT_URL
 from custom_components.securitas.coordinators import (
     ActivityCoordinator,
     ActivityData,
@@ -21,6 +23,7 @@ from custom_components.securitas.coordinators import (
     AlarmStatusData,
     CameraCoordinator,
     CameraData,
+    InstallationOperation,
     LockCoordinator,
     LockData,
     SentinelCoordinator,
@@ -54,9 +57,14 @@ from .conftest import make_installation
 
 
 def _make_hass() -> MagicMock:
-    """Create a minimal mock HomeAssistant instance."""
+    """Create a minimal mock HomeAssistant instance.
+
+    Its Repairs registry is a mock: every alarm poll with a proto code keeps
+    the unrecognised-state issue in step, and the real registry needs a
+    running Home Assistant (tests of the issue itself use the ``hass``
+    fixture)."""
     hass = MagicMock(spec=HomeAssistant)
-    hass.data = {}
+    hass.data = {ir.DATA_REGISTRY: MagicMock()}
 
     def _close_coro(coro: Coroutine[Any, Any, Any]) -> None:
         coro.close()
@@ -92,6 +100,111 @@ def _make_installation() -> Installation:
     return make_installation()
 
 
+# ── InstallationOperation ────────────────────────────────────────────────────
+
+
+class TestInstallationOperation:
+    """Tests for InstallationOperation, the one command an installation runs."""
+
+    def test_starts_idle(self):
+        operation = InstallationOperation()
+
+        assert operation.running is False
+        assert operation.kind is None
+        assert operation.panels == frozenset()
+        assert operation.mode is None
+
+    def test_begin_records_the_operation(self):
+        operation = InstallationOperation()
+        main, interior = object(), object()
+
+        operation.begin("arm", (p for p in [main, interior, main]), "armed_away")
+
+        assert operation.running is True
+        assert operation.kind == "arm"
+        assert operation.panels == frozenset({main, interior})
+        assert operation.mode == "armed_away"
+
+    def test_begin_without_a_mode_records_none(self):
+        operation = InstallationOperation()
+        panel = object()
+
+        operation.begin("partial_disarm", [panel])
+
+        assert operation.kind == "partial_disarm"
+        assert operation.panels == frozenset({panel})
+        assert operation.mode is None
+
+    def test_end_clears_the_operation(self):
+        operation = InstallationOperation()
+        operation.begin("arm", [object()], "armed_home")
+
+        operation.end()
+
+        assert operation.running is False
+        assert operation.kind is None
+        assert operation.panels == frozenset()
+        assert operation.mode is None
+
+    def test_begin_while_running_is_refused_and_keeps_the_running_one(self):
+        operation = InstallationOperation()
+        panel = object()
+        operation.begin("arm", [panel], "armed_away")
+
+        with pytest.raises(AssertionError, match="operation already running"):
+            operation.begin("disarm", [object()])
+
+        assert operation.kind == "arm"
+        assert operation.panels == frozenset({panel})
+        assert operation.mode == "armed_away"
+
+    def test_begin_after_end_starts_a_new_operation(self):
+        operation = InstallationOperation()
+        operation.begin("arm", [object()], "armed_away")
+        operation.end()
+        panel = object()
+
+        operation.begin("disarm", [panel])
+
+        assert operation.running is True
+        assert operation.kind == "disarm"
+        assert operation.panels == frozenset({panel})
+        assert operation.mode is None
+
+    @pytest.mark.asyncio
+    async def test_wait_idle_returns_at_once_when_idle(self):
+        await asyncio.wait_for(InstallationOperation().wait_idle(), timeout=1)
+
+    @pytest.mark.asyncio
+    async def test_end_wakes_every_waiter(self):
+        operation = InstallationOperation()
+        operation.begin("arm", [object()], "armed_away")
+        waiters = [asyncio.create_task(operation.wait_idle()) for _ in range(3)]
+        await asyncio.sleep(0)
+        assert not any(w.done() for w in waiters)
+
+        operation.end()
+
+        await asyncio.wait_for(asyncio.gather(*waiters), timeout=1)
+
+    def test_each_alarm_coordinator_has_its_own(self):
+        """Two installations never wait for each other's commands."""
+        first, second = (
+            AlarmCoordinator(
+                _make_hass(),
+                _make_client(),
+                _make_queue(),
+                _make_installation(),
+                update_interval=timedelta(seconds=30),
+            )
+            for _ in range(2)
+        )
+        first.operation.begin("arm", [object()], "armed_away")
+
+        assert isinstance(first.operation, InstallationOperation)
+        assert second.operation.running is False
+
+
 # ── AlarmCoordinator ─────────────────────────────────────────────────────────
 
 
@@ -113,31 +226,6 @@ class TestAlarmCoordinator:
             update_interval=timedelta(seconds=30),
         )
 
-    def test_alarm_state_known_true_for_modelled_code(self):
-        """A modelled proto code (e.g. 'T') reports the state as known."""
-        coord = self._make_coordinator(
-            _make_hass(), _make_client(), _make_queue(), _make_installation()
-        )
-        coord.data = AlarmStatusData(status=SStatus(status="T"), protom_response="T")
-        assert coord.alarm_state_known is True
-
-    def test_alarm_state_known_false_for_unmodelled_code(self):
-        """An unmodelled proto code (e.g. 'N' after a central-station reset)
-        reports the state as unknown so callers can disarm unconditionally."""
-        coord = self._make_coordinator(
-            _make_hass(), _make_client(), _make_queue(), _make_installation()
-        )
-        coord.data = AlarmStatusData(status=SStatus(status="N"), protom_response="N")
-        assert coord.alarm_state_known is False
-
-    def test_alarm_state_known_false_when_no_data(self):
-        """No poll yet → state is not known."""
-        coord = self._make_coordinator(
-            _make_hass(), _make_client(), _make_queue(), _make_installation()
-        )
-        coord.data = None
-        assert coord.alarm_state_known is False
-
     @pytest.mark.asyncio
     async def test_successful_update(self):
         """Successful update returns AlarmStatusData with status and protom_response."""
@@ -157,6 +245,285 @@ class TestAlarmCoordinator:
         assert result.status is status
         assert result.protom_response == "D"
         queue.submit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_poll_records_confirmed_proto_code(self):
+        """A poll carrying a proto letter becomes the installation's
+        confirmed state; one that doesn't leaves it alone."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        assert coord.confirmed_proto_code is None
+
+        client.get_general_status.return_value = SStatus(status="T")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "T"
+
+        client.get_general_status.return_value = SStatus(status="0")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "T"
+
+    @pytest.mark.asyncio
+    async def test_poll_during_operation_leaves_confirmed_proto_code(self):
+        """A poll landing while a panel command runs may predate the command's
+        result, so it doesn't overwrite the confirmed state; the next poll
+        after the command does."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        panel = object()
+        coord.record_confirmed_proto_code("T")
+
+        coord.operation.begin("arm", [panel])
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "T"
+
+        coord.operation.end()
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code == "D"
+
+    @pytest.mark.asyncio
+    async def test_timed_out_result_stays_provisional_until_confirmed(self):
+        """A code marked provisional (a command accepted but not confirmed)
+        stays so until a real command result or a poll allowed to record
+        replaces it."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        coord.record_confirmed_proto_code("D")
+        assert coord.confirmed_is_provisional is False
+        coord.mark_confirmed_provisional({"D"})
+        assert coord.confirmed_is_provisional is True
+        coord.record_confirmed_proto_code("T")
+        assert coord.confirmed_is_provisional is False
+
+        coord.mark_confirmed_provisional({"D"})
+        panel = object()
+        coord.operation.begin("arm", [panel])
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is True  # poll held back
+        coord.operation.end()
+        client.get_general_status.return_value = SStatus(status="0")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is True  # not a proto code
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is False
+        assert coord.confirmed_proto_code == "D"
+
+    @pytest.mark.asyncio
+    async def test_possible_codes_keep_every_unconfirmed_state_until_a_poll(self):
+        """While the recorded code is provisional, the installation may be in
+        the last confirmed state or any unconfirmed command's; a poll makes
+        the polled code the only one again."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            _make_hass(), client, _make_queue(), _make_installation()
+        )
+        assert coord.possible_proto_codes == {None}
+        coord.record_confirmed_proto_code("E")
+        assert coord.possible_proto_codes == {"E"}
+
+        for optimistic in ("A", "E"):  # an arm, then a disarm, both timed out
+            earlier = coord.possible_proto_codes
+            coord.record_confirmed_proto_code(optimistic)
+            coord.mark_confirmed_provisional(earlier)
+        assert coord.confirmed_proto_code == "E"
+        assert coord.possible_proto_codes == {"E", "A"}
+
+        client.get_general_status.return_value = SStatus(status="T")
+        await coord._async_update_data()
+        assert coord.confirmed_is_provisional is False
+        assert coord.possible_proto_codes == {"T"}
+
+    @staticmethod
+    def _unknown_state_issue(hass: HomeAssistant) -> ir.IssueEntry | None:
+        return ir.async_get(hass).async_get_issue(DOMAIN, "unknown_alarm_state_123456")
+
+    @pytest.mark.asyncio
+    async def test_polled_unrecognised_code_raises_repairs_issue_until_known(
+        self, hass: HomeAssistant
+    ):
+        """A poll reporting a code this integration doesn't model raises a
+        Repairs issue naming the code and installation; the next poll with a
+        known code removes it."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+
+        client.get_general_status.return_value = SStatus(status="N")
+        await coord._async_update_data()
+
+        issue = self._unknown_state_issue(hass)
+        assert issue is not None
+        assert issue.translation_key == "unknown_alarm_state"
+        assert issue.translation_placeholders == {
+            "code": "N",
+            "installation": "Home",
+            "url": f"{PROJECT_URL}/issues",
+        }
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.is_fixable is False
+        assert issue.is_persistent is False
+
+        client.get_general_status.return_value = SStatus(status="D")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_poll_during_operation_still_moves_the_repairs_issue(
+        self, hass: HomeAssistant
+    ):
+        """A poll held back from the confirmed state while a command runs still
+        decides the issue: it follows the latest code seen."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+        coord.operation.begin("arm", [object()], "armed_away")
+
+        client.get_general_status.return_value = SStatus(status="N")
+        await coord._async_update_data()
+        assert coord.confirmed_proto_code is None
+        assert self._unknown_state_issue(hass) is not None
+
+        client.get_general_status.return_value = SStatus(status="T")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_recorded_unrecognised_code_raises_repairs_issue_until_known(
+        self, hass: HomeAssistant
+    ):
+        """A command answer or the status check before an arm recording an
+        unmodelled code raises the issue; recording a known code clears it."""
+        coord = self._make_coordinator(
+            hass, _make_client(), _make_queue(), _make_installation()
+        )
+
+        coord.record_confirmed_proto_code("N")
+        issue = self._unknown_state_issue(hass)
+        assert issue is not None
+        assert (issue.translation_placeholders or {})["code"] == "N"
+
+        coord.record_confirmed_proto_code("Z")
+        issue = self._unknown_state_issue(hass)
+        assert issue is not None
+        assert (issue.translation_placeholders or {})["code"] == "Z"
+
+        coord.record_confirmed_proto_code("T")
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_a_coordinator_clears_an_issue_another_one_raised(
+        self, hass: HomeAssistant
+    ):
+        """Another coordinator for the installation can leave the issue behind
+        (a second entry's, or one that never shut down, e.g. after a crash);
+        this one's first known code still clears it."""
+        client = _make_client()
+        installation = _make_installation()
+        old = self._make_coordinator(hass, client, _make_queue(), installation)
+        old.record_confirmed_proto_code("N")
+        assert self._unknown_state_issue(hass) is not None
+
+        new = self._make_coordinator(hass, client, _make_queue(), installation)
+        client.get_general_status.return_value = SStatus(status="D")
+        await new._async_update_data()
+
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("first", "kept"), [("without_panels", True), ("with_panels", False)]
+    )
+    async def test_shutdown_keeps_the_issue_while_another_entry_runs_the_panels(
+        self, hass: HomeAssistant, first: str, kept: bool
+    ):
+        """An installation added twice has an alarm coordinator per entry but
+        one issue, and only the entry running the alarm panels keeps polling
+        (the other's coordinator has no entities listening). Unloading the
+        other entry (its data is gone from hass.data by the time its
+        coordinators shut down) leaves the issue to it; unloading the entry
+        running the panels takes the issue away, as does unloading the last.
+        Another installation's panels do not keep it."""
+        client = _make_client()
+        installation = _make_installation()
+        with_panels = self._make_coordinator(hass, client, _make_queue(), installation)
+        without_panels = self._make_coordinator(
+            hass, client, _make_queue(), installation
+        )
+        elsewhere = self._make_coordinator(
+            hass, client, _make_queue(), make_installation(number="654321")
+        )
+        hass.data[DOMAIN] = {
+            "with_panels": {
+                "alarm_coordinator": with_panels,
+                "combined_alarm_panels": {"123456": MagicMock(coordinator=with_panels)},
+            },
+            "without_panels": {"alarm_coordinator": without_panels},
+            "elsewhere": {
+                "alarm_coordinator": elsewhere,
+                "combined_alarm_panels": {"654321": MagicMock(coordinator=elsewhere)},
+            },
+            "sessions": {},
+        }
+        coordinators = {"with_panels": with_panels, "without_panels": without_panels}
+        with_panels.record_confirmed_proto_code("N")
+        assert self._unknown_state_issue(hass) is not None
+
+        hass.data[DOMAIN].pop(first)
+        await coordinators.pop(first).async_shutdown()
+        assert (self._unknown_state_issue(hass) is not None) is kept
+
+        ((last_id, last),) = coordinators.items()
+        last.record_confirmed_proto_code("N")
+        hass.data[DOMAIN].pop(last_id)
+        await last.async_shutdown()
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", ["X", "E", "D"])
+    async def test_recognised_code_raises_no_repairs_issue(
+        self, hass: HomeAssistant, code: str
+    ):
+        """A code the integration models is not this issue, even one no
+        button on the Main panel is mapped to (that stays a log warning)."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+
+        client.get_general_status.return_value = SStatus(status=code)
+        await coord._async_update_data()
+        coord.record_confirmed_proto_code(code)
+
+        assert self._unknown_state_issue(hass) is None
+
+    @pytest.mark.asyncio
+    async def test_status_without_a_proto_code_leaves_the_repairs_issue(
+        self, hass: HomeAssistant
+    ):
+        """A status that is not a proto code says nothing about the state, so
+        it neither raises nor clears the issue."""
+        client = _make_client()
+        coord = self._make_coordinator(
+            hass, client, _make_queue(), _make_installation()
+        )
+
+        client.get_general_status.return_value = SStatus(status="0")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is None
+
+        coord.record_confirmed_proto_code("N")
+        await coord._async_update_data()
+        assert self._unknown_state_issue(hass) is not None
 
     @pytest.mark.asyncio
     async def test_waf_blocked_raises_update_failed(self):

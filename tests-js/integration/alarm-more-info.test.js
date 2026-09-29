@@ -124,6 +124,24 @@ describe("Verisure native alarm More Info extension", () => {
     expect(force.disabled).toBe(false);
   });
 
+  it("labels Force Arm and Cancel in Catalan", async () => {
+    const element = await mountMoreInfo({
+      hass: makeHass({ language: "ca" }),
+      stateObj: makeState({
+        armExceptionActive: true,
+        forceArmAvailable: true,
+        armExceptions: ["Finestra cuina"],
+      }),
+    });
+    const root = exceptionRoot(element);
+
+    expect(root.querySelector(".force").textContent).toBe("Força l’armat");
+    expect(root.querySelector(".cancel").textContent).toBe("Cancel·la");
+    expect(root.querySelector(".force-title").textContent).toContain(
+      "Sensor(s) obert(s) — armar igualment?",
+    );
+  });
+
   it("keeps non-forceable exceptions useful for Spain", async () => {
     const hass = makeHass({ language: "es" });
     const element = await mountMoreInfo({

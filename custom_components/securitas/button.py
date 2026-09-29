@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import DOMAIN, VerisureDevice, VerisureHub
+from .alarm_control_panel import main_panel_for
 from .entity import VerisureEntity, camera_device_info
 from .verisure_owa_api import Installation
 from .verisure_owa_api.models import CameraDevice
@@ -62,9 +63,9 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
         )
 
     def _get_alarm_entity(self):
-        """Return the alarm entity for this installation, if available."""
-        alarm_entities = self.hass.data.get(DOMAIN, {}).get("alarm_entities", {})
-        return alarm_entities.get(self._installation.number)
+        """Return the Main panel of whichever entry runs this installation's
+        panels, which need not be this button's entry."""
+        return main_panel_for(self.hass, self._installation.number)
 
     async def async_press(self) -> None:
         """Delegate to the alarm panel's async_manual_refresh.
@@ -82,11 +83,16 @@ class VerisureRefreshButton(VerisureEntity, ButtonEntity):
             return
         alarm_entity = self._get_alarm_entity()
         if alarm_entity is None:
+            _LOGGER.debug(
+                "%s: no alarm panel is set up for this installation",
+                self.entity_id or self._attr_unique_id,
+            )
             return
         # Surface the button's HA context to the alarm entity so the
         # downstream inject_ha_event call attributes the action to the
         # user who pressed the button.
-        alarm_entity.async_set_context(self._context)
+        if self._context is not None:
+            alarm_entity.async_set_context(self._context)
         await alarm_entity.async_manual_refresh()
 
 

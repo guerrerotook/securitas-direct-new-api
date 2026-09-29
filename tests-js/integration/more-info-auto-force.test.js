@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeHass } from "../fixtures/hass.js";
+import {
+  autoForceCalls,
+  autoForceCheckbox as checkbox,
+  autoForceToggle as toggle,
+  closePinPrompt,
+  makeModesControl,
+  openPinPrompt as openPinPromptFrom,
+  pressMode as pressModeOn,
+  submitPin,
+} from "../fixtures/ha-alarm-dom.js";
 
 const ENTITY = "alarm_control_panel.test";
 const LS_KEY = `verisure-owa:auto-force-arm:${ENTITY}`;
@@ -47,41 +57,20 @@ function mountMoreInfo(stateOverrides = {}, { callService } = {}) {
   return { element, callService: callServiceFn };
 }
 
-function toggle(element) {
-  // The tick box is a persistent element toggled via `hidden` (matching the
-  // force-extension pattern in this file), so treat hidden as not shown.
-  const el = element.shadowRoot.querySelector(".auto-force-toggle");
-  return el && !el.hidden ? el : null;
-}
-
-function checkbox(element) {
-  return element.shadowRoot.querySelector(".auto-force-checkbox");
-}
-
 // HA renders its mode buttons several shadow roots deep inside the wrapped
 // native control: more-info-content > more-info-alarm_control_panel >
 // ha-state-control-alarm_control_panel-modes > ha-control-select.
 function nativeModeSelect(element, controlTag = "ha-state-control-alarm_control_panel-modes") {
   const native = element.shadowRoot.getElementById("native-control");
   const moreInfo = document.createElement("more-info-alarm_control_panel");
-  const control = document.createElement(controlTag);
-  const select = document.createElement("ha-control-select");
-  control.attachShadow({ mode: "open" }).appendChild(select);
+  const { control, select } = makeModesControl(controlTag);
   moreInfo.attachShadow({ mode: "open" }).appendChild(control);
   native.replaceChildren(moreInfo);
   return select;
 }
 
-// What HA's ha-control-select fires when a mode button is pressed
-// (fireEvent defaults: bubbles + composed).
 function pressMode(element, value = "armed_away", controlTag) {
-  const event = new CustomEvent("value-changed", {
-    detail: { value },
-    bubbles: true,
-    composed: true,
-  });
-  nativeModeSelect(element, controlTag).dispatchEvent(event);
-  return event;
+  return pressModeOn(nativeModeSelect(element, controlTag), value);
 }
 
 // A press whose modes control opens the PIN prompt from its own handler on
@@ -97,52 +86,14 @@ function pressModeThatPromptsAtOnce(element) {
       }),
     ),
   );
-  select.dispatchEvent(
-    new CustomEvent("value-changed", {
-      detail: { value: "armed_away" },
-      bubbles: true,
-      composed: true,
-    }),
-  );
+  pressModeOn(select);
 }
 
-// HA's modes control fires show-dialog itself to open its PIN prompt; the
-// prompt then lives in HA's shell and fires dialog-closed there on Submit or
-// Cancel, which reaches window.
+// Opens the PIN prompt from the modes control the last press was made on.
 function openPinPrompt(element) {
   const native = element.shadowRoot.getElementById("native-control");
   const control = native.firstElementChild.shadowRoot.firstElementChild;
-  control.dispatchEvent(
-    new CustomEvent("show-dialog", {
-      detail: { dialogTag: "dialog-enter-code" },
-      bubbles: true,
-      composed: true,
-    }),
-  );
-}
-
-// The keypad's tick button in HA's PIN prompt, clicked as a user would.
-function submitPin() {
-  const prompt = document.createElement("dialog-enter-code");
-  const tick = document.createElement("ha-control-button");
-  tick.className = "submit";
-  prompt.attachShadow({ mode: "open" }).appendChild(tick);
-  document.body.appendChild(prompt);
-  tick.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
-  prompt.remove();
-}
-
-function closePinPrompt() {
-  const prompt = document.createElement("dialog-enter-code");
-  document.body.appendChild(prompt);
-  prompt.dispatchEvent(
-    new CustomEvent("dialog-closed", {
-      detail: { dialog: "dialog-enter-code" },
-      bubbles: true,
-      composed: true,
-    }),
-  );
-  prompt.remove();
+  openPinPromptFrom(control.shadowRoot.firstElementChild);
 }
 
 beforeEach(() => {
@@ -252,6 +203,21 @@ describe("More Info auto-force tick box persistence (localStorage)", () => {
     localStorage.setItem(LS_KEY, "true");
     const { element } = mountMoreInfo();
     expect(checkbox(element).checked).toBe(true);
+  });
+
+  it("keeps the last alarm's tick box through an update without an alarm", () => {
+    localStorage.setItem(LS_KEY, "true");
+    const { element } = mountMoreInfo();
+
+    element.hass = makeHass({ states: {} });
+    element.stateObj = undefined;
+
+    expect(toggle(element)).not.toBeNull();
+    expect(checkbox(element).checked).toBe(true);
+    const cb = checkbox(element);
+    cb.checked = false;
+    cb.dispatchEvent(new Event("change"));
+    expect(localStorage.getItem(LS_KEY)).toBe("false");
   });
 });
 
@@ -457,12 +423,6 @@ describe("More Info auto-force behaviour", () => {
 });
 
 describe("More Info auto-force acts only on the dialog's own arm buttons", () => {
-  function autoForceCalls(callService) {
-    return callService.mock.calls
-      .map((call) => call[1])
-      .filter((service) => ["suppress_arm_exception_prompt", "force_arm"].includes(service));
-  }
-
   function armWithException(element, callService) {
     push(element, { state: "arming" }, { callService });
     push(element, { forceArmAvailable: true, armExceptions: ["Kitchen Door"] }, { callService });

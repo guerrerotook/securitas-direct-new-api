@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "Service is already configured",
             "reauth_successful": "Reauthentication successful",
-            "no_refresh_token": "Login succeeded but Verisure did not return a refresh token. The integration cannot persist credentials safely. Please try again later or report this if it persists."
+            "no_refresh_token": "Login succeeded but Verisure did not return a refresh token. The integration cannot persist credentials safely. Please try again later or report this if it persists.",
+            "installation_not_on_account": "This Verisure account can't see installation {number}. Sign in with an account that has access to it."
         },
         "step": {
             "reauth_confirm": {
@@ -247,19 +248,33 @@
             "message": "Invalid PIN code for {entity_id}"
         },
         "unsupported_alarm_mode": {
-            "message": "This alarm mode is not supported by your panel (rejected: {tried}). Check the state mappings in the integration options (Settings → Devices & Services → Verisure OWA → Configure)."
+            "message": "This alarm mode is not supported by your panel (rejected: {tried}). Check the state mappings in the integration options (Settings → Devices & services → Verisure OWA → Configure)."
         },
         "unsupported_alarm_mode_subpanel": {
             "message": "This alarm mode is not supported by your panel (rejected: {tried}). It has been disabled on this sub-panel and won't be offered again."
         },
         "no_supported_command": {
-            "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & Services → Verisure OWA → Configure)."
+            "message": "No supported command found for this panel. Check the state mappings in the integration options (Settings → Devices & services → Verisure OWA → Configure)."
+        },
+        "operation_in_progress": {
+            "message": "The alarm is busy with another command. Try again in a moment."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Can't arm {installation}: the alarm reports a state this integration doesn't recognise (code {code}). See Settings → Repairs."
         }
     },
     "issues": {
         "orphan_verisure_owa_directory": {
             "title": "Leftover verisure_owa folder",
             "description": "An obsolete `verisure_owa` directory was left at `{path}` by an earlier (broken) upgrade. It does nothing now and can be safely deleted. Remove the directory and restart Home Assistant to clear this notice."
+        },
+        "duplicate_entry": {
+            "title": "Installation added twice",
+            "description": "Verisure OWA has two entries for {installation} on the same account. Remove one of them in Settings → Devices & services → Verisure OWA. This notice clears once only one is left."
+        },
+        "unknown_alarm_state": {
+            "title": "Unrecognised alarm state",
+            "description": "Verisure reports alarm state code {code} for {installation}, which this integration doesn't recognise yet. Disarming still works, but arming is refused until the alarm reports a known state. Please report the code at {url} so it can be supported. This notice clears when a known state returns."
         }
     },
     "entity": {

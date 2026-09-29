@@ -27,9 +27,16 @@
     drift (`scripts/check_translations.py`), docs drift (`scripts/check_docs.py`
     — adding, removing or renaming a module or service without touching
     README/docs blocks the push), then the unit tests
-    (`pytest tests/ -m "not integration"`) and, when the card changed,
-    `npm run lint` and `npm test`. Bypass in an emergency with
+    (`pytest tests/ -m "not integration"`), the card import stamps
+    (`python3 scripts/stamp_card_imports.py --check`) when anything under
+    `custom_components/securitas/www/`,
+    `custom_components/securitas/manifest.json` or
+    `scripts/stamp_card_imports.py` changed, and, when the card
+    changed, `npm run lint` and `npm test`. Bypass in an emergency with
     `git push --no-verify`.
+- After editing a card module, re-stamp the imports with
+    `python3 scripts/stamp_card_imports.py` and restart HA to serve the new
+    entry-point URLs.
 - CI additionally runs pylint, the integration suite (`-m integration`) on the
     stable, dev and minimum HA channels, and a combined 90% coverage gate.
 - Before creating a PR run `ruff check .`, `ruff format .` and

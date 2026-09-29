@@ -222,18 +222,19 @@ The `CommandResolver` class models the alarm as three independent axes — `Inte
 
 4. **Runtime discovery of unsupported commands:** When a command fails with a non-409 `VerisureOwaError`, `_execute_step()` calls `resolver.mark_unsupported(command)`, and the resolver skips it in all future resolutions. This is per-command granularity (not a global flag), so a disarm-specific failure (e.g. `DARM1DARMPERI`) does not disable unrelated compound arm commands. The unsupported set is in-memory and resets on HA restart.
 
-5. **Disarm uses current state:** The resolver determines the disarm command from the current `AlarmState` (derived from `_last_proto_code`), not from configuration flags. If both interior and perimeter are armed, it tries `DARM1DARMPERI` first, falling back to `DARM1`. If only perimeter is armed, it tries `DARMPERI` first, falling back to `DARM1`.
+5. **Disarm uses current state:** The resolver determines the disarm command from the current `AlarmState` (derived from `_planning_proto_code()`, see *Installation-wide confirmed state*), not from configuration flags. If both interior and perimeter are armed, it tries `DARM1DARMPERI` first, falling back to `DARM1`. If only perimeter is armed, it tries `DARMPERI` first, falling back to `DARM1`.
 
 6. **409 errors** (server busy) are re-raised immediately and do not trigger the fallback chain.
 
 Home Assistant has five alarm buttons (Home, Away, Night, Vacation, Custom Bypass). The user maps each button to a Verisure OWA state through the options flow. Standard installations get defaults without perimeter; perimeter installations get defaults that use perimeter states for Away (Total + Perimeter) and Custom (Perimeter Only). Both standard and perimeter installations default Night to Partial Night. Perimeter variants (e.g. Partial Night + Perimeter) are available in the options for perimeter installations and can be assigned to any button. The `Vacation` and `Custom Bypass` buttons are hidden unless a mapping is configured for them.
 
-If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code at `info` level. This is not an error — it simply means the alarm is in a valid Verisure OWA state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
+If the alarm is put into a state that is not mapped to any HA button (e.g. the perimeter is armed via a physical panel but perimeter support is not enabled in the integration), the entity reports `ARMED_CUSTOM_BYPASS` and logs the unmapped proto code as a warning, once per code. This is not an error — it simply means the alarm is in a valid Verisure OWA state that the user has not assigned to an HA button. To resolve it, enable perimeter support or map the relevant state in the integration options.
 
-**Unknown proto codes: arm refuses, disarm proceeds** (issues [#441](https://github.com/guerrerotook/securitas-direct-new-api/issues/441), [#550](https://github.com/guerrerotook/securitas-direct-new-api/issues/550)). `_last_proto_code` admits any single uppercase ASCII letter — including codes we don't yet model (e.g. `N`, which Verisure reports after a central-station reset). The two operations are handled differently because a disarm command is *unconditional* while an arm is not:
+**Unknown proto codes: arm refuses, disarm proceeds** (issues [#441](https://github.com/guerrerotook/securitas-direct-new-api/issues/441), [#550](https://github.com/guerrerotook/securitas-direct-new-api/issues/550)). `_last_proto_code` and `AlarmCoordinator.confirmed_proto_code` admit any single uppercase ASCII letter — including codes we don't yet model (e.g. `N`, which Verisure reports after a central-station reset). The two operations are handled differently because a disarm command is *unconditional* while an arm is not:
 
-- **Arm** needs a known current state to plan the transition, so `_execute_transition()` refuses with a translated notification naming the actual code. Sending incorrect transitions off an unknown state was one half of #441. The refusal clears automatically on the next poll once the alarm returns to a state we model.
-- **Disarm** proceeds unconditionally. `_execute_transition()` routes a full disarm to `_disarm_circuits_unconditional()`, which asks the resolver for disarm-only steps (`resolve_disarm_only()`) — `DARM1` / `DARM1DARMPERI` / `DARMANNEX1` clear their axis regardless of the current state, so no read is needed. This is *not* the #441 silent no-op (resolver computing `current==target` off a stale `D` and skipping `DARM1`): the command is actually sent. The lock's auto-disarm and partial disarm take the same path, gated on `AlarmCoordinator.alarm_state_known` — without it, `alarm_state` falls back to all-OFF for an unmodeled code and the disarm would silently skip, leaving the door open over an armed alarm.
+- **Arm** needs a known current state to plan the transition, so `_execute_transition()` refuses it. With no code at all yet it raises a plain `VerisureOwaError` ("Alarm state not yet known"), handled like any arm failure with the `arm_failed` notification. With an unmodelled code it raises `_UnrecognisedStateError` (a `VerisureOwaError` carrying the code), which `set_arm_state` turns into a translated `HomeAssistantError`, `arm_refused_unknown_state`, naming the installation and the code and pointing at Settings → Repairs. Like the other translated refusals it is shown to whoever pressed Arm, puts the display back and sends no notification (except after Force Arm tapped in the phone notification, where no screen shows it: `_async_force_arm_from_notification()` sends any refused force arm as the `arm_failed` notification with the error's English text). Like `operation_in_progress` it logs a warning; unlike the other refusals it adds an `ARMING_FAILED` "Arm failed: …" activity-log entry attributed to the caller's context, as the `arm_failed` branch does. Other callers of `_execute_transition()` (a disarm, the lock's partial disarm) still see it as a `VerisureOwaError`. Sending incorrect transitions off an unknown state was one half of #441. The refusal clears automatically on the next poll once the alarm returns to a state we model.
+- **Repairs issue.** While the latest code the alarm reported is a well-formed letter not in `PROTO_TO_ALARM_STATE`, `AlarmCoordinator` keeps a Repairs issue, `unknown_alarm_state_<installation number>` (translation key `unknown_alarm_state`, placeholders `code`, `installation` — the alias — and `url`), asking the user to report the code. `track_unrecognised_code()` runs from `record_confirmed_proto_code()` unless it is given `optimistic=True` (command answers, the pre-arm status check, a manual Refresh, a poll), and directly for a poll or Refresh answer held back from `confirmed_proto_code` while a command runs, so the issue follows the latest code the alarm reported. A timed-out command's optimistic code is recorded with `optimistic=True` and leaves the issue alone: it is a guess, not a code the alarm reported. A modelled code deletes the issue; anything that is not a proto letter leaves it alone. It is neither persistent (the first poll after a restart raises it again) nor fixable. `AlarmCoordinator.async_shutdown()`, which Home Assistant runs when the entry unloads (also before a removal or a reload), deletes it unless another loaded entry runs the installation's alarm panels (`main_panel_for()`; an installation added twice), so it does not outlive the last coordinator polling the installation: the entry that runs no panels owns no entities, so nothing listens to its coordinator and Home Assistant schedules no polls for it; after a reload the first poll raises it again if the code is still unknown. A code the integration models but no Main-panel button is mapped to is not this issue: `_log_unmapped_proto_code()` only logs a warning for it, once per code, as it also does for an unmodelled one.
+- **Disarm** proceeds unconditionally. `_execute_transition()` routes a full disarm to `_disarm_circuits_unconditional()`, which asks the resolver for disarm-only steps (`resolve_disarm_only()`) — `DARM1` / `DARM1DARMPERI` / `DARMANNEX1` clear their axis regardless of the current state, so no read is needed. This is *not* the #441 silent no-op (resolver computing `current==target` off a stale `D` and skipping `DARM1`): the command is actually sent. A partial disarm (`execute_partial_disarm`, which the lock's auto-disarm calls with its circuits) takes the same path when the installation's latest known state (`AlarmCoordinator.confirmed_proto_code`, read through `_confirmed_alarm_state()`) is missing, unmodelled or provisional — otherwise an unmodeled code would read as nothing armed and the disarm would silently skip, leaving the door open over an armed alarm.
 
 ### Exceptions (`exceptions.py`)
 
@@ -251,7 +252,8 @@ VerisureOwaError                  Base class (http_status, message, response_bod
 ├── OperationFailedError          Panel rejection (carries error_code, error_type)
 ├── ArmingExceptionError          Open sensors blocking arm (carries force-arm context)
 ├── ImageCaptureError             Camera capture failure
-└── UnexpectedStateError          Unrecognised protocol code (carries proto_code)
+├── UnexpectedStateError          Unrecognised protocol code (carries proto_code)
+└── _UnrecognisedStateError       Transition refused: current state code not modelled (carries proto_code; private, in alarm_control_panel/_base.py)
 ```
 
 `VerisureOwaError` takes `(message, *, http_status)` and has a `response_body` attribute that callers can set after construction. The `message` property returns the short human-readable description. The `log_detail()` method returns just the message for well-known HTTP statuses (400, 403, 409) and appends the response body for unknown errors to aid diagnosis.
@@ -319,7 +321,7 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 
 **Critical rule:** Platform `async_setup_entry` functions must **never** make API calls. All API-based discovery is deferred to a background task that runs after setup completes. This avoids blocking HA startup.
 
-**Config-entry migration (`async_migrate_entry`):** runs before `async_setup_entry` whenever `entry.version` is below the current `VERSION` (5). Pre-v3 entries are rejected with a user notification. v3 → v4 strips the obsolete `CONF_TOKEN` dead-write key and bumps the version. `CONF_PASSWORD` is intentionally preserved so the next successful login can still happen on legacy entries; it is scrubbed lazily by `VerisureHub._persist_refresh_token` on first capture. v4 → v5 hashes any plain-text `CONF_CODE` still present in `entry.data`/`entry.options` (via `pin_crypto.hash_pin`) into `CONF_CODE_HASH` + `CONF_CODE_IS_NUMERIC`, then drops the plain-text key — see "PIN code validation" below. It rewrites the key wherever it was *present*, not just where it was non-empty: an empty `options["code"]` means "the user removed the PIN" and has to keep shadowing a stale `data["code"]` (`_opt` reads options first), so it becomes `CONF_CODE_HASH: None` rather than an absent key, which would stop shadowing and resurrect the old PIN.
+**Config-entry migration (`async_migrate_entry`):** runs before `async_setup_entry` whenever `entry.version` is below the current `VERSION` (5), or `entry.minor_version` below `MINOR_VERSION` (2). Pre-v3 entries are rejected with a user notification. v3 → v4 strips the obsolete `CONF_TOKEN` dead-write key and bumps the version. `CONF_PASSWORD` is intentionally preserved so the next successful login can still happen on legacy entries; it is scrubbed lazily by `VerisureHub._persist_refresh_token` on first capture. v4 → v5 hashes any plain-text `CONF_CODE` still present in `entry.data`/`entry.options` (via `pin_crypto.hash_pin`) into `CONF_CODE_HASH` + `CONF_CODE_IS_NUMERIC`, then drops the plain-text key — see "PIN code validation" below. It rewrites the key wherever it was *present*, not just where it was non-empty: an empty `options["code"]` means "the user removed the PIN" and has to keep shadowing a stale `data["code"]` (`_opt` reads options first), so it becomes `CONF_CODE_HASH: None` rather than an absent key, which would stop shadowing and resurrect the old PIN. 5.1 → 5.2 (`_migrate_lower_case_email`) lower-cases `CONF_USERNAME`, because Verisure's sign-in ignores capitals and the in-memory stores keyed by username (shared sessions, installations cache, refresh-crash streaks) must see one spelling per account; the config flow lower-cases the email as it is typed, in both the user and the reauth step. The step also rebuilds the entry's unique ID as `<username>_<installation>` from the lower-cased email, which corrects an ID still carrying the email from before a reauth account switch; an entry with no installation number just has its ID lower-cased. It is a minor bump so an older release still loads the entry. When another entry of the domain works out to the same ID (the same account and installation added twice with different capitals), neither entry is removed — which of the two owns the installation's entities is decided by which sets up first, so it can change on any restart — and the entry only takes the new ID when no other entry holds it. The user is asked to delete one by a Repairs issue, `duplicate_entry`, which `_async_update_duplicate_entry_issues` keeps in step with the entries: it runs at the start of every `async_setup_entry`, in `async_remove_entry`, and in the reauth step once it has saved the entry's new account (the reload that follows runs no setup when the entry is disabled), groups the domain's entries by `_entry_unique_id` (entries with none are skipped), raises one issue per ID held by two or more, and deletes any `duplicate_entry_*` issue whose clash has gone — so it clears as soon as the user removes the duplicate, without a restart. Home Assistant drops an entry from `hass.config_entries` before it calls `async_remove_entry`; the entry being removed is still excluded explicitly. The issue is not persistent: Home Assistant forgets it on restart, and the next setup raises it again if the clash remains. Its ID is `duplicate_entry_` plus a hash of the shared unique ID, because Home Assistant saves issue IDs and the email must not be saved; its placeholder is the installation's name (the entry title).
 
 ```
 1. Read config entry data into OrderedDict (CONF_PASSWORD optional, CONF_REFRESH_TOKEN preferred)
@@ -404,13 +406,21 @@ The module also provides `verisure_device_info()` and `camera_device_info()` hel
 
 ### Alarm control panel (`alarm_control_panel/`)
 
-The alarm-panel platform is split into a package: `_base.py` carries `BaseVerisureOwaAlarmPanel` (state mapping, transition orchestration, force-arm context, PIN, WAF tracking) and the shared `build_partial_disarm_target` helper; `_panels.py` defines the four concrete entity classes (`CombinedVerisureOwaAlarmPanel` and the three axis sub-panels via `_AxisSubPanelMixin`); `alarm_control_panel/__init__.py` is the platform's `async_setup_entry` plus the entity-service registrations. All four classes are re-exported from the package root for backwards compatibility.
+The alarm-panel platform is split into a package: `_base.py` carries `BaseVerisureOwaAlarmPanel` (state mapping, transition orchestration, force-arm context, PIN, WAF tracking) and the shared `build_partial_disarm_target` and `armed_circuits` helpers, which the package root re-exports for the lock; `_panels.py` defines the four concrete entity classes (`CombinedVerisureOwaAlarmPanel` and the three axis sub-panels via `_AxisSubPanelMixin`); `alarm_control_panel/__init__.py` is the platform's `async_setup_entry` plus the entity-service registrations. All four classes are re-exported from the package root for backwards compatibility.
 
 The main entity is `CombinedVerisureOwaAlarmPanel` — one per installation. Inherits from `CoordinatorEntity[AlarmCoordinator]` and `AlarmControlPanelEntity`. The entity starts with `_state = None` (renders as "unknown" in HA) until the first successful coordinator update populates the real alarm state. This avoids showing a false "disarmed" state at startup.
 
 On `async_setup_entry`, the combined panel is stored in `entry_data["combined_alarm_panels"][installation_number]` and each enabled sub-panel is stored in `entry_data["axis_alarm_panels"][installation_number][axis]`. The lock platform reads these to drive `execute_partial_disarm` (auto-disarm before unlock).
 
-**Coordinator integration:** The `_handle_coordinator_update()` callback skips updates while `_operation_in_progress` is True (during arm/disarm) to prevent stale API responses from overwriting the transitional state. On each coordinator update, `_clear_force_context()` is called and `_update_from_coordinator()` maps the `SStatus.status` proto code to an HA state.
+**One entry runs an installation's panels:** each config entry has its own `AlarmCoordinator`, and so its own `InstallationOperation` (see "One command at a time" below). When two entries serve the same installation (the duplicate the `duplicate_entry` Repairs issue reports), whichever sets up its alarm platform first creates the panels, and the other creates none for that installation — not the Main panel, and not an Interior, Perimeter or Annex panel switched on only in its options — registers nothing in its `combined_alarm_panels` / `axis_alarm_panels`, and logs a warning naming the installation's number and alias. Otherwise a sub-panel only the second entry switched on would run on that entry's coordinator and could arm while the first entry's Main panel disarms. `main_panel_for(hass, installation_number)` finds the Main panel whichever entry runs it; the check between the entries uses it too, with no await between it and the registration, so two entries setting up at once cannot both claim the installation. The deprecated Refresh button looks its panel up with it on each press (a no-op, logged at debug level, when no entry runs one), and so does the lock's auto-disarm when its own entry has no panel — both usually belong to the entry that runs the panels anyway, since that entry also won their unique IDs. When the entry running the panels is removed or unloaded, the other entry does not take them over until it is itself reloaded (or Home Assistant restarts).
+
+**Coordinator integration:** The `_handle_coordinator_update()` callback skips updates while `_operation_in_progress` is True (while the panel takes part in the installation's running command, see "One command at a time" below) to prevent stale API responses from overwriting the transitional state. On each coordinator update, `_clear_force_context()` is called and `_update_from_coordinator()` maps the `SStatus.status` proto code to an HA state.
+
+**Installation-wide confirmed state:** `AlarmCoordinator.confirmed_proto_code` holds the latest known proto code for the installation. Each command's own answer records it through `record_confirmed_proto_code()` as soon as that command returns (`_send_single_command`), so a transition of several commands cut short between them leaves behind the state its last answered command reached; that includes the answer `_execute_transition` retries from after a mismatch. The only other writers are `_handle_operation_timeout` (the optimistic code after a confirmation timeout, then marked provisional), `_confirm_state_with_panel` (below), `async_manual_refresh` (a successful Refresh, skipped while a command runs) and the coordinator's poll. Showing a result (`update_status_alarm`) only updates the entity, so a transition that sends no command records nothing. Every poll writes it unless the installation is running a command (`AlarmCoordinator.operation.running`), because a poll landing then may predate the command's result. Right after a command the confirmed code is therefore newer than the coordinator's `data`; and because the coordinator's own first poll writes it, it is known even before the panels are added to Home Assistant. `execute_partial_disarm` decides from it which of the circuits it is given (the lock's auto-disarm passes its own) are armed, and every panel plans its commands from it (`_planning_proto_code()`, which falls back to the panel's own `_last_proto_code` only while nothing is confirmed); sub-panels also keep the other axes from it when building a target. So a panel whose own polls lag behind a command sent from another panel still plans from what that command confirmed.
+
+The recorded code becomes unconfirmed (`mark_confirmed_provisional()`) after a confirmation timeout, and when an arm or disarm is cancelled after its command left the API queue to be sent (the hub's `on_start` callback ran; a command cancelled while still queued was never sent and changes nothing). While it is, `possible_proto_codes` holds the last confirmed code, each later timed-out command's optimistic code, and None (not known) after such a cancellation or a timeout whose target has no proto code. A multi-step transition that timed out part-way may also have stopped between those (for example fully disarmed on the way from A to E), which the set does not list; that is harmless for the disarm check below, since no plan switches an axis on only part-way. `confirmed_is_provisional` stays True until a real command result, the pre-arm check, a manual Refresh or a poll allowed to record replaces the code, and while it does `_confirmed_alarm_state()` returns None, so `execute_partial_disarm` disarms the circuits it is given unconditionally rather than trust an unconfirmed disarm. Panels keep planning from the recorded code, with two exceptions for a disarm: `_execute_transition()` sends a full disarm unconditionally, and an axis sub-panel's disarm (`_unconfirmed_planning_state`) plans as if its axis were armed when any possible state has that axis armed or is None — so pressing Disarm again after a disarm that timed out is not a silent no-op — while sending nothing when every possible state has the axis off. An arm does not plan from an unconfirmed code at all: `set_arm_state` first calls `_confirm_state_with_panel()`, which asks the panel for its state through `refresh_alarm_status()` (the Refresh button's `CheckAlarm` round trip), records the answer as confirmed, clears the provisional flag, shows the answer and forces Arming again, so a later rollback lands on the answer rather than the old guess. The arm then plans from that answer; if the first arm did land, it sends nothing. A timeout or a non-letter answer raises `VerisureOwaError`, handled as an arm failure with nothing sent; an unmodelled letter (e.g. `N`) is recorded and the arm refused by `_execute_transition` as above. `_confirm_state_with_panel` first puts back the state from before "Arming", then applies the answer; an axis sub-panel cannot project an unmodelled answer onto its axis, so its `_show_state_check_answer` leaves its display alone then instead of falling back to the last poll.
+
+**One command at a time per installation:** all panels of an installation share one `InstallationOperation` (`AlarmCoordinator.operation`, in `coordinators.py`), recording the running command's kind (`arm`, `disarm` or `partial_disarm`), the panels taking part and, for an arm, its mode. A user arm, a user disarm and `execute_partial_disarm` (the lock's auto-disarm) each wait (`_wait_until_idle`, bounded by `_operation_wait_limit()`, then the translated `operation_in_progress` error, which `execute_partial_disarm` turns into a False return) until the installation is idle, then call `begin()` with no await in between, and `end()` in the `finally` of the `try` that starts right after it, so no exit leaves the installation busy and no command can end another's. Each command plans from the state the previous one left. Repeat presses are quiet no-ops, decided by `_repeats_running()`: a full disarm while a full disarm runs on the same panel (checked each time the wait wakes, so two queued disarms send one), and an arm to the mode an arm is already running to on the same panel (checked at press time, before a user arm dismisses the pending Force Arm prompt, so an ignored repeat leaves the running arm's prompt in place). A force-arm is never a repeat: it may arrive while the blocked arm it completes is still finishing, and then queues behind it. Among arms waiting on one panel only the latest press runs (`_arm_presses`, a per-panel counter taken after the repeat check, so an ignored repeat cancels nothing); arms waiting on different panels all run, in turn. `_force_state(ARMING)` happens only after the arm has begun, so a waiting arm does not show Arming.
 
 **State mapping system:** During `__init__`, two dictionaries are built from the user's configuration:
 
@@ -422,11 +432,22 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
 **Arm flow** (`async_alarm_arm_away` and friends):
 ```
 1. _check_code_for_arm_if_required(code) — if PIN required for arming
-2. _force_state(ARMING) — set transitional state, save previous in _last_state
-3. set_arm_state(target_mode):
-   a. Convert target HA mode to AlarmState via _mode_to_alarm_state()
-   b. _execute_transition(target_alarm_state, **force_params):
-      - Derives current AlarmState from _last_proto_code
+2. Same mode already arming on this panel? return, sending nothing and
+   leaving that arm's Force Arm prompt in place
+3. Dismiss any pending force-arm context on this panel and its siblings
+4. set_arm_state(target_mode):
+   a. Same mode already arming on this panel (and not a force-arm)? return
+      (checked again for direct callers of `set_arm_state`;
+      `async_force_arm`, the only other caller in the integration, is never
+      a repeat)
+   b. Take a press number, _wait_until_idle(); a later arm pressed on this
+      panel meanwhile? return (the latest press runs)
+   c. operation.begin("arm", [self], mode)
+   d. _force_state(ARMING) — set transitional state, save previous in _last_state
+   e. Confirmed state provisional? _confirm_state_with_panel() first
+   f. Convert target HA mode to AlarmState via _mode_to_alarm_state()
+   g. _execute_transition(target_alarm_state, **force_params):
+      - Derives current AlarmState from _planning_proto_code() (the installation's confirmed code)
       - resolver.resolve(current, target) returns list of CommandSteps
       - If mode change (e.g. Partial→Total): resolver inserts disarm first
       - For each step, _execute_step() tries command alternatives in order
@@ -437,29 +458,53 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
       - Force params passed to all commands (both interior and perimeter
         sensors can trigger ArmingExceptionError)
       - _last_arm_result tracks the most recent successful step for partial state
-   c. On error:
+   h. On error:
       - Notify user via persistent notification (short message only, never
         full error tuples with headers/tokens)
       - If a prior step succeeded (_last_arm_result), reflect that partial state
       - If no steps succeeded, revert to _last_state
-   d. update_status_alarm() with the final response
+   i. update_status_alarm() with the final response
+   j. finally: operation.end()
 ```
 
 **Disarm flow** (`async_alarm_disarm`):
 ```
 1. _check_code(code) — raises ServiceValidationError if wrong
-2. _force_state(DISARMING)
-3. _execute_transition(AlarmState(OFF, OFF)):
-   a. resolver.resolve(current, disarmed) returns CommandStep with ordered
-      alternatives based on current state:
-      - Both armed? → [DARM1DARMPERI, DARM1]
+2. _wait_until_idle(duplicate_of="disarm") — waits until no panel of the
+   installation runs a command; returns at once, sending nothing, when a
+   disarm is already running on this same panel (checked each time the wait
+   wakes, so two disarms queued behind one command send one)
+3. operation.begin("disarm", [self])
+4. Dismiss any pending force-arm context on this panel and its siblings
+5. _force_state(DISARMING)
+6. target = _resolve_target_state("disarmed"): all axes off on the Main
+   panel; a sub-panel turns off its own axis and keeps the others as the
+   installation's planning state has them (when that is unreadable, as the
+   last poll has them, or all off)
+7. _execute_transition(target):
+   a. Planning state (_planning_proto_code()) unreadable (never polled, or an
+      unmodelled code like N), or the confirmed state provisional, and the
+      target is all off? → _disarm_circuits_unconditional(_full_disarm_circuits()):
+      resolver.resolve_disarm_only() emits only DARM commands (DARM1 /
+      DARM1DARMPERI / DARMANNEX1) for every axis the Main panel owns, or just
+      a sub-panel's own axis, whatever the current state (#550)
+   b. Otherwise, provisional? a sub-panel plans from _unconfirmed_planning_state():
+      its axis counts as armed when any possible state has it armed or is
+      unknown, so a disarm that timed out is sent again
+   c. resolver.resolve(current, target) returns steps with ordered
+      alternatives based on what is armed:
+      - Interior and perimeter? → [DARM1DARMPERI, DARM1]
       - Only perimeter? → [DARMPERI, DARM1]
       - Only interior? → [DARM1]
-   b. _execute_step() tries alternatives, marks failed ones unsupported
-   c. 409 errors re-raised (server busy, not unsupported)
-   d. Error on all attempts? → _notify_error() with short message, restore
-      _last_state
-4. update_status_alarm() with the response
+      - Annex armed? → DARMANNEX1 appended
+      - Nothing armed? → no steps, nothing sent
+   d. _execute_step() tries alternatives, marks failed ones unsupported;
+      409 errors re-raised (server busy, not unsupported)
+   e. Answer differs from the target? replan once from the answer
+8. Success → update_status_alarm(result), coordinator refresh, activity event
+   Timeout → _handle_operation_timeout(): show the target, state provisional
+   Error → restore _last_state, _handle_arm_disarm_error() notifies
+9. finally: operation.end()
 ```
 
 **Arming exception flow** (open sensors blocking arm):
@@ -477,7 +522,9 @@ On `async_setup_entry`, the combined panel is stored in `entry_data["combined_al
       the force has resolved by then (_wipe_force_arm_state() and entity
       removal cancel the timer), and only if force_arm_notifications is
       still enabled when it fires
-5. State reverts to _last_state
+5. If an earlier command of this arm was answered (_last_arm_result), show
+   that answer and request a coordinator refresh so the other panels catch
+   up; otherwise the state reverts to _last_state
 ```
 
 **Force arm flow** (`verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services):
@@ -495,7 +542,7 @@ force_arm_cancel:
   3. async_write_ha_state()
 
 Mobile notification actions (when built-in handler enabled):
-  - SECURITAS_FORCE_ARM_<num> → async_force_arm()
+  - SECURITAS_FORCE_ARM_<num> → _async_force_arm_from_notification() (async_force_arm(); a refusal → arm_failed notification)
   - SECURITAS_CANCEL_FORCE_ARM_<num> → _clear_force_context() + write state
 ```
 
@@ -602,13 +649,13 @@ context.
 When the built-in handler is active it:
 - Creates a persistent notification listing open zones with instructions for how to force-arm.
 - Sends a mobile notification (if `notify_group` is configured) with **Force Arm** / **Cancel** action buttons.
-- Listens for `mobile_app_notification_action` events to handle button taps (`SECURITAS_FORCE_ARM_<num>` → `async_force_arm()`, `SECURITAS_CANCEL_FORCE_ARM_<num>` → cancel). The action names retain the `SECURITAS_` prefix through the v5 deprecation window: the integration both sends the action (in the mobile notification payload) and listens for the resulting press event, so renaming would silently break any user automation hooked to `mobile_app_notification_action` events that match the action string. Renamed in v6 with explicit release-note guidance.
+- Listens for `mobile_app_notification_action` events to handle button taps (`SECURITAS_FORCE_ARM_<num>` → `_async_force_arm_from_notification()`, which runs `async_force_arm()` and sends a refused force arm as the `arm_failed` notification, `SECURITAS_CANCEL_FORCE_ARM_<num>` → cancel). The action names retain the `SECURITAS_` prefix through the v5 deprecation window: the integration both sends the action (in the mobile notification payload) and listens for the resulting press event, so renaming would silently break any user automation hooked to `mobile_app_notification_action` events that match the action string. Renamed in v6 with explicit release-note guidance.
 - When the force-arm context expires (180 s), fires `verisure_owa_force_arm_expired` (regardless of toggle) and — when notifications are enabled — updates the persistent notification, then replaces the mobile notification *in place* with a button-less informational card (same `tag` as the original so iOS/Android updates the existing card rather than stacking a new one; `actions` array omitted so no buttons render).
 - Listens for `verisure_owa_arming_exception_dismissed` and clears the shared persistent + mobile notifications when fired (so a sibling-panel arm/disarm or an integration reload cleans up the user-visible state).
 
 **Disabling the built-in handler:**
 
-Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & Services → Verisure OWA → Configure). The `verisure_owa_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
+Set **Built-in force-arm notifications** to off in the integration options (Settings → Devices & services → Verisure OWA → Configure). The `verisure_owa_arming_exception` event still fires, `force_arm_available` / `arm_exceptions` attributes are still set, and the `verisure_owa.force_arm` / `verisure_owa.force_arm_cancel` services still work — only the notifications are suppressed. This lets you replace the built-in notifications with custom automations.
 
 **Custom automation examples:**
 
@@ -758,7 +805,7 @@ Lock and unlock operations use `change_lock_mode(lock=True/False)` which follows
 
 - **Lock command verification** (`_change_lock_mode` → `_poll_lock_until`): the backend acks a lock/unlock before the device physically actuates (~6s to start + ~4.5s to complete; see PR #413), so a single immediate read races ahead of the lock. Before sending the command we take a **fresh baseline** `statusTimestamp` via a direct `get_lock_modes` call (foreground priority) — not from coordinator data, which can be older than the actual current backend state if the lock was physically moved since the last coordinator refresh. We then re-read the status up to `LOCK_VERIFY_ATTEMPTS` times (`LOCK_VERIFY_DELAY` apart) and treat any read with `statusTimestamp > pre_ts` as authoritative: matches target → confirmed success; doesn't match → confirmed failure (lock blocked / snapped back). Stale reads (`statusTimestamp <= pre_ts`) keep polling — they may be pre-command state still propagating. The window covers the worst-case actuation (currently ~18s, past #413's validated 15s; tune from the per-attempt `statusTimestamp` debug logs). On window exhaust with `status == target` but no fresh timestamp, we treat it as a quiet success — defensively handling the case where the device does not re-stamp `statusTimestamp` on a no-op command.
 
-- **Auto-disarm before unlock**: HA-initiated `async_unlock` / `async_open` runs `_dispatch_unlock_disarm()` and `_change_lock_mode(unlock)` concurrently via `asyncio.gather`. The disarm reads `_unlock_disarms_circuits`, intersects with the currently-armed circuit set, and if non-empty calls `combined_alarm_panel.execute_partial_disarm(targets)`. That method drives the same optimistic-state lifecycle as a user-initiated disarm on the combined panel **and on every registered axis sub-panel** for the listed circuits (DISARMING during the transition, post-result state on success, rollback on failure), then triggers a coordinator refresh. Both the lock and any affected sub-panels animate immediately. After both branches complete, an "Unlock failed" notification fires only if the disarm succeeded but the lock state stayed LOCKED.
+- **Auto-disarm before unlock**: HA-initiated `async_unlock` / `async_open` runs `_dispatch_unlock_disarm()` and `_change_lock_mode(unlock)` concurrently via `asyncio.gather`. The lock hands every circuit in `_unlock_disarms_circuits` to `combined_alarm_panel.execute_partial_disarm(circuits)`, which decides what to send: an empty list returns None at once without waiting; otherwise it waits for any command already running on any alarm panel of the installation (main or sub-panel), then keeps only the circuits armed in the installation's latest known state (`armed_circuits()`), or all of them when that state is unreadable or unconfirmed (#550). It returns None when nothing was armed (no command sent), True when it disarmed, and False when the disarm failed or the wait gave up — only False fires the lock's "Auto-disarm failed" notification. While it runs it holds the installation's operation (`partial_disarm`), so any arm, from any panel (e.g. Perimeter), waits for it rather than running alongside and re-arming the circuits it just disarmed. It drives the same optimistic-state lifecycle as a user-initiated disarm on the combined panel **and on every registered axis sub-panel** for the circuits it disarms (DISARMING during the transition, post-result state on success, rollback on failure), then triggers a coordinator refresh. Both the lock and any affected sub-panels animate immediately. After both branches complete, an "Unlock failed" notification fires only if the disarm succeeded but the lock state stayed LOCKED.
 
 The `axis_alarm_panels` registration in `entry_data` is what lets `execute_partial_disarm` find the affected sub-panels without leaking lock-platform knowledge into the alarm package. Only HA-initiated unlocks reach into the alarm — Verisure-app or physical-lock unlocks never trigger auto-disarm because they don't go through the entity.
 
@@ -796,7 +843,7 @@ Both entities are grouped under a per-camera child device (via `camera_device_in
 Both button entities below are now **deprecated thin wrappers** that delegate to entity methods on the corresponding alarm-panel / camera entities. The bundled Lovelace cards (alarm card, camera card) invoke those methods directly via `verisure_owa.refresh_alarm` / `verisure_owa.capture_image` and don't look up these buttons at all. Both buttons remain registered so existing automations and Lovelace button cards continue to work; pressing one logs a one-line deprecation warning and will be removed in a future release.
 
 **`VerisureRefreshButton`** (deprecated) — `async_press` forwards the current HA context to the alarm entity and calls `alarm_entity.async_manual_refresh()`. The real implementation lives on `BaseVerisureOwaAlarmPanel`:
-- On success: updates `protom_response` on the client, clears `refresh_failed`, triggers a state write
+- On success: updates `protom_response` on the client, clears `refresh_failed`, triggers a state write; unless a command is running on the installation or the answer is not a state letter, it also records the answer as the confirmed state, clears the unconfirmed flag and its "Arm not confirmed" notification, and shows the answer (`_apply_panel_answer`, shared with the pre-arm check)
 - On timeout: sets `refresh_failed` (card shows stale data banner), injects a `COMMUNICATION_FAILED` activity event
 - On 403: creates "Rate limited" persistent notification, sets `waf_blocked`, injects `COMMUNICATION_FAILED`
 
@@ -898,11 +945,11 @@ Step 6 (mappings): Map HA alarm buttons to Verisure OWA states
 → Create config entry per installation
 ```
 
-Device IDs are generated during initial setup and stored in the config entry for reuse across restarts. The config flow caches authenticated sessions and installations in `hass.data[DOMAIN]` for reuse during `async_setup_entry`, avoiding duplicate login calls.
+Device IDs are generated during initial setup and stored in the config entry for reuse across restarts. The config flow registers its authenticated session in `hass.data[DOMAIN]["sessions"]` (keyed by username, always lower case: the flow lower-cases the email as it is typed and the 5.2 migration lower-cases saved ones) for reuse during `async_setup_entry`, avoiding duplicate login calls. The account's installations list goes in `hass.data["securitas_installations_cache"]` (`_store_installations_cache`, keyed by username, kept for `API_CACHE_TTL`), outside `hass.data[DOMAIN]` so it survives the integration's clean-up when the only entry unloads; the reload after reauth switches the entry's account therefore reuses the list instead of fetching it again.
 
 **Reauth flow** (`async_step_reauth` / `async_step_reauth_confirm`):
 
-Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing. Every login this flow runs — initial setup, reauth and the 2FA completion — goes through `_login_with_family_fallback`, so the flow reaches the server the same way setup does (#606).
+Triggered when `async_setup_entry` raises `ConfigEntryAuthFailed` (on `TwoFactorRequiredError` or `AuthenticationError`). The most common everyday trigger is a refresh-token failure with no password fallback — e.g. token revoked, expired past its 180-day TTL, or dead on disk (the `xSRefreshLogin` null-deref crash carries no error code, so a single crash is treated as transient; a streak of them — two consecutive setup attempts, or three consecutive runtime renewals with no success in between, raised as `RefreshTokenDeadError` — escalates to reauth, #568). Presents a form pre-filled with the existing username. Preserves existing device IDs from the entry being reauthenticated to maintain device identity. On successful login, `_finish_reauth` writes the **fresh refresh token** (not the password) to `entry.data` and reloads the integration. The typed email is lower-cased, so the same email in other capitals is the same account; a different email is an account switch, which is refused (`installation_not_on_account`) when that account cannot see the entry's installation, and otherwise moves the entry's unique ID to `<new email>_<installation>` unless another entry already holds that ID (Home Assistant reports taking another entry's ID as an integration bug). In that case both entries now work out to the same ID. `_finish_reauth` re-runs `_async_update_duplicate_entry_issues` as soon as it saves the new account, so the `duplicate_entry` Repairs issue appears when a switch creates such a clash and clears when a switch ends one, even when the entry is disabled and the reload sets nothing up. If 2FA is required during reauth, the full 2FA flow (phone selection, OTP) runs before completing. Every login this flow runs — initial setup, reauth and the 2FA completion — goes through `_login_with_family_fallback`, so the flow reaches the server the same way setup does (#606).
 
 **Options flow** (`VerisureOptionsFlowHandler`):
 ```
@@ -940,15 +987,18 @@ Changing options triggers `async_update_options()`, which compares each tracked 
 User presses "Arm Away" in HA UI
   → async_alarm_arm_away(code)
     → _check_code_for_arm_if_required(code)  # PIN check if configured
-    → _force_state(ARMING)                   # UI shows "Arming..."
     → set_arm_state(ARMED_AWAY)
+      → _wait_until_idle(); operation.begin("arm", [self], ARMED_AWAY)
+      → _force_state(ARMING)                 # UI shows "Arming..."
       → _mode_to_alarm_state(ARMED_AWAY) = AlarmState(TOTAL, ON)  (example with peri)
       → _execute_transition(target=AlarmState(TOTAL, ON))
-        → current = AlarmState from _last_proto_code (e.g. "B" → DAY+ON)
+        → current = AlarmState from _planning_proto_code() (e.g. "B" → DAY+ON)
         → resolver.resolve(current, target) returns:
           Step 1: disarm [DARM1DARMPERI, DARM1]  (mode change needs disarm first)
           Step 2: arm [ARMINTEXT1, ARM1PERI1, ARM1+PERI1]
         → _execute_step(Step 1):
+          → each command's answer is recorded as it returns
+            (_send_single_command → coordinator.record_confirmed_proto_code)
           → try DARM1DARMPERI → success? done
           → VerisureOwaError (non-409)? mark_unsupported, try DARM1
         → _execute_step(Step 2):
@@ -960,6 +1010,7 @@ User presses "Arm Away" in HA UI
         → _last_proto_code = "A"
         → _status_map["A"] = ARMED_AWAY
         → _state = ARMED_AWAY                   # UI shows "Armed Away"
+      → finally: operation.end()
 ```
 
 ### Periodic status poll
@@ -976,7 +1027,7 @@ AlarmCoordinator fires every scan_interval seconds
     → _clear_force_context()
     → _update_from_coordinator(data)
       → proto_code from status.status
-      → _last_proto_code = proto_code  # Track for resolver's current state
+      → _last_proto_code = proto_code  # resolver's fallback until a code is confirmed
       → protomResponse "D" → DISARMED
       → protomResponse in _status_map → mapped HA state
       → protomResponse unknown → ARMED_CUSTOM_BYPASS + notification
@@ -1208,3 +1259,5 @@ alongside it under `.github/workflows/`.
 | `www/verisure-owa-alarm-card.js` | 1841 | Custom Lovelace alarm card with WAF warning banner, multi-language. **Deprecated since v5.8.0**, together with the badge and Mushroom chip in `www/verisure-owa-alarm-chip.js`: the card shows a notice the user can close, and each of the three reports itself once per element instance over the `verisure_owa/deprecated_element` websocket command, which `card_resources.py` registers from `async_setup` and which logs one warning per element and dashboard until Home Assistant restarts. (Filename `securitas-alarm-card.js` is a byte-identical copy retained indefinitely as an alias served at the `/securitas_panel/` URL prefix so old user dashboards keep loading; the card picker only offers the `custom:verisure-owa-alarm-card` form.) |
 | `www/verisure-owa-camera-card.js` | 376 | Custom Lovelace camera card with capture button, image timestamp overlay, and loading spinner. (Same legacy-copy treatment as the alarm card.) |
 | `www/verisure-owa-activity-log-card.js` | — | Custom Lovelace **Activity Log** card showing recent alarm-panel activity. |
+
+**Card cache-busting.** The card files are served from `/verisure-owa-panel` with a long browser cache lifetime, so every URL the integration serves from it carries `?v=<first 8 hex of the file's sha256>-<manifest version>`. `const.py::_card_url` stamps the registered entry points when `const.py` is imported. The relative imports between modules (for example `./verisure-owa-card-utils.js`) are stamped in the JS source by `scripts/stamp_card_imports.py`, dependencies first, so a change to one module changes the URL of every module that imports it, directly or through others. After editing a card module, run `python3 scripts/stamp_card_imports.py` and restart Home Assistant so it serves the new entry-point URLs. `tests/test_card_cache_busting.py`, `tests-js/integration/card-cache-busting.test.js` and the pre-push hook (`--check`) fail when a stamp is out of date, and the release workflow re-runs the script after each version bump.

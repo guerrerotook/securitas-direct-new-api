@@ -355,6 +355,55 @@ class TestLogin:
         hub.client.login.assert_awaited_once()
 
 
+# ── arm_alarm / disarm_alarm tests ──────────────────────────────────────────
+
+
+class TestArmDisarmOnStart:
+    """``on_start`` runs as a command leaves the queue, and only then."""
+
+    @pytest.mark.parametrize("verb", ["arm", "disarm"])
+    async def test_on_start_runs_just_before_the_command_is_sent(self, verb):
+        """on_start runs as the command leaves the queue, before it is sent."""
+        hub = make_hub()
+        order: list[str] = []
+        setattr(
+            hub.client,
+            verb,
+            AsyncMock(side_effect=lambda *_a, **_k: order.append("sent")),
+        )
+
+        await getattr(hub, f"{verb}_alarm")(
+            make_installation(), "CMD", on_start=lambda: order.append("start")
+        )
+
+        assert order == ["start", "sent"]
+
+    @pytest.mark.parametrize("verb", ["arm", "disarm"])
+    async def test_on_start_never_runs_for_a_command_cancelled_in_the_queue(self, verb):
+        """A command cancelled while queued never runs on_start nor is sent."""
+        hub = make_hub()
+        setattr(hub.client, verb, AsyncMock())
+        started = MagicMock()
+        release = asyncio.Event()
+        busy = asyncio.create_task(
+            hub.api_queue.submit(release.wait, priority=ApiQueue.FOREGROUND)
+        )
+        await asyncio.sleep(0)
+        command = asyncio.create_task(
+            getattr(hub, f"{verb}_alarm")(make_installation(), "CMD", on_start=started)
+        )
+        await asyncio.sleep(0)
+
+        command.cancel()
+        await asyncio.gather(command, return_exceptions=True)
+        release.set()
+        await busy
+        await asyncio.sleep(0)
+
+        started.assert_not_called()
+        getattr(hub.client, verb).assert_not_awaited()
+
+
 # ── change_lock_mode tests ──────────────────────────────────────────────────
 
 

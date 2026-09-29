@@ -22,11 +22,13 @@ from homeassistant.const import (
 )
 from homeassistant.data_entry_flow import FlowResultType, section
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.securitas import (
     _ALIASED_SERVICES,
+    _INSTALLATIONS_CACHE,
     ALIAS_DOMAIN,
     CONF_ADVANCED,
     CONF_CODE_ARM_REQUIRED,
@@ -50,6 +52,7 @@ from custom_components.securitas import (
 )
 from custom_components.securitas.config_flow import SECTION_PIN, FlowHandler
 from custom_components.securitas.const import (
+    API_CACHE_TTL,
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
     CONF_ENABLE_ANNEX_PANEL,
@@ -1822,6 +1825,43 @@ async def test_unique_id_includes_installation(hass):
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
     assert entries[0].unique_id == "test@example.com_42"
+
+
+async def test_new_entry_stores_the_email_in_lower_case(hass):
+    """Verisure's sign-in ignores capitals, so the entry and its ID keep the
+    email in lower case whatever the user typed."""
+    result = await _complete_full_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "User@Example.COM"},
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.data[CONF_USERNAME] == "user@example.com"
+    assert entry.unique_id == "user@example.com_123456"
+
+
+async def test_adding_the_same_account_in_other_capitals_is_a_duplicate(hass):
+    """An installation configured while this flow waits on its options form
+    is caught by the entry ID, which must match whatever the capitals."""
+    result = await _start_user_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "USER@example.com"},
+    )
+    assert result["step_id"] == "options"
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="user@example.com_123456",
+        data=make_config_entry_data(username="user@example.com"),
+        version=FlowHandler.VERSION,
+    ).add_to_hass(hass)
+
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
 
 
 async def test_already_configured_filtered_out(hass):
@@ -3853,7 +3893,7 @@ async def test_reauth_preserves_username_from_entry(hass):
     assert schema is not None
 
 
-async def _reauth_as_other_account(hass, entry):
+async def _reauth_as_other_account(hass, entry, other_hub=None):
     """Sign the entry in again as another account and let the reload set it up."""
     reauths = [
         flow
@@ -3865,10 +3905,15 @@ async def _reauth_as_other_account(hass, entry):
         if reauths
         else (await _start_reauth_flow(hass, entry))["flow_id"]
     )
-    other_hub = _hub_factory()
-    other_hub.config = make_config_entry_data(username="other@example.com")
+    if other_hub is None:
+        other_hub = _hub_for_other_account(
+            make_installation(number=entry.data[CONF_INSTALLATION])
+        )
+    reauth_hub = _hub_factory()
+    # The dialog signs in to the same account the reload does.
+    reauth_hub.client.list_installations = other_hub.client.list_installations
     with (
-        _patches(_hub_factory()),
+        _patches(reauth_hub),
         patch(
             "custom_components.securitas._login_ipv4_first",
             AsyncMock(return_value=other_hub),
@@ -4005,6 +4050,685 @@ async def test_deleting_an_entry_renamed_to_another_account_releases_its_session
     await hass.async_block_till_done()
 
     _assert_torn_down(hass)
+
+
+# ===================================================================
+# TestAccountSwitchLeftovers: per-account stores the first account leaves behind
+# ===================================================================
+
+
+def _crashing_login(hub):
+    """Stand in for ``_login_ipv4_first`` with a sign-in whose token crashes."""
+    hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+
+    async def crashing_login(hass, _config, _entry, username):
+        await _login_or_raise(hass, hub, username)
+
+    return patch(
+        "custom_components.securitas._login_ipv4_first", side_effect=crashing_login
+    )
+
+
+async def _home_crashed_once_then_rejected(hass):
+    """Set Home up so its stored token crashes once, then is rejected.
+
+    It is left waiting in the reauth dialog with a crash count of one on
+    its first account, below the two that ask for re-authentication.
+    """
+    home = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_111",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "111"},
+        version=FlowHandler.VERSION,
+    )
+    home.add_to_hass(hass)
+    with _crashing_login(_hub_factory()):
+        assert not await hass.config_entries.async_setup(home.entry_id)
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(side_effect=AuthenticationError("rejected")),
+    ):
+        await hass.config_entries.async_reload(home.entry_id)
+        await hass.async_block_till_done()
+    assert home.state is ConfigEntryState.SETUP_ERROR
+    assert _crash_streaks(hass) == {"test@example.com": 1}
+    return home
+
+
+def _reauth_flows_for(hass, entry) -> list:
+    return [
+        flow
+        for flow in hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+        if flow["context"]["source"] == SOURCE_REAUTH
+        and flow["context"].get("entry_id") == entry.entry_id
+    ]
+
+
+async def test_a_new_entry_on_the_first_account_gets_its_retry_after_a_switch(hass):
+    """The crash count Home leaves on its first account when it moves to
+    another is still there, but a new entry for that account starts from a
+    live sign-in in its setup dialog, which clears it: the new entry's first
+    crash later waits to retry instead of asking for the password."""
+    home = await _home_crashed_once_then_rejected(hass)
+    await _reauth_as_other_account(hass, home)
+    assert _crash_streaks(hass) == {"test@example.com": 1}
+
+    office = (
+        await _finish_from_options(
+            hass, await _start_user_flow(hass, _two_installation_hub())
+        )
+    )["result"]
+    assert office.state is ConfigEntryState.LOADED
+    assert _crash_streaks(hass) == {}
+
+    with _crashing_login(_hub_factory()):
+        await hass.config_entries.async_reload(office.entry_id)
+        await hass.async_block_till_done()
+
+    assert office.state is ConfigEntryState.SETUP_RETRY
+    assert not _reauth_flows_for(hass, office)
+
+
+@pytest.mark.parametrize("home_switches_account", [True, False])
+async def test_a_switch_does_not_change_what_a_crash_on_the_first_account_costs(
+    hass, home_switches_account
+):
+    """Entries on one account share its crash count, so Office's first crash
+    on the account Home crashed on counts as the second. Home moving to
+    another account in between must leave that exactly as it would be had Home
+    stayed: the switch adds nothing."""
+    home = await _home_crashed_once_then_rejected(hass)
+    office = _add_office_entry(hass)
+    if home_switches_account:
+        await _reauth_as_other_account(hass, home)
+
+    with _crashing_login(_hub_factory()):
+        assert not await hass.config_entries.async_setup(office.entry_id)
+    await hass.async_block_till_done()
+
+    assert office.state is ConfigEntryState.SETUP_ERROR
+    assert _crash_streaks(hass) == {"test@example.com": 2}
+
+
+async def _load_third_account_entry(hass):
+    """Load an entry on an unrelated account, so Home's reload during the
+    switch does not tear the integration and its caches down."""
+    third = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="third@example.com_999",
+        data={
+            **make_config_entry_data(username="third@example.com"),
+            CONF_INSTALLATION: "999",
+        },
+        version=FlowHandler.VERSION,
+    )
+    third.add_to_hass(hass)
+    third_hub = _hub_factory()
+    third_hub.config = make_config_entry_data(username="third@example.com")
+    third_hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number="999", alias="Third")]
+    )
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=third_hub),
+    ):
+        assert await hass.config_entries.async_setup(third.entry_id)
+    await hass.async_block_till_done()
+    return third
+
+
+def _hub_for_other_account(*installations):
+    hub = _hub_factory()
+    hub.config = make_config_entry_data(username="other@example.com")
+    hub.client.list_installations = AsyncMock(return_value=list(installations))
+    return hub
+
+
+async def test_an_entry_switched_to_another_account_lists_that_accounts_installations(
+    hass,
+):
+    """The first account's cached installation list is still fresh when Home
+    is set up again on the second; Home must get the second account's list."""
+    await _load_third_account_entry(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    other_hub = _hub_for_other_account(
+        make_installation(number="111", alias="Home, as the other account sees it")
+    )
+
+    await _reauth_as_other_account(hass, home, other_hub)
+
+    assert "test@example.com" in hass.data[_INSTALLATIONS_CACHE]
+
+    other_hub.client.list_installations.assert_awaited_once()
+    devices = hass.data[DOMAIN][home.entry_id]["devices"]
+    assert [d.installation.alias for d in devices] == [
+        "Home, as the other account sees it"
+    ]
+
+
+async def test_a_setup_dialog_for_the_second_account_offers_its_own_installations(
+    hass,
+):
+    """After the switch the first account's list is still cached; a setup
+    dialog for the second account must offer the second account's
+    installations, not the first's."""
+    await _load_third_account_entry(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    other_hub = _hub_for_other_account(
+        make_installation(number="111", alias="Home"),
+        make_installation(number="333", alias="Holiday home"),
+    )
+    await _reauth_as_other_account(hass, home, other_hub)
+    assert "test@example.com" in hass.data[_INSTALLATIONS_CACHE]
+
+    result = await _start_user_flow(
+        hass,
+        _hub_factory(),
+        credentials={**USER_INPUT_CREDENTIALS, CONF_USERNAME: "other@example.com"},
+    )
+    result = await _finish_from_options(hass, result)
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["result"].data[CONF_INSTALLATION] == "333"
+
+
+@pytest.mark.parametrize("cache_expired", [False, True])
+async def test_the_first_accounts_cached_list_lasts_only_its_usual_time(
+    hass, cache_expired
+):
+    """Left behind by the switch, the first account's cached list is still
+    only ever used for that account, and only until it expires as usual."""
+    await _load_third_account_entry(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    await _reauth_as_other_account(hass, home)
+    assert "test@example.com" not in _flow_sessions(hass)
+    assert "test@example.com" in hass.data[_INSTALLATIONS_CACHE]
+    if cache_expired:
+        hass.data[_INSTALLATIONS_CACHE]["test@example.com"]["time"] -= API_CACHE_TTL + 1
+    office = _add_office_entry(hass)
+    first_account_hub = _hub_factory()
+    first_account_hub.client.list_installations = AsyncMock(
+        return_value=[
+            make_installation(number="111", alias="Home"),
+            make_installation(number="222", alias="Office, renamed since"),
+        ]
+    )
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=first_account_hub),
+    ):
+        assert await hass.config_entries.async_setup(office.entry_id)
+    await hass.async_block_till_done()
+
+    devices = hass.data[DOMAIN][office.entry_id]["devices"]
+    if cache_expired:
+        first_account_hub.client.list_installations.assert_awaited_once()
+        assert [d.installation.alias for d in devices] == ["Office, renamed since"]
+    else:
+        first_account_hub.client.list_installations.assert_not_awaited()
+        assert [d.installation.alias for d in devices] == ["Office"]
+
+
+# ===================================================================
+# TestReauthOutcomes: what a reauth leaves behind for the next setup
+# ===================================================================
+
+
+def _reauth_hub_seeing(*numbers):
+    """A reauth dialog's hub whose account lists these installations."""
+    hub = _hub_factory()
+    hub.client.list_installations = AsyncMock(
+        return_value=[make_installation(number=n) for n in numbers]
+    )
+    return hub
+
+
+async def _submit_reauth(hass, entry, username, reauth_hub, setup_login):
+    """Answer the entry's reauth dialog as ``username``; ``setup_login``
+    stands in for the reload's sign-in."""
+    flows = _reauth_flows_for(hass, entry)
+    flow_id = (
+        flows[0]["flow_id"]
+        if flows
+        else (await _start_reauth_flow(hass, entry))["flow_id"]
+    )
+    with _patches(reauth_hub), setup_login:
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_USERNAME: username, CONF_PASSWORD: "new-password"},
+        )
+        await hass.async_block_till_done()
+    return result
+
+
+async def test_a_reauth_on_the_same_account_gives_the_next_crash_its_retry(hass):
+    """Signing in again proves the new token, so the crashes of the old one
+    must not count against it: its first crash waits to retry."""
+    home = await _home_crashed_once_then_rejected(hass)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "test@example.com",
+        _reauth_hub_seeing("111"),
+        _crashing_login(_hub_factory()),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert not _reauth_flows_for(hass, home)
+
+
+async def test_a_reauth_onto_another_account_clears_that_accounts_crash_count(
+    hass,
+):
+    """The account signed in to has a crash count from another of its
+    entries; the successful sign-in proves its token, so Home's first crash
+    on it waits to retry."""
+    await _load_third_account_entry(hass)
+    other = await _other_account_retrying_after_a_refresh_crash(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    assert _crash_streaks(hass) == {"other@example.com": 1}
+    home.async_start_reauth(hass)
+    await hass.async_block_till_done()
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        _reauth_hub_seeing("111"),
+        _crashing_login(_hub_factory()),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.data[CONF_USERNAME] == "other@example.com"
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert other.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_a_reauth_onto_an_account_without_the_installation_is_refused(hass):
+    """Signing in as an account that cannot see the entry's installation would
+    leave the entry with no devices; the dialog refuses, naming the
+    installation, and the entry stays on its first account."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    data_before = dict(home.data)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        _reauth_hub_seeing("333"),
+        patch("custom_components.securitas._login_ipv4_first"),
+    )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "installation_not_on_account"
+    assert result["description_placeholders"] == {"number": "111"}
+    assert dict(home.data) == data_before
+    assert home.state is ConfigEntryState.LOADED
+
+
+async def test_a_reauth_onto_another_account_that_cannot_list_asks_again(hass):
+    """If the other account's installations cannot be listed, the switch is
+    not made and the dialog asks again rather than guessing."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    data_before = dict(home.data)
+    reauth_hub = _hub_factory()
+    reauth_hub.client.list_installations = AsyncMock(
+        side_effect=VerisureOwaError("offline")
+    )
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        reauth_hub,
+        patch("custom_components.securitas._login_ipv4_first"),
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert dict(home.data) == data_before
+
+
+@pytest.mark.parametrize("only_entry", [True, False])
+async def test_a_switch_lists_the_new_accounts_installations_once(hass, only_entry):
+    """The dialog's check already fetched the new account's list; the reload
+    that follows must use it rather than ask Verisure again. As the only
+    entry, Home's reload tears the integration down in between."""
+    if not only_entry:
+        await _load_third_account_entry(hass)
+    home = await _load_home_entry(hass, _two_installation_hub())
+    reauth_hub = _reauth_hub_seeing("111")
+    reload_hub = _hub_for_other_account(make_installation(number="111"))
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=reload_hub),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.state is ConfigEntryState.LOADED
+    assert (
+        reauth_hub.client.list_installations.await_count
+        + reload_hub.client.list_installations.await_count
+        == 1
+    )
+    assert [
+        d.installation.number for d in hass.data[DOMAIN][home.entry_id]["devices"]
+    ] == ["111"]
+
+
+async def test_the_same_email_in_other_capitals_is_not_a_switch(hass):
+    """Verisure treats the email the same whatever its capitals, so retyping
+    it differently is the same account: no installation check is made."""
+    home = await _home_crashed_once_then_rejected(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "Test@Example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    reauth_hub.client.list_installations.assert_not_awaited()
+
+
+async def test_the_same_email_in_other_capitals_clears_the_crash_count(hass):
+    """The crash count is kept under the lower-case email, so a reauth
+    typing it in other capitals stores it in lower case and clears its
+    count: the next crash waits to retry."""
+    home = await _home_crashed_once_then_rejected(hass)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "Test@Example.com",
+        _reauth_hub_seeing("111"),
+        _crashing_login(_hub_factory()),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.data[CONF_USERNAME] == "test@example.com"
+    assert home.state is ConfigEntryState.SETUP_RETRY
+    assert _crash_streaks(hass) == {"test@example.com": 1}
+
+
+async def test_the_same_email_in_other_capitals_keeps_the_shared_session(hass):
+    """Home's reload after a reauth typing the email in other capitals goes
+    back on the session Office still holds, with the installations already
+    cached: no second sign-in, no second session, no second list."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = _add_office_entry(hass)
+    assert await hass.config_entries.async_setup(office.entry_id)
+    await hass.async_block_till_done()
+    home.async_start_reauth(hass)
+    await hass.async_block_till_done()
+    reload_login = AsyncMock(return_value=_two_installation_hub())
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "Test@Example.com",
+        _reauth_hub_seeing("111"),
+        patch("custom_components.securitas._login_ipv4_first", reload_login),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.state is ConfigEntryState.LOADED
+    assert _flow_sessions(hass).keys() == {"test@example.com"}
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {
+        home.entry_id,
+        office.entry_id,
+    }
+    reload_login.assert_not_awaited()
+    hub.client.list_installations.assert_awaited_once()
+
+
+async def test_reauth_stores_the_email_in_lower_case(hass):
+    """Retyping the entry's email in capitals is the same account: no
+    installation check, and the entry keeps the lower-case email."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="user@example.com_111",
+        data={
+            **make_config_entry_data(username="user@example.com"),
+            CONF_INSTALLATION: "111",
+        },
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    result = await _submit_reauth(
+        hass,
+        entry,
+        "User@Example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    reauth_hub.client.list_installations.assert_not_awaited()
+    assert entry.data[CONF_USERNAME] == "user@example.com"
+    assert entry.unique_id == "user@example.com_111"
+
+
+async def test_reauth_lower_cases_an_email_saved_in_capitals(hass):
+    """An entry saved in capitals, re-entered with the same capitals, is the
+    same account: no installation check, it is stored in lower case, and the
+    entry keeps its ID."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="Test@Example.com_111",
+        data={
+            **make_config_entry_data(username="Test@Example.com"),
+            CONF_INSTALLATION: "111",
+        },
+        version=FlowHandler.VERSION,
+        minor_version=FlowHandler.MINOR_VERSION,
+    )
+    entry.add_to_hass(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    result = await _submit_reauth(
+        hass,
+        entry,
+        "Test@Example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    reauth_hub.client.list_installations.assert_not_awaited()
+    assert entry.data[CONF_USERNAME] == "test@example.com"
+    # Only an account switch moves the entry ID; lower-casing it is the
+    # startup migration's job, which leaves an ID alone when another entry
+    # holds the lower-case one.
+    assert entry.unique_id == "Test@Example.com_111"
+
+
+@pytest.mark.parametrize("id_taken", [False, True])
+async def test_reauth_account_switch_moves_the_entry_id_to_the_new_email(
+    hass, id_taken
+):
+    """The entry ID is the email plus the installation, so a switch moves it
+    to the new email; if another entry already holds that ID it stays put."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    if id_taken:
+        MockConfigEntry(
+            domain=DOMAIN,
+            unique_id="other@example.com_111",
+            data={
+                **make_config_entry_data(username="other@example.com"),
+                CONF_INSTALLATION: "111",
+            },
+            version=FlowHandler.VERSION,
+        ).add_to_hass(hass)
+
+    result = await _submit_reauth(
+        hass,
+        home,
+        "other@example.com",
+        _reauth_hub_seeing("111"),
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(
+                return_value=_hub_for_other_account(make_installation(number="111"))
+            ),
+        ),
+    )
+
+    assert result["reason"] == "reauth_successful"
+    assert home.data[CONF_USERNAME] == "other@example.com"
+    assert home.unique_id == (
+        "test@example.com_111" if id_taken else "other@example.com_111"
+    )
+
+
+async def _load_installation_111_entries(hass, *usernames) -> list:
+    """One entry per email for installation 111, all set up."""
+    entries = []
+    for username in usernames:
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            unique_id=f"{username}_111",
+            data={
+                **make_config_entry_data(username=username),
+                CONF_INSTALLATION: "111",
+            },
+            version=FlowHandler.VERSION,
+            minor_version=FlowHandler.MINOR_VERSION,
+        )
+        entry.add_to_hass(hass)
+        entries.append(entry)
+    with patch(
+        "custom_components.securitas._login_ipv4_first",
+        AsyncMock(return_value=_two_installation_hub()),
+    ):
+        assert await async_setup_component(hass, DOMAIN, {})
+        await hass.async_block_till_done()
+    assert all(entry.state is ConfigEntryState.LOADED for entry in entries)
+    return entries
+
+
+def _duplicate_entry_issue_ids(hass) -> list[str]:
+    return [
+        issue_id
+        for domain, issue_id in ir.async_get(hass).issues
+        if domain == DOMAIN and issue_id.startswith("duplicate_entry_")
+    ]
+
+
+async def _reauth_disabled_entry(hass, entry, username):
+    """Submit the entry's reauth dialog as ``username`` and disable the entry
+    while the sign-in is still running. The submitted step still saves the
+    account (recent Home Assistant versions also close the dialog on disable),
+    and the reload after it runs no setup for a disabled entry."""
+    flow_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    hub = _reauth_hub_seeing("111")
+    signing_in, gate = asyncio.Event(), asyncio.Event()
+    sign_in = hub.login.side_effect
+
+    async def _sign_in_after_gate():
+        signing_in.set()
+        await gate.wait()
+        await sign_in()
+
+    hub.login = AsyncMock(side_effect=_sign_in_after_gate)
+    with _patches(hub), patch("custom_components.securitas._login_ipv4_first"):
+        # Untracked, so the wait for Home Assistant to settle after the
+        # disable does not wait for the held sign-in.
+        submit = asyncio.create_task(
+            hass.config_entries.flow.async_configure(
+                flow_id,
+                user_input={CONF_USERNAME: username, CONF_PASSWORD: "new-password"},
+            )
+        )
+        await asyncio.wait_for(signing_in.wait(), 2)
+        try:
+            await _disable(hass, entry)
+            assert not submit.done()
+        finally:
+            gate.set()
+            result = await submit
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_USERNAME] == username
+    assert entry.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_a_reauth_moving_a_disabled_entry_off_a_shared_id_clears_the_repair(
+    hass,
+):
+    """Two entries for one installation raise a Repairs issue; signing one in
+    to another account ends the clash, and the issue goes even though the
+    entry is disabled and never sets up again."""
+    first, _ = await _load_installation_111_entries(
+        hass, "User@Example.com", "user@example.com"
+    )
+    assert len(_duplicate_entry_issue_ids(hass)) == 1
+
+    await _reauth_disabled_entry(hass, first, "other@example.com")
+
+    assert _duplicate_entry_issue_ids(hass) == []
+
+
+async def test_a_reauth_moving_a_disabled_entry_onto_a_shared_id_raises_the_repair(
+    hass,
+):
+    """Signing a disabled entry in to the account another entry already uses
+    for the same installation raises the Repairs issue straight away."""
+    _, second = await _load_installation_111_entries(
+        hass, "user@example.com", "other@example.com"
+    )
+    assert _duplicate_entry_issue_ids(hass) == []
+
+    await _reauth_disabled_entry(hass, second, "user@example.com")
+
+    assert len(_duplicate_entry_issue_ids(hass)) == 1
+
+
+async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):
+    """The account already saw the installation when the entry was set up; a
+    same-account reauth costs no extra call."""
+    home = await _home_crashed_once_then_rejected(hass)
+    reauth_hub = _reauth_hub_seeing("111")
+
+    await _submit_reauth(
+        hass,
+        home,
+        "test@example.com",
+        reauth_hub,
+        patch(
+            "custom_components.securitas._login_ipv4_first",
+            AsyncMock(return_value=_two_installation_hub()),
+        ),
+    )
+
+    reauth_hub.client.list_installations.assert_not_awaited()
+    assert home.state is ConfigEntryState.LOADED
 
 
 # ===================================================================

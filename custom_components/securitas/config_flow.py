@@ -26,6 +26,7 @@ from homeassistant.helpers.selector import (
     CountrySelectorConfig,
     selector,
 )
+from homeassistant.helpers.typing import UNDEFINED, UndefinedType
 
 from . import (
     CONF_ADVANCED,
@@ -60,12 +61,16 @@ from . import (
     VerisureHub,
     _account_lock,
     _async_teardown_domain_if_unused,
+    _async_update_duplicate_entry_issues,
+    _clear_setup_refresh_crash,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
     _release_session_hold,
     _resolve_flow_capabilities,
+    _store_installations_cache,
     _take_session_hold,
+    _unique_id_for,
     generate_uuid,
 )
 from .api_queue import ApiQueue
@@ -480,6 +485,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow."""
 
     VERSION = 5
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the flow handler."""
@@ -508,7 +514,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Register a new entry, persisting the refresh token (not the password)."""
         username = self.config[CONF_USERNAME]
-        unique_id = f"{username}_{installation.number}"
+        unique_id = _unique_id_for(username, installation.number)
         await self.async_set_unique_id(unique_id)
         # HA 2026.6: opt out of implicit reload to avoid deprecated double-reload
         # with the entry-update listener registered in __init__.async_setup_entry.
@@ -694,6 +700,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(step_id="user", data_schema=self._user_schema())
 
         self.config = dict(user_input)
+        self.config[CONF_USERNAME] = self.config[CONF_USERNAME].lower()
 
         self.config[CONF_DELAY_CHECK_OPERATION] = DEFAULT_DELAY_CHECK_OPERATION
         self.config[CONF_DEVICE_INDIGITALL] = ""
@@ -735,7 +742,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             self.config[CONF_PASSWORD] = user_input[CONF_PASSWORD]
             self.config[CONF_USERNAME] = user_input.get(
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
-            )
+            ).lower()
 
             # Preserve existing device IDs from the entry being reauthenticated
             self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
@@ -768,6 +775,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return await self._finish_reauth()
 
+        return self._reauth_form(errors)
+
+    def _reauth_form(
+        self, errors: dict[str, str] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        assert self._reauth_entry is not None
         username = self._reauth_entry.data.get(CONF_USERNAME, "")
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -777,7 +790,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_PASSWORD): str,
                 }
             ),
-            errors=errors,
+            errors=errors or {},
         )
 
     async def _finish_reauth(self) -> config_entries.ConfigFlowResult:
@@ -794,11 +807,47 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 "leaving existing entry unchanged"
             )
             return self.async_abort(reason="no_refresh_token")
+        username = self.config[CONF_USERNAME]
+        installation = self._reauth_entry.data.get(CONF_INSTALLATION)
+        old_username = self._reauth_entry.data.get(CONF_USERNAME, "")
+        switched = username != old_username.lower()
+        if installation and switched:
+            # Another account keeps the entry's installation number; one that
+            # cannot see it would leave the entry with no devices.
+            try:
+                installations = await self.hub.client.list_installations()
+            except VerisureOwaError:
+                return self._reauth_form({"base": "cannot_connect"})
+            if all(inst.number != installation for inst in installations):
+                return self.async_abort(
+                    reason="installation_not_on_account",
+                    description_placeholders={"number": installation},
+                )
+            _store_installations_cache(self.hass, username, installations)
         new_data = {**self._reauth_entry.data}
-        new_data[CONF_USERNAME] = self.config[CONF_USERNAME]
+        new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
         new_data[CONF_REFRESH_TOKEN] = refresh_token
-        self.hass.config_entries.async_update_entry(self._reauth_entry, data=new_data)
+        unique_id: str | UndefinedType = UNDEFINED
+        if installation and switched:
+            new_uid = _unique_id_for(username, installation)
+            # Home Assistant reports taking another entry's ID as an
+            # integration bug.
+            if (
+                self.hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, new_uid
+                )
+                is None
+            ):
+                unique_id = new_uid
+        self.hass.config_entries.async_update_entry(
+            self._reauth_entry, data=new_data, unique_id=unique_id
+        )
+        # The reload below runs no setup for a disabled entry.
+        _async_update_duplicate_entry_issues(self.hass)
+        # This sign-in proves the new token; crashes of the one it replaces
+        # must not count against it.
+        _clear_setup_refresh_crash(self.hass, username)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")
 
@@ -880,10 +929,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
-        self.hass.data[DOMAIN][f"installations_cache_{username}"] = {
-            "data": installations,
-            "time": time.monotonic(),
-        }
+        _store_installations_cache(self.hass, username, installations)
 
         configured_ids = {
             entry.data.get(CONF_INSTALLATION) for entry in self._async_current_entries()

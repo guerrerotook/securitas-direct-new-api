@@ -8,19 +8,39 @@ which patch _execute_request directly.
 """
 
 import contextlib
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.securitas import DOMAIN, async_setup_entry, async_unload_entry
+from custom_components.securitas.alarm_control_panel import (
+    CombinedVerisureOwaAlarmPanel,
+)
+from custom_components.securitas.button import VerisureRefreshButton
+from custom_components.securitas.config_flow import FlowHandler
+from custom_components.securitas.const import (
+    CONF_ENABLE_INTERIOR_PANEL,
+    CONF_INSTALLATION,
+    DEFAULT_SCAN_INTERVAL,
+)
+from custom_components.securitas.lock import VerisureLock
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
 )
 
-from .conftest import make_config_entry_data
+from .conftest import make_config_entry_data, refresh_response
 from .mock_graphql import (
     FAKE_JWT,
     MockGraphQLServer,
@@ -30,6 +50,7 @@ from .mock_graphql import (
     graphql_check_alarm,
     graphql_disarm,
     graphql_disarm_status,
+    graphql_general_status,
     graphql_installations,
     graphql_login,
     graphql_login_error,
@@ -767,3 +788,378 @@ async def test_malformed_json_raises(
 
     with pytest.raises(VerisureOwaError):
         await hub.client.check_alarm(installation)
+
+
+# ── Two entries for one installation ──────────────────────────────────────────
+
+_INSTALLATION = "123456"
+
+
+def _add_entry_for(
+    hass: HomeAssistant, username: str, options: dict | None = None
+) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=f"{username}_{_INSTALLATION}",
+        data={
+            **make_config_entry_data(username=username, delay_check_operation=0),
+            CONF_INSTALLATION: _INSTALLATION,
+        },
+        options=options or {},
+        version=FlowHandler.VERSION,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _queue_installation_with_a_camera(server: MockGraphQLServer) -> None:
+    """Serve every sign-in, restart and discovery call for one installation.
+
+    The camera makes the background discovery register entities and a child
+    device too, not only the platform setup.
+    """
+    queue_standard_setup(server, numinst=_INSTALLATION)
+    server.set_default_response("mkLoginToken", graphql_login())
+    server.set_default_response("RefreshLogin", refresh_response())
+    server.set_default_response(
+        "mkInstallationList", graphql_installations(numinst=_INSTALLATION)
+    )
+    camera = {
+        "id": "1",
+        "code": "1",
+        "zoneId": "QR01",
+        "name": "Hall",
+        "type": "QR",
+        "isActive": True,
+        "serialNumber": None,
+    }
+    server.set_default_response(
+        "xSDeviceList",
+        {"data": {"xSDeviceList": {"res": "OK", "devices": [camera]}}},
+    )
+    server.set_default_response(
+        "mkGetThumbnail",
+        {"data": {"xSGetThumbnail": {"idSignal": None, "image": None}}},
+    )
+
+
+def _owned(
+    hass: HomeAssistant, entry: MockConfigEntry
+) -> tuple[set[str], set[tuple[str, str]]]:
+    """The unique IDs of the entities, and the identifiers of the devices,
+    that ``entry`` owns.
+
+    Identifiers, not device IDs: Home Assistant 2026.9 gives each entry a
+    device record of its own for the same identifier, where 2025.2 adds the
+    second entry to the one shared record.
+    """
+    entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+    return {e.unique_id for e in entities}, {i for d in devices for i in d.identifiers}
+
+
+def _holdings(
+    hass: HomeAssistant, older: MockConfigEntry, newer: MockConfigEntry
+) -> tuple[str, str]:
+    """Say, for each entry, whether it owns every entity and device, only the
+    devices, or nothing."""
+    owned = [_owned(hass, older), _owned(hass, newer)]
+    all_entities = owned[0][0] | owned[1][0]
+    all_devices = owned[0][1] | owned[1][1]
+    assert all_entities and all_devices
+
+    def describe(entities: set[str], devices: set[tuple[str, str]]) -> str:
+        if devices == all_devices:
+            if entities == all_entities:
+                return "everything"
+            if not entities:
+                return "devices"
+        if not entities and not devices:
+            return "nothing"
+        return f"entities={sorted(entities)} devices={sorted(devices)}"
+
+    return describe(*owned[0]), describe(*owned[1])
+
+
+async def _set_up_in_turn(hass: HomeAssistant, entries: list[MockConfigEntry]) -> None:
+    for entry in entries:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+def _duplicate_id_errors(caplog: pytest.LogCaptureFixture) -> int:
+    return sum(
+        "does not generate unique IDs" in r.getMessage()
+        for r in caplog.records
+        if r.levelname == "ERROR"
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "restart", "after_first", "after_restart"),
+    [
+        ("older", "older", ("everything", "nothing"), ("everything", "nothing")),
+        ("older", "newer", ("everything", "nothing"), ("devices", "everything")),
+        ("newer", "older", ("nothing", "everything"), ("everything", "devices")),
+        ("newer", "newer", ("nothing", "everything"), ("nothing", "everything")),
+    ],
+)
+async def test_the_entry_set_up_first_takes_the_installations_entities(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    caplog: pytest.LogCaptureFixture,
+    first: str,
+    restart: str,
+    after_first: tuple[str, str],
+    after_restart: tuple[str, str],
+):
+    """Two entries for one installation (the same email in other capitals)
+    share every entity and device ID. Whichever sets up first takes all the
+    entities, moving them over from the other on a restart, and every entry
+    that has ever registered the devices keeps them. The newer entry can
+    therefore own the user's entities and devices, so it cannot be removed
+    safely."""
+    _queue_installation_with_a_camera(mock_server)
+    # Loaded up front, so each async_setup below sets up only its own entry.
+    assert await async_setup_component(hass, DOMAIN, {})
+    older = _add_entry_for(hass, "User@Example.com")
+    newer = _add_entry_for(hass, "user@example.com")
+    order = {"older": [older, newer], "newer": [newer, older]}
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, order[first])
+            # The second entry sets up no alarm panels, so every other
+            # entity of the first is refused for it.
+            entity_count = sum(
+                e.domain != "alarm_control_panel"
+                for e in er.async_entries_for_config_entry(
+                    er.async_get(hass), order[first][0].entry_id
+                )
+            )
+            assert _holdings(hass, older, newer) == after_first
+            assert _duplicate_id_errors(caplog) == entity_count
+            caplog.clear()
+
+            for entry in (older, newer):
+                assert await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+            await _set_up_in_turn(hass, order[restart])
+
+            assert _holdings(hass, older, newer) == after_restart
+            assert _duplicate_id_errors(caplog) == entity_count
+        finally:
+            for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("how", ["unload", "remove"])
+async def test_unloading_the_entry_clears_its_unknown_state_notice(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    how: str,
+):
+    """The Repairs notice for an unrecognised alarm state lasts only while an
+    entry polls the installation: unloading or removing its only entry takes
+    it away rather than leaving it until Home Assistant restarts."""
+    queue_standard_setup(mock_server, numinst=_INSTALLATION)
+    mock_server.set_default_response("Status", graphql_general_status(status="N"))
+    assert await async_setup_component(hass, DOMAIN, {})
+    entry = _add_entry_for(hass, "user@example.com")
+    issue_id = f"unknown_alarm_state_{_INSTALLATION}"
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [entry])
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+            if how == "unload":
+                assert await hass.config_entries.async_unload(entry.entry_id)
+            else:
+                await hass.config_entries.async_remove(entry.entry_id)
+            await hass.async_block_till_done()
+
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+        finally:
+            if hass.config_entries.async_get_entry(entry.entry_id) is not None:
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize(
+    ("first_unloaded", "kept"), [("newer", True), ("older", False)]
+)
+async def test_the_unknown_state_notice_stays_while_an_entry_runs_the_alarm_panels(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    first_unloaded: str,
+    kept: bool,
+):
+    """An installation added twice has one unknown-state notice. The older
+    entry, set up first, runs the alarm panels, and only its coordinator keeps
+    polling: the newer one has no entities listening. Unloading the newer
+    entry keeps the notice; unloading the older takes it away, since nothing
+    would clear it once the alarm reports a known state again. Unloading
+    both takes it away."""
+    _queue_installation_with_a_camera(mock_server)
+    mock_server.set_default_response("Status", graphql_general_status(status="N"))
+    assert await async_setup_component(hass, DOMAIN, {})
+    entries = {
+        "older": _add_entry_for(hass, "User@Example.com"),
+        "newer": _add_entry_for(hass, "user@example.com"),
+    }
+    older, newer = entries["older"], entries["newer"]
+    first = entries.pop(first_unloaded)
+    (second,) = entries.values()
+    issue_id = f"unknown_alarm_state_{_INSTALLATION}"
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [older, newer])
+            assert _INSTALLATION in hass.data[DOMAIN][older.entry_id].get(
+                "combined_alarm_panels", {}
+            )
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+
+            assert await hass.config_entries.async_unload(first.entry_id)
+            await hass.async_block_till_done()
+            notice = ir.async_get(hass).async_get_issue(DOMAIN, issue_id)
+            assert (notice is not None) is kept
+
+            polls = mock_server.call_count("Status")
+            async_fire_time_changed(
+                hass, dt_util.utcnow() + timedelta(seconds=DEFAULT_SCAN_INTERVAL + 1)
+            )
+            await hass.async_block_till_done()
+            assert (mock_server.call_count("Status") > polls) is kept
+
+            assert await hass.config_entries.async_unload(second.entry_id)
+            await hass.async_block_till_done()
+            assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+        finally:
+            for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+
+async def test_a_second_entry_for_an_installation_sets_up_no_alarm_panels(
+    hass: HomeAssistant,
+    mock_server: MockGraphQLServer,
+    enable_custom_integrations,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Each entry has its own one-command-at-a-time flag, so a sub-panel only
+    the second entry switches on would arm alongside a disarm on the first
+    entry's Main panel. The second entry therefore sets up no alarm panels,
+    and the Refresh button and the lock's auto-disarm, whichever entry they
+    belong to, reach the first entry's Main panel."""
+    _queue_installation_with_a_camera(mock_server)
+    assert await async_setup_component(hass, DOMAIN, {})
+    older = _add_entry_for(hass, "User@Example.com")
+    newer = _add_entry_for(
+        hass, "user@example.com", options={CONF_ENABLE_INTERIOR_PANEL: True}
+    )
+
+    with patch(
+        "custom_components.securitas.async_get_clientsession",
+        return_value=mock_server.make_http_client(),
+    ):
+        try:
+            await _set_up_in_turn(hass, [older, newer])
+            ent_reg = er.async_get(hass)
+            older_data = hass.data[DOMAIN][older.entry_id]
+            newer_data = hass.data[DOMAIN][newer.entry_id]
+            main = older_data["combined_alarm_panels"][_INSTALLATION]
+
+            assert hass.states.async_entity_ids("alarm_control_panel") == [
+                main.entity_id
+            ]
+            assert not [
+                e
+                for e in er.async_entries_for_config_entry(ent_reg, newer.entry_id)
+                if e.domain == "alarm_control_panel"
+            ]
+            assert _INSTALLATION not in newer_data.get("combined_alarm_panels", {})
+            assert _INSTALLATION not in newer_data.get("axis_alarm_panels", {})
+            skipped = [
+                r.getMessage()
+                for r in caplog.records
+                if r.levelname == "WARNING" and "Repairs" in r.getMessage()
+            ]
+            assert len(skipped) == 1
+            assert "Home" in skipped[0]
+            assert "example.com" not in skipped[0].lower()
+
+            older_coord = older_data["alarm_coordinator"]
+            assert {p.coordinator for p in main._siblings_on_installation()} == {
+                older_coord
+            }
+            mock_server.add_response("xSArmPanel", graphql_arm())
+            mock_server.add_response("ArmStatus", graphql_arm_status(proto="T"))
+            await hass.services.async_call(
+                "alarm_control_panel",
+                "alarm_arm_away",
+                {"entity_id": main.entity_id},
+                blocking=True,
+            )
+            assert mock_server.call_count("xSArmPanel") == 1
+            assert not newer_data["alarm_coordinator"].operation.running
+
+            refresh_id = ent_reg.async_get_entity_id(
+                "button", DOMAIN, f"v4_securitas_direct.{_INSTALLATION}_refresh_button"
+            )
+            assert refresh_id is not None
+            asked = mock_server.call_count("CheckAlarm")
+            await hass.services.async_call(
+                "button", "press", {"entity_id": refresh_id}, blocking=True
+            )
+            assert mock_server.call_count("CheckAlarm") == asked + 1
+
+            skipped_button = VerisureRefreshButton(
+                newer_data["devices"][0].installation, newer_data["hub"]
+            )
+            skipped_button.hass = hass
+            with patch.object(
+                CombinedVerisureOwaAlarmPanel, "async_manual_refresh", autospec=True
+            ) as refresh:
+                await skipped_button.async_press()
+            refresh.assert_awaited_once_with(main)
+
+            for entry, data in ((older, older_data), (newer, newer_data)):
+                lock_coordinator = MagicMock()
+                lock_coordinator.config_entry = entry
+                lock = VerisureLock(
+                    coordinator=lock_coordinator,
+                    installation=data["devices"][0].installation,
+                    client=data["hub"],
+                )
+                lock.hass = hass
+                await lock.async_added_to_hass()
+                lock._unlock_disarms_circuits = ["interior"]
+                with patch.object(
+                    CombinedVerisureOwaAlarmPanel,
+                    "execute_partial_disarm",
+                    autospec=True,
+                    return_value=True,
+                ) as disarm:
+                    assert await lock._dispatch_unlock_disarm() is True
+                disarm.assert_awaited_once_with(main, ["interior"])
+                for remove in lock._on_remove or []:
+                    remove()
+        finally:
+            for entry in (older, newer):
+                await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()

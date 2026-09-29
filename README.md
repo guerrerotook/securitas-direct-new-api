@@ -151,7 +151,7 @@ The mapping works both ways: when Verisure reports "Total + Perimeter" and you'v
 
 ### When the panel sits in an unmapped state
 
-If the alarm enters a Verisure state you haven't mapped (e.g. perimeter is armed from a physical keypad but you haven't mapped a HA button to it), the entity shows as **Custom Bypass**. To resolve, add a mapping or enable the relevant capability. To check which status code is being reported, [enable debug logging](#reporting-issues).
+If the alarm enters a Verisure state you haven't mapped (e.g. perimeter is armed from a physical keypad but you haven't mapped a HA button to it), the entity shows as **Custom Bypass**. To resolve, add a mapping or enable the relevant capability. To check which status code is being reported, [enable debug logging](#reporting-issues). If the code is one the integration doesn't recognise at all, you don't need debug logging: a notice in **Settings → Repairs** names it.
 
 ## Sub-panels
 
@@ -220,7 +220,7 @@ Home Assistant's own dashboard elements now show open sensors and offer Force Ar
 | If you use | Replace it with |
 | --- | --- |
 | **Verisure OWA Alarm Card** | A [Tile card](#tile-card) with the **Alarm modes** and **Verisure OWA Open Sensors** features, which lists the blocking sensors, offers Force Arm and shows the [auto-force-arm tick box](#auto-force-arm-tick-box) inside the Tile. Home Assistant's **Alarm panel card** also works: the More Info dialog opened from it offers Force Arm and the tick box. |
-| **Verisure OWA Alarm Badge** | Home Assistant's own entity badge for the alarm. Tapping it opens More Info. Unlike the custom badge, it does not switch to a warning icon when arming is blocked. |
+| **Verisure OWA Alarm Badge** | Home Assistant's own Entity badge for the alarm. Tapping it opens More Info. Unlike the custom badge, it does not switch to a warning icon when arming is blocked. |
 | **Mushroom chip** (`type: verisure-owa-alarm`) | Mushroom's own alarm chip, `type: alarm-control-panel`. |
 
 ## Custom Alarm Card
@@ -249,7 +249,7 @@ To add it, click **Add Card → Search for "Verisure OWA Alarm Card"** and pick 
 ### Badge
 
 > [!WARNING]
-> Deprecated: use Home Assistant's own entity badge. See [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
+> Deprecated: use Home Assistant's own Entity badge. See [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 A compact native-style dashboard badge for the badges row. By default it shows the alarm state beside a state-specific shield icon; an amber warning triangle replaces the icon when arming is blocked by open sensors. Tap to open Home Assistant's native More Info dialog, where Home Assistant owns the alarm modes and PIN entry. Hold and double-tap can use the supported dashboard actions described under [Gesture Actions](#gesture-actions).
 
@@ -285,7 +285,7 @@ The Badge offers the Home Assistant **More Info**, **Navigate**, **Perform actio
 
 #### Using the Badge with native alarm controls
 
-This describes the deprecated **Verisure OWA Alarm Badge**. For new dashboards use Home Assistant's own entity badge instead, which opens the same More Info dialog — see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
+This describes the deprecated **Verisure OWA Alarm Badge**. For new dashboards use Home Assistant's own Entity badge instead, which opens the same More Info dialog — see [Replacing the deprecated alarm card, badge and chip](#replacing-the-deprecated-alarm-card-badge-and-chip).
 
 With the existing Badge:
 
@@ -609,7 +609,7 @@ Most users won't need anything below — Home Assistant's native More Info dialo
 
 ### What happens when arming is blocked
 
-The arm command reverts, the entity gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The native More Info dialog, the Tile card, the deprecated custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
+The arm stops. The entity shows the state before the arm or, if an open sensor blocked a two-step arm at its second command, what the first command left (part of the alarm armed, or Disarmed when that first command was a disarm). It also gains `arm_exception_active`, `force_arm_available`, and `arm_exceptions` attributes, and a `verisure_owa_arming_exception` event fires (always, regardless of the notifications toggle). The native More Info dialog, the Tile card, the deprecated custom card, and notifications list the affected sensors. **Force Arm** is offered only when the panel explicitly permits it; on panels that prohibit forcing (observed in Spain), the warning instead tells you to close those sensors and retry.
 
 When force-arming is allowed, you then have ~180 seconds to either fix the underlying issue and arm normally, or force-arm from the native More Info dialog, the Tile card, the deprecated custom card, the mobile notification, the `verisure_owa.force_arm` service, or your own automation. After that the context expires and you have to retry.
 
@@ -729,7 +729,7 @@ If you encounter a bug or unexpected behavior, please [open an issue](https://gi
 
    Then retrieve the logs from **Settings → System → Logs → three dots in the top right corner → Show full logs**.
 4. **Steps to reproduce** — what you did, what you expected, and what happened instead.
-5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Verisure OWA integration log messages (after enabling debug logging and reproducing the issue).
+5. If the issue is about an **unmapped alarm state**, include the `protomResponse` code shown in the Verisure OWA integration log messages (after enabling debug logging and reproducing the issue). For a state code the integration doesn't recognise at all, the notice in **Settings → Repairs** names the code, so debug logging isn't needed.
 
 ### HAR file (for tricky bugs)
 

@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "O serviço já está configurado",
             "reauth_successful": "Reautenticação bem-sucedida",
-            "no_refresh_token": "Início de sessão bem-sucedido, mas a Verisure não devolveu um token de atualização. A integração não pode guardar as credenciais em segurança. Tente novamente mais tarde ou comunique se persistir."
+            "no_refresh_token": "Início de sessão bem-sucedido, mas a Verisure não devolveu um token de atualização. A integração não pode guardar as credenciais em segurança. Tente novamente mais tarde ou comunique se persistir.",
+            "installation_not_on_account": "Esta conta Verisure não consegue ver a instalação {number}. Inicie sessão com uma conta que tenha acesso a ela."
         },
         "step": {
             "reauth_confirm": {
@@ -87,7 +88,7 @@
                             "auto_force_arm": "Mostrar uma caixa de armar forçado automático nos controlos do alarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando ativado, a janela de informações do alarme e um cartão Mosaico (Tile) com os modos de alarme e a funcionalidade Verisure OWA Open Sensors (e o cartão de alarme obsoleto) mostram uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. Só atua num armamento iniciado pelos botões ao lado. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
+                            "auto_force_arm": "Quando ativado, a janela de informações do alarme e um cartão Mosaico (Tile) com os Modos do Alarme e a funcionalidade Verisure OWA Open Sensors (e o cartão de alarme obsoleto) mostram uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. Só atua num armamento iniciado pelos botões ao lado. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
                         }
                     },
                     "subpanels": {
@@ -150,7 +151,7 @@
                             "auto_force_arm": "Mostrar uma caixa de armar forçado automático nos controlos do alarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando ativado, a janela de informações do alarme e um cartão Mosaico (Tile) com os modos de alarme e a funcionalidade Verisure OWA Open Sensors (e o cartão de alarme obsoleto) mostram uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. Só atua num armamento iniciado pelos botões ao lado. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
+                            "auto_force_arm": "Quando ativado, a janela de informações do alarme e um cartão Mosaico (Tile) com os Modos do Alarme e a funcionalidade Verisure OWA Open Sensors (e o cartão de alarme obsoleto) mostram uma caixa que arma forçadamente de forma automática ignorando portas/janelas abertas, em vez de esperar a sua confirmação. Só atua num armamento iniciado pelos botões ao lado. A escolha é memorizada por dispositivo no navegador. Deixe desativado se a sua central não suportar o armar forçado."
                         }
                     },
                     "subpanels": {
@@ -254,12 +255,26 @@
         },
         "no_supported_command": {
             "message": "Nenhum comando compatível encontrado para este painel. Verifique os mapeamentos de estado nas opções da integração (Definições → Dispositivos e Serviços → Verisure OWA → Configurar)."
+        },
+        "operation_in_progress": {
+            "message": "O alarme está ocupado com outro comando. Tente novamente dentro de momentos."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Não é possível armar {installation}: o alarme indica um estado que esta integração não reconhece (código {code}). Consulte Definições → Reparações."
         }
     },
     "issues": {
         "orphan_verisure_owa_directory": {
             "title": "Pasta verisure_owa obsoleta",
             "description": "Uma pasta obsoleta `verisure_owa` ficou em `{path}` de uma atualização anterior. Já não faz nada e pode ser apagada com segurança. Apague a pasta e reinicie o Home Assistant para limpar este aviso."
+        },
+        "duplicate_entry": {
+            "title": "Instalação adicionada duas vezes",
+            "description": "O Verisure OWA tem duas entradas para {installation} com a mesma conta. Remova uma delas em Definições → Dispositivos e Serviços → Verisure OWA. Este aviso desaparece quando só restar uma."
+        },
+        "unknown_alarm_state": {
+            "title": "Estado do alarme não reconhecido",
+            "description": "A Verisure indica o código de estado do alarme {code} para {installation}, que esta integração ainda não reconhece. Desarmar continua a funcionar, mas armar é recusado até o alarme indicar um estado conhecido. Comunique o código em {url} para que possa ser suportado. Este aviso desaparece quando voltar um estado conhecido."
         }
     },
     "entity": {

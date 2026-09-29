@@ -1,7 +1,9 @@
 """Tests for custom_components/verisure_owa/__init__.py."""
 
 import contextlib
+import hashlib
 from collections import Counter, OrderedDict
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,9 +15,16 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.util import dt as dt_util
+from homeassistant.util.async_ import get_scheduled_timer_handles
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.securitas import (
+    _INSTALLATIONS_CACHE,
     _OPTIONS_MANAGED_FIELDS,
     CONF_CODE_ARM_REQUIRED,
     CONF_CODE_HASH,
@@ -42,14 +51,18 @@ from custom_components.securitas import (
     VerisureDevice,
     VerisureHub,
     _build_config_dict,
+    _cached_installations,
     _options_are_authoritative,
+    _store_installations_cache,
     _synced_entry_data,
     add_device_information,
     async_migrate_entry,
+    async_remove_entry,
     async_setup_entry,
     async_unload_entry,
     async_update_options,
 )
+from custom_components.securitas.const import API_CACHE_TTL
 from custom_components.securitas.hub import (
     _async_notify,
     _notify,
@@ -758,10 +771,9 @@ class TestAsyncSetupEntry:
         """Static paths use a differential cache policy.
 
         ``/verisure-owa-panel`` (cache_headers=True): the integration only ever
-        emits cache-busted URLs here — entry points via ``_card_url``
-        (``?v=<hash>-<version>``) and their bare imports via a ``?v=<version>``
-        query stamped in the JS (enforced by
-        tests-js/integration/card-cache-busting.test.js) — so a long max-age is
+        emits cache-busted URLs here — entry points via ``_card_url`` and the
+        imports between modules via ``scripts/stamp_card_imports.py``, all
+        ``?v=<content hash>-<version>`` — so a long max-age is
         safe and gives the cold-load speed-up (the alarm chip no longer renders
         5-10s late).
 
@@ -952,12 +964,8 @@ class TestAsyncSetupEntry:
         ), js_urls
 
     async def test_two_accounts_each_fetches_own_installations(self, hass):
-        """Two entries with different usernames must not share installations_cache.
-
-        Regression test: previously installations_cache was a single global key,
-        so the second entry would reuse the first entry's (wrong) list, find no
-        matching installation number, and leave its entities unavailable.
-        """
+        """Two accounts' entries each list and keep their own installations, so
+        each finds its own installation and its entities are available."""
         italian_installation = make_installation(number="1111", alias="Gran Via")
         spanish_installation = make_installation(number="2222", alias="Rome")
 
@@ -1020,6 +1028,61 @@ class TestAsyncSetupEntry:
         assert it_devices[0].installation.number == "1111"
         assert len(es_devices) == 1
         assert es_devices[0].installation.number == "2222"
+
+    async def test_reading_the_cache_forgets_the_lists_that_expired(self, hass):
+        """A removed integration's list, which holds addresses, is dropped
+        once past its usual time by the next read of any account's list."""
+        _store_installations_cache(hass, "old@example.com", [make_installation()])
+        _store_installations_cache(hass, "fresh@example.com", [make_installation()])
+        hass.data[_INSTALLATIONS_CACHE]["old@example.com"]["time"] -= API_CACHE_TTL
+
+        assert _cached_installations(hass, "fresh@example.com") is not None
+
+        assert set(hass.data[_INSTALLATIONS_CACHE]) == {"fresh@example.com"}
+
+    async def test_storing_a_list_forgets_the_lists_that_expired(self, hass):
+        """The cached lists outlive the integration's clean-up, so storing one
+        drops those past their usual time rather than keep them forever."""
+        _store_installations_cache(hass, "old@example.com", [make_installation()])
+        _store_installations_cache(hass, "fresh@example.com", [make_installation()])
+        hass.data[_INSTALLATIONS_CACHE]["old@example.com"]["time"] -= API_CACHE_TTL
+
+        _store_installations_cache(hass, "new@example.com", [make_installation()])
+
+        assert set(hass.data[_INSTALLATIONS_CACHE]) == {
+            "fresh@example.com",
+            "new@example.com",
+        }
+
+    async def test_the_lists_are_forgotten_once_the_last_one_expires(self, hass):
+        """With nothing left to read or store them (the integration removed),
+        the lists are dropped once the most recently stored one has expired,
+        and storing another list does not add a second timer."""
+        _store_installations_cache(hass, "old@example.com", [make_installation()])
+        _store_installations_cache(hass, "new@example.com", [make_installation()])
+        assert len(_pending_installations_cache_expiries(hass)) == 1
+
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+        assert set(hass.data[_INSTALLATIONS_CACHE]) == {
+            "old@example.com",
+            "new@example.com",
+        }
+
+        async_fire_time_changed(
+            hass, dt_util.utcnow() + timedelta(seconds=API_CACHE_TTL + 1)
+        )
+        assert _INSTALLATIONS_CACHE not in hass.data
+        assert _pending_installations_cache_expiries(hass) == []
+
+
+def _pending_installations_cache_expiries(hass):
+    """The timers still set to forget the cached installation lists."""
+    return [
+        handle
+        for handle in get_scheduled_timer_handles(hass.loop)
+        if not handle.cancelled()
+        and "installations" in getattr(handle._args[-1], "name", "")
+    ]
 
 
 # ===========================================================================
@@ -2264,6 +2327,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert entry.version == 5
+        assert entry.minor_version == 2
         assert CONF_TOKEN not in entry.data
         # CONF_PASSWORD intentionally retained — first setup login removes it.
         assert CONF_PASSWORD in entry.data
@@ -2285,6 +2349,265 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert entry.version == 5
+
+
+def _minor_1_entry(hass, username, unique_id, installation="123456", title="Home"):
+    """Add a v5.1 entry (saved before emails were lower-cased) to hass."""
+    data = make_config_entry_data(username=username)
+    if username is None:
+        del data[CONF_USERNAME]
+    if installation is not None:
+        data[CONF_INSTALLATION] = installation
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        unique_id=unique_id,
+        title=title,
+        version=5,
+        minor_version=1,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+class TestLowerCaseEmailMigration:
+    """The v5.1 → v5.2 step: the saved email and the entry ID in lower case."""
+
+    async def test_minor_2_migration_lower_cases_the_email_and_entry_id(self, hass):
+        entry = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.data[CONF_USERNAME] == "user@example.com"
+        assert entry.unique_id == "user@example.com_123456"
+        assert (entry.version, entry.minor_version) == (5, 2)
+
+    async def test_minor_2_migration_rebuilds_an_entry_id_left_from_an_account_switch(
+        self, hass
+    ):
+        """An earlier release switched an entry's account on reauth without
+        moving its ID off the old email."""
+        entry = _minor_1_entry(hass, "new@example.com", "old@example.com_123456")
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert entry.unique_id == "new@example.com_123456"
+
+    async def test_minor_2_migration_leaves_a_lower_case_entry_as_it_is(self, hass):
+        entry = _minor_1_entry(hass, "user@example.com", "user@example.com_123456")
+        data_before = dict(entry.data)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert dict(entry.data) == data_before
+        assert entry.unique_id == "user@example.com_123456"
+        assert entry.minor_version == 2
+
+    async def test_minor_2_migration_tolerates_missing_username_and_installation(
+        self, hass
+    ):
+        entry = _minor_1_entry(hass, None, "Legacy-ID", installation=None)
+
+        assert await async_migrate_entry(hass, entry) is True
+
+        assert CONF_USERNAME not in entry.data
+        assert entry.unique_id == "legacy-id"
+        assert entry.minor_version == 2
+
+    async def test_minor_2_migration_ignores_entries_without_an_id(self, hass):
+        """Entries with neither an email, an installation nor an entry ID
+        keep no ID and still move to 5.2."""
+        first = _minor_1_entry(hass, None, None, installation=None)
+        second = _minor_1_entry(hass, None, None, installation=None)
+
+        with patch("custom_components.securitas._notify") as mock_notify:
+            assert await async_migrate_entry(hass, first) is True
+            assert await async_migrate_entry(hass, second) is True
+
+        assert (first.unique_id, second.unique_id) == (None, None)
+        assert (first.minor_version, second.minor_version) == (2, 2)
+        mock_notify.assert_not_called()
+
+    @pytest.mark.parametrize("migrate_older_first", [True, False])
+    async def test_minor_2_migration_keeps_both_entries_of_a_duplicate(
+        self, hass, migrate_older_first
+    ):
+        """The same account added twice in other capitals: whichever entry
+        set up first owns the entities, so neither is removed. Both keep
+        distinct entry IDs, and the migration posts no notification: a
+        Repairs issue raised at setup asks the user to remove one."""
+        older = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+        newer = _minor_1_entry(hass, "USER@example.com", "USER@example.com_123456")
+        order = [older, newer] if migrate_older_first else [newer, older]
+        second_id = order[1].unique_id
+
+        with patch("custom_components.securitas._notify") as mock_notify:
+            for entry in order:
+                assert await async_migrate_entry(hass, entry) is True
+            await hass.async_block_till_done()
+
+        assert {e.entry_id for e in hass.config_entries.async_entries(DOMAIN)} == {
+            older.entry_id,
+            newer.entry_id,
+        }
+        assert older.data[CONF_USERNAME] == "user@example.com"
+        assert newer.data[CONF_USERNAME] == "user@example.com"
+        assert order[0].unique_id == "user@example.com_123456"
+        assert order[1].unique_id == second_id
+        mock_notify.assert_not_called()
+
+    async def test_minor_2_migration_keeps_an_entry_off_an_id_already_held(self, hass):
+        """An entry already holding the lower-case ID keeps it; the entry
+        typed in capitals keeps its own."""
+        holder = _minor_1_entry(hass, "user@example.com", "user@example.com_123456")
+        mixed = _minor_1_entry(hass, "User@Example.com", "User@Example.com_123456")
+
+        with patch("custom_components.securitas._notify") as mock_notify:
+            assert await async_migrate_entry(hass, mixed) is True
+            assert await async_migrate_entry(hass, holder) is True
+
+        assert holder.unique_id == "user@example.com_123456"
+        assert mixed.unique_id == "User@Example.com_123456"
+        assert mixed.data[CONF_USERNAME] == "user@example.com"
+        mock_notify.assert_not_called()
+
+
+def _entry_for(hass, username, installation="123456", title="Home"):
+    """Add an entry for one installation on one account to hass."""
+    data = make_config_entry_data(username=username)
+    data[CONF_INSTALLATION] = installation
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=data,
+        unique_id=f"{username}_{installation}",
+        title=title,
+        version=5,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _duplicate_entry_issues(hass):
+    return {
+        issue_id: issue
+        for (domain, issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue_id.startswith("duplicate_entry_")
+    }
+
+
+_CLASH_ISSUE_ID = (
+    "duplicate_entry_" + hashlib.sha256(b"user@example.com_123456").hexdigest()[:12]
+)
+
+
+class TestDuplicateEntryIssue:
+    """One installation held by two entries on the same account (the email
+    typed in other capitals, or an entry signed in again to the account the
+    other uses) is flagged in Repairs for as long as both entries exist."""
+
+    @pytest.fixture
+    def mock_hub(self):
+        hub = make_securitas_hub_mock()
+        hub.client.list_installations = AsyncMock(return_value=[make_installation()])
+        return hub
+
+    @pytest.fixture
+    def set_up(self, hass, mock_hub):
+        async def _set_up(*entries):
+            with (
+                _patch_hub(mock_hub),
+                patch("custom_components.securitas.async_get_clientsession"),
+                patch.object(
+                    hass.config_entries,
+                    "async_forward_entry_setups",
+                    new_callable=AsyncMock,
+                ),
+            ):
+                for entry in entries:
+                    assert await async_setup_entry(hass, entry) is True
+
+        return _set_up
+
+    async def test_two_entries_for_one_installation_raise_one_issue(self, hass, set_up):
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+
+        await set_up(first, second)
+
+        issues = _duplicate_entry_issues(hass)
+        assert list(issues) == [_CLASH_ISSUE_ID]
+        issue = issues[_CLASH_ISSUE_ID]
+        assert issue.is_fixable is False
+        assert issue.is_persistent is False
+        assert issue.severity == ir.IssueSeverity.WARNING
+        assert issue.translation_key == "duplicate_entry"
+        assert issue.translation_placeholders == {"installation": "Home"}
+        # Home Assistant saves issue IDs and data; the email must stay out.
+        assert "@" not in _CLASH_ISSUE_ID
+
+    async def test_removing_one_of_the_entries_clears_the_issue(
+        self, hass, set_up, enable_custom_integrations
+    ):
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+        await set_up(first, second)
+        assert list(_duplicate_entry_issues(hass)) == [_CLASH_ISSUE_ID]
+
+        await hass.config_entries.async_remove(second.entry_id)
+        await hass.async_block_till_done()
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_the_entry_being_removed_no_longer_counts(self, hass, set_up):
+        first = _entry_for(hass, "User@Example.com")
+        second = _entry_for(hass, "user@example.com")
+        await set_up(first, second)
+        assert list(_duplicate_entry_issues(hass)) == [_CLASH_ISSUE_ID]
+
+        await async_remove_entry(hass, second)
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_different_installations_raise_no_issue(self, hass, set_up):
+        home = _entry_for(hass, "user@example.com", "123456", "Home")
+        office = _entry_for(hass, "user@example.com", "654321", "Office")
+
+        await set_up(home, office)
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_a_single_entry_raises_no_issue(self, hass, set_up):
+        await set_up(_entry_for(hass, "user@example.com"))
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_entries_without_an_id_do_not_clash(self, hass, set_up):
+        """Entries with neither an email, an installation nor an entry ID
+        have nothing to clash on."""
+        for _ in range(2):
+            MockConfigEntry(
+                domain=DOMAIN, data={}, version=5, minor_version=2
+            ).add_to_hass(hass)
+
+        await set_up(_entry_for(hass, "user@example.com"))
+
+        assert _duplicate_entry_issues(hass) == {}
+
+    async def test_a_stale_issue_is_cleared_on_the_next_setup(self, hass, set_up):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            _CLASH_ISSUE_ID,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="duplicate_entry",
+            translation_placeholders={"installation": "Home"},
+        )
+
+        await set_up(_entry_for(hass, "user@example.com"))
+
+        assert _duplicate_entry_issues(hass) == {}
 
 
 class TestCodeHashMigration:

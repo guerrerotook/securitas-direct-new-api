@@ -47,3 +47,74 @@ describe.each([
     expect(`missing in ${locale}: ${missing.join(", ")}`).toBe(`missing in ${locale}: `);
   });
 });
+
+// Names as Home Assistant 2026.9's own translations spell them
+// (ui.panel.lovelace.editor.card.tile.name, card.alarm-panel.name, the Entity
+// badge, and the alarm_control_panel "triggered" state), so a user can find the
+// replacement in the card picker and the card agrees with More Info.
+describe("the alarm card names Home Assistant's cards and states as HA does", () => {
+  const HA_NAMES = {
+    en: { tile: "Tile", alarmPanel: "Alarm panel", badge: "Entity badge", triggered: "TRIGGERED" },
+    ca: {
+      tile: "Peça",
+      alarmPanel: "Panell d'alarma",
+      badge: "insígnia Entitat",
+      triggered: "DISPARADA",
+    },
+    es: {
+      tile: "Mosaico",
+      alarmPanel: "Panel de alarma",
+      badge: "insignia Entidad",
+      triggered: "DISPARADA",
+    },
+    fr: {
+      tile: "Tuile",
+      alarmPanel: "Panneau d'alarme",
+      badge: "badge Entité",
+      triggered: "DÉCLENCHÉE",
+    },
+    it: {
+      tile: "Mosaico",
+      alarmPanel: "Pannello degli Allarmi",
+      badge: "distintivo Entità",
+      triggered: "INNESCATO",
+    },
+    pt: {
+      tile: "Mosaico",
+      alarmPanel: "Painel de alarme",
+      badge: "crachá Entidade",
+      triggered: "DISPARADO",
+    },
+    "pt-BR": {
+      tile: "Bloco",
+      alarmPanel: "Painel de alarme",
+      badge: "emblema Entidade",
+      triggered: "ACIONADO",
+    },
+  };
+
+  it.each(Object.keys(HA_NAMES))("%s", (lang) => {
+    const { tile, alarmPanel, badge, triggered } = HA_NAMES[lang];
+    expect(ALARM[lang].deprecated_card).toContain(`${tile} `);
+    expect(ALARM[lang].deprecated_card).toContain(alarmPanel);
+    expect(ALARM[lang].deprecated_badge).toContain(badge);
+    expect(ALARM[lang].triggered).toBe(triggered);
+  });
+});
+
+// Home Assistant's Catalan UI labels buttons in the command form ("Cancel·la",
+// "Tanca", "Activa, a fora"). The PIN prompt embeds a button label, so it must
+// not read "per Arma fora".
+describe("Catalan buttons use Home Assistant's command form", () => {
+  it.each(["arm_away", "disarm", "cancel", "close", "confirm", "force_arm", "deprecated_dismiss"])(
+    "%s",
+    (key) => {
+      expect(ALARM.ca[key]).not.toMatch(/^\S+(ar|ir|er|re)\b/u);
+    },
+  );
+
+  it("puts the button label first in the PIN and code prompts", () => {
+    expect(ALARM.ca.enter_pin.startsWith("{action}")).toBe(true);
+    expect(ALARM.ca.enter_code.startsWith("{action}")).toBe(true);
+  });
+});

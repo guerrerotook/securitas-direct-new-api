@@ -57,6 +57,8 @@ echo "pre-push: $(printf '%s\n' "$changed" | grep -c . || true) changed file(s) 
 py_changed=$(printf '%s\n' "$changed"   | grep -E '^(custom_components/securitas/|tests/).*\.py$' || true)
 fe_changed=$(printf '%s\n' "$changed"   | grep -E '^(custom_components/securitas/www/|tests-js/)' || true)
 i18n_changed=$(printf '%s\n' "$changed" | grep -E '^custom_components/securitas/(strings\.json|translations/)' || true)
+# The stamps embed the manifest version, so a version bump alone makes them stale.
+stamp_changed=$(printf '%s\n' "$changed" | grep -E '^custom_components/securitas/(www/|manifest\.json$)|^scripts/stamp_card_imports\.py$' || true)
 
 # --- Step 1: fast lint/format + types (Python) ---
 if [ -n "$py_changed" ]; then
@@ -95,7 +97,14 @@ if [ -n "$py_changed" ]; then
   fi
 fi
 
-# --- Step 5: frontend lint + tests (only if the card changed) ---
+# --- Step 5: card import stamps (card, manifest or stamp script changed) ---
+if [ -n "$stamp_changed" ]; then
+  step "Card import stamps"
+  if need python3 && python3 "$ROOT/scripts/stamp_card_imports.py" --check; then pass "Card import stamps"
+  else fail "Card import stamps — run: python3 scripts/stamp_card_imports.py"; fi
+fi
+
+# --- Step 6: frontend lint + tests (only if the card changed) ---
 if [ -n "$fe_changed" ]; then
   step "Frontend lint"
   if need npm && npm run lint; then pass "Frontend lint"

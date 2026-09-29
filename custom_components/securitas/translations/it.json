@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "Il servizio è già configurato",
             "reauth_successful": "Riautenticazione riuscita",
-            "no_refresh_token": "Il login è riuscito ma Verisure non ha restituito un token di aggiornamento. L'integrazione non può salvare le credenziali in modo sicuro. Riprova più tardi o segnala il problema se persiste."
+            "no_refresh_token": "Il login è riuscito ma Verisure non ha restituito un token di aggiornamento. L'integrazione non può salvare le credenziali in modo sicuro. Riprova più tardi o segnala il problema se persiste.",
+            "installation_not_on_account": "Questo account Verisure non vede l'installazione {number}. Accedi con un account che vi abbia accesso."
         },
         "step": {
             "reauth_confirm": {
@@ -87,7 +88,7 @@
                             "auto_force_arm": "Mostra una casella di attivazione forzata automatica nei controlli dell'allarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme e una scheda Riquadro (Tile) con le modalità di allarme e la funzione Verisure OWA Open Sensors (e la scheda dell'allarme deprecata) mostrano una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. Agisce solo su un'attivazione avviata dai pulsanti accanto. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
+                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme e una scheda Mosaico (Tile) con le Modalità di allarme e la funzione Verisure OWA Open Sensors (e la scheda dell'allarme deprecata) mostrano una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. Agisce solo su un'attivazione avviata dai pulsanti accanto. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
                         }
                     },
                     "subpanels": {
@@ -150,7 +151,7 @@
                             "auto_force_arm": "Mostra una casella di attivazione forzata automatica nei controlli dell'allarme"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme e una scheda Riquadro (Tile) con le modalità di allarme e la funzione Verisure OWA Open Sensors (e la scheda dell'allarme deprecata) mostrano una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. Agisce solo su un'attivazione avviata dai pulsanti accanto. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
+                            "auto_force_arm": "Quando abilitata, la finestra di dettaglio dell'allarme e una scheda Mosaico (Tile) con le Modalità di allarme e la funzione Verisure OWA Open Sensors (e la scheda dell'allarme deprecata) mostrano una casella che attiva forzatamente l'allarme in automatico ignorando porte/finestre aperte, invece di attendere la conferma. Agisce solo su un'attivazione avviata dai pulsanti accanto. La scelta viene ricordata per dispositivo nel browser. Lascia disattivato se la tua centrale non supporta l'attivazione forzata."
                         }
                     },
                     "subpanels": {
@@ -254,12 +255,26 @@
         },
         "no_supported_command": {
             "message": "Nessun comando compatibile trovato per questo pannello. Controlla le mappature degli stati nelle opzioni dell'integrazione (Impostazioni → Dispositivi e servizi → Verisure OWA → Configura)."
+        },
+        "operation_in_progress": {
+            "message": "L'allarme è occupato con un altro comando. Riprova tra un momento."
+        },
+        "arm_refused_unknown_state": {
+            "message": "Impossibile inserire {installation}: l'allarme segnala uno stato che questa integrazione non riconosce (codice {code}). Vedi Impostazioni → Riparazioni."
         }
     },
     "issues": {
         "orphan_verisure_owa_directory": {
             "title": "Cartella verisure_owa obsoleta",
             "description": "Una cartella obsoleta `verisure_owa` è rimasta in `{path}` da un precedente aggiornamento. Non fa più nulla e può essere eliminata in sicurezza. Eliminala e riavvia Home Assistant per rimuovere questo avviso."
+        },
+        "duplicate_entry": {
+            "title": "Installazione aggiunta due volte",
+            "description": "Verisure OWA ha due voci per {installation} con lo stesso account. Rimuovine una in Impostazioni → Dispositivi e servizi → Verisure OWA. Questo avviso scompare quando ne rimane solo una."
+        },
+        "unknown_alarm_state": {
+            "title": "Stato dell'allarme non riconosciuto",
+            "description": "Verisure segnala il codice di stato dell'allarme {code} per {installation}, che questa integrazione non riconosce ancora. Il disinserimento funziona ancora, ma l'inserimento viene rifiutato finché l'allarme non segnala uno stato noto. Segnala il codice su {url} perché possa essere supportato. Questo avviso scompare quando torna uno stato noto."
         }
     },
     "entity": {

@@ -12,7 +12,8 @@
         "abort": {
             "already_configured": "El servei ja està configurat",
             "reauth_successful": "Reautenticació correcta",
-            "no_refresh_token": "L'inici de sessió ha estat correcte però Verisure no ha retornat un token d'actualització. La integració no pot desar les credencials de manera segura. Torna-ho a provar més tard o comunica-ho si persisteix."
+            "no_refresh_token": "L'inici de sessió ha estat correcte però Verisure no ha retornat un token d'actualització. La integració no pot desar les credencials de manera segura. Torna-ho a provar més tard o comunica-ho si persisteix.",
+            "installation_not_on_account": "Aquest compte de Verisure no pot veure la instal·lació {number}. Inicia la sessió amb un compte que hi tingui accés."
         },
         "step": {
             "reauth_confirm": {
@@ -87,7 +88,7 @@
                             "auto_force_arm": "Mostra una casella d'armat forçat automàtic als controls de l'alarma"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Mosaic (Tile) amb els modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
+                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Peça (Tile) amb els Modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
                         }
                     },
                     "subpanels": {
@@ -150,7 +151,7 @@
                             "auto_force_arm": "Mostra una casella d'armat forçat automàtic als controls de l'alarma"
                         },
                         "data_description": {
-                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Mosaic (Tile) amb els modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
+                            "auto_force_arm": "Quan està activat, el diàleg d'informació de l'alarma i una targeta Peça (Tile) amb els Modes d'alarma i la funció Verisure OWA Open Sensors (i la targeta d'alarma obsoleta) mostren una casella que força l'armat automàticament ignorant portes/finestres obertes, en lloc d'esperar la vostra confirmació. Només actua sobre un armat iniciat amb els botons que l'acompanyen. L'elecció es recorda per dispositiu al navegador. Deixeu-ho desactivat si la vostra central no admet l'armat forçat."
                         }
                     },
                     "subpanels": {
@@ -254,12 +255,26 @@
         },
         "no_supported_command": {
             "message": "No s'ha trobat cap ordre compatible per a aquest panell. Revisa les assignacions d'estat a les opcions de la integració (Configuració → Dispositius i serveis → Verisure → Configurar)."
+        },
+        "operation_in_progress": {
+            "message": "L'alarma està ocupada amb una altra ordre. Torna-ho a provar d'aquí a un moment."
+        },
+        "arm_refused_unknown_state": {
+            "message": "No es pot armar {installation}: l'alarma indica un estat que aquesta integració no reconeix (codi {code}). Consulta Configuració → Reparacions."
         }
     },
     "issues": {
         "orphan_verisure_owa_directory": {
             "title": "Carpeta verisure_owa sobrant",
             "description": "S'ha trobat una carpeta obsoleta `verisure_owa` a `{path}` d'una actualització anterior. Ja no fa res i es pot esborrar amb seguretat. Elimina-la i reinicia Home Assistant per amagar aquest avís."
+        },
+        "duplicate_entry": {
+            "title": "Instal·lació afegida dues vegades",
+            "description": "Verisure OWA té dues entrades per a {installation} amb el mateix compte. Elimina'n una a Configuració → Dispositius i serveis → Verisure OWA. Aquest avís desapareix quan només en queda una."
+        },
+        "unknown_alarm_state": {
+            "title": "Estat d'alarma no reconegut",
+            "description": "Verisure indica el codi d'estat d'alarma {code} per a {installation}, que aquesta integració encara no reconeix. Desarmar continua funcionant, però armar es rebutja fins que l'alarma indiqui un estat conegut. Informa del codi a {url} perquè es pugui afegir. Aquest avís desapareix quan torna un estat conegut."
         }
     },
     "entity": {

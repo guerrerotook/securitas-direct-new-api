@@ -102,7 +102,7 @@ _DEPRECATED_ELEMENTS = {
         "Home Assistant's Tile card with the Verisure OWA Open Sensors feature, "
         "or its Alarm panel card",
     ),
-    "badge": ("alarm badge", "Home Assistant's own entity badge"),
+    "badge": ("alarm badge", "Home Assistant's own Entity badge"),
     "chip": ("Mushroom alarm chip", "Mushroom's own alarm control panel chip"),
 }
 # Kept outside ``hass.data[DOMAIN]``, which the clean-up discards, so the

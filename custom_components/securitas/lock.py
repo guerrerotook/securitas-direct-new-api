@@ -15,11 +15,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DOMAIN, VerisureHub
+from .alarm_control_panel import armed_circuits, main_panel_for
 from .api_queue import ApiQueue
 from .const import (
-    CIRCUIT_ANNEX,
-    CIRCUIT_INTERIOR,
-    CIRCUIT_PERIMETER,
     CONF_CODE_HASH,
     CONF_CODE_IS_NUMERIC,
     CONF_LOCK_AUTOMATIONS,
@@ -34,29 +32,11 @@ from .verisure_owa_api import (
     VerisureOwaError,
 )
 from .verisure_owa_api.client import SMARTLOCK_DEVICE_ID
-from .verisure_owa_api.models import (
-    AlarmState,
-    AnnexMode,
-    InteriorMode,
-    PerimeterMode,
-)
 
 if TYPE_CHECKING:
     from .verisure_owa_api import SmartLockMode
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _armed_circuits(state: AlarmState) -> set[str]:
-    """Return the set of circuit labels currently armed (mode != OFF)."""
-    armed: set[str] = set()
-    if state.interior != InteriorMode.OFF:
-        armed.add(CIRCUIT_INTERIOR)
-    if state.perimeter != PerimeterMode.OFF:
-        armed.add(CIRCUIT_PERIMETER)
-    if state.annex != AnnexMode.OFF:
-        armed.add(CIRCUIT_ANNEX)
-    return armed
 
 
 def _ts_is_newer(read_ts: str, base_ts: str) -> bool:
@@ -290,7 +270,7 @@ class VerisureLock(  # type: ignore[override]
         """
         if self._alarm_coordinator is None:
             return
-        new_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
+        new_armed = armed_circuits(self._alarm_coordinator.alarm_state)
         prev = self._alarm_baseline
         self._alarm_baseline = new_armed
         if prev is None:
@@ -401,7 +381,7 @@ class VerisureLock(  # type: ignore[override]
         # Establish baseline + subscribe.
         if self._alarm_coordinator is not None:
             # Read the current state to seed the baseline (no firing).
-            self._alarm_baseline = _armed_circuits(self._alarm_coordinator.alarm_state)
+            self._alarm_baseline = armed_circuits(self._alarm_coordinator.alarm_state)
             self.async_on_remove(
                 self._alarm_coordinator.async_add_listener(
                     self._handle_alarm_coordinator_update
@@ -686,24 +666,15 @@ class VerisureLock(  # type: ignore[override]
 
         The unlock always proceeds regardless of the return value.
         """
-        if not self._unlock_disarms_circuits:
+        # This entry may run no panels (another entry for the installation
+        # does); look that one up now, as it may set up after this lock.
+        panel = self._combined_alarm_panel
+        if panel is None:
+            panel = main_panel_for(self.hass, self._installation.number)
+        if panel is None:
             return None
-        if self._combined_alarm_panel is None or self._alarm_coordinator is None:
-            return None
-        if self._alarm_coordinator.alarm_state_known:
-            currently_armed = _armed_circuits(self._alarm_coordinator.alarm_state)
-            targets = [c for c in self._unlock_disarms_circuits if c in currently_armed]
-        else:
-            # State unreadable (e.g. 'N' after a central-station reset):
-            # alarm_state falls back to all-OFF, so _armed_circuits would find
-            # nothing and skip disarm, leaving the door open over an armed
-            # alarm. Disarm every configured circuit instead — disarm is
-            # unconditional, so this is safe regardless of the real state (#550).
-            targets = list(self._unlock_disarms_circuits)
-        if not targets:
-            return None
-        ok = await self._combined_alarm_panel.execute_partial_disarm(targets)
-        if not ok:
+        ok = await panel.execute_partial_disarm(list(self._unlock_disarms_circuits))
+        if ok is False:
             await self._fire_lock_notification(
                 title="Auto-disarm failed",
                 message=(

@@ -11,18 +11,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_queue import ApiQueue
+from .const import DOMAIN, PROJECT_URL
 from .events import HA_INJECTABLE_CATEGORIES
 from .verisure_owa_api.capabilities import detect_annex, detect_peri
 from .verisure_owa_api.client import VerisureOwaClient
@@ -48,6 +50,7 @@ from .verisure_owa_api.models import (
     SmartLockMode,
     SStatus,
     ThumbnailResponse,
+    is_proto_letter,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -218,6 +221,48 @@ async def _fetch_with_session_recovery[T](
 # ── AlarmCoordinator ─────────────────────────────────────────────────────────
 
 
+OperationKind = Literal["arm", "disarm", "partial_disarm"]
+
+
+class InstallationOperation:
+    """The one alarm command an installation runs at a time, shared by all
+    its panels: a second one waits until this one ends."""
+
+    def __init__(self) -> None:
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self.kind: OperationKind | None = None
+        self.panels: frozenset[object] = frozenset()
+        self.mode: str | None = None
+
+    @property
+    def running(self) -> bool:
+        """True from ``begin`` until ``end``."""
+        return not self._idle.is_set()
+
+    def begin(
+        self, kind: OperationKind, panels: Iterable[object], mode: str | None = None
+    ) -> None:
+        """Mark ``kind`` as running on ``panels``; ``mode`` is an arm's mode."""
+        # Callers check `running` and call begin with no await in between.
+        assert not self.running, "operation already running"
+        self.kind = kind
+        self.panels = frozenset(panels)
+        self.mode = mode
+        self._idle.clear()
+
+    def end(self) -> None:
+        """Mark the installation idle, waking every waiter."""
+        self.kind = None
+        self.panels = frozenset()
+        self.mode = None
+        self._idle.set()
+
+    async def wait_idle(self) -> None:
+        """Return once no operation runs."""
+        await self._idle.wait()
+
+
 class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     """Coordinator for alarm status polling."""
 
@@ -246,6 +291,119 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         self._has_peri: bool = False
         self._has_annex: bool = False
         self._capabilities_populated: bool = False
+        self._confirmed_proto_code: str | None = None
+        self._confirmed_provisional = False
+        self._earlier_possible: frozenset[str | None] = frozenset()
+        # Also holds back polled codes while it runs: a poll landing then may
+        # predate the command's result.
+        self.operation = InstallationOperation()
+
+    @property
+    def confirmed_proto_code(self) -> str | None:
+        """The installation's latest known proto code, from whichever came
+        last: a poll, any alarm panel's command result, the status check
+        before an arm, or a manual Refresh.
+
+        Right after a command this is newer than ``data``, whose refresh may
+        not have landed yet. None until either has happened.
+        """
+        return self._confirmed_proto_code
+
+    @property
+    def confirmed_is_provisional(self) -> bool:
+        """True while the panel may not be in ``confirmed_proto_code``: a
+        command it accepted was never confirmed (#508). The code is then that
+        command's optimistic result after a timeout, or the code from before
+        it after a cancellation; ``possible_proto_codes`` lists the rest."""
+        return self._confirmed_provisional
+
+    @property
+    def possible_proto_codes(self) -> frozenset[str | None]:
+        """The codes the installation may really be in: ``confirmed_proto_code``
+        alone, or while that is provisional, also the last confirmed code and
+        each later unconfirmed command's optimistic code. None stands for a
+        state that is not known."""
+        return self._earlier_possible | {self._confirmed_proto_code}
+
+    def record_confirmed_proto_code(
+        self, proto_code: str, *, optimistic: bool = False
+    ) -> None:
+        """Record ``proto_code`` as the installation's state and clear any
+        unconfirmed marker: a panel command's result, the status check before
+        an arm, a manual Refresh, a poll, or a timed-out command's
+        ``optimistic`` code (which the caller then marks unconfirmed).
+
+        An optimistic code is a guess, not a code the alarm reported, so it
+        leaves the unrecognised-state Repairs issue as it is."""
+        self._confirmed_proto_code = proto_code
+        self._confirmed_provisional = False
+        self._earlier_possible = frozenset()
+        if not optimistic:
+            self.track_unrecognised_code(proto_code)
+
+    def track_unrecognised_code(self, proto_code: str) -> None:
+        """Keep the Repairs issue for a state code this integration doesn't
+        model in step with the latest code the alarm reported, including one
+        a poll or a manual Refresh read while a command runs, which is kept
+        out of ``confirmed_proto_code``. Anything that is not a proto letter
+        says nothing about the state and leaves the issue as it is."""
+        if not is_proto_letter(proto_code):
+            return
+        issue_id = self._unrecognised_issue_id
+        # Not only an issue this coordinator raised: another coordinator for
+        # the installation (a second entry's) may have raised it.
+        if proto_code in PROTO_TO_ALARM_STATE:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="unknown_alarm_state",
+            translation_placeholders={
+                "code": proto_code,
+                "installation": self._installation.alias,
+                "url": f"{PROJECT_URL}/issues",
+            },
+        )
+
+    async def async_shutdown(self) -> None:
+        """Stop polling and take down this installation's unrecognised-state
+        Repairs issue, unless another entry still runs the installation's
+        alarm panels: only that entry's coordinator has entities listening,
+        so only it keeps polling, and without a poll nothing clears the
+        issue."""
+        await super().async_shutdown()
+        if not self._alarm_panels_run_elsewhere():
+            ir.async_delete_issue(self.hass, DOMAIN, self._unrecognised_issue_id)
+
+    def _alarm_panels_run_elsewhere(self) -> bool:
+        """True when another loaded entry for this installation (it was added
+        twice) runs its alarm panels."""
+        # Imported here: the alarm panel platform imports this module.
+        from .alarm_control_panel import main_panel_for
+
+        panel = main_panel_for(self.hass, self._installation.number)
+        return panel is not None and panel.coordinator is not self
+
+    @property
+    def _unrecognised_issue_id(self) -> str:
+        return f"unknown_alarm_state_{self._installation.number}"
+
+    def mark_confirmed_provisional(self, earlier: Iterable[str | None]) -> None:
+        """Flag the recorded code as unconfirmed until a real command result,
+        the status check before an arm, a manual Refresh or a poll replaces
+        it.
+
+        ``earlier`` is ``possible_proto_codes`` read before the unconfirmed
+        command's optimistic code was recorded, plus None if the command's
+        effect is not known.
+        """
+        self._confirmed_provisional = True
+        self._earlier_possible = frozenset(earlier)
 
     @property
     def has_peri(self) -> bool:
@@ -287,20 +445,6 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
         if proto_code is None:
             return _default
         return PROTO_TO_ALARM_STATE.get(proto_code, _default)
-
-    @property
-    def alarm_state_known(self) -> bool:
-        """Return True if the latest polled proto code maps to a modelled state.
-
-        ``alarm_state`` falls back to all-OFF both when nothing has been
-        polled and when the panel reports an unmodelled proto code (e.g. 'N'
-        after a central-station reset, #550) — the two are indistinguishable
-        from the AlarmState alone. Consumers that must not mistake "unknown"
-        for "disarmed" (the lock's auto-disarm, partial disarm) gate on this.
-        """
-        if self.data is None or self.data.status is None:
-            return False
-        return self.data.status.status in PROTO_TO_ALARM_STATE
 
     def populate_capabilities_from_data(
         self,
@@ -369,9 +513,18 @@ class AlarmCoordinator(DataUpdateCoordinator[AlarmStatusData]):
     async def _async_update_data(self) -> AlarmStatusData:
         """Fetch alarm status via the API queue."""
         await self._populate_capabilities()
-        return await _fetch_with_session_recovery(
+        data = await _fetch_with_session_recovery(
             self._client, self._fetch, "Alarm status"
         )
+        proto_code = data.status.status if data.status else None
+        if not is_proto_letter(proto_code):
+            return data
+        assert proto_code is not None  # narrowed by is_proto_letter
+        if self.operation.running:
+            self.track_unrecognised_code(proto_code)
+        else:
+            self.record_confirmed_proto_code(proto_code)
+        return data
 
 
 # ── SentinelCoordinator ──────────────────────────────────────────────────────

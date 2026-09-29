@@ -45,6 +45,14 @@ describe("alarm card deprecation notice", () => {
     expect(notice.textContent).toContain("obsoleta");
   });
 
+  it("shows the notice in Catalan, naming Home Assistant's Catalan card names", () => {
+    const card = mount("verisure-owa-alarm-card", hassWithAlarm({ language: "ca" }));
+    const notice = card.shadowRoot.querySelector(".deprecation-notice");
+    expect(notice.textContent).toContain("Aquesta targeta està obsoleta");
+    expect(notice.textContent).toContain("Peça");
+    expect(notice.textContent).toContain("Panell d'alarma");
+  });
+
   it("stays hidden after it is dismissed, including on a new card", () => {
     const card = mount("verisure-owa-alarm-card");
     card.shadowRoot.querySelector(".deprecation-dismiss").click();

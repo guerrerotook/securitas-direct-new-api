@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import socket
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -45,15 +46,23 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.core import (
+    HassJob,
+    HomeAssistant,
+    ServiceCall,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_component import EntityComponent
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.service import (
     async_extract_entity_ids,
     async_set_service_schema,
@@ -375,7 +384,8 @@ def _hash_legacy_plaintext_code(
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Reject pre-v3 entries; bump v3 → v4 → v5 (hash the plain-text PIN)."""
+    """Reject pre-v3 entries; bump v3 → v4 → v5 (hash the plain-text PIN) → v5.2
+    (lower-case the email and entry ID)."""
     if config_entry.version < 3:
         _LOGGER.error(
             "Config entry %s uses format v%s which is no longer supported. "
@@ -404,7 +414,91 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             config_entry, data=new_data, options=new_options, version=5
         )
 
+    if config_entry.version == 5 and config_entry.minor_version < 2:
+        _migrate_lower_case_email(hass, config_entry)
+
     return True
+
+
+def _unique_id_for(username: str, installation: str) -> str:
+    """The config entry's unique ID for one installation on one account."""
+    return f"{username}_{installation}"
+
+
+def _entry_unique_id(data: Mapping[str, Any], fallback: str | None) -> str | None:
+    username = data.get(CONF_USERNAME)
+    installation = data.get(CONF_INSTALLATION)
+    if username and installation:
+        return _unique_id_for(username.lower(), installation)
+    return fallback.lower() if fallback else None
+
+
+@callback
+def _migrate_lower_case_email(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Verisure's sign-in ignores capitals, so store the email in lower case.
+
+    Two entries for the same account typed in other capitals would now share
+    one entry ID. Neither is removed, since whichever sets up first owns the
+    entities, and neither takes an ID the other holds: the Repairs issue from
+    ``_async_update_duplicate_entry_issues`` asks the user to remove one.
+    """
+    data = dict(entry.data)
+    if username := data.get(CONF_USERNAME):
+        data[CONF_USERNAME] = username.lower()
+    new_uid = _entry_unique_id(data, entry.unique_id)
+    uid = entry.unique_id
+    if new_uid is not None:
+        holder = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, new_uid)
+        if holder is None or holder is entry:
+            uid = new_uid
+    hass.config_entries.async_update_entry(
+        entry, data=data, unique_id=uid, minor_version=2
+    )
+
+
+_DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"
+
+
+@callback
+def _async_update_duplicate_entry_issues(
+    hass: HomeAssistant, removing: ConfigEntry | None = None
+) -> None:
+    """Keep one Repairs issue per installation that has two entries.
+
+    ``removing`` is the entry being deleted, which must not count.
+    """
+    by_id: dict[str, list[ConfigEntry]] = {}
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if removing is not None and entry.entry_id == removing.entry_id:
+            continue
+        if (uid := _entry_unique_id(entry.data, entry.unique_id)) is not None:
+            by_id.setdefault(uid, []).append(entry)
+    wanted = {
+        # Hashed: Home Assistant saves issue IDs, and the email must not be.
+        _DUPLICATE_ENTRY_ISSUE + hashlib.sha256(uid.encode()).hexdigest()[:12]: (
+            entries[0].title
+        )
+        for uid, entries in by_id.items()
+        if len(entries) > 1
+    }
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith(_DUPLICATE_ENTRY_ISSUE)
+            and issue_id not in wanted
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+    for issue_id, installation in wanted.items():
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="duplicate_entry",
+            translation_placeholders={"installation": installation},
+        )
 
 
 def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
@@ -508,8 +602,9 @@ def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
 
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
-    """Forget the account's setup-time crash count: a live session proved the token."""
-    hass.data[DOMAIN].get("refresh_crash_streaks", {}).pop(username, None)
+    """Forget the account's setup-time crash count: a live session or a
+    successful sign-in proved the token."""
+    hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
 
 async def _login_or_raise(
@@ -832,6 +927,61 @@ def _get_or_create_api_queue(
     session.api_queue = api_queues[domain_url]
 
 
+# Kept outside ``hass.data[DOMAIN]``, which the clean-up discards: reloading
+# the only entry tears the integration down between a dialog listing the
+# installations and the setup that reuses the list.
+_INSTALLATIONS_CACHE = f"{DOMAIN}_installations_cache"
+_INSTALLATIONS_CACHE_EXPIRY = f"{DOMAIN}_installations_cache_expiry"
+
+
+def _store_installations_cache(
+    hass: HomeAssistant, username: str, installations: list[Installation]
+) -> None:
+    """Remember an account's installations for ``API_CACHE_TTL`` seconds.
+
+    Keyed by username so that entries for different accounts (e.g. Italian
+    and Spanish installations on separate Verisure accounts) never share each
+    other's list. The cache outlives the integration, so once the last list
+    stored has expired a timer drops them all: after the integration is
+    removed nothing reads or stores them again, and they hold addresses.
+    """
+    _live_installations_cache(hass)[username] = {
+        "data": installations,
+        "time": time.monotonic(),
+    }
+    if cancel := hass.data.pop(_INSTALLATIONS_CACHE_EXPIRY, None):
+        cancel()
+
+    @callback
+    def _forget(_now: datetime) -> None:
+        # Restarted by every store, so when it fires every list has expired.
+        hass.data.pop(_INSTALLATIONS_CACHE_EXPIRY, None)
+        hass.data.pop(_INSTALLATIONS_CACHE, None)
+
+    hass.data[_INSTALLATIONS_CACHE_EXPIRY] = async_call_later(
+        hass,
+        API_CACHE_TTL,
+        HassJob(_forget, "forget cached installations", cancel_on_shutdown=True),
+    )
+
+
+def _cached_installations(
+    hass: HomeAssistant, username: str
+) -> list[Installation] | None:
+    """The account's installations if listed within ``API_CACHE_TTL``."""
+    cached = _live_installations_cache(hass).get(username)
+    return None if cached is None else cached["data"]
+
+
+def _live_installations_cache(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """The installations cache, first dropping lists past ``API_CACHE_TTL``."""
+    cache: dict[str, dict[str, Any]] = hass.data.setdefault(_INSTALLATIONS_CACHE, {})
+    now = time.monotonic()
+    for expired in [u for u, c in cache.items() if now - c["time"] >= API_CACHE_TTL]:
+        del cache[expired]
+    return cache
+
+
 async def _fetch_and_cache_installations(
     hass: HomeAssistant,
     hub: VerisureHub,
@@ -845,26 +995,14 @@ async def _fetch_and_cache_installations(
     Returns a list of VerisureDevice wrappers for this entry's
     installations.
     """
-    # Cache keyed by username so that entries for different accounts (e.g.
-    # Italian and Spanish installations on separate Verisure accounts) do not
-    # accidentally share each other's installation list.
     username = entry.data.get(CONF_USERNAME, entry.entry_id)
-    install_cache_key = f"installations_cache_{username}"
-    install_cache = hass.data[DOMAIN].get(install_cache_key)
-    if (
-        install_cache is not None
-        and time.monotonic() - install_cache["time"] < API_CACHE_TTL
-    ):
-        all_installations: list[Installation] = install_cache["data"]
-    else:
+    all_installations = _cached_installations(hass, username)
+    if all_installations is None:
         all_installations = await hub.api_queue.submit(
             hub.client.list_installations,
             priority=ApiQueue.FOREGROUND,
         )
-        hass.data[DOMAIN][install_cache_key] = {
-            "data": all_installations,
-            "time": time.monotonic(),
-        }
+        _store_installations_cache(hass, username, all_installations)
     target_number = entry.data.get(CONF_INSTALLATION)
     if target_number:
         entry_installations = [
@@ -1212,8 +1350,6 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:  
     """
     orphan = Path(hass.config.path("custom_components", "verisure_owa"))
     if orphan.is_dir():
-        from homeassistant.helpers import issue_registry as ir
-
         ir.async_create_issue(
             hass,
             DOMAIN,
@@ -1246,17 +1382,10 @@ async def _async_register_cards(hass: HomeAssistant) -> None:
             # made the alarm chip render 5-10s late on a slow network.
             #
             # Safe on THIS path because every URL the integration emits here
-            # is cache-busted:
-            #  - registered entry points via _card_url's ?v=<hash>-<version>
-            #    (content-hash — busts whenever the file changes), and
-            #  - their bare cross-module imports (shared.js, card-utils.js)
-            #    carry a ?v=<version> query stamped into the import specifiers
-            #    (enforced by card-cache-busting.test.js).
-            # The shared modules are version- (not hash-) busted, which is
-            # sufficient because users only receive new files via a HACS
-            # update, which by definition bumps the manifest version, and the
-            # test forces the stamps to track that version — so every
-            # delivered change yields new URLs and nothing is served stale.
+            # carries ?v=<content hash>-<version>: the registered entry points via
+            # const._card_url, and the relative imports between modules via
+            # stamps written into the JS by scripts/stamp_card_imports.py
+            # (enforced by tests/test_card_cache_busting.py).
             StaticPathConfig(
                 "/verisure-owa-panel",
                 panel_dir,
@@ -1314,6 +1443,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # get duplicated entities with _2 suffixes. Idempotent; safe to run
     # on every setup.
     await migrate_unique_ids(hass, entry)
+    _async_update_duplicate_entry_issues(hass)
 
     config, need_sign_in = _build_config_dict(entry)
 
@@ -1742,12 +1872,14 @@ async def _async_teardown_domain(
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Release a deleted entry's hold on its session if unloading did not.
+    """Release a deleted entry's hold on its session if unloading did not,
+    and clear the duplicate-entry issue the deletion resolves.
 
     Home Assistant calls ``async_unload_entry`` only for a loaded entry before
     deleting it. An entry whose setup failed after taking its hold (waiting to
     retry, or needing reauth) still holds the session here.
     """
+    _async_update_duplicate_entry_issues(hass, removing=entry)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return
