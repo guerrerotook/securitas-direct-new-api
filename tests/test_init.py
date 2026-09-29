@@ -2352,7 +2352,7 @@ class TestAsyncMigrateEntry:
 
 
 def _minor_1_entry(hass, username, unique_id, installation="123456", title="Home"):
-    """Add a v5.1 entry (saved before emails were lower-cased) to hass."""
+    """Add a v5.1 entry (saved before the 5.2 entry-ID migration) to hass."""
     data = make_config_entry_data(username=username)
     if username is None:
         del data[CONF_USERNAME]
