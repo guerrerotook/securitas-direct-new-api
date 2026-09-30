@@ -18,10 +18,10 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ### Fixed
 
-- **The alarm showed "unknown" for up to 20 seconds after a restart or an options change** ([#628](https://github.com/guerrerotook/securitas-direct-new-api/pull/628)): requests to Verisure now take turns in the order they arrive.
+- **The alarm showed "unknown" for up to 20 seconds after a restart or an options change** ([#628](https://github.com/guerrerotook/securitas-direct-new-api/pull/628)): waiting requests to Verisure are now served in the order they arrived, with commands you start still going first.
 - **The More Info dialog was empty until a dashboard had been opened** ([#624](https://github.com/guerrerotook/securitas-direct-new-api/issues/624)). The old **verisure-owa-more-info.js** dashboard resource is removed automatically. Thanks to [@andersonmkr-ux](https://github.com/andersonmkr-ux) for the report.
 - **Disarm pressed while the alarm was arming was ignored** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it now waits for the arm, then disarms. The lock's "disarm when unlocked" does the same.
-- **Alarm commands could clash** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): commands from any of an installation's alarm panels, or from a lock, now wait their turn instead of being ignored or sent together.
+- **Alarm commands could clash** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): commands from any of an installation's alarm panels, or from a lock, now wait for the one in progress instead of being ignored or sent together. Of several arm modes pressed on a busy panel, only the last runs.
 - **Force Arm from the phone notification failed silently while the alarm was busy** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it now waits its turn, or a notification says why it couldn't.
 - **Pressing an arm mode again after an unconfirmed arm sent nothing** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): the integration now checks the alarm's real state and arms from there.
 - **An arm blocked part-way by an open sensor showed the earlier state** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it now shows straight away what did arm.
