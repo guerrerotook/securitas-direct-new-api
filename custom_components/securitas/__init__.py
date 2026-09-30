@@ -624,9 +624,9 @@ async def _login_or_raise(
     ``retry_other_family`` marks a first attempt the caller will repeat on
     another address family. A failure to establish the connection is then
     re-raised as-is rather than mapped, so the attempt about to be retried does
-    not notify the user, log an error or count towards the dead-token streak. Every
-    other failure — including a timeout waiting for a reply — takes the mapping
-    path, as it does for every other caller.
+    not notify the user, log an error or count towards the dead-token streak.
+    Every other failure — including a timeout waiting for a reply — takes the
+    mapping path, as it does for every other caller.
     """
     try:
         await client.login()
@@ -870,10 +870,10 @@ async def _get_or_create_session(
             # the xSRefreshLogin 'fr' crash on the next restart.
             if client.config_entry is None:
                 _attach_token_persistence(client, entry)
-            # A shared client condemned by a dead-token streak, reached with a token
-            # that is not the one it condemned: the reauth flow wrote a fresh
-            # token into this entry and reloaded it, but the co-tenant kept
-            # the session alive, so the reload lands here instead of on a
+            # A shared client condemned by a dead-token streak, reached with a
+            # token that is not the one it condemned: the reauth flow wrote a
+            # fresh token into this entry and reloaded it, but the co-tenant
+            # kept the session alive, so the reload lands here instead of on a
             # fresh hub. Try the new token on the shared client.
             stored_token = config.get(CONF_REFRESH_TOKEN)
             if (
@@ -1786,8 +1786,8 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
     as in use; the last one to finish unloading runs the check again here.
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
-    reloaded entry set up again first and keep its session and crash count
-    (or, after reauth switched its account, let go of the old one).
+    reloaded entry set up again first and keep its session and dead-token
+    count (or, after reauth switched its account, let go of the old one).
     """
     async with entry.setup_lock:
         if entry.state is not ConfigEntryState.NOT_LOADED:

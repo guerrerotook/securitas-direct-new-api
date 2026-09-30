@@ -821,7 +821,7 @@ class TestRefreshCrashEscalation:
             await api._check_authentication_token()
 
 
-# ── Runtime escalation of the err 4 refresh-token rejection to reauth ──────
+# ── Runtime escalation of the err 4 token rejection to reauth ────────────────
 
 
 class TestRefreshTokenRejectedEscalation:

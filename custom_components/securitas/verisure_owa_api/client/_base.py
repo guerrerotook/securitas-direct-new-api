@@ -538,12 +538,14 @@ class _ClientBase:
                     )
                     # Genuine token rejection (e.g. err 60067): the refresh
                     # token is dead -> fall through to login() so a missing
-                    # password surfaces as a clean reauth signal. Transient
-                    # server error (5xx, the xSRefreshLogin crash or err 4
-                    # refusal, a timeout): the token is probably fine -> do NOT
-                    # burn a login attempt; record it and propagate so the
-                    # coordinator retries. _note_refresh_crash counts the crash
-                    # and the err 4 refusal towards the dead-token streak.
+                    # password surfaces as a clean reauth signal. Anything else
+                    # (5xx, a timeout, or a single xSRefreshLogin crash or err
+                    # 4 refusal) may be a passing fault: don't spend a login;
+                    # record it and propagate so the coordinator retries.
+                    # _note_refresh_crash counts the crash and the err 4
+                    # refusal towards the dead-token streak; once it trips the
+                    # token is treated as dead (RefreshTokenDeadError, or
+                    # login() when a password is stored).
                     if is_genuine_auth_failure(owa_err):
                         _LOGGER.warning(
                             "Refresh token genuinely rejected, falling back to "
@@ -585,10 +587,10 @@ class _ClientBase:
         Only a ``dead_refresh_token_signal`` counts, other transient failures
         neither count nor reset (a successful renewal does, via
         note_auth_success). Signals within ``_REFRESH_CRASH_MIN_SPACING`` of
-        the last counted one are the same renewal window and count once. Reaching
-        ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches ``refresh_token_is_dead``
-        so every later renewal on this shared client concludes the same
-        without another round-trip.
+        the last counted one are the same renewal window and count once.
+        Reaching ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches
+        ``refresh_token_is_dead`` so every later renewal on this shared client
+        concludes the same without another round-trip.
         """
         if self._refresh_token_dead:
             return True

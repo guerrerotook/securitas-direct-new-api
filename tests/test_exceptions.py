@@ -399,7 +399,17 @@ class TestDeadRefreshTokenSignal:
         assert dead_refresh_token_signal(err) is None
 
     def test_server_error_is_not_a_signal(self):
-        err = VerisureOwaError("boom", http_status=500)
+        err = VerisureOwaError("Internal server error", http_status=500)
+        err.response_body = {
+            "errors": [
+                {
+                    "message": "Internal server error",
+                    "name": "ApiError",
+                    "data": {"res": "ERROR", "err": "500", "status": 500},
+                    "path": ["xSRefreshLogin"],
+                }
+            ]
+        }
         assert dead_refresh_token_signal(err) is None
 
     def test_no_response_body_is_not_a_signal(self):

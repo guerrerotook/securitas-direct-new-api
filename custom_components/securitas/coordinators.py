@@ -135,10 +135,10 @@ def _raise_fetch_error(err: VerisureOwaError, label: str) -> NoReturn:
 
     A genuinely dead session — bad credentials, account blocked, 2FA, an
     explicitly invalid/revoked token (err 60067/60052), or a refresh token
-    condemned by a dead-token streak (RefreshTokenDeadError) — reaching the fetch
-    means the refresh-token chain is broken with no way to recover unattended:
-    raise ConfigEntryAuthFailed so HA prompts reauth. Everything else is a
-    transient backend wobble → UpdateFailed (retry next poll).
+    condemned by a dead-token streak (RefreshTokenDeadError) — reaching the
+    fetch means the refresh-token chain is broken with no way to recover
+    unattended: raise ConfigEntryAuthFailed so HA prompts reauth. Everything
+    else is a transient backend wobble → UpdateFailed (retry next poll).
     """
     if is_genuine_auth_failure(err):
         raise ConfigEntryAuthFailed(f"Re-authentication required: {err}") from err

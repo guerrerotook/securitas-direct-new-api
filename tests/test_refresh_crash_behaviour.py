@@ -96,4 +96,5 @@ class TestRefreshTokenRejectedHandling:
             await client.refresh_token()
 
         assert is_refresh_token_rejected(excinfo.value) is True
+        assert is_genuine_auth_failure(excinfo.value) is False
         assert client.refresh_token_value == "on-disk-refresh-token"
