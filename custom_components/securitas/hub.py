@@ -536,7 +536,8 @@ class VerisureHub:
         return self.client.refresh_token_is_dead
 
     def adopt_refresh_token(self, value: str) -> None:
-        """Hand the client a refresh token obtained elsewhere (e.g. reauth)."""
+        """Hand the client the stored refresh token of an entry joining this
+        shared session."""
         self.client.adopt_refresh_token(value)
 
     def _persist_refresh_token(self, value: str) -> None:

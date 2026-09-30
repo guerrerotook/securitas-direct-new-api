@@ -614,10 +614,11 @@ class _ClientBase:
         return self._refresh_token_dead
 
     def adopt_refresh_token(self, value: str) -> None:
-        """Replace the refresh token with one obtained elsewhere (e.g. reauth).
+        """Replace the refresh token with the stored one of an entry joining
+        this shared session.
 
         Clears the dead-token verdict so the next renewal actually tries it.
-        The token is not persisted here: it came from the caller's own entry.
+        The token is not persisted here: that entry already stores it.
         """
         self.refresh_token_value = value
         self._register_secret("refresh_token", value)
