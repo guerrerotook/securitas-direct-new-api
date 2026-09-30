@@ -95,11 +95,12 @@ ALARM_STATUS_SERVICE_ID = "11"
 _AUTH_ESCALATION_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
 # Counted xSRefreshLogin crashes or err 4 rejections (dead_refresh_token_signal),
-# with no successful renewal in between, after which the stored refresh token is
-# treated as dead and reauth is requested (#568). One can be a server wobble; a
-# token that keeps failing this way across polls has never been seen to recover.
-# Failures closer together than the spacing are one renewal window — the coordinators sharing this client each
-# take a turn behind the auth lock seconds apart — and count once.
+# with no successful renewal in between, after which the stored refresh token
+# is treated as dead and reauth is requested (#568). One can be a server
+# wobble; a token that keeps failing this way across polls has never been seen
+# to recover. Failures closer together than the spacing are one renewal window
+# (the coordinators sharing this client each take a turn behind the auth lock
+# seconds apart) and count once.
 _REFRESH_CRASH_REAUTH_THRESHOLD = 3
 _REFRESH_CRASH_MIN_SPACING = timedelta(seconds=60)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
