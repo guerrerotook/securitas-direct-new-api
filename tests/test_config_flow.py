@@ -48,6 +48,7 @@ from custom_components.securitas import (
     DOMAIN,
     _get_or_create_session,
     _login_or_raise,
+    _raise_sign_in_issue,
     async_remove_entry,
     async_unload_entry,
 )
@@ -5348,3 +5349,31 @@ async def test_reopening_a_dialog_at_the_code_steps_starts_the_sign_in_again(
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == first_step
     assert not result.get("errors")
+
+
+async def test_signing_a_disabled_entry_in_again_clears_its_sign_in_repair(hass):
+    """The reload sets nothing up for a disabled entry, so the sign-in itself,
+    which proves the new login, must clear the account's Repairs issue."""
+    entry = _make_reauth_entry(hass)
+    # Never set up, so there is nothing to unload and this reports False.
+    await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
+    assert entry.disabled_by is ConfigEntryDisabler.USER
+    _raise_sign_in_issue(hass, "test@example.com")
+    result = await _start_reauth_flow(hass, entry)
+
+    with _patches(_hub_factory()):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    assert not [
+        issue
+        for (domain, _id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue.translation_key == "sign_in_again"
+    ]

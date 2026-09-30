@@ -63,6 +63,7 @@ from . import (
     _async_teardown_domain_if_unused,
     _async_update_duplicate_entry_issues,
     _clear_setup_refresh_crash,
+    _clear_sign_in_issues,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
@@ -860,8 +861,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # The reload below runs no setup for a disabled entry.
         _async_update_duplicate_entry_issues(self.hass)
         # This sign-in proves the new token; crashes or err 4 refusals of the
-        # one it replaces must not count against it.
+        # one it replaces must not count against it, and there is nothing left
+        # to sign in again (the reload sets nothing up for a disabled entry).
         _clear_setup_refresh_crash(self.hass, username)
+        _clear_sign_in_issues(self.hass, username)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")
 
