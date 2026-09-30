@@ -650,8 +650,8 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
 # server blip. The count lives in hass.data because each retry builds a fresh
 # hub, and is keyed by username like ``sessions``: co-tenant entries retry the
 # same token and alternate as session creator.
-# Handing back any session, or signing in through the reauth dialog, resets
-# it — other transient failures in between neither count nor reset.
+# Handing back any session, or signing in through the reauth or Reconfigure
+# dialog, resets it — other transient failures in between neither count nor reset.
 _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
 
 
@@ -664,7 +664,7 @@ def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
     """Forget the account's setup-time dead-token count once setup hands
-    back a session or the reauth dialog signs in."""
+    back a session or the reauth or Reconfigure dialog signs in."""
     hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
 
@@ -893,6 +893,47 @@ def _account_lock(hass: HomeAssistant, username: str) -> asyncio.Lock:
     as the account's session, replacing any running one."""
     setup_locks = hass.data.setdefault(DOMAIN, {}).setdefault("setup_locks", {})
     return setup_locks.setdefault(username, asyncio.Lock())
+
+
+_FLOW_HOLDER_PREFIX = "config_flow:"
+
+
+def _flow_session_holder(flow_id: str) -> str:
+    """A config flow's key in a session's holders; never an entry id's shape."""
+    return f"{_FLOW_HOLDER_PREFIX}{flow_id}"
+
+
+def _replace_account_session(
+    hass: HomeAssistant, username: str, hub: VerisureHub
+) -> dict[str, Any]:
+    """Register ``hub`` as the account's session in place of any running one.
+
+    Called under the account lock. Entries keep using the old hub until they
+    reload, but its renewals must not save the old login over the new one.
+    Config flows' holds move to the new record, so a flow's hold is always on
+    the account's registered record: a setup dialog's entry joins the new
+    session, which must last while the dialog is open.
+    """
+    sessions = hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})
+    registered = _new_session_record(hub)
+    if (retired := sessions.get(username)) is not None:
+        retired["hub"].config_entry = None
+        flow_holds = {
+            holder
+            for holder in retired["holders"]
+            if holder.startswith(_FLOW_HOLDER_PREFIX)
+        }
+        retired["holders"] -= flow_holds
+        registered["holders"] |= flow_holds
+    sessions[username] = registered
+    return registered
+
+
+def _release_flow_hold(hass: HomeAssistant, username: str, holder: str) -> None:
+    """Release a config flow's hold on the account's registered session."""
+    sessions = hass.data.get(DOMAIN, {}).get("sessions", {})
+    if (session := sessions.get(username)) is not None:
+        _release_session_hold(sessions, username, session, holder)
 
 
 async def _get_or_create_session(
@@ -1867,9 +1908,10 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
     as in use; the last one to finish unloading runs the check again here.
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
-    reloaded entry set up again first and keep its session and dead-token
-    count (or, after reauth or Reconfigure switched its account, let go of the
-    old one).
+    reloaded entry set up again first. A plain reload keeps its session and
+    dead-token count; after reauth or Reconfigure the entry joins the session
+    that dialog registered (and lets go of the old account's session if the
+    account changed).
     """
     async with entry.setup_lock:
         if entry.state is not ConfigEntryState.NOT_LOADED:

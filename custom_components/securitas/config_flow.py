@@ -66,10 +66,12 @@ from . import (
     _async_update_duplicate_entry_issues,
     _clear_setup_refresh_crash,
     _clear_sign_in_issues,
+    _flow_session_holder,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
-    _release_session_hold,
+    _release_flow_hold,
+    _replace_account_session,
     _resolve_flow_capabilities,
     _store_installations_cache,
     _take_session_hold,
@@ -505,8 +507,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # borrowed from a running session that entries or other setup dialogs
         # hold — rebuilding that one would strand them on the old hub (issue #606).
         self._owns_hub: bool = False
-        # The shared-session record this flow holds, as (username, record).
-        self._held_session: tuple[str, dict[str, Any]] | None = None
+        # The account whose registered session this setup dialog holds. A
+        # reauth or Reconfigure dialog's own hold is taken and released
+        # inside _finish_reauth.
+        self._held_account: str | None = None
         self.otp_challenge: tuple[str | None, list[OtpPhone] | None] | None = None
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
@@ -794,7 +798,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
             )
 
-            # Preserve existing device IDs from the entry being reauthenticated
+            # Preserve existing device IDs from the entry being signed in again
             self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
                 CONF_DEVICE_ID, generate_uuid()
             )
@@ -900,53 +904,54 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # token, so this hub replaces that session and every entry on the
         # account reloads onto it. Nothing below awaits until the reloads, so
         # no setup or renewal can come in between.
-        async with _account_lock(self.hass, username):
-            if self.overtaken_reason:
-                return self.async_abort(reason=self.overtaken_reason)
-            sessions = self.hass.data.setdefault(DOMAIN, {}).setdefault("sessions", {})
-            if (retired := sessions.get(username)) is not None:
-                # Its holders use it until they reload, but its renewals must
-                # not save the old login over the new one.
-                retired["hub"].config_entry = None
-            registered = sessions[username] = _new_session_record(self.hub)
-            # Held until the reloads return, not until the flow is removed:
-            # Home Assistant 2025.5 and later abort a reauth flow at the start
-            # of its entry's reload, which would drop this session before the
-            # reload's setup could join it.
-            _take_session_hold(registered, self._session_holder)
-            self._save_reauth_entry(username, installation, switched, refresh_token)
-            account_entries = [
-                entry
-                for entry in self.hass.config_entries.async_entries(DOMAIN)
-                if entry is not self._reauth_entry
-                and entry.data.get(CONF_USERNAME) == username
-            ]
-            for entry in account_entries:
-                self.hass.config_entries.async_update_entry(
-                    entry, data={**entry.data, CONF_REFRESH_TOKEN: refresh_token}
-                )
-            self._overtake_sign_ins_in_flight(username)
-        # Home Assistant before 2025.5 leaves the entry's reauth dialog open
-        # through the reload; submitted later, it would replace this sign-in.
-        for flow in list(
-            self._reauth_entry.async_get_active_flows(
-                self.hass, {config_entries.SOURCE_REAUTH}
-            )
-        ):
-            if flow["flow_id"] != self.flow_id:
-                self.hass.config_entries.flow.async_abort(flow["flow_id"])
-        # The reload below runs no setup for a disabled entry.
-        _async_update_duplicate_entry_issues(self.hass)
-        # This sign-in proves the new token; crashes or err 4 refusals of the
-        # one it replaces must not count against it, and there is nothing left
-        # to sign in again (the reload sets nothing up for a disabled entry).
-        _clear_setup_refresh_crash(self.hass, username)
-        _clear_sign_in_issues(self.hass, username)
         try:
+            async with _account_lock(self.hass, username):
+                if self.overtaken_reason:
+                    return self.async_abort(reason=self.overtaken_reason)
+                registered = _replace_account_session(self.hass, username, self.hub)
+                # Held until the reloads return, not until the flow is removed:
+                # Home Assistant 2025.5 and later abort a reauth flow at the start
+                # of its entry's reload, which would drop this session before the
+                # reload's setup could join it.
+                _take_session_hold(registered, self._session_holder)
+                self._save_reauth_entry(username, installation, switched, refresh_token)
+                account_entries = [
+                    entry
+                    for entry in self.hass.config_entries.async_entries(DOMAIN)
+                    if entry is not self._reauth_entry
+                    and entry.data.get(CONF_USERNAME) == username
+                ]
+                for entry in account_entries:
+                    self.hass.config_entries.async_update_entry(
+                        entry, data={**entry.data, CONF_REFRESH_TOKEN: refresh_token}
+                    )
+                self._overtake_sign_ins_in_flight(username)
+            # Home Assistant before 2025.5 leaves the entry's reauth dialog open
+            # through the reload; submitted later, it would replace this sign-in.
+            for flow in list(
+                self._reauth_entry.async_get_active_flows(
+                    self.hass, {config_entries.SOURCE_REAUTH}
+                )
+            ):
+                if flow["flow_id"] != self.flow_id:
+                    self.hass.config_entries.flow.async_abort(flow["flow_id"])
+            # The reload below runs no setup for a disabled entry.
+            _async_update_duplicate_entry_issues(self.hass)
+            # This sign-in proves the new token; crashes or err 4 refusals of the
+            # one it replaces must not count against it, and there is nothing left
+            # to sign in again (the reload sets nothing up for a disabled entry).
+            _clear_setup_refresh_crash(self.hass, username)
+            _clear_sign_in_issues(self.hass, username)
             for entry in (self._reauth_entry, *account_entries):
                 await self.hass.config_entries.async_reload(entry.entry_id)
         finally:
-            _release_session_hold(sessions, username, registered, self._session_holder)
+            # Also reached by an overtaken dialog, which took no hold; its key
+            # is then on no session and nothing is released.
+            _release_flow_hold(self.hass, username, self._session_holder)
+            # Home Assistant 2025.5 and later close a reauth dialog as its
+            # entry's reload starts, so the clean-up check its closing ran saw
+            # this hold; a disabled entry sets nothing up to take over.
+            self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
         if self.source == config_entries.SOURCE_RECONFIGURE:
             return self.async_abort(reason="reconfigure_successful")
         return self.async_abort(reason="reauth_successful")
@@ -1285,7 +1290,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     @property
     def _session_holder(self) -> str:
         """This flow's key in a session's holders; never an entry id's shape."""
-        return f"config_flow:{self.flow_id}"
+        return _flow_session_holder(self.flow_id)
 
     async def _sign_in_and_hold_session(self, username: str) -> None:
         """Sign in unless the account's session is already running, and hold it.
@@ -1339,35 +1344,29 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         the earlier account's session is let go once the flow has signed in to
         or borrowed the other one's, rather than stranded.
         """
-        if self._held_session is not None and self._held_session[1] is not session:
+        if self._held_account not in (None, username):
             self._release_flow_session()
         _take_session_hold(session, self._session_holder)
-        self._held_session = (username, session)
+        self._held_account = username
 
     def _follow_replaced_session(self) -> None:
         """Move to the account's registered session if a reauth or Reconfigure
-        replaced the one this flow holds: the entry it creates joins that one,
-        so it must store that one's login."""
-        if self._held_session is None:
+        replaced the one this flow signed in with or borrowed: the entry it
+        creates joins that one, so it must store that one's login and ids."""
+        if self._held_account is None:
             return
-        username, held = self._held_session
         sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        current = sessions.get(username)
-        if current is None or current is held:
-            return
-        _take_session_hold(current, self._session_holder)
-        _release_session_hold(sessions, username, held, self._session_holder)
-        self._held_session = (username, current)
-        self.hub = current["hub"]
+        current = sessions.get(self._held_account)
+        if current is not None and current["hub"] is not self.hub:
+            self._borrow_session(self._held_account, current)
 
     def _release_flow_session(self) -> None:
         """Release this flow's hold; the session goes once nobody holds it."""
-        if self._held_session is None:
+        if self._held_account is None:
             return
-        username, session = self._held_session
-        self._held_session = None
-        sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        _release_session_hold(sessions, username, session, self._session_holder)
+        username = self._held_account
+        self._held_account = None
+        _release_flow_hold(self.hass, username, self._session_holder)
 
     @callback
     def async_remove(self) -> None:
