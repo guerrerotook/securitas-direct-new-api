@@ -2,9 +2,11 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from custom_components.securitas import api_queue
 from custom_components.securitas.api_queue import ApiQueue
 
 
@@ -82,7 +84,7 @@ class TestApiQueuePriority:
         queue = ApiQueue(interval=0.05)
         order = []
 
-        # Hold the lock with an initial call
+        # Keep the queue busy with an initial call
         release = asyncio.Event()
 
         async def blocker():
@@ -95,11 +97,11 @@ class TestApiQueuePriority:
         async def fg():
             order.append("fg")
 
-        # Start blocker (holds the lock)
+        # Start blocker (runs and keeps the queue busy)
         blocker_task = asyncio.create_task(
             queue.submit(blocker, priority=ApiQueue.BACKGROUND)
         )
-        await asyncio.sleep(0.01)  # let blocker acquire lock
+        await asyncio.sleep(0.01)  # let blocker start
 
         # Queue background then foreground
         bg_task = asyncio.create_task(queue.submit(bg, priority=ApiQueue.BACKGROUND))
@@ -118,13 +120,16 @@ class TestApiQueuePriority:
         """Background waits while foreground work is pending."""
         queue = ApiQueue(interval=0)
         events = []
+        release = asyncio.Event()
 
-        # Simulate: foreground is "pending" (incremented but not yet submitted)
-        queue._pending_foreground = 1
-        queue._bg_event.clear()
+        async def fg():
+            await release.wait()
 
         async def bg():
             events.append("bg")
+
+        fg_task = asyncio.create_task(queue.submit(fg, priority=ApiQueue.FOREGROUND))
+        await asyncio.sleep(0.005)
 
         # Background should block
         bg_task = asyncio.create_task(queue.submit(bg, priority=ApiQueue.BACKGROUND))
@@ -132,10 +137,221 @@ class TestApiQueuePriority:
         assert "bg" not in events  # still waiting
 
         # Clear foreground
-        queue._pending_foreground = 0
-        queue._bg_event.set()
-        await bg_task
+        release.set()
+        await asyncio.wait_for(asyncio.gather(fg_task, bg_task), timeout=1)
         assert "bg" in events
+
+    async def test_foreground_goes_before_earlier_background_without_a_gap(self):
+        """With no gap to sit out, a waiting foreground still beats earlier background."""
+        queue = ApiQueue(interval=0)
+        order = []
+        release = asyncio.Event()
+
+        async def blocker():
+            await release.wait()
+
+        async def call(name):
+            order.append(name)
+
+        blocker_task = asyncio.create_task(
+            queue.submit(blocker, priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        bg_task = asyncio.create_task(
+            queue.submit(call, "bg", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        fg_task = asyncio.create_task(
+            queue.submit(call, "fg", priority=ApiQueue.FOREGROUND)
+        )
+        await asyncio.sleep(0.005)
+        release.set()
+        await asyncio.gather(blocker_task, bg_task, fg_task)
+        assert order == ["fg", "bg"]
+
+    async def test_foreground_arriving_during_the_gap_goes_first(self, monkeypatch):
+        """Background already sitting out the gap still yields to foreground,
+        even when it wakes first."""
+        clock = SimpleNamespace(skew=0.0)
+        monkeypatch.setattr(
+            api_queue,
+            "time",
+            SimpleNamespace(monotonic=lambda: time.monotonic() + clock.skew),
+        )
+        queue = ApiQueue(interval=0.05)
+        order = []
+
+        async def call(name):
+            order.append(name)
+
+        await queue.submit(call, "done", priority=ApiQueue.BACKGROUND)
+        bg_task = asyncio.create_task(
+            queue.submit(call, "bg", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.01)
+        # Foreground reckons its gap on a clock 20 ms slow, so it wakes about
+        # 20 ms after background; by then the gap has long passed for both.
+        clock.skew = -0.02
+        fg_task = asyncio.create_task(
+            queue.submit(call, "fg", priority=ApiQueue.FOREGROUND)
+        )
+        await asyncio.sleep(0)
+        clock.skew = 1.0
+        await asyncio.gather(bg_task, fg_task)
+        assert order == ["done", "fg", "bg"]
+
+    async def test_cancelled_foreground_waiter_releases_background(self):
+        """Background proceeds once a waiting foreground caller is cancelled."""
+        queue = ApiQueue(interval=0)
+        order = []
+        release = asyncio.Event()
+
+        async def blocker():
+            await release.wait()
+
+        async def call(name):
+            order.append(name)
+
+        blocker_task = asyncio.create_task(
+            queue.submit(blocker, priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        bg_task = asyncio.create_task(
+            queue.submit(call, "bg", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        fg_task = asyncio.create_task(
+            queue.submit(call, "fg", priority=ApiQueue.FOREGROUND)
+        )
+        await asyncio.sleep(0.005)
+        fg_task.cancel()
+        release.set()
+        await asyncio.wait_for(asyncio.gather(blocker_task, bg_task), timeout=1)
+        assert order == ["bg"]
+
+
+class TestApiQueueArrivalOrder:
+    """Callers of the same priority are served in the order they arrived,
+    and a caller that gives up does not stall the line."""
+
+    async def _stream_with_late_arrival(self, priority):
+        """One caller submits back to back; another arrives during its first call."""
+        queue = ApiQueue(interval=0.02)
+        order = []
+        first_started = asyncio.Event()
+
+        async def stream_call(n):
+            order.append(f"stream{n}")
+            if n == 1:
+                first_started.set()
+                await asyncio.sleep(0.01)
+
+        async def stream():
+            for n in (1, 2, 3):
+                await queue.submit(stream_call, n, priority=priority)
+
+        async def late():
+            order.append("late")
+
+        stream_task = asyncio.create_task(stream())
+        await first_started.wait()
+        late_task = asyncio.create_task(queue.submit(late, priority=priority))
+        await asyncio.gather(stream_task, late_task)
+        return order
+
+    async def test_background_arrival_is_not_overtaken_by_a_stream(self):
+        """A status read queued during a thumbnail is not starved by the next ones."""
+        order = await self._stream_with_late_arrival(ApiQueue.BACKGROUND)
+        assert order == ["stream1", "late", "stream2", "stream3"]
+
+    async def test_foreground_arrival_is_not_overtaken_by_a_stream(self):
+        """A foreground call queued during a burst is not overtaken by its next calls."""
+        order = await self._stream_with_late_arrival(ApiQueue.FOREGROUND)
+        assert order == ["stream1", "late", "stream2", "stream3"]
+
+    async def test_waiting_background_callers_run_in_arrival_order(self):
+        """Several callers queued behind a slow call run first-come, first-served."""
+        queue = ApiQueue(interval=0.02)
+        order = []
+        release = asyncio.Event()
+
+        async def blocker():
+            await release.wait()
+
+        async def call(name):
+            order.append(name)
+
+        blocker_task = asyncio.create_task(
+            queue.submit(blocker, priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        tasks = []
+        for name in ("a", "b", "c", "d"):
+            tasks.append(
+                asyncio.create_task(
+                    queue.submit(call, name, priority=ApiQueue.BACKGROUND)
+                )
+            )
+            await asyncio.sleep(0.005)
+        release.set()
+        await asyncio.gather(blocker_task, *tasks)
+        assert order == ["a", "b", "c", "d"]
+
+    async def test_cancelled_waiter_does_not_stall_the_line(self):
+        """A caller cancelled while waiting its turn does not block the ones behind it."""
+        queue = ApiQueue(interval=0)
+        order = []
+        release = asyncio.Event()
+
+        async def blocker():
+            await release.wait()
+
+        async def call(name):
+            order.append(name)
+
+        blocker_task = asyncio.create_task(
+            queue.submit(blocker, priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        cancelled = asyncio.create_task(
+            queue.submit(call, "cancelled", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        after = asyncio.create_task(
+            queue.submit(call, "after", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        cancelled.cancel()
+        release.set()
+        await asyncio.wait_for(asyncio.gather(blocker_task, after), timeout=1)
+        assert order == ["after"]
+        assert cancelled.cancelled()
+
+    @pytest.mark.parametrize(
+        "first_priority", [ApiQueue.BACKGROUND, ApiQueue.FOREGROUND]
+    )
+    async def test_cancelled_while_sitting_out_the_gap_wakes_the_next(
+        self, first_priority
+    ):
+        """Cancelling the caller that is waiting out the gap lets the next one go."""
+        queue = ApiQueue(interval=0.05)
+        order = []
+
+        async def call(name):
+            order.append(name)
+
+        await queue.submit(call, "done", priority=ApiQueue.BACKGROUND)
+        first = asyncio.create_task(
+            queue.submit(call, "cancelled", priority=first_priority)
+        )
+        await asyncio.sleep(0.005)
+        after = asyncio.create_task(
+            queue.submit(call, "after", priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        first.cancel()
+        await asyncio.wait_for(after, timeout=1)
+        assert order == ["done", "after"]
 
 
 class TestApiQueueConcurrency:
@@ -182,29 +398,17 @@ class TestApiQueueConcurrency:
         results = await asyncio.gather(*tasks)
 
         assert sorted(results) == [0, 10, 20]
-        # Counter must be back to zero after all complete
-        assert queue._pending_foreground == 0
 
-    async def test_foreground_counter_correct_after_errors(self):
-        """A foreground error still decrements the counter, unblocking background."""
-        queue = ApiQueue(interval=0)
-
-        async def failing_fg():
-            raise RuntimeError("fg error")
-
-        with pytest.raises(RuntimeError, match="fg error"):
-            await queue.submit(failing_fg, priority=ApiQueue.FOREGROUND)
-
-        # Counter must be back to zero
-        assert queue._pending_foreground == 0
-        assert queue._bg_event.is_set()
-
-        # Background should proceed without blocking
+        # Nothing is left holding background back
         async def bg():
             return "ok"
 
-        result = await queue.submit(bg, priority=ApiQueue.BACKGROUND)
-        assert result == "ok"
+        assert (
+            await asyncio.wait_for(
+                queue.submit(bg, priority=ApiQueue.BACKGROUND), timeout=1
+            )
+            == "ok"
+        )
 
 
 class TestApiQueueErrorRecovery:
@@ -227,7 +431,7 @@ class TestApiQueueErrorRecovery:
         assert result == "second"
 
     async def test_foreground_error_unblocks_background(self):
-        """A foreground error releases the bg_event so background can proceed."""
+        """A foreground error leaves the queue free, so background can proceed."""
         queue = ApiQueue(interval=0)
         events = []
 
@@ -238,25 +442,49 @@ class TestApiQueueErrorRecovery:
             events.append("bg")
             return "bg done"
 
-        # Start background first — it will block once foreground is pending
-        release = asyncio.Event()
-
-        async def slow_bg():
-            await release.wait()
-            # Now submit the real background call after the foreground error
-            return await queue.submit(bg, priority=ApiQueue.BACKGROUND)
-
         # Submit and fail a foreground call
         with pytest.raises(RuntimeError, match="fg boom"):
             await queue.submit(failing_fg, priority=ApiQueue.FOREGROUND)
 
         # Background should not be blocked
-        assert queue._pending_foreground == 0
-        assert queue._bg_event.is_set()
-
-        result = await queue.submit(bg, priority=ApiQueue.BACKGROUND)
+        result = await asyncio.wait_for(
+            queue.submit(bg, priority=ApiQueue.BACKGROUND), timeout=1
+        )
         assert result == "bg done"
         assert "bg" in events
+
+    async def test_synchronous_raise_releases_the_caller_behind_it(self):
+        """A plain callable raising before it returns a coroutine still frees the queue."""
+        queue = ApiQueue(interval=0)
+        release = asyncio.Event()
+
+        async def blocker():
+            await release.wait()
+
+        def boom():
+            raise ValueError("raised before any coroutine")
+
+        async def after():
+            return "after ran"
+
+        blocker_task = asyncio.create_task(
+            queue.submit(blocker, priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        boom_task = asyncio.create_task(
+            queue.submit(boom, priority=ApiQueue.BACKGROUND)  # type: ignore[arg-type]
+        )
+        await asyncio.sleep(0.005)
+        after_task = asyncio.create_task(
+            queue.submit(after, priority=ApiQueue.BACKGROUND)
+        )
+        await asyncio.sleep(0.005)
+        release.set()
+
+        await asyncio.wait_for(blocker_task, timeout=1)
+        with pytest.raises(ValueError, match="raised before any coroutine"):
+            await asyncio.wait_for(boom_task, timeout=1)
+        assert await asyncio.wait_for(after_task, timeout=1) == "after ran"
 
     async def test_last_api_time_updated_even_on_error_with_interval(self):
         """Error still updates _last_api_time, so subsequent calls respect throttle."""

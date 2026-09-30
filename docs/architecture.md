@@ -307,16 +307,16 @@ Serializes API calls with priority-based rate limiting to avoid WAF blocks. One 
 **Design:**
 - Two priority levels: `FOREGROUND` (arm/disarm, user actions, setup) and `BACKGROUND` (polling)
 - Both share the same minimum interval (`delay_check_operation`, default 2 seconds)
-- Foreground requests preempt queued background work — background waits while any foreground requests are pending
+- Foreground requests preempt queued background work — background waits while any foreground request is waiting
+- Within a level, requests run in the order they arrived, so a caller submitting back to back (camera thumbnails) can't starve one that queued earlier (the first alarm status after a reload)
 - In-flight API calls are not cancelled; preemption happens between calls
 
 **Algorithm:**
 1. `submit(coro_fn, *args, priority, label)` accepts an async callable + args. The optional `label` overrides the function name in throttle log messages.
-2. Foreground increments `_pending_foreground` and clears `_bg_event`
-3. Background waits while `_pending_foreground > 0`
-4. Lock ensures minimum gap between calls: `interval - elapsed_since_last_api_time`
-5. Execute coroutine, update `_last_api_time`
-6. Foreground decrements count, sets `_bg_event` when count reaches 0
+2. The call joins the end of its level's line (`_waiting[priority]`) with its own wake-up event
+3. Only the call that goes next is woken (`_wake_next`): the first in the foreground line, else the first in the background line, and only while no call is running. A woken call that is no longer next (foreground arrived meanwhile) goes back to waiting
+4. If the minimum gap (`interval - elapsed_since_last_api_time`) hasn't passed, it sleeps it out and checks again
+5. It leaves the line, runs the coroutine, updates `_last_api_time` and wakes the next call; a caller cancelled while waiting leaves the line and wakes the next one too
 
 ### Setup flow (`async_setup_entry`)
 
@@ -1067,7 +1067,7 @@ tests/
 ├── conftest.py              Shared fixtures (API client, JWT helpers, response factories)
 ├── mock_graphql.py          Mock HTTP transport for integration tests (see below)
 ├── test_alarm_panel.py      Alarm entity: state mapping, arm/disarm, PIN validation, WAF handling
-├── test_api_queue.py        ApiQueue priority, throttling, preemption
+├── test_api_queue.py        ApiQueue priority, throttling, arrival order, cancellation
 ├── test_architecture.py     Structural tests (imports, file existence, module patterns)
 ├── test_auth.py             Login, refresh, 2FA, token lifecycle (HA-level)
 ├── test_binary_sensor.py    WiFi connection binary sensor (coordinator-driven)
