@@ -82,6 +82,7 @@ from tests.conftest import (
     make_installation,
     make_securitas_hub_mock,
     refresh_login_crash_error,
+    refresh_token_rejected_error,
 )
 
 # ---------------------------------------------------------------------------
@@ -3321,13 +3322,14 @@ class TestServiceDescriptionTargets:
 
 
 class TestSetupRefreshCrashEscalation:
-    """A stored token that keeps crashing xSRefreshLogin prompts reauth.
+    """A stored token that keeps crashing xSRefreshLogin, or being refused by it
+    (err 4), prompts reauth.
 
     At setup the token comes straight off disk with no in-process evidence it
     was ever valid, and every diagnosed instance of the crash was a dead token
     (#557, #568). One retry absorbs a momentary server blip; the second
-    consecutive crash must escalate to ConfigEntryAuthFailed so the user can
-    recover by re-entering the password instead of deleting the entry.
+    consecutive crash or refusal must escalate to ConfigEntryAuthFailed so the
+    user can recover by re-entering the password instead of deleting the entry.
     """
 
     @pytest.fixture
@@ -3356,7 +3358,20 @@ class TestSetupRefreshCrashEscalation:
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(ConfigEntryAuthFailed):
+        with pytest.raises(ConfigEntryAuthFailed, match="refresh-login crash"):
+            await self._attempt(hass, entry, mock_hub)
+
+    async def test_second_consecutive_rejection_prompts_reauth(self, hass, mock_hub):
+        """Verisure refusing the stored token with err 4 / 404 escalates the same way."""
+        mock_hub.login = AsyncMock(side_effect=refresh_token_rejected_error())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        with pytest.raises(
+            ConfigEntryAuthFailed, match=r"refresh-token rejection \(err 4\)"
+        ):
             await self._attempt(hass, entry, mock_hub)
 
     async def test_streak_is_per_account(self, hass, mock_hub):

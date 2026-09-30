@@ -9,7 +9,8 @@ crash, which is independent of that fix: one crash is classified transient
 untouched. Escalation to reauth happens only on a *streak* of crashes (see
 RefreshTokenDeadError and the setup-path threshold in __init__); these tests
 guard against a lone crash being turned into a reauth trigger or corrupting
-the stored token.
+the stored token. TestRefreshTokenRejectedHandling applies the same checks to
+a single err 4 refusal of the stored token.
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ from custom_components.securitas.verisure_owa_api.client import VerisureOwaClien
 from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     is_genuine_auth_failure,
+    is_refresh_token_rejected,
 )
 
-from .conftest import refresh_crash_response
+from .conftest import refresh_crash_response, refresh_token_rejected_response
 
 FR_CRASH_RESPONSE = refresh_crash_response()
 
@@ -79,3 +81,20 @@ class TestRefreshCrashHandling:
             await client.refresh_token()
 
         assert is_genuine_auth_failure(excinfo.value) is False
+
+
+class TestRefreshTokenRejectedHandling:
+    """The err 4 / 404 refusal reaches the streak counters recognisably."""
+
+    async def test_raw_reply_raises_a_recognised_rejection(
+        self, mock_transport
+    ) -> None:
+        mock_transport.execute.return_value = refresh_token_rejected_response()
+        client = _make_client(mock_transport, refresh_token="on-disk-refresh-token")
+
+        with pytest.raises(VerisureOwaError) as excinfo:
+            await client.refresh_token()
+
+        assert is_refresh_token_rejected(excinfo.value) is True
+        assert is_genuine_auth_failure(excinfo.value) is False
+        assert client.refresh_token_value == "on-disk-refresh-token"

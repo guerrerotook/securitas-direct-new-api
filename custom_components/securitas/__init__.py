@@ -166,7 +166,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
     generate_uuid,
 )
-from .verisure_owa_api.exceptions import is_refresh_login_crash
+from .verisure_owa_api.exceptions import dead_refresh_token_signal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -581,27 +581,28 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     return config, need_sign_in
 
 
-# Consecutive setup attempts whose stored refresh token crashed xSRefreshLogin
-# before setup gives up retrying and asks for re-authentication (#568). At
-# setup the token comes straight off disk with no evidence it was ever valid,
-# and every diagnosed crash was a dead token; one retry (HA's first backoff,
-# a few seconds) absorbs a momentary server blip. The count lives in hass.data because
-# each retry builds a fresh hub, and is keyed by username like ``sessions``:
-# co-tenant entries retry the same token and alternate as session creator.
+# Consecutive setup attempts whose stored refresh token crashed or was refused
+# by xSRefreshLogin (dead_refresh_token_signal) before setup gives up retrying
+# and asks for re-authentication (#568). At setup the token comes straight off
+# disk with no evidence it was ever valid, and every diagnosed case was a dead
+# token; one retry (HA's first backoff, a few seconds) absorbs a momentary
+# server blip. The count lives in hass.data because each retry builds a fresh
+# hub, and is keyed by username like ``sessions``: co-tenant entries retry the
+# same token and alternate as session creator.
 # Only handing back a live client resets it — other transient failures in
 # between neither count nor reset.
 _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
 
 
 def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
-    """Bump and return the account's consecutive setup-time crash count."""
+    """Bump and return the account's consecutive setup-time dead-token count."""
     streaks = hass.data[DOMAIN].setdefault("refresh_crash_streaks", {})
     streaks[username] = streaks.get(username, 0) + 1
     return streaks[username]
 
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
-    """Forget the account's setup-time crash count: a live session or a
+    """Forget the account's setup-time dead-token count: a live session or a
     successful sign-in proved the token."""
     hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
@@ -615,7 +616,7 @@ async def _login_or_raise(
 ) -> None:
     """Log the hub in, mapping failures to HA's setup exceptions.
 
-    A streak of refresh-login crashes (see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD)
+    A streak of dead-token signals (see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD)
     becomes ConfigEntryAuthFailed like a credential rejection; HA's own reauth
     card is the user-facing notice for that path, so unlike the credential
     branches it raises no persistent notification of its own.
@@ -623,9 +624,9 @@ async def _login_or_raise(
     ``retry_other_family`` marks a first attempt the caller will repeat on
     another address family. A failure to establish the connection is then
     re-raised as-is rather than mapped, so the attempt about to be retried does
-    not notify the user, log an error or count towards the crash streak. Every
-    other failure — including a timeout waiting for a reply — takes the mapping
-    path, as it does for every other caller.
+    not notify the user, log an error or count towards the dead-token streak.
+    Every other failure — including a timeout waiting for a reply — takes the
+    mapping path, as it does for every other caller.
     """
     try:
         await client.login()
@@ -643,7 +644,7 @@ async def _login_or_raise(
         # On the first of two family attempts (retry_other_family), re-raise a
         # connection that never opened untouched: the caller is about to repeat
         # it on another address family, so it must not notify, log, or count
-        # towards the refresh-crash streak. Every other error — timeouts waiting
+        # towards the dead-token streak. Every other error — timeouts waiting
         # for a reply included — takes the mapping path below. (The isinstance
         # guard narrows err for pyright; pylint doesn't narrow across `and`, so
         # its no-member on the guarded attribute is a false positive.)
@@ -661,14 +662,15 @@ async def _login_or_raise(
             "Unable to connect to Verisure: %s",
             err.log_detail(),
         )
+        signal = dead_refresh_token_signal(err)
         if (
-            is_refresh_login_crash(err)
+            signal is not None
             and _note_setup_refresh_crash(hass, username)
             >= _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD
         ):
             raise ConfigEntryAuthFailed(
-                "Stored refresh token keeps crashing the Verisure "
-                "refresh-login call; re-authentication required"
+                f"Stored refresh token keeps failing to renew (last: {signal}); "
+                "re-authentication required"
             ) from None
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"
@@ -868,10 +870,10 @@ async def _get_or_create_session(
             # the xSRefreshLogin 'fr' crash on the next restart.
             if client.config_entry is None:
                 _attach_token_persistence(client, entry)
-            # A shared client condemned by a crash streak, reached with a token
-            # that is not the one it condemned: the reauth flow wrote a fresh
-            # token into this entry and reloaded it, but the co-tenant kept
-            # the session alive, so the reload lands here instead of on a
+            # A shared client condemned by a dead-token streak, reached with a
+            # token that is not the one it condemned: the reauth flow wrote a
+            # fresh token into this entry and reloaded it, but the co-tenant
+            # kept the session alive, so the reload lands here instead of on a
             # fresh hub. Try the new token on the shared client.
             stored_token = config.get(CONF_REFRESH_TOKEN)
             if (
@@ -1784,8 +1786,8 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
     as in use; the last one to finish unloading runs the check again here.
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
-    reloaded entry set up again first and keep its session and crash count
-    (or, after reauth switched its account, let go of the old one).
+    reloaded entry set up again first and keep its session and dead-token
+    count (or, after reauth switched its account, let go of the old one).
     """
     async with entry.setup_lock:
         if entry.state is not ConfigEntryState.NOT_LOADED:

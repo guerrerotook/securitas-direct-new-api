@@ -28,6 +28,7 @@ from ..exceptions import (
     SessionExpiredError,
     VerisureOwaError,
     _error_code_from_body,
+    dead_refresh_token_signal,
     is_genuine_auth_failure,
     is_refresh_login_crash,
 )
@@ -93,12 +94,13 @@ ALARM_STATUS_SERVICE_ID = "11"
 # UpdateFailed repeat-suppression.
 _AUTH_ESCALATION_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
-# Counted xSRefreshLogin crashes, with no successful renewal in between, after
-# which the stored refresh token is treated as dead and reauth is requested
-# (#568). One crash can be a server wobble; a token that keeps crashing across
-# polls has never been seen to recover. Crashes closer together than the
-# spacing are one renewal window — the coordinators sharing this client each
-# take a turn behind the auth lock seconds apart — and count once.
+# Counted xSRefreshLogin crashes or err 4 rejections (dead_refresh_token_signal),
+# with no successful renewal in between, after which the stored refresh token
+# is treated as dead and reauth is requested (#568). One can be a server
+# wobble; a token that keeps failing this way across polls has never been seen
+# to recover. Failures closer together than the spacing are one renewal window
+# (the coordinators sharing this client each take a turn behind the auth lock
+# seconds apart) and count once.
 _REFRESH_CRASH_REAUTH_THRESHOLD = 3
 _REFRESH_CRASH_MIN_SPACING = timedelta(seconds=60)
 _ISSUES_URL = "https://github.com/guerrerotook/securitas-direct-new-api/issues"
@@ -180,8 +182,9 @@ class _ClientBase:
         # crash re-presents the same token every poll, and repeating the recruit
         # line on each retry would become the log spam it avoids.
         self._refresh_crash_reported: bool = False
-        # Consecutive xSRefreshLogin crashes on the current refresh token; reset
-        # only by a successful renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
+        # Consecutive dead-token signals (xSRefreshLogin crash or err 4
+        # rejection) on the current refresh token; reset only by a successful
+        # renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
         self._refresh_crash_streak: int = 0
         self._last_counted_refresh_crash: datetime | None = None
         # Latched once the streak trips: the client is shared by every
@@ -535,10 +538,14 @@ class _ClientBase:
                     )
                     # Genuine token rejection (e.g. err 60067): the refresh
                     # token is dead -> fall through to login() so a missing
-                    # password surfaces as a clean reauth signal. Transient
-                    # server error (5xx, the xSRefreshLogin crash, a timeout):
-                    # the token is probably fine -> do NOT burn a login attempt;
+                    # password surfaces as a clean reauth signal. Anything else
+                    # (5xx, a timeout, or a single xSRefreshLogin crash or err
+                    # 4 refusal) may be a passing fault: don't spend a login;
                     # record it and propagate so the coordinator retries.
+                    # _note_refresh_crash counts the crash and the err 4
+                    # refusal towards the dead-token streak; once it trips the
+                    # token is treated as dead (RefreshTokenDeadError, or
+                    # login() when a password is stored).
                     if is_genuine_auth_failure(owa_err):
                         _LOGGER.warning(
                             "Refresh token genuinely rejected, falling back to "
@@ -554,14 +561,15 @@ class _ClientBase:
                         # Not recorded as a transient failure: that WARNING says
                         # reauth is being withheld, which this raise contradicts.
                         raise RefreshTokenDeadError(
-                            f"Stored refresh token rejected {self._refresh_crash_streak} "
-                            "times by the Verisure refresh-login crash; "
+                            "Stored refresh token failed "
+                            f"{self._refresh_crash_streak} renewals in a row "
+                            f"(last: {dead_refresh_token_signal(owa_err)}); "
                             "re-authentication required"
                         ) from err
                     else:
                         _LOGGER.warning(
-                            "Refresh token found dead after %d refresh-login "
-                            "crashes, falling back to login",
+                            "Refresh token found dead after %d failed "
+                            "renewals, falling back to login",
                             self._refresh_crash_streak,
                         )
             elif self._refresh_token_dead and not self.password:
@@ -574,19 +582,19 @@ class _ClientBase:
             await self.login()  # type: ignore[attr-defined]
 
     def _note_refresh_crash(self, err: VerisureOwaError) -> bool:
-        """Count a refresh-login crash; True once the stored token is dead.
+        """Count a dead-token signal; True once the stored token is dead.
 
-        Only the crash signature counts, other transient failures neither count
-        nor reset (a successful renewal does, via note_auth_success). Crashes
-        within ``_REFRESH_CRASH_MIN_SPACING`` of the last counted one are the
-        same renewal window and count once. Reaching
-        ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches ``refresh_token_is_dead``
-        so every later renewal on this shared client concludes the same
-        without another round-trip.
+        Only a ``dead_refresh_token_signal`` counts, other transient failures
+        neither count nor reset (a successful renewal does, via
+        note_auth_success). Signals within ``_REFRESH_CRASH_MIN_SPACING`` of
+        the last counted one are the same renewal window and count once.
+        Reaching ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches
+        ``refresh_token_is_dead`` so every later renewal on this shared client
+        concludes the same without another round-trip.
         """
         if self._refresh_token_dead:
             return True
-        if not is_refresh_login_crash(err):
+        if dead_refresh_token_signal(err) is None:
             return False
         now = datetime.now()
         last = self._last_counted_refresh_crash
@@ -601,7 +609,7 @@ class _ClientBase:
 
     @property
     def refresh_token_is_dead(self) -> bool:
-        """True once a crash streak has condemned the stored refresh token."""
+        """True once a dead-token streak has condemned the stored refresh token."""
         return self._refresh_token_dead
 
     def adopt_refresh_token(self, value: str) -> None:

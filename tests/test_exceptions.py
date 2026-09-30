@@ -20,9 +20,13 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     VerisureOwaError,
     WAFBlockedError,
     _error_code_from_body,
+    dead_refresh_token_signal,
     is_genuine_auth_failure,
     is_refresh_login_crash,
+    is_refresh_token_rejected,
 )
+
+from .conftest import refresh_login_crash_error, refresh_token_rejected_error
 
 # ── Subclass checks ───────────────────────────────────────────────────────────
 
@@ -335,6 +339,83 @@ class TestIsRefreshLoginCrash:
         assert is_refresh_login_crash(err) is False
 
 
+# ── is_refresh_token_rejected ─────────────────────────────────────────────────
+
+
+class TestIsRefreshTokenRejected:
+    """Identifies Verisure refusing the stored refresh token with err 4 / 404."""
+
+    def test_err_4_on_refresh_login_matches(self):
+        assert is_refresh_token_rejected(refresh_token_rejected_error()) is True
+
+    def test_err_4_on_a_different_path_does_not_match(self):
+        err = refresh_token_rejected_error()
+        err.response_body["errors"][0]["path"] = ["xSArmPanel"]
+        assert is_refresh_token_rejected(err) is False
+
+    def test_other_error_code_on_refresh_login_does_not_match(self):
+        err = refresh_token_rejected_error()
+        err.response_body["errors"][0]["data"]["err"] = "60067"
+        assert is_refresh_token_rejected(err) is False
+
+    def test_the_568_crash_does_not_match(self):
+        assert is_refresh_token_rejected(refresh_login_crash_error()) is False
+
+    def test_is_not_mistaken_for_the_568_crash(self):
+        assert is_refresh_login_crash(refresh_token_rejected_error()) is False
+
+    def test_no_response_body_does_not_match(self):
+        assert is_refresh_token_rejected(VerisureOwaError("boom")) is False
+
+    def test_empty_errors_array_does_not_match(self):
+        err = VerisureOwaError("boom")
+        err.response_body = {"errors": [], "data": {"xSRefreshLogin": None}}
+        assert is_refresh_token_rejected(err) is False
+
+    def test_a_single_rejection_stays_transient(self):
+        """Only a streak escalates, as with the #568 crash."""
+        assert is_genuine_auth_failure(refresh_token_rejected_error()) is False
+
+
+# ── dead_refresh_token_signal ─────────────────────────────────────────────────
+
+
+class TestDeadRefreshTokenSignal:
+    """Names the failures that count towards a dead-refresh-token streak."""
+
+    def test_crash_is_named(self):
+        assert dead_refresh_token_signal(refresh_login_crash_error()) == (
+            "refresh-login crash"
+        )
+
+    def test_err_4_rejection_is_named(self):
+        assert dead_refresh_token_signal(refresh_token_rejected_error()) == (
+            "refresh-token rejection (err 4)"
+        )
+
+    def test_genuine_invalid_session_is_not_a_signal(self):
+        err = refresh_token_rejected_error()
+        err.response_body["errors"][0]["data"]["err"] = "60067"
+        assert dead_refresh_token_signal(err) is None
+
+    def test_server_error_is_not_a_signal(self):
+        err = VerisureOwaError("Internal server error", http_status=500)
+        err.response_body = {
+            "errors": [
+                {
+                    "message": "Internal server error",
+                    "name": "ApiError",
+                    "data": {"res": "ERROR", "err": "500", "status": 500},
+                    "path": ["xSRefreshLogin"],
+                }
+            ]
+        }
+        assert dead_refresh_token_signal(err) is None
+
+    def test_no_response_body_is_not_a_signal(self):
+        assert dead_refresh_token_signal(VerisureOwaError("boom")) is None
+
+
 # ── _error_code_from_body ─────────────────────────────────────────────────────
 
 
@@ -350,7 +431,7 @@ def test_error_code_from_body_extracts_and_stringifies():
 
 
 class TestRefreshTokenDeadError:
-    """A refresh-crash streak that has exhausted its retries is a genuine auth failure."""
+    """A dead-token streak that has exhausted its retries is a genuine auth failure."""
 
     def test_is_an_authentication_error(self):
         assert issubclass(RefreshTokenDeadError, AuthenticationError)

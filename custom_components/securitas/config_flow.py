@@ -844,8 +844,8 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         )
         # The reload below runs no setup for a disabled entry.
         _async_update_duplicate_entry_issues(self.hass)
-        # This sign-in proves the new token; crashes of the one it replaces
-        # must not count against it.
+        # This sign-in proves the new token; crashes or err 4 refusals of the
+        # one it replaces must not count against it.
         _clear_setup_refresh_crash(self.hass, username)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")

@@ -66,13 +66,12 @@ class AccountBlockedError(AuthenticationError):
 
 
 class RefreshTokenDeadError(AuthenticationError):
-    """Raised when the stored refresh token keeps crashing xSRefreshLogin.
+    """Raised when xSRefreshLogin keeps failing on the stored refresh token.
 
-    The crash carries no error code, so a single occurrence is classified
-    transient. A streak of them with no successful renewal in between means
-    the token is not coming back (every diagnosed case was a consumed or
-    lost token — #557, #568); subclassing AuthenticationError routes it to
-    the reauth prompt through ``is_genuine_auth_failure``.
+    A single crash (#568) or ``err 4`` rejection is classified transient. A
+    streak of them with no successful renewal in between means the token is
+    not coming back; subclassing AuthenticationError routes it to the reauth
+    prompt through ``is_genuine_auth_failure``. See ``dead_refresh_token_signal``.
     """
 
 
@@ -178,7 +177,8 @@ def _first_error(body: object) -> dict[str, Any] | None:
     Centralises the defensive walk into a GraphQL response's error envelope so
     the several predicates that inspect the first error (``_error_code_from_body``
     for its ``data.err`` code, ``is_refresh_login_crash`` for its ``path`` and
-    ``message``) share one shape guard instead of each re-implementing it.
+    ``message``, ``is_refresh_token_rejected`` for its ``path`` and error code)
+    share one shape guard instead of each re-implementing it.
     """
     if not isinstance(body, dict):
         return None
@@ -218,10 +218,10 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
 
     Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
     "try again later" session error, and unrecognised null-data GraphQL errors
-    such as a single xSRefreshLogin server crash -- is transient and must NOT
-    trigger a reauth prompt. Unknown failures default to transient. A *streak*
-    of those crashes is raised as RefreshTokenDeadError, which this predicate
-    does classify as genuine.
+    such as a single xSRefreshLogin server crash or err 4 rejection -- is
+    transient and must NOT trigger a reauth prompt. Unknown failures default to
+    transient. A *streak* of those is raised as RefreshTokenDeadError, which
+    this predicate does classify as genuine.
     """
     if isinstance(err, (AuthenticationError, TwoFactorRequiredError)):
         return True
@@ -250,3 +250,31 @@ def is_refresh_login_crash(err: VerisureOwaError) -> bool:
         isinstance(message, str) and "Cannot read properties of undefined" in message
     )
     return on_refresh_login and is_null_deref
+
+
+def is_refresh_token_rejected(err: VerisureOwaError) -> bool:
+    """True when ``xSRefreshLogin`` refuses the stored token with error code 4.
+
+    The error arrives with status 404, but only the path and code are checked.
+    Seen when Verisure revoked a session server-side: every renewal with that
+    token was refused this way for a day, until a fresh sign-in.
+    """
+    first = _first_error(err.response_body)
+    if first is None:
+        return False
+    path = first.get("path")
+    on_refresh_login = isinstance(path, list) and "xSRefreshLogin" in path
+    return on_refresh_login and _error_code(err) == "4"
+
+
+def dead_refresh_token_signal(err: VerisureOwaError) -> str | None:
+    """Name the failure if it counts towards a dead-refresh-token streak, else None.
+
+    One occurrence stays transient; the client and setup each count a streak
+    of them before asking for re-authentication.
+    """
+    if is_refresh_login_crash(err):
+        return "refresh-login crash"
+    if is_refresh_token_rejected(err):
+        return "refresh-token rejection (err 4)"
+    return None
