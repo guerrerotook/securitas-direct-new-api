@@ -279,6 +279,10 @@
         "sign_in_again": {
             "title": "Entre novamente na Verisure",
             "description": "A Verisure precisa que você entre novamente como {username}; até lá, o Home Assistant não consegue se conectar ao seu alarme. Abra Configurações → Dispositivos e Serviços → Verisure OWA e siga o aviso para entrar com sua senha (e o código que a Verisure enviar por SMS, se ela pedir). Este aviso some quando o login funcionar."
+        },
+        "account_blocked": {
+            "title": "A Verisure bloqueou sua conta",
+            "description": "A Verisure bloqueou a conta {username}, então o Home Assistant não consegue se conectar ao seu alarme. Use 'Esqueci minha senha' no site da Verisure para redefinir a senha e desbloquear a conta; depois abra Configurações → Dispositivos e Serviços → Verisure OWA e siga o aviso para entrar com a nova senha. Este aviso some quando o login funcionar."
         }
     },
     "entity": {

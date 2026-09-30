@@ -279,6 +279,10 @@
         "sign_in_again": {
             "title": "Reconnectez-vous à Verisure",
             "description": "Verisure vous demande de vous reconnecter en tant que {username} ; d'ici là, Home Assistant ne peut plus joindre votre alarme. Ouvrez Paramètres → Appareils et services → Verisure OWA et suivez l'invite pour vous connecter avec votre mot de passe (et le code que Verisure vous envoie par SMS, s'il le demande). Cette notification disparaît dès que la connexion réussit."
+        },
+        "account_blocked": {
+            "title": "Verisure a bloqué votre compte",
+            "description": "Verisure a bloqué le compte {username}, donc Home Assistant ne peut plus joindre votre alarme. Utilisez « Mot de passe oublié » sur le site Verisure pour réinitialiser votre mot de passe et débloquer le compte, puis ouvrez Paramètres → Appareils et services → Verisure OWA et suivez l'invite pour vous connecter avec le nouveau mot de passe. Cette notification disparaît dès que la connexion réussit."
         }
     },
     "entity": {

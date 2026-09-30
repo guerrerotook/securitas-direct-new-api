@@ -279,6 +279,10 @@
         "sign_in_again": {
             "title": "Accedi di nuovo a Verisure",
             "description": "Verisure richiede di accedere di nuovo come {username}; fino ad allora Home Assistant non riesce a raggiungere l'allarme. Apri Impostazioni → Dispositivi e servizi → Verisure OWA e segui la richiesta per accedere con la password (e il codice che Verisure ti invia via SMS, se lo chiede). Questo avviso scompare quando l'accesso riesce."
+        },
+        "account_blocked": {
+            "title": "Verisure ha bloccato il tuo account",
+            "description": "Verisure ha bloccato l'account {username}, quindi Home Assistant non riesce a raggiungere l'allarme. Usa 'Password dimenticata' sul sito Verisure per reimpostare la password e sbloccare l'account, poi apri Impostazioni → Dispositivi e servizi → Verisure OWA e segui la richiesta per accedere con la nuova password. Questo avviso scompare quando l'accesso riesce."
         }
     },
     "entity": {

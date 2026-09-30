@@ -158,6 +158,7 @@ from .log_filter import SensitiveDataFilter, TransientCoordinatorErrorFilter
 from .migrate_unique_ids import migrate_unique_ids
 from .pin_crypto import encode_pin
 from .verisure_owa_api import (
+    AccountBlockedError,
     APIConnectionError,
     ApiDomains,
     AuthenticationError,
@@ -464,9 +465,12 @@ def _sign_in_issue_id(username: str) -> str:
     return _SIGN_IN_ISSUE + hashlib.sha256(username.encode()).hexdigest()[:12]
 
 
-def _raise_sign_in_issue(hass: HomeAssistant, username: str) -> None:
+def _raise_sign_in_issue(
+    hass: HomeAssistant, username: str, *, blocked: bool = False
+) -> None:
     """Explain in Repairs why Home Assistant asks to sign the account in again.
 
+    A blocked account must be unblocked first, so it gets its own text.
     Not persistent: after a restart, setup raises it again if the saved login
     still fails.
     """
@@ -477,7 +481,7 @@ def _raise_sign_in_issue(hass: HomeAssistant, username: str) -> None:
         is_fixable=False,
         is_persistent=False,
         severity=ir.IssueSeverity.ERROR,
-        translation_key="sign_in_again",
+        translation_key="account_blocked" if blocked else "sign_in_again",
         translation_placeholders={"username": username},
     )
 
@@ -683,7 +687,9 @@ async def _login_or_raise(
         _raise_sign_in_issue(hass, username)
         raise
     except AuthenticationError as err:
-        _raise_sign_in_issue(hass, username)
+        _raise_sign_in_issue(
+            hass, username, blocked=isinstance(err, AccountBlockedError)
+        )
         _LOGGER.error(
             "Could not log in to Verisure: %s",
             err.log_detail(),

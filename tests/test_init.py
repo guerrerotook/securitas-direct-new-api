@@ -72,6 +72,7 @@ from custom_components.securitas.verisure_owa_api.const import (
     STD_DEFAULTS,
 )
 from custom_components.securitas.verisure_owa_api.exceptions import (
+    AccountBlockedError,
     APIConnectionError,
     AuthenticationError,
     TwoFactorRequiredError,
@@ -518,6 +519,30 @@ class TestAsyncSetupEntry:
         assert issues[0].translation_key == "sign_in_again"
         assert issues[0].translation_placeholders == {"username": "test@example.com"}
         assert "test@example.com" not in issues[0].issue_id
+
+    async def test_a_blocked_account_raises_a_repair_saying_how_to_unblock_it(
+        self, hass, mock_hub
+    ):
+        """Signing in again with the same password fails while Verisure blocks
+        the account, so its issue says to unblock it first."""
+        mock_hub.login = AsyncMock(side_effect=AccountBlockedError("blocked"))
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            pytest.raises(ConfigEntryAuthFailed),
+        ):
+            await async_setup_entry(hass, entry)
+
+        issues = [
+            issue
+            for (domain, _id), issue in ir.async_get(hass).issues.items()
+            if domain == DOMAIN
+        ]
+        assert [issue.translation_key for issue in issues] == ["account_blocked"]
+        assert issues[0].translation_placeholders == {"username": "test@example.com"}
 
     async def test_a_successful_sign_in_clears_the_sign_in_repair(self, hass, mock_hub):
         """Once the account signs in again, the issue has nothing left to say."""
