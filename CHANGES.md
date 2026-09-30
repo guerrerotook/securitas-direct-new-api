@@ -14,7 +14,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 - **A refused login is explained in Settings → Repairs** ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)) instead of a notification quoting Verisure's error. A blocked account is told to use "Forgot password" first.
 - **The tick box only force-arms arms started from its own buttons** ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)), not ones from an automation or the Verisure app.
 - **Repairs notice for an alarm state the integration doesn't recognise** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)), such as code N. Disarming still works meanwhile.
-- **Repairs notice for an installation added twice on one account** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)). Until you remove one, only the entry that starts first runs its alarm panels.
+- **Repairs notice for an installation added twice on one account** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)). Until you remove one, only the entry that starts first runs its alarm panels; afterwards, reload the one you kept if its entities are missing.
 
 ### Fixed
 
@@ -23,7 +23,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 - **Disarm pressed while the alarm was arming was ignored** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it now waits for the arm, then disarms. The lock's "disarm when unlocked" does the same.
 - **Alarm commands could clash** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): commands from any of an installation's alarm panels, or from a lock, now wait for the one in progress instead of being ignored or sent together. Of several arm modes pressed on a busy panel, only the last runs.
 - **Force Arm from the phone notification failed silently while the alarm was busy** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it now waits its turn, or a notification says why it couldn't.
-- **Pressing an arm mode again after an unconfirmed arm sent nothing** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): the integration now checks the alarm's real state and arms from there.
+- **Pressing an arm mode again after an unconfirmed arm sent nothing** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): the integration now checks the alarm's real state and arms from there. A Refresh of that panel also settles it.
 - **An arm blocked part-way by an open sensor showed the earlier state** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it now shows straight away what did arm.
 - **A blocked arm went unnoticed if you closed More Info with auto-force-arm ticked** ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)): with built-in notifications on, the "arm blocked" notification now follows about 15 seconds later.
 - **The Force Arm controls are now in Catalan** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)).
@@ -34,7 +34,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 - **Signing in again as an account that can't see the installation was accepted** ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)): it is now refused. An email typed with different capitals counts as a different account.
 - **Signing in again didn't take effect while another installation on the same account was running** ([#630](https://github.com/guerrerotook/securitas-direct-new-api/pull/630)): every installation on the account now moves to the new login.
 - **A failed SMS request while signing in again switched to the new-setup form** ([#630](https://github.com/guerrerotook/securitas-direct-new-api/pull/630)): it now returns to the sign-in form.
-- **Reopening a sign-in dialog closed at the code step failed with "500 Internal Server Error"** ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)): it now reopens at the password form.
+- **Reopening a sign-in dialog closed at the phone or code step failed with "500 Internal Server Error"** ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)): it now reopens at the password form.
 
 ## v5.8.0
 
