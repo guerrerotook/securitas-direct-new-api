@@ -482,8 +482,29 @@ def _raise_sign_in_issue(hass: HomeAssistant, username: str) -> None:
     )
 
 
-def _clear_sign_in_issue(hass: HomeAssistant, username: str) -> None:
-    ir.async_delete_issue(hass, DOMAIN, _sign_in_issue_id(username))
+def _clear_sign_in_issues(
+    hass: HomeAssistant, username: str | None, removing: ConfigEntry | None = None
+) -> None:
+    """Clear ``username``'s issue, and those of accounts no entry uses any
+    more: signing an entry in again as another account, or deleting an
+    account's last entry, leaves nothing to sign in again there.
+
+    ``removing`` is the entry being deleted, which no longer counts.
+    """
+    in_use = {
+        _sign_in_issue_id(entry.data[CONF_USERNAME])
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if entry is not removing and entry.data.get(CONF_USERNAME)
+    }
+    if username is not None:
+        in_use.discard(_sign_in_issue_id(username))
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith(_SIGN_IN_ISSUE)
+            and issue_id not in in_use
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 @callback
@@ -918,7 +939,7 @@ async def _get_or_create_session(
 
     # Either branch hands back a live session, which proves the stored token.
     _clear_setup_refresh_crash(hass, username)
-    _clear_sign_in_issue(hass, username)
+    _clear_sign_in_issues(hass, username)
     return client
 
 
@@ -1905,13 +1926,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     retry, or needing reauth) still holds the session here.
     """
     _async_update_duplicate_entry_issues(hass, removing=entry)
-    username = entry.data.get(CONF_USERNAME)
-    if username and not any(
-        other.data.get(CONF_USERNAME) == username
-        for other in hass.config_entries.async_entries(DOMAIN)
-        if other.entry_id != entry.entry_id
-    ):
-        _clear_sign_in_issue(hass, username)
+    _clear_sign_in_issues(hass, None, removing=entry)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return

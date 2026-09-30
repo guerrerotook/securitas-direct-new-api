@@ -546,6 +546,39 @@ class TestAsyncSetupEntry:
 
         assert _sign_in_issues(hass) == []
 
+    async def test_signing_in_as_another_account_clears_the_first_accounts_repair(
+        self, hass, mock_hub
+    ):
+        """Signing the entry in again as another account leaves no entry on
+        the first one, so its issue has nothing left to say."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        mock_hub.login = AsyncMock(side_effect=AuthenticationError("bad credentials"))
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            pytest.raises(ConfigEntryAuthFailed),
+        ):
+            await async_setup_entry(hass, entry)
+        assert _sign_in_issues(hass)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_USERNAME: "other@example.com"}
+        )
+
+        mock_hub.login = AsyncMock()
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+
+        assert _sign_in_issues(hass) == []
+
     async def test_deleting_the_accounts_last_entry_clears_the_sign_in_repair(
         self, hass, mock_hub
     ):
