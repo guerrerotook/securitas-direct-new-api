@@ -228,6 +228,11 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
     return _error_code(err) in _GENUINE_AUTH_ERROR_CODES
 
 
+def is_account_blocked(err: VerisureOwaError) -> bool:
+    """True when Verisure refused the request because the account is blocked."""
+    return isinstance(err, AccountBlockedError) or _error_code(err) == "60052"
+
+
 def is_refresh_login_crash(err: VerisureOwaError) -> bool:
     """True for the specific server-side ``xSRefreshLogin`` resolver crash (#568).
 

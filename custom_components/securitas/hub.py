@@ -33,6 +33,7 @@ from .const import (
 from .log_filter import SensitiveDataFilter
 from .notification_translations import get_notification_strings
 from .verisure_owa_api import (
+    AccountBlockedError,
     ApiDomains,
     AuthenticationError,
     CameraDevice,
@@ -47,7 +48,7 @@ from .verisure_owa_api import (
 )
 from .verisure_owa_api.client import VerisureOwaClient
 from .verisure_owa_api.client._base import _token_fingerprint
-from .verisure_owa_api.exceptions import is_genuine_auth_failure
+from .verisure_owa_api.exceptions import is_account_blocked, is_genuine_auth_failure
 from .verisure_owa_api.http_transport import HttpTransport
 
 _LOGGER = logging.getLogger(__name__)
@@ -217,6 +218,7 @@ class VerisureHub:
         wobble" trade-off the steady-state client path (_base.py) makes.
         """
         if self.client.refresh_token_value:
+            blocked = False
             try:
                 if await self.client.refresh_token():
                     return
@@ -224,7 +226,12 @@ class VerisureHub:
                 if not is_genuine_auth_failure(err):
                     raise
                 _LOGGER.warning("Refresh genuinely rejected: %s", err.log_detail())
+                blocked = is_account_blocked(err)
             if not self.client.password:
+                if blocked:
+                    raise AccountBlockedError(
+                        "Account blocked by Verisure; reauth required"
+                    )
                 raise AuthenticationError(
                     "Refresh token rejected and no password available; reauth required"
                 )
