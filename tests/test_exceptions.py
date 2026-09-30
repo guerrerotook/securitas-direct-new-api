@@ -421,7 +421,7 @@ def test_error_code_from_body_extracts_and_stringifies():
 
 
 class TestRefreshTokenDeadError:
-    """A refresh-crash streak that has exhausted its retries is a genuine auth failure."""
+    """A dead-token streak that has exhausted its retries is a genuine auth failure."""
 
     def test_is_an_authentication_error(self):
         assert issubclass(RefreshTokenDeadError, AuthenticationError)

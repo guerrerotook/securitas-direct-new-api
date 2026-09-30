@@ -177,7 +177,8 @@ def _first_error(body: object) -> dict[str, Any] | None:
     Centralises the defensive walk into a GraphQL response's error envelope so
     the several predicates that inspect the first error (``_error_code_from_body``
     for its ``data.err`` code, ``is_refresh_login_crash`` for its ``path`` and
-    ``message``) share one shape guard instead of each re-implementing it.
+    ``message``, ``is_refresh_token_rejected`` for its ``path`` and error code)
+    share one shape guard instead of each re-implementing it.
     """
     if not isinstance(body, dict):
         return None
@@ -252,8 +253,9 @@ def is_refresh_login_crash(err: VerisureOwaError) -> bool:
 
 
 def is_refresh_token_rejected(err: VerisureOwaError) -> bool:
-    """True when ``xSRefreshLogin`` refuses the stored token with ``err 4`` (404).
+    """True when ``xSRefreshLogin`` refuses the stored token with error code 4.
 
+    The error arrives with status 404, but only the path and code are checked.
     Seen when Verisure revoked a session server-side: every renewal with that
     token was refused this way for a day, until a fresh sign-in.
     """

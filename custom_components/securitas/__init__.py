@@ -585,24 +585,24 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
 # by xSRefreshLogin (dead_refresh_token_signal) before setup gives up retrying
 # and asks for re-authentication (#568). At setup the token comes straight off
 # disk with no evidence it was ever valid, and every diagnosed case was a dead
-# token; one retry (HA's first backoff,
-# a few seconds) absorbs a momentary server blip. The count lives in hass.data because
-# each retry builds a fresh hub, and is keyed by username like ``sessions``:
-# co-tenant entries retry the same token and alternate as session creator.
+# token; one retry (HA's first backoff, a few seconds) absorbs a momentary
+# server blip. The count lives in hass.data because each retry builds a fresh
+# hub, and is keyed by username like ``sessions``: co-tenant entries retry the
+# same token and alternate as session creator.
 # Only handing back a live client resets it — other transient failures in
 # between neither count nor reset.
 _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
 
 
 def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
-    """Bump and return the account's consecutive setup-time crash count."""
+    """Bump and return the account's consecutive setup-time dead-token count."""
     streaks = hass.data[DOMAIN].setdefault("refresh_crash_streaks", {})
     streaks[username] = streaks.get(username, 0) + 1
     return streaks[username]
 
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
-    """Forget the account's setup-time crash count: a live session or a
+    """Forget the account's setup-time dead-token count: a live session or a
     successful sign-in proved the token."""
     hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
@@ -624,7 +624,7 @@ async def _login_or_raise(
     ``retry_other_family`` marks a first attempt the caller will repeat on
     another address family. A failure to establish the connection is then
     re-raised as-is rather than mapped, so the attempt about to be retried does
-    not notify the user, log an error or count towards the crash streak. Every
+    not notify the user, log an error or count towards the dead-token streak. Every
     other failure — including a timeout waiting for a reply — takes the mapping
     path, as it does for every other caller.
     """
@@ -644,7 +644,7 @@ async def _login_or_raise(
         # On the first of two family attempts (retry_other_family), re-raise a
         # connection that never opened untouched: the caller is about to repeat
         # it on another address family, so it must not notify, log, or count
-        # towards the refresh-crash streak. Every other error — timeouts waiting
+        # towards the dead-token streak. Every other error — timeouts waiting
         # for a reply included — takes the mapping path below. (The isinstance
         # guard narrows err for pyright; pylint doesn't narrow across `and`, so
         # its no-member on the guarded attribute is a false positive.)
@@ -870,7 +870,7 @@ async def _get_or_create_session(
             # the xSRefreshLogin 'fr' crash on the next restart.
             if client.config_entry is None:
                 _attach_token_persistence(client, entry)
-            # A shared client condemned by a crash streak, reached with a token
+            # A shared client condemned by a dead-token streak, reached with a token
             # that is not the one it condemned: the reauth flow wrote a fresh
             # token into this entry and reloaded it, but the co-tenant kept
             # the session alive, so the reload lands here instead of on a

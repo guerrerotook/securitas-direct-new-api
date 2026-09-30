@@ -3322,13 +3322,14 @@ class TestServiceDescriptionTargets:
 
 
 class TestSetupRefreshCrashEscalation:
-    """A stored token that keeps crashing xSRefreshLogin prompts reauth.
+    """A stored token that keeps crashing xSRefreshLogin, or being refused by it
+    (err 4), prompts reauth.
 
     At setup the token comes straight off disk with no in-process evidence it
     was ever valid, and every diagnosed instance of the crash was a dead token
     (#557, #568). One retry absorbs a momentary server blip; the second
-    consecutive crash must escalate to ConfigEntryAuthFailed so the user can
-    recover by re-entering the password instead of deleting the entry.
+    consecutive crash or refusal must escalate to ConfigEntryAuthFailed so the
+    user can recover by re-entering the password instead of deleting the entry.
     """
 
     @pytest.fixture

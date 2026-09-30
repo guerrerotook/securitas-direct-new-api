@@ -9,7 +9,8 @@ crash, which is independent of that fix: one crash is classified transient
 untouched. Escalation to reauth happens only on a *streak* of crashes (see
 RefreshTokenDeadError and the setup-path threshold in __init__); these tests
 guard against a lone crash being turned into a reauth trigger or corrupting
-the stored token.
+the stored token. TestRefreshTokenRejectedHandling applies the same checks to
+a single err 4 refusal of the stored token.
 """
 
 from __future__ import annotations

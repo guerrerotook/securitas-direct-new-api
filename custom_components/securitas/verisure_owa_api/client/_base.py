@@ -182,8 +182,9 @@ class _ClientBase:
         # crash re-presents the same token every poll, and repeating the recruit
         # line on each retry would become the log spam it avoids.
         self._refresh_crash_reported: bool = False
-        # Consecutive xSRefreshLogin crashes on the current refresh token; reset
-        # only by a successful renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
+        # Consecutive dead-token signals (xSRefreshLogin crash or err 4
+        # rejection) on the current refresh token; reset only by a successful
+        # renewal. See _REFRESH_CRASH_REAUTH_THRESHOLD.
         self._refresh_crash_streak: int = 0
         self._last_counted_refresh_crash: datetime | None = None
         # Latched once the streak trips: the client is shared by every
@@ -538,9 +539,11 @@ class _ClientBase:
                     # Genuine token rejection (e.g. err 60067): the refresh
                     # token is dead -> fall through to login() so a missing
                     # password surfaces as a clean reauth signal. Transient
-                    # server error (5xx, the xSRefreshLogin crash, a timeout):
-                    # the token is probably fine -> do NOT burn a login attempt;
-                    # record it and propagate so the coordinator retries.
+                    # server error (5xx, the xSRefreshLogin crash or err 4
+                    # refusal, a timeout): the token is probably fine -> do NOT
+                    # burn a login attempt; record it and propagate so the
+                    # coordinator retries. _note_refresh_crash counts the crash
+                    # and the err 4 refusal towards the dead-token streak.
                     if is_genuine_auth_failure(owa_err):
                         _LOGGER.warning(
                             "Refresh token genuinely rejected, falling back to "
@@ -580,9 +583,9 @@ class _ClientBase:
         """Count a dead-token signal; True once the stored token is dead.
 
         Only a ``dead_refresh_token_signal`` counts, other transient failures
-        neither count nor reset (a successful renewal does, via note_auth_success). Crashes
-        within ``_REFRESH_CRASH_MIN_SPACING`` of the last counted one are the
-        same renewal window and count once. Reaching
+        neither count nor reset (a successful renewal does, via
+        note_auth_success). Signals within ``_REFRESH_CRASH_MIN_SPACING`` of
+        the last counted one are the same renewal window and count once. Reaching
         ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches ``refresh_token_is_dead``
         so every later renewal on this shared client concludes the same
         without another round-trip.
@@ -604,7 +607,7 @@ class _ClientBase:
 
     @property
     def refresh_token_is_dead(self) -> bool:
-        """True once a crash streak has condemned the stored refresh token."""
+        """True once a dead-token streak has condemned the stored refresh token."""
         return self._refresh_token_dead
 
     def adopt_refresh_token(self, value: str) -> None:
