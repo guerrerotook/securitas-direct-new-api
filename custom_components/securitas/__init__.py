@@ -650,8 +650,8 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
 # server blip. The count lives in hass.data because each retry builds a fresh
 # hub, and is keyed by username like ``sessions``: co-tenant entries retry the
 # same token and alternate as session creator.
-# Handing back any session resets it — other transient failures in between
-# neither count nor reset.
+# Handing back any session, or signing in through the reauth dialog, resets
+# it — other transient failures in between neither count nor reset.
 _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
 
 
@@ -664,7 +664,7 @@ def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
     """Forget the account's setup-time dead-token count once setup hands
-    back a session."""
+    back a session or the reauth dialog signs in."""
     hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
 
@@ -955,8 +955,9 @@ async def _get_or_create_session(
             signed_in = True
 
     # Any session handed back resets the streak, even a reused one whose
-    # adopted token was never tried; a token that keeps crashing is caught by
-    # the runtime renewal streak instead.
+    # adopted token was never tried; a token that keeps failing to renew (a
+    # crash or an err 4 refusal) is caught by the runtime renewal streak
+    # instead.
     _clear_setup_refresh_crash(hass, username)
     # Only a sign-in made here shows the account can sign in now. A reused
     # session may hold a token Verisure has just refused: adopting it made the
