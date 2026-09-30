@@ -275,6 +275,10 @@
         "unknown_alarm_state": {
             "title": "Stato dell'allarme non riconosciuto",
             "description": "Verisure segnala il codice di stato dell'allarme {code} per {installation}, che questa integrazione non riconosce ancora. Il disinserimento funziona ancora, ma l'inserimento viene rifiutato finché l'allarme non segnala uno stato noto. Segnala il codice su {url} perché possa essere supportato. Questo avviso scompare quando torna uno stato noto."
+        },
+        "sign_in_again": {
+            "title": "Accedi di nuovo a Verisure",
+            "description": "Verisure richiede di accedere di nuovo come {username}; fino ad allora Home Assistant non riesce a raggiungere l'allarme. Apri Impostazioni → Dispositivi e servizi → Verisure OWA e segui la richiesta per accedere con la password (e il codice che Verisure ti invia via SMS, se lo chiede). Questo avviso scompare quando l'accesso riesce."
         }
     },
     "entity": {

@@ -275,6 +275,10 @@
         "unknown_alarm_state": {
             "title": "Estat d'alarma no reconegut",
             "description": "Verisure indica el codi d'estat d'alarma {code} per a {installation}, que aquesta integració encara no reconeix. Desarmar continua funcionant, però armar es rebutja fins que l'alarma indiqui un estat conegut. Informa del codi a {url} perquè es pugui afegir. Aquest avís desapareix quan torna un estat conegut."
+        },
+        "sign_in_again": {
+            "title": "Torna a iniciar la sessió a Verisure",
+            "description": "Verisure necessita que tornis a iniciar la sessió com a {username}; fins aleshores, Home Assistant no pot connectar amb la teva alarma. Obre Configuració → Dispositius i serveis → Verisure OWA i segueix l'avís per iniciar la sessió amb la contrasenya (i el codi que Verisure t'enviï per SMS, si el demana). Aquest avís desapareix quan l'inici de sessió funciona."
         }
     },
     "entity": {

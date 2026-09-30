@@ -5296,3 +5296,55 @@ async def test_options_init_prefills_saved_operation_poll_timeout(hass):
         f"Expected pre-filled default {saved_value!r}, got {marker.default()!r}. "
         "CONF_OPERATION_POLL_TIMEOUT is missing from the async_step_init defaults dict."
     )
+
+
+# ===================================================================
+# Reopening a dialog left at the phone list or the code step
+# ===================================================================
+
+
+async def _reauth_to_2fa_step(hass, hub, step_id):
+    """Sign an entry in again as far as ``step_id`` of the SMS-code steps."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    with _patches(hub):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        if step_id == "otp_challenge":
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input={"phones": "0_555-1234"}
+            )
+    assert result["step_id"] == step_id
+    return result["flow_id"]
+
+
+async def _setup_to_2fa_step(hass, hub, step_id):
+    """Run a new setup as far as ``step_id`` of the SMS-code steps."""
+    if step_id == "phone_list":
+        return await _start_2fa_flow(hass, hub)
+    return await _get_to_otp_step(hass, hub)
+
+
+@pytest.mark.parametrize("step_id", ["phone_list", "otp_challenge"])
+@pytest.mark.parametrize(
+    ("reach", "first_step"),
+    [(_reauth_to_2fa_step, "reauth_confirm"), (_setup_to_2fa_step, "user")],
+    ids=["sign-in-again", "setup"],
+)
+async def test_reopening_a_dialog_at_the_code_steps_starts_the_sign_in_again(
+    hass, reach, first_step, step_id
+):
+    """Closing the dialog leaves the flow at its step, and reopening it asks
+    for that step with no input; the dialog shows its first form again, so
+    submitting it sends a new code, rather than failing."""
+    hub = _hub_factory(two_fa=True)
+    flow_id = await reach(hass, hub, step_id)
+
+    with _patches(hub):
+        result = await hass.config_entries.flow.async_configure(flow_id)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == first_step
+    assert not result.get("errors")

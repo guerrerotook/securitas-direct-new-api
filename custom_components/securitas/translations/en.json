@@ -275,6 +275,10 @@
         "unknown_alarm_state": {
             "title": "Unrecognised alarm state",
             "description": "Verisure reports alarm state code {code} for {installation}, which this integration doesn't recognise yet. Disarming still works, but arming is refused until the alarm reports a known state. Please report the code at {url} so it can be supported. This notice clears when a known state returns."
+        },
+        "sign_in_again": {
+            "title": "Sign in to Verisure again",
+            "description": "Verisure needs you to sign in again as {username}, so Home Assistant can't reach your alarm until you do. Open Settings → Devices & services → Verisure OWA and follow the prompt to sign in with your password (and the code Verisure texts you, if it asks for one). This notice clears once the sign-in succeeds."
         }
     },
     "entity": {

@@ -24,14 +24,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Please remove the integration entry and re-add it."
             ),
         },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": ("Verisure needs a 2FA verification code. Please log in again."),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "Could not log in to Verisure: {error}",
-        },
         "arm_failed": {
             "title": "Verisure: Arming failed",
             "message": "{error}",
@@ -126,17 +118,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Tu configuración de Verisure usa un formato antiguo. "
                 "Por favor, elimina la integración y vuelve a añadirla."
             ),
-        },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": (
-                "Verisure necesita un código de verificación 2FA. "
-                "Por favor, inicia sesión de nuevo."
-            ),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "No se pudo iniciar sesión en Verisure: {error}",
         },
         "arm_failed": {
             "title": "Verisure: Error al armar",
@@ -238,17 +219,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Votre configuration Verisure utilise un ancien format. "
                 "Veuillez supprimer l'intégration et l'ajouter à nouveau."
             ),
-        },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": (
-                "Verisure a besoin d'un code de vérification 2FA. "
-                "Veuillez vous reconnecter."
-            ),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "Impossible de se connecter à Verisure : {error}",
         },
         "arm_failed": {
             "title": "Verisure : Échec de l'armement",
@@ -354,17 +324,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "obsoleto. Rimuovi l'integrazione e aggiungila di nuovo."
             ),
         },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": (
-                "Verisure richiede un codice di verifica 2FA. "
-                "Effettua di nuovo l'accesso."
-            ),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "Impossibile accedere a Verisure: {error}",
-        },
         "arm_failed": {
             "title": "Verisure: Attivazione fallita",
             "message": "{error}",
@@ -468,17 +427,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Por favor, remova a integração e adicione-a novamente."
             ),
         },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": (
-                "Verisure precisa de um código de verificação 2FA. "
-                "Por favor, inicie sessão novamente."
-            ),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "Não foi possível iniciar sessão no Verisure: {error}",
-        },
         "arm_failed": {
             "title": "Verisure: Falha ao armar",
             "message": "{error}",
@@ -578,17 +526,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "Sua configuração do Verisure usa um formato antigo. "
                 "Por favor, remova a integração e adicione-a novamente."
             ),
-        },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": (
-                "Verisure precisa de um código de verificação 2FA. "
-                "Por favor, faça login novamente."
-            ),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "Não foi possível fazer login no Verisure: {error}",
         },
         "arm_failed": {
             "title": "Verisure: Falha ao armar",
@@ -690,17 +627,6 @@ NOTIFICATION_TRANSLATIONS: dict[str, dict[str, dict[str, str]]] = {
                 "La teva configuració de Verisure utilitza un format antic. "
                 "Si us plau, elimina la integració i torna-la a afegir."
             ),
-        },
-        "two_factor_required": {
-            "title": "Verisure",
-            "message": (
-                "Verisure necessita un codi de verificació 2FA. "
-                "Si us plau, torna a iniciar sessió."
-            ),
-        },
-        "login_failed": {
-            "title": "Verisure",
-            "message": "No s'ha pogut iniciar sessió a Verisure: {error}",
         },
         "arm_failed": {
             "title": "Verisure: Error en armar",

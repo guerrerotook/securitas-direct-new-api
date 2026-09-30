@@ -456,6 +456,34 @@ def _migrate_entry_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 _DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"
+_SIGN_IN_ISSUE = "sign_in_again_"
+
+
+def _sign_in_issue_id(username: str) -> str:
+    # Hashed: the email must not be part of a saved issue ID.
+    return _SIGN_IN_ISSUE + hashlib.sha256(username.encode()).hexdigest()[:12]
+
+
+def _raise_sign_in_issue(hass: HomeAssistant, username: str) -> None:
+    """Explain in Repairs why Home Assistant asks to sign the account in again.
+
+    Not persistent: after a restart, setup raises it again if the saved login
+    still fails.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _sign_in_issue_id(username),
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="sign_in_again",
+        translation_placeholders={"username": username},
+    )
+
+
+def _clear_sign_in_issue(hass: HomeAssistant, username: str) -> None:
+    ir.async_delete_issue(hass, DOMAIN, _sign_in_issue_id(username))
 
 
 @callback
@@ -619,7 +647,7 @@ async def _login_or_raise(
     A streak of dead-token signals (see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD)
     becomes ConfigEntryAuthFailed like a credential rejection; HA's own reauth
     card is the user-facing notice for that path, so unlike the credential
-    branches it raises no persistent notification of its own.
+    branches it raises no Repairs issue of its own.
 
     ``retry_other_family`` marks a first attempt the caller will repeat on
     another address family. A failure to establish the connection is then
@@ -631,10 +659,10 @@ async def _login_or_raise(
     try:
         await client.login()
     except TwoFactorRequiredError:
-        _notify(hass, "2fa_error", "two_factor_required")
+        _raise_sign_in_issue(hass, username)
         raise
     except AuthenticationError as err:
-        _notify(hass, "login_error", "login_failed", {"error": str(err)})
+        _raise_sign_in_issue(hass, username)
         _LOGGER.error(
             "Could not log in to Verisure: %s",
             err.log_detail(),
@@ -890,6 +918,7 @@ async def _get_or_create_session(
 
     # Either branch hands back a live session, which proves the stored token.
     _clear_setup_refresh_crash(hass, username)
+    _clear_sign_in_issue(hass, username)
     return client
 
 
@@ -1876,6 +1905,13 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     retry, or needing reauth) still holds the session here.
     """
     _async_update_duplicate_entry_issues(hass, removing=entry)
+    username = entry.data.get(CONF_USERNAME)
+    if username and not any(
+        other.data.get(CONF_USERNAME) == username
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ):
+        _clear_sign_in_issue(hass, username)
     domain_data = hass.data.get(DOMAIN)
     if domain_data is None:
         return

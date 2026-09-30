@@ -275,6 +275,10 @@
         "unknown_alarm_state": {
             "title": "État d'alarme non reconnu",
             "description": "Verisure signale le code d'état d'alarme {code} pour {installation}, que cette intégration ne reconnaît pas encore. Le désarmement fonctionne toujours, mais l'armement est refusé tant que l'alarme ne signale pas un état connu. Signalez ce code sur {url} pour qu'il puisse être pris en charge. Cette notification disparaît dès qu'un état connu revient."
+        },
+        "sign_in_again": {
+            "title": "Reconnectez-vous à Verisure",
+            "description": "Verisure vous demande de vous reconnecter en tant que {username} ; d'ici là, Home Assistant ne peut plus joindre votre alarme. Ouvrez Paramètres → Appareils et services → Verisure OWA et suivez l'invite pour vous connecter avec votre mot de passe (et le code que Verisure vous envoie par SMS, s'il le demande). Cette notification disparaît dès que la connexion réussit."
         }
     },
     "entity": {

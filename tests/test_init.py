@@ -117,6 +117,15 @@ def _patch_hub(mock_hub):
 # ===========================================================================
 
 
+def _sign_in_issues(hass) -> list:
+    """The Repairs issues asking to sign an account in again."""
+    return [
+        issue
+        for (domain, _issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue.translation_key == "sign_in_again"
+    ]
+
+
 class TestAddDeviceInformation:
     """Tests for add_device_information() pure function."""
 
@@ -477,9 +486,21 @@ class TestAsyncSetupEntry:
 
         assert result is True
 
-    async def test_setup_login_2fa_error(self, hass, mock_hub):
-        """TwoFactorRequiredError raises ConfigEntryAuthFailed and notifies via translation key."""
-        mock_hub.login = AsyncMock(side_effect=TwoFactorRequiredError("2FA required"))
+    @pytest.mark.parametrize(
+        "error",
+        [
+            TwoFactorRequiredError("2FA required"),
+            AuthenticationError("bad credentials"),
+        ],
+        ids=["code-needed", "login-rejected"],
+    )
+    async def test_a_rejected_login_raises_a_sign_in_repair_not_a_notification(
+        self, hass, mock_hub, error
+    ):
+        """Home Assistant asks to sign in again (ConfigEntryAuthFailed); the
+        integration adds a plain-language Repairs issue saying why, rather than
+        a notification quoting Verisure's error."""
+        mock_hub.login = AsyncMock(side_effect=error)
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 
@@ -487,29 +508,70 @@ class TestAsyncSetupEntry:
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
             patch("custom_components.securitas._notify") as mock_notify,
-            pytest.raises(ConfigEntryAuthFailed, match="2FA required"),
+            pytest.raises(ConfigEntryAuthFailed),
         ):
             await async_setup_entry(hass, entry)
 
-        mock_notify.assert_called_once_with(hass, "2fa_error", "two_factor_required")
+        mock_notify.assert_not_called()
+        issues = _sign_in_issues(hass)
+        assert len(issues) == 1
+        assert issues[0].translation_key == "sign_in_again"
+        assert issues[0].translation_placeholders == {"username": "test@example.com"}
+        assert "test@example.com" not in issues[0].issue_id
 
-    async def test_setup_login_error(self, hass, mock_hub):
-        """AuthenticationError raises ConfigEntryAuthFailed and notifies with the API error."""
+    async def test_a_successful_sign_in_clears_the_sign_in_repair(self, hass, mock_hub):
+        """Once the account signs in again, the issue has nothing left to say."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
         mock_hub.login = AsyncMock(side_effect=AuthenticationError("bad credentials"))
-        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
-        entry.add_to_hass(hass)
-
         with (
             _patch_hub(mock_hub),
             patch("custom_components.securitas.async_get_clientsession"),
-            patch("custom_components.securitas._notify") as mock_notify,
-            pytest.raises(ConfigEntryAuthFailed, match="Authentication failed"),
+            pytest.raises(ConfigEntryAuthFailed),
         ):
             await async_setup_entry(hass, entry)
+        assert _sign_in_issues(hass)
 
-        mock_notify.assert_called_once_with(
-            hass, "login_error", "login_failed", {"error": "bad credentials"}
+        mock_hub.login = AsyncMock()
+        with (
+            _patch_hub(mock_hub),
+            patch("custom_components.securitas.async_get_clientsession"),
+            patch.object(
+                hass.config_entries,
+                "async_forward_entry_setups",
+                new_callable=AsyncMock,
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+
+        assert _sign_in_issues(hass) == []
+
+    async def test_deleting_the_accounts_last_entry_clears_the_sign_in_repair(
+        self, hass, mock_hub
+    ):
+        """Nothing is left to sign in again once the account's last entry is
+        gone; another account's issue stays."""
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+        other = MockConfigEntry(
+            domain=DOMAIN, data=make_config_entry_data(username="other@example.com")
         )
+        other.add_to_hass(hass)
+        mock_hub.login = AsyncMock(side_effect=AuthenticationError("bad credentials"))
+        for failing in (entry, other):
+            with (
+                _patch_hub(mock_hub),
+                patch("custom_components.securitas.async_get_clientsession"),
+                pytest.raises(ConfigEntryAuthFailed),
+            ):
+                await async_setup_entry(hass, failing)
+        assert len(_sign_in_issues(hass)) == 2
+
+        await async_remove_entry(hass, entry)
+
+        assert [i.translation_placeholders for i in _sign_in_issues(hass)] == [
+            {"username": "other@example.com"}
+        ]
 
     async def test_setup_securitas_error_during_login(self, hass, mock_hub):
         """VerisureOwaError during login should raise ConfigEntryNotReady."""
