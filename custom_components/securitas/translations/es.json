@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "El servicio ya está configurado",
             "reauth_successful": "Reautenticación exitosa",
+            "reconfigure_successful": "Sesión iniciada de nuevo",
             "no_refresh_token": "El inicio de sesión fue correcto pero Verisure no devolvió un token de actualización. La integración no puede guardar las credenciales de forma segura. Inténtalo más tarde o repórtalo si persiste.",
-            "installation_not_on_account": "Esta cuenta de Verisure no puede ver la instalación {number}. Inicia sesión con una cuenta que tenga acceso a ella."
+            "installation_not_on_account": "Esta cuenta de Verisure no puede ver la instalación {number}. Inicia sesión con una cuenta que tenga acceso a ella.",
+            "signed_in_again_elsewhere": "Mientras este cuadro de diálogo iniciaba sesión, se volvió a iniciar sesión en esta entrada desde otro cuadro de diálogo, así que este inicio de sesión no se ha guardado.",
+            "account_signed_in_again_elsewhere": "Mientras este cuadro de diálogo iniciaba sesión, se volvió a iniciar sesión en esta cuenta de Verisure desde el cuadro de diálogo de otra instalación, así que este inicio de sesión no se ha guardado. Si esta instalación sigue sin conectarse, vuelve a iniciar sesión.",
+            "already_in_progress": "Ya hay otra configuración o inicio de sesión en curso para esta instalación."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Reautenticar Verisure",
                 "description": "Su sesión ha caducado. Vuelva a introducir su contraseña para reconectar.",
+                "data": {
+                    "username": "Usuario",
+                    "password": "Contraseña"
+                }
+            },
+            "reconfigure": {
+                "title": "Volver a iniciar sesión en Verisure",
+                "description": "Introduzca su contraseña de Verisure para obtener un inicio de sesión nuevo. Úselo cuando la integración no pueda conectarse y no le haya pedido que vuelva a iniciar sesión.",
                 "data": {
                     "username": "Usuario",
                     "password": "Contraseña"

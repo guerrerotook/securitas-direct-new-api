@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "O serviço já está configurado",
             "reauth_successful": "Reautenticação bem-sucedida",
+            "reconfigure_successful": "Sessão iniciada novamente",
             "no_refresh_token": "Início de sessão bem-sucedido, mas a Verisure não devolveu um token de atualização. A integração não pode guardar as credenciais em segurança. Tente novamente mais tarde ou comunique se persistir.",
-            "installation_not_on_account": "Esta conta Verisure não consegue ver a instalação {number}. Inicie sessão com uma conta que tenha acesso a ela."
+            "installation_not_on_account": "Esta conta Verisure não consegue ver a instalação {number}. Inicie sessão com uma conta que tenha acesso a ela.",
+            "signed_in_again_elsewhere": "Enquanto esta janela iniciava sessão, foi iniciada novamente a sessão desta entrada a partir de outra janela, pelo que este início de sessão não foi guardado.",
+            "account_signed_in_again_elsewhere": "Enquanto esta janela iniciava sessão, foi iniciada novamente a sessão desta conta Verisure a partir da janela de outra instalação, pelo que este início de sessão não foi guardado. Se esta instalação continuar sem ligação, inicie sessão novamente.",
+            "already_in_progress": "Já está em curso outra configuração ou início de sessão para esta instalação."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Reautenticar Verisure",
                 "description": "A sua sessão expirou. Introduza novamente a sua palavra-passe para reconectar.",
+                "data": {
+                    "username": "Nome de utilizador",
+                    "password": "Palavra-passe"
+                }
+            },
+            "reconfigure": {
+                "title": "Iniciar sessão novamente na Verisure",
+                "description": "Introduza a sua palavra-passe da Verisure para obter uma nova sessão. Utilize esta opção quando a integração não conseguir ligar-se e não lhe tiver pedido para iniciar sessão novamente.",
                 "data": {
                     "username": "Nome de utilizador",
                     "password": "Palavra-passe"

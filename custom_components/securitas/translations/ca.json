@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "El servei ja està configurat",
             "reauth_successful": "Reautenticació correcta",
+            "reconfigure_successful": "Sessió iniciada de nou",
             "no_refresh_token": "L'inici de sessió ha estat correcte però Verisure no ha retornat un token d'actualització. La integració no pot desar les credencials de manera segura. Torna-ho a provar més tard o comunica-ho si persisteix.",
-            "installation_not_on_account": "Aquest compte de Verisure no pot veure la instal·lació {number}. Inicia la sessió amb un compte que hi tingui accés."
+            "installation_not_on_account": "Aquest compte de Verisure no pot veure la instal·lació {number}. Inicia la sessió amb un compte que hi tingui accés.",
+            "signed_in_again_elsewhere": "Mentre aquest diàleg iniciava la sessió, s'ha tornat a iniciar la sessió d'aquesta entrada des d'un altre diàleg, així que aquest inici de sessió no s'ha desat.",
+            "account_signed_in_again_elsewhere": "Mentre aquest diàleg iniciava la sessió, s'ha tornat a iniciar la sessió d'aquest compte de Verisure des del diàleg d'una altra instal·lació, així que aquest inici de sessió no s'ha desat. Si aquesta instal·lació encara no es pot connectar, torna a iniciar la sessió.",
+            "already_in_progress": "Ja hi ha una altra configuració o un altre inici de sessió en curs per a aquesta instal·lació."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Reautentica Verisure",
                 "description": "La sessió ha caducat. Torneu a introduir la contrasenya per reconnectar.",
+                "data": {
+                    "username": "Nom d'usuari",
+                    "password": "Contrasenya"
+                }
+            },
+            "reconfigure": {
+                "title": "Torna a iniciar la sessió a Verisure",
+                "description": "Introduïu la contrasenya de Verisure per obtenir un inici de sessió nou. Feu-ho servir quan la integració no es pot connectar i no us ha demanat que torneu a iniciar la sessió.",
                 "data": {
                     "username": "Nom d'usuari",
                     "password": "Contrasenya"

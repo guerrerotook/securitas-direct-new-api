@@ -2025,11 +2025,11 @@ class TestSharedSession:
         mock_hub.get_refresh_token.return_value = "dead-token"
 
         entry, written_to = await self._set_up_on_detached_hub(
-            hass, mock_hub, stored_token="fresh-from-reauth"
+            hass, mock_hub, stored_token="own-stored-token"
         )
 
         assert mock_hub.config_entry is entry
-        mock_hub.adopt_refresh_token.assert_called_once_with("fresh-from-reauth")
+        mock_hub.adopt_refresh_token.assert_called_once_with("own-stored-token")
         assert written_to == []
 
     async def test_per_entry_data_stored(self, hass, mock_hub):
@@ -3680,18 +3680,16 @@ class TestSetupRefreshCrashEscalation:
 
 
 # ===========================================================================
-# TestCoTenantReauthRecovery
+# TestCoTenantStoredTokenRecovery
 # ===========================================================================
 
 
-class TestCoTenantReauthRecovery:
-    """Two installations share one hub; reauth on one must revive the shared
-    session instead of reloading onto the client already found dead.
+class TestCoTenantStoredTokenRecovery:
+    """Two installations share one hub whose client has condemned its token.
 
-    After the reauth flow writes a fresh token into one entry and reloads it,
-    the co-tenant still holds the session, so setup lands on the reuse branch.
-    A dead shared client whose token differs from this entry's stored one
-    means exactly that: adopt the stored token and log in with it.
+    A reloaded entry whose own stored token differs from the condemned one
+    lands on the reuse branch while the co-tenant still holds the session, and
+    tries its stored token on the shared client: adopt it and log in with it.
     """
 
     @pytest.fixture
@@ -3721,9 +3719,9 @@ class TestCoTenantReauthRecovery:
         }
         mock_hub.config_entry = entry
 
-    async def test_reload_after_reauth_adopts_the_fresh_token(self, hass, mock_hub):
+    async def test_reload_with_a_different_stored_token_adopts_it(self, hass, mock_hub):
         data = make_config_entry_data()
-        data[CONF_REFRESH_TOKEN] = "fresh-from-reauth"
+        data[CONF_REFRESH_TOKEN] = "own-stored-token"
         entry = MockConfigEntry(domain=DOMAIN, data=data)
         entry.add_to_hass(hass)
         _raise_sign_in_issue(hass, entry.data[CONF_USERNAME])
@@ -3734,7 +3732,7 @@ class TestCoTenantReauthRecovery:
 
         assert await self._attempt(hass, entry, mock_hub) is True
 
-        mock_hub.adopt_refresh_token.assert_called_once_with("fresh-from-reauth")
+        mock_hub.adopt_refresh_token.assert_called_once_with("own-stored-token")
         mock_hub.login.assert_awaited_once()
         assert _sign_in_issues(hass) == {}
 

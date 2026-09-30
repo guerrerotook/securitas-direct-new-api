@@ -6,6 +6,8 @@ import asyncio
 import logging
 import socket
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import voluptuous as vol
@@ -64,10 +66,12 @@ from . import (
     _async_update_duplicate_entry_issues,
     _clear_setup_refresh_crash,
     _clear_sign_in_issues,
+    _flow_session_holder,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
-    _release_session_hold,
+    _release_flow_hold,
+    _replace_account_session,
     _resolve_flow_capabilities,
     _store_installations_cache,
     _take_session_hold,
@@ -129,6 +133,12 @@ LOCK_DISCOVERY_WAIT_TIMEOUT: float = 15.0
 #   Routing via `notify.persistent_notification` would produce a duplicate
 #   card with no actions and no useful body and never reach a real device.
 _NOTIFY_EXCLUDE = {"notify", "send_message", "persistent_notification"}
+
+# Kept outside ``hass.data[DOMAIN]``, which the clean-up discards: a waiting
+# reauth dialog does not count as using the integration, and its entry is not
+# loaded while it reloads or is disabled, so the clean-up can run while the
+# dialog's submission waits on Verisure.
+_SIGN_INS_IN_FLIGHT = f"{DOMAIN}_sign_ins_in_flight"
 
 
 # Section keys for the grouped settings schema. Persisted-data shape stays
@@ -497,8 +507,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # borrowed from a running session that entries or other setup dialogs
         # hold — rebuilding that one would strand them on the old hub (issue #606).
         self._owns_hub: bool = False
-        # The shared-session record this flow holds, as (username, record).
-        self._held_session: tuple[str, dict[str, Any]] | None = None
+        # The account whose registered session this setup dialog holds. A
+        # reauth or Reconfigure dialog's own hold is taken and released
+        # inside _finish_reauth.
+        self._held_account: str | None = None
         self.otp_challenge: tuple[str | None, list[OtpPhone] | None] | None = None
         self._available_installations: list[Installation] = []
         self._selected_installation: Installation | None = None
@@ -508,7 +520,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self._panel_options: dict[str, Any] = {}
         self._has_peri: bool = False
         self._has_annex: bool = False
+        # The entry a reauth or Reconfigure dialog signs in again; the
+        # _reauth_* names cover both.
         self._reauth_entry: config_entries.ConfigEntry | None = None
+        # The abort reason, set when another dialog saves a sign-in for the
+        # same entry or account while this one's submission is still running.
+        self.overtaken_reason: str | None = None
 
     async def _create_entry_for_installation(
         self, installation: Installation
@@ -521,6 +538,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # with the entry-update listener registered in __init__.async_setup_entry.
         self._abort_if_unique_id_configured(reload_on_update=False)
         self.config[CONF_INSTALLATION] = installation.number
+        self._follow_replaced_session()
         assert self.hub is not None
         refresh_token = self.hub.get_refresh_token()
         # Refusing here is the only safe move: dropping the password while
@@ -639,6 +657,12 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Last step of the OTP challenge."""
         if user_input is None:
             return await self._restart_sign_in()
+        with self._sign_in_running():
+            return await self._check_otp_code(user_input)
+
+    async def _check_otp_code(
+        self, user_input: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
         assert self.hub is not None
         assert self.otp_challenge is not None
         try:
@@ -649,34 +673,33 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             # Check if OTP expired (auth-code 10002) — restart 2FA to get new code
             if self._is_otp_expired(err):
                 return await self._show_2fa_error("otp_expired")
-            return self.async_show_form(
-                step_id="otp_challenge",
-                data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
-                errors={"base": "invalid_otp"},
-            )
+            return self._ask_for_the_code_again()
         except Exception as err:  # pylint: disable=broad-exception-caught
             _LOGGER.error(
                 "send_sms_code raised unexpected %s: %s", type(err).__name__, err
             )
-            return self.async_show_form(
-                step_id="otp_challenge",
-                data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
-                errors={"base": "invalid_otp"},
-            )
+            return self._ask_for_the_code_again()
         # If validate_device returns a challenge hash, the code was wrong —
         # the API re-issued a challenge instead of completing authentication.
         otp_hash, _phones = result
         if otp_hash is not None:
-            return self.async_show_form(
-                step_id="otp_challenge",
-                data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
-                errors={"base": "invalid_otp"},
-            )
+            return self._ask_for_the_code_again()
         # MFA may succeed without returning a token (hash: null).
         # finish_setup() will call login() to obtain it.
         if self._reauth_entry is not None:
             return await self._finish_reauth()
         return await self.finish_setup()
+
+    def _ask_for_the_code_again(self) -> config_entries.ConfigFlowResult:
+        # Another code would finish the sign-in this submission started
+        # before another dialog saved, replacing the newer one.
+        if self.overtaken_reason:
+            return self.async_abort(reason=self.overtaken_reason)
+        return self.async_show_form(
+            step_id="otp_challenge",
+            data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
+            errors={"base": "invalid_otp"},
+        )
 
     async def _restart_sign_in(self) -> config_entries.ConfigFlowResult:
         """Show the dialog's first form again.
@@ -750,6 +773,21 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Show reauth form and handle credential re-entry."""
+        return await self._sign_in_again(user_input)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Sign an entry in again from its menu, whether or not it needs reauth."""
+        if self._reauth_entry is None:
+            self._reauth_entry = self._get_reconfigure_entry()
+            self.config = dict(self._reauth_entry.data)
+        return await self._sign_in_again(user_input)
+
+    async def _sign_in_again(
+        self, user_input: dict[str, Any] | None
+    ) -> config_entries.ConfigFlowResult:
+        """Shared by reauth and reconfigure: sign in, then keep the new token."""
         assert self._reauth_entry is not None
         errors: dict[str, str] = {}
 
@@ -759,7 +797,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_USERNAME, self._reauth_entry.data.get(CONF_USERNAME, "")
             )
 
-            # Preserve existing device IDs from the entry being reauthenticated
+            # Preserve existing device IDs from the entry being signed in again
             self.config[CONF_DEVICE_ID] = self._reauth_entry.data.get(
                 CONF_DEVICE_ID, generate_uuid()
             )
@@ -774,21 +812,24 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DELAY_CHECK_OPERATION, DEFAULT_DELAY_CHECK_OPERATION
             )
             self.config.setdefault(CONF_ENTRY_ID, "")
+            # The hub's login() prefers a saved refresh token over the password,
+            # so with the entry's token it would accept any password typed here.
+            self.config.pop(CONF_REFRESH_TOKEN, None)
 
-            self.hub = self._create_client()
-
-            try:
-                await self._login_with_family_fallback()
-            except TwoFactorRequiredError:
-                return await self._start_2fa_flow()
-            except AccountBlockedError:
-                errors["base"] = "account_blocked"
-            except AuthenticationError:
-                errors["base"] = "invalid_auth"
-            except VerisureOwaError:
-                errors["base"] = "cannot_connect"
-            else:
-                return await self._finish_reauth()
+            with self._sign_in_running():
+                self.hub = self._create_client()
+                try:
+                    await self._login_with_family_fallback()
+                except TwoFactorRequiredError:
+                    return await self._start_2fa_flow()
+                except AccountBlockedError:
+                    errors["base"] = "account_blocked"
+                except AuthenticationError:
+                    errors["base"] = "invalid_auth"
+                except VerisureOwaError:
+                    errors["base"] = "cannot_connect"
+                else:
+                    return await self._finish_reauth()
 
         return self._reauth_form(errors)
 
@@ -798,7 +839,11 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         assert self._reauth_entry is not None
         username = self._reauth_entry.data.get(CONF_USERNAME, "")
         return self.async_show_form(
-            step_id="reauth_confirm",
+            step_id=(
+                "reconfigure"
+                if self.source == config_entries.SOURCE_RECONFIGURE
+                else "reauth_confirm"
+            ),
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_USERNAME, default=username): str,
@@ -812,13 +857,16 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         """Capture a fresh refresh token and reload; the supplied password is never persisted."""
         assert self._reauth_entry is not None
         assert self.hub is not None
-        await self.async_set_unique_id(self._reauth_entry.unique_id)
+        # Checked again under the account lock; here, before the checks
+        # below judge this sign-in against the entry the other dialog saved.
+        if self.overtaken_reason:
+            return self.async_abort(reason=self.overtaken_reason)
         refresh_token = self.hub.get_refresh_token()
         # Without a refresh token the entry would be left unauthenticatable.
-        # Leave the existing entry data untouched so the user can retry reauth.
+        # Leave the existing entry data untouched so the user can sign in again.
         if not refresh_token:
             _LOGGER.error(
-                "Reauth login succeeded but no refresh token was returned; "
+                "Sign-in succeeded but no refresh token was returned; "
                 "leaving existing entry unchanged"
             )
             return self.async_abort(reason="no_refresh_token")
@@ -839,6 +887,130 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     description_placeholders={"number": installation},
                 )
             _store_installations_cache(self.hass, username, installations)
+        unique_id = self._reauth_entry.unique_id
+        # Home Assistant before 2025.4 also counts the entry's own pending
+        # reauth dialog as in progress, which would end a Reconfigure opened
+        # beside it; this applies the later versions' rule on all of them.
+        if unique_id is not None and any(
+            flow.get("context", {}).get("source") != config_entries.SOURCE_REAUTH
+            for flow in self._async_in_progress(
+                include_uninitialized=True, match_context={"unique_id": unique_id}
+            )
+        ):
+            return self.async_abort(reason="already_in_progress")
+        await self.async_set_unique_id(unique_id, raise_on_progress=False)
+        # Setup reuses the account's running session rather than a stored
+        # token, so this hub replaces that session and every entry on the
+        # account reloads onto it. Nothing below awaits until the reloads, so
+        # no setup or renewal can come in between.
+        try:
+            async with _account_lock(self.hass, username):
+                if self.overtaken_reason:
+                    return self.async_abort(reason=self.overtaken_reason)
+                registered = _replace_account_session(self.hass, username, self.hub)
+                # Held until the reloads return, not until the flow is removed:
+                # Home Assistant 2025.5 and later abort a reauth flow at the start
+                # of its entry's reload, which would drop this session before the
+                # reload's setup could join it.
+                _take_session_hold(registered, self._session_holder)
+                self._save_reauth_entry(username, installation, switched, refresh_token)
+                account_entries = [
+                    entry
+                    for entry in self.hass.config_entries.async_entries(DOMAIN)
+                    if entry is not self._reauth_entry
+                    and entry.data.get(CONF_USERNAME) == username
+                ]
+                for entry in account_entries:
+                    new_data = {**entry.data, CONF_REFRESH_TOKEN: refresh_token}
+                    new_data.pop(CONF_PASSWORD, None)
+                    self.hass.config_entries.async_update_entry(entry, data=new_data)
+                self._overtake_sign_ins_in_flight(username)
+            # Home Assistant before 2025.5 leaves the entry's reauth dialog open
+            # through the reload; submitted later, it would replace this sign-in.
+            for flow in list(
+                self._reauth_entry.async_get_active_flows(
+                    self.hass, {config_entries.SOURCE_REAUTH}
+                )
+            ):
+                if flow["flow_id"] != self.flow_id:
+                    self.hass.config_entries.flow.async_abort(flow["flow_id"])
+            # The reload below runs no setup for a disabled entry.
+            _async_update_duplicate_entry_issues(self.hass)
+            # This sign-in proves the new token; crashes or err 4 refusals of the
+            # one it replaces must not count against it, and there is nothing left
+            # to sign in again (the reload sets nothing up for a disabled entry).
+            _clear_setup_refresh_crash(self.hass, username)
+            _clear_sign_in_issues(self.hass, username)
+            for entry in (self._reauth_entry, *account_entries):
+                await self.hass.config_entries.async_reload(entry.entry_id)
+        finally:
+            # Also reached by an overtaken dialog, which took no hold; its key
+            # is then on no session and nothing is released.
+            _release_flow_hold(self.hass, username, self._session_holder)
+            # Home Assistant 2025.5 and later close a reauth dialog as its
+            # entry's reload starts, so the clean-up check its closing ran saw
+            # this hold; a disabled entry sets nothing up to take over.
+            self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            return self.async_abort(reason="reconfigure_successful")
+        return self.async_abort(reason="reauth_successful")
+
+    def _sign_ins_in_flight(self) -> dict[FlowHandler, str]:
+        """The sign-in-again dialogs running a step that can save, with the
+        entry each signs in again.
+
+        A save marks the others on the dialogs themselves, so the mark lasts
+        however long their step takes to reach the check.
+        """
+        return self.hass.data.setdefault(_SIGN_INS_IN_FLIGHT, {})
+
+    def _overtake_sign_ins_in_flight(self, username: str) -> None:
+        """Stop the other running sign-ins for this entry or this account.
+
+        Entries on one account share its session, so a sign-in started
+        before this save, for another of its installations, would replace the
+        one just saved.
+        """
+        assert self._reauth_entry is not None
+        entry_id = self._reauth_entry.entry_id
+        for flow, flow_entry_id in self._sign_ins_in_flight().items():
+            if flow is self:
+                continue
+            if flow_entry_id == entry_id:
+                flow.overtaken_reason = "signed_in_again_elsewhere"
+            elif flow.config.get(CONF_USERNAME) == username:
+                flow.overtaken_reason = (
+                    flow.overtaken_reason or "account_signed_in_again_elsewhere"
+                )
+
+    @contextmanager
+    def _sign_in_running(self) -> Iterator[None]:
+        """Keep this dialog on the list while a step that can save runs.
+
+        Only while the step runs, not until the dialog closes: Home Assistant
+        2025.5 and later close a reauth dialog when its entry reloads, and
+        ``_finish_reauth`` closes it on earlier versions, but a step already
+        running carries on.
+        """
+        if self._reauth_entry is None:
+            yield
+            return
+        running = self._sign_ins_in_flight()
+        self.overtaken_reason = None
+        running[self] = self._reauth_entry.entry_id
+        try:
+            yield
+        finally:
+            running.pop(self, None)
+
+    def _save_reauth_entry(
+        self,
+        username: str,
+        installation: str | None,
+        switched: bool,
+        refresh_token: str,
+    ) -> None:
+        assert self._reauth_entry is not None
         new_data = {**self._reauth_entry.data}
         new_data[CONF_USERNAME] = username
         new_data.pop(CONF_PASSWORD, None)
@@ -858,15 +1030,6 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self.hass.config_entries.async_update_entry(
             self._reauth_entry, data=new_data, unique_id=unique_id
         )
-        # The reload below runs no setup for a disabled entry.
-        _async_update_duplicate_entry_issues(self.hass)
-        # This sign-in proves the new token; crashes or err 4 refusals of the
-        # one it replaces must not count against it, and there is nothing left
-        # to sign in again (the reload sets nothing up for a disabled entry).
-        _clear_setup_refresh_crash(self.hass, username)
-        _clear_sign_in_issues(self.hass, username)
-        await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-        return self.async_abort(reason="reauth_successful")
 
     async def _start_2fa_flow(
         self, errors: dict[str, str] | None = None
@@ -877,11 +1040,18 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             otp_result = await self.hub.validate_device()
         except VerisureOwaError as err:
             _LOGGER.error("2FA device validation failed: %s", err)
+            # The setup form would go on to create a new entry, not update this one.
+            if self._reauth_entry is not None:
+                return self._reauth_form({"base": "cannot_connect"})
             return self.async_show_form(
                 step_id="user",
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
+        # The code step would finish the sign-in this submission started
+        # before another dialog saved, replacing the newer one.
+        if self.overtaken_reason:
+            return self.async_abort(reason=self.overtaken_reason)
         self.otp_challenge = otp_result
         otp_phones = otp_result[1] or []
         phone_options = [
@@ -1123,7 +1293,7 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     @property
     def _session_holder(self) -> str:
         """This flow's key in a session's holders; never an entry id's shape."""
-        return f"config_flow:{self.flow_id}"
+        return _flow_session_holder(self.flow_id)
 
     async def _sign_in_and_hold_session(self, username: str) -> None:
         """Sign in unless the account's session is already running, and hold it.
@@ -1177,19 +1347,29 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         the earlier account's session is let go once the flow has signed in to
         or borrowed the other one's, rather than stranded.
         """
-        if self._held_session is not None and self._held_session[1] is not session:
+        if self._held_account not in (None, username):
             self._release_flow_session()
         _take_session_hold(session, self._session_holder)
-        self._held_session = (username, session)
+        self._held_account = username
+
+    def _follow_replaced_session(self) -> None:
+        """Move to the account's registered session if a reauth or Reconfigure
+        replaced the one this flow signed in with or borrowed: the entry it
+        creates joins that one, so it must store that one's login and ids."""
+        if self._held_account is None:
+            return
+        sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
+        current = sessions.get(self._held_account)
+        if current is not None and current["hub"] is not self.hub:
+            self._borrow_session(self._held_account, current)
 
     def _release_flow_session(self) -> None:
         """Release this flow's hold; the session goes once nobody holds it."""
-        if self._held_session is None:
+        if self._held_account is None:
             return
-        username, session = self._held_session
-        self._held_session = None
-        sessions = self.hass.data.get(DOMAIN, {}).get("sessions", {})
-        _release_session_hold(sessions, username, session, self._session_holder)
+        username = self._held_account
+        self._held_account = None
+        _release_flow_hold(self.hass, username, self._session_holder)
 
     @callback
     def async_remove(self) -> None:
@@ -1200,8 +1380,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         the user closing the dialog, and a created entry. On the last, HA has
         already set the new entry up, so it holds the session and it is kept.
         An open setup dialog keeps the integration set up even when it holds
-        nothing, so closing one may leave nothing using it. A reauth dialog
-        does not count; its entry keeps the integration set up while it waits.
+        nothing, so closing one may leave nothing using it; a Reconfigure
+        dialog counts as one. A reauth dialog does not count; its entry keeps
+        the integration set up while it waits.
         """
         self._release_flow_session()
         self.hass.async_create_task(_async_teardown_domain_if_unused(self.hass))

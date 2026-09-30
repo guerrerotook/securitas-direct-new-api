@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "O serviço já está configurado",
             "reauth_successful": "Reautenticação realizada com sucesso",
+            "reconfigure_successful": "Você entrou novamente",
             "no_refresh_token": "Login bem-sucedido, mas a Verisure não retornou um token de atualização. A integração não pode salvar as credenciais com segurança. Tente novamente mais tarde ou reporte se persistir.",
-            "installation_not_on_account": "Esta conta Verisure não consegue ver a instalação {number}. Entre com uma conta que tenha acesso a ela."
+            "installation_not_on_account": "Esta conta Verisure não consegue ver a instalação {number}. Entre com uma conta que tenha acesso a ela.",
+            "signed_in_again_elsewhere": "Enquanto esta janela fazia login, esta entrada foi conectada novamente a partir de outra janela, então este login não foi salvo.",
+            "account_signed_in_again_elsewhere": "Enquanto esta janela fazia login, esta conta Verisure foi conectada novamente a partir da janela de outra instalação, então este login não foi salvo. Se esta instalação ainda não conseguir se conectar, faça login novamente.",
+            "already_in_progress": "Já existe outra configuração ou login em andamento para esta instalação."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Reautenticar Verisure",
                 "description": "Sua sessão expirou. Digite novamente sua senha para reconectar.",
+                "data": {
+                    "username": "Nome de usuário",
+                    "password": "Senha"
+                }
+            },
+            "reconfigure": {
+                "title": "Entrar novamente na Verisure",
+                "description": "Digite sua senha da Verisure para obter um novo login. Use esta opção quando a integração não conseguir se conectar e não tiver pedido para você entrar novamente.",
                 "data": {
                     "username": "Nome de usuário",
                     "password": "Senha"

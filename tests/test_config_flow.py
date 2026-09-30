@@ -2,12 +2,16 @@
 
 import asyncio
 import logging
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from types import MethodType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components import frontend
 from homeassistant.config_entries import (
     SOURCE_REAUTH,
+    SOURCE_RECONFIGURE,
     SOURCE_USER,
     ConfigEntryDisabler,
     ConfigEntryState,
@@ -21,7 +25,7 @@ from homeassistant.const import (
     CONF_UNIQUE_ID,
     CONF_USERNAME,
 )
-from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.data_entry_flow import FlowResultType, UnknownFlow, section
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
@@ -46,6 +50,7 @@ from custom_components.securitas import (
     DEFAULT_DELAY_CHECK_OPERATION,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    _async_teardown_domain_if_unused,
     _get_or_create_session,
     _login_or_raise,
     _raise_sign_in_issue,
@@ -63,6 +68,7 @@ from custom_components.securitas.const import (
     CONF_REFRESH_TOKEN,
     PANEL_OPTION_KEYS,
 )
+from custom_components.securitas.hub import VerisureHub
 from custom_components.securitas.pin_crypto import verify_pin
 from custom_components.securitas.verisure_owa_api import (
     PERI_DEFAULTS,
@@ -72,6 +78,7 @@ from custom_components.securitas.verisure_owa_api import (
     AuthenticationError,
     OtpPhone,
     TwoFactorRequiredError,
+    VerisureOwaClient,
     VerisureOwaError,
     VerisureOwaState,
 )
@@ -622,10 +629,14 @@ async def test_otp_challenge_advances_to_options(hass):
 # ===================================================================
 
 
-async def _reauth_to_2fa_step(hass, hub, step_id):
-    """Sign an entry in again as far as ``step_id`` of the SMS-code steps."""
+async def _sign_in_again_to_2fa_step(hass, hub, step_id, first_step):
+    """Sign an entry in again, by reauth or Reconfigure as ``first_step``
+    names, as far as ``step_id`` of the SMS-code steps."""
     entry = _make_reauth_entry(hass)
-    result = await _start_reauth_flow(hass, entry)
+    start = (
+        _start_reconfigure_flow if first_step == "reconfigure" else _start_reauth_flow
+    )
+    result = await start(hass, entry)
     with _patches(hub):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
@@ -647,15 +658,23 @@ async def _setup_to_2fa_step(hass, hub, step_id):
 
 
 @pytest.mark.parametrize("step_id", ["phone_list", "otp_challenge"])
-@pytest.mark.parametrize("reauth", [True, False], ids=["sign-in-again", "setup"])
+@pytest.mark.parametrize(
+    "first_step",
+    ["reauth_confirm", "reconfigure", "user"],
+    ids=["reauth", "reconfigure", "setup"],
+)
 async def test_reopening_a_dialog_at_the_code_steps_starts_the_sign_in_again(
-    hass, reauth, step_id
+    hass, first_step, step_id
 ):
     """Closing the dialog leaves the flow at its step, and reopening it asks
     for that step with no input. The dialog shows its first form again rather
     than failing, and signing in from there sends a new code and finishes."""
-    reach = _reauth_to_2fa_step if reauth else _setup_to_2fa_step
-    flow_id = await reach(hass, _hub_factory(two_fa=True), step_id)
+    signing_in_again = first_step != "user"
+    hub = _hub_factory(two_fa=True)
+    if signing_in_again:
+        flow_id = await _sign_in_again_to_2fa_step(hass, hub, step_id, first_step)
+    else:
+        flow_id = await _setup_to_2fa_step(hass, hub, step_id)
     fresh = _hub_factory(two_fa=True)
     fresh.validate_device.return_value = ("new-challenge", MOCK_PHONES)
     fresh.get_refresh_token.return_value = "new-refresh-token"
@@ -668,12 +687,12 @@ async def test_reopening_a_dialog_at_the_code_steps_starts_the_sign_in_again(
         result = await hass.config_entries.flow.async_configure(flow_id)
 
         assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == ("reauth_confirm" if reauth else "user")
+        assert result["step_id"] == first_step
         assert not result.get("errors")
 
         credentials = (
             {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"}
-            if reauth
+            if signing_in_again
             else USER_INPUT_CREDENTIALS
         )
         result = await hass.config_entries.flow.async_configure(
@@ -690,8 +709,12 @@ async def test_reopening_a_dialog_at_the_code_steps_starts_the_sign_in_again(
         )
         fresh.send_sms_code.assert_awaited_once_with("new-challenge", "123456")
 
-        if reauth:
-            assert result["reason"] == "reauth_successful"
+        if signing_in_again:
+            assert result["reason"] == (
+                "reconfigure_successful"
+                if first_step == "reconfigure"
+                else "reauth_successful"
+            )
             entry = hass.config_entries.async_entries(DOMAIN)[0]
         else:
             assert result["step_id"] == "options"
@@ -2889,9 +2912,52 @@ async def test_removing_the_token_owner_prefers_a_loaded_co_tenant(hass):
     assert written_to == [office]
 
 
+async def test_removing_the_token_owner_skips_a_co_tenant_moved_to_another_account(
+    hass,
+):
+    """Reconfigure names the new account in an entry before its reload lets go
+    of the first account's session. The hub refuses to save into that entry,
+    so saving must go to a co-tenant still on the account, even a retrying one
+    when the moved entry is loaded."""
+    hub = _two_installation_hub()
+    home = await _load_home_entry(hass, hub)
+    office = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="aa-loaded-office",
+        unique_id="test@example.com_222",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "222"},
+        version=FlowHandler.VERSION,
+    )
+    office.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(office.entry_id)
+    cabin = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="zz-retrying-cabin",
+        unique_id="test@example.com_333",
+        data={**make_config_entry_data(), CONF_INSTALLATION: "333"},
+        version=FlowHandler.VERSION,
+    )
+    cabin.add_to_hass(hass)
+    with patch(
+        "custom_components.securitas._fetch_and_cache_installations",
+        AsyncMock(side_effect=VerisureOwaError("offline")),
+    ):
+        await hass.config_entries.async_setup(cabin.entry_id)
+    assert office.state is ConfigEntryState.LOADED
+    assert cabin.state is ConfigEntryState.SETUP_RETRY
+    _write_other_account_into(hass, office)
+    written_to = _record_persistence_target(hub)
+
+    await hass.config_entries.async_remove(home.entry_id)
+    await hass.async_block_till_done()
+
+    assert hub.config_entry is cabin
+    assert written_to == [cabin]
+
+
 async def test_a_dead_token_is_not_handed_to_the_co_tenant(hass):
-    """A condemned token written over the co-tenant's own would stop setup from
-    trying the co-tenant's token, which may be a fresh one from reauth."""
+    """A condemned token is not written to the co-tenant: it would replace the
+    co-tenant's own token, which setup may still be able to use."""
     hub = _two_installation_hub()
     home = await _load_home_entry(hass, hub)
     office = _add_office_entry(hass)
@@ -3797,6 +3863,18 @@ def _make_reauth_entry(hass) -> MockConfigEntry:
     return entry
 
 
+def _make_reauth_office_entry(hass) -> MockConfigEntry:
+    """A second installation on the reauth entry's account, added to hass."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="test@example.com_654321",
+        data={**REAUTH_ENTRY_DATA, CONF_INSTALLATION: "654321"},
+        version=3,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
 async def _start_reauth_flow(hass, entry):
     """Initiate a reauth flow for the given entry."""
     result = await hass.config_entries.flow.async_init(
@@ -4022,15 +4100,12 @@ async def _reauth_as_other_account(hass, entry, other_hub=None):
         other_hub = _hub_for_other_account(
             make_installation(number=entry.data[CONF_INSTALLATION])
         )
-    reauth_hub = _hub_factory()
-    # The dialog signs in to the same account the reload does.
-    reauth_hub.client.list_installations = other_hub.client.list_installations
+    # The dialog's sign-in becomes the account's session, which the reload
+    # joins rather than signing in again.
+    setup_login = AsyncMock(return_value=other_hub)
     with (
-        _patches(reauth_hub),
-        patch(
-            "custom_components.securitas._login_ipv4_first",
-            AsyncMock(return_value=other_hub),
-        ),
+        _patches(other_hub),
+        patch("custom_components.securitas._login_ipv4_first", setup_login),
     ):
         result = await hass.config_entries.flow.async_configure(
             flow_id,
@@ -4042,6 +4117,8 @@ async def _reauth_as_other_account(hass, entry, other_hub=None):
         await hass.async_block_till_done()
     assert result["reason"] == "reauth_successful"
     assert entry.state is ConfigEntryState.LOADED
+    setup_login.assert_not_awaited()
+    assert _flow_sessions(hass)["other@example.com"]["hub"] is other_hub
     assert _flow_sessions(hass)["other@example.com"]["holders"] == {entry.entry_id}
 
 
@@ -4294,6 +4371,7 @@ async def _load_third_account_entry(hass):
 def _hub_for_other_account(*installations):
     hub = _hub_factory()
     hub.config = make_config_entry_data(username="other@example.com")
+    hub.client.username = "other@example.com"
     hub.client.list_installations = AsyncMock(return_value=list(installations))
     return hub
 
@@ -4400,7 +4478,7 @@ def _reauth_hub_seeing(*numbers):
 
 async def _submit_reauth(hass, entry, username, reauth_hub, setup_login):
     """Answer the entry's reauth dialog as ``username``; ``setup_login``
-    stands in for the reload's sign-in."""
+    stands in for any sign-in the reload's setup makes."""
     flows = _reauth_flows_for(hass, entry)
     flow_id = (
         flows[0]["flow_id"]
@@ -4416,20 +4494,49 @@ async def _submit_reauth(hass, entry, username, reauth_hub, setup_login):
     return result
 
 
+@contextmanager
+def _seen_as_the_reload_starts(hass, look):
+    """Record ``look()`` as each entry reload starts, then reload as usual.
+
+    Separates what the dialog did from what the reload's setup then does
+    with the session the dialog handed it.
+    """
+    seen: list = []
+    reload = hass.config_entries.async_reload
+
+    async def recording_reload(entry_id):
+        seen.append(look())
+        return await reload(entry_id)
+
+    with patch.object(hass.config_entries, "async_reload", recording_reload):
+        yield seen
+
+
+async def _crash_on_the_next_setup(hass, entry):
+    """Reload ``entry`` with a sign-in whose token crashes."""
+    with _crashing_login(_hub_factory()):
+        await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
 async def test_a_reauth_on_the_same_account_gives_the_next_crash_its_retry(hass):
     """Signing in again proves the new token, so the crashes of the old one
     must not count against it: its first crash waits to retry."""
     home = await _home_crashed_once_then_rejected(hass)
 
-    result = await _submit_reauth(
-        hass,
-        home,
-        "test@example.com",
-        _reauth_hub_seeing("111"),
-        _crashing_login(_hub_factory()),
-    )
+    with _seen_as_the_reload_starts(hass, lambda: dict(_crash_streaks(hass))) as seen:
+        result = await _submit_reauth(
+            hass,
+            home,
+            "test@example.com",
+            _reauth_hub_seeing("111"),
+            _crashing_login(_hub_factory()),
+        )
 
     assert result["reason"] == "reauth_successful"
+    assert seen == [{}]
+    assert home.state is ConfigEntryState.LOADED
+    await _crash_on_the_next_setup(hass, home)
     assert home.state is ConfigEntryState.SETUP_RETRY
     assert not _reauth_flows_for(hass, home)
 
@@ -4447,18 +4554,26 @@ async def test_a_reauth_onto_another_account_clears_that_accounts_crash_count(
     home.async_start_reauth(hass)
     await hass.async_block_till_done()
 
-    result = await _submit_reauth(
-        hass,
-        home,
-        "other@example.com",
-        _reauth_hub_seeing("111"),
-        _crashing_login(_hub_factory()),
-    )
+    with _seen_as_the_reload_starts(hass, lambda: dict(_crash_streaks(hass))) as seen:
+        result = await _submit_reauth(
+            hass,
+            home,
+            "other@example.com",
+            _reauth_hub_seeing("111"),
+            _crashing_login(_hub_factory()),
+        )
 
     assert result["reason"] == "reauth_successful"
+    # Home's reload, then the other entry on the account it joined.
+    assert seen == [{}, {}]
     assert home.data[CONF_USERNAME] == "other@example.com"
+    assert other.data[CONF_REFRESH_TOKEN] == home.data[CONF_REFRESH_TOKEN]
+    assert home.state is ConfigEntryState.LOADED
+    assert other.state is ConfigEntryState.LOADED
+    # So that Home's next setup signs in rather than joining its session.
+    assert await hass.config_entries.async_unload(other.entry_id)
+    await _crash_on_the_next_setup(hass, home)
     assert home.state is ConfigEntryState.SETUP_RETRY
-    assert other.state is ConfigEntryState.SETUP_RETRY
 
 
 async def test_a_reauth_onto_an_account_without_the_installation_is_refused(hass):
@@ -4594,20 +4709,22 @@ async def test_reauth_keeps_a_login_saved_in_capitals(hass):
     )
     entry.add_to_hass(hass)
     reauth_hub = _reauth_hub_seeing("111")
+    listed = reauth_hub.client.list_installations
 
-    result = await _submit_reauth(
-        hass,
-        entry,
-        "Test@Example.com",
-        reauth_hub,
-        patch(
-            "custom_components.securitas._login_ipv4_first",
-            AsyncMock(return_value=_two_installation_hub()),
-        ),
-    )
+    with _seen_as_the_reload_starts(hass, lambda: listed.await_count) as seen:
+        result = await _submit_reauth(
+            hass,
+            entry,
+            "Test@Example.com",
+            reauth_hub,
+            patch(
+                "custom_components.securitas._login_ipv4_first",
+                AsyncMock(return_value=_two_installation_hub()),
+            ),
+        )
 
     assert result["reason"] == "reauth_successful"
-    reauth_hub.client.list_installations.assert_not_awaited()
+    assert seen == [0]
     assert entry.data[CONF_USERNAME] == "Test@Example.com"
     assert entry.unique_id == "Test@Example.com_111"
 
@@ -4774,24 +4891,59 @@ async def test_signing_a_disabled_entry_in_again_clears_its_sign_in_repair(hass)
     assert _sign_in_issue_ids(hass) == []
 
 
+async def test_signing_the_only_entry_in_again_while_it_is_disabled_tears_down(hass):
+    """Disabled mid sign-in, the entry sets nothing up again, so once the
+    dialog lets go of the new session nothing uses the integration."""
+    (entry,) = await _load_installation_111_entries(hass, "user@example.com")
+
+    await _reauth_disabled_entry(hass, entry, "user@example.com")
+    await hass.async_block_till_done()
+
+    _assert_torn_down(hass)
+
+
+@pytest.mark.parametrize("source", [SOURCE_REAUTH, SOURCE_RECONFIGURE])
+async def test_signing_a_disabled_only_entry_in_again_tears_down(hass, source):
+    """The reload sets nothing up for a disabled entry, so once the dialog
+    lets go of the session it registered nothing uses the integration."""
+    (entry,) = await _load_installation_111_entries(hass, "user@example.com")
+    await _disable(hass, entry)
+    _assert_torn_down(hass)
+    start = _start_reauth_flow if source == SOURCE_REAUTH else _start_reconfigure_flow
+    flow_id = (await start(hass, entry))["flow_id"]
+
+    with _patches(_reauth_hub_seeing("111")):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_USERNAME: "user@example.com", CONF_PASSWORD: "pw"},
+        )
+    await hass.async_block_till_done()
+
+    assert result["reason"] in ("reauth_successful", "reconfigure_successful")
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    _assert_torn_down(hass)
+
+
 async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):
     """The account already saw the installation when the entry was set up; a
     same-account reauth costs no extra call."""
     home = await _home_crashed_once_then_rejected(hass)
     reauth_hub = _reauth_hub_seeing("111")
+    listed = reauth_hub.client.list_installations
 
-    await _submit_reauth(
-        hass,
-        home,
-        "test@example.com",
-        reauth_hub,
-        patch(
-            "custom_components.securitas._login_ipv4_first",
-            AsyncMock(return_value=_two_installation_hub()),
-        ),
-    )
+    with _seen_as_the_reload_starts(hass, lambda: listed.await_count) as seen:
+        await _submit_reauth(
+            hass,
+            home,
+            "test@example.com",
+            reauth_hub,
+            patch(
+                "custom_components.securitas._login_ipv4_first",
+                AsyncMock(return_value=_two_installation_hub()),
+            ),
+        )
 
-    reauth_hub.client.list_installations.assert_not_awaited()
+    assert seen == [0]
     assert home.state is ConfigEntryState.LOADED
 
 
@@ -5410,3 +5562,1240 @@ async def test_options_init_prefills_saved_operation_poll_timeout(hass):
         f"Expected pre-filled default {saved_value!r}, got {marker.default()!r}. "
         "CONF_OPERATION_POLL_TIMEOUT is missing from the async_step_init defaults dict."
     )
+
+
+# ===================================================================
+# Reconfigure: signing in again from the entry's menu
+# ===================================================================
+
+
+async def _start_reconfigure_flow(hass, entry):
+    """Open the Reconfigure dialog for the given entry."""
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+
+
+async def _submit_sign_in(
+    hass, flow_id, hub, password="new-password", username="test@example.com"
+):
+    """Answer the entry's sign-in form (reauth or Reconfigure) with a reload that does nothing."""
+    with (
+        _patches(hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={
+                CONF_USERNAME: username,
+                CONF_PASSWORD: password,
+            },
+        )
+    return result, mock_reload
+
+
+async def test_the_entry_menu_offers_reconfigure(hass):
+    """The entry's menu has a Reconfigure item."""
+    entry = _make_reauth_entry(hass)
+
+    assert entry.supports_reconfigure is True
+
+
+async def test_reconfigure_asks_for_the_password_with_the_username_filled_in(hass):
+    """Reconfigure shows its sign-in form with the entry's username filled in."""
+    entry = _make_reauth_entry(hass)
+
+    result = await _start_reconfigure_flow(hass, entry)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    fields = {str(key): key for key in result["data_schema"].schema}
+    assert fields[CONF_USERNAME].default() == "test@example.com"
+    assert CONF_PASSWORD in fields
+
+
+async def test_reconfigure_saves_a_fresh_login_without_the_password(hass):
+    """Reconfigure saves the new refresh token, not the password, and reloads."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+
+    result, mock_reload = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    assert CONF_PASSWORD not in entry.data
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reconfigure_with_a_wrong_password_asks_again(hass):
+    """A rejected password shows the form again and leaves the entry unchanged."""
+    entry = _make_reauth_entry(hass)
+    data_before = dict(entry.data)
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    hub.login.side_effect = AuthenticationError("bad credentials")
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub, password="wrong")
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert dict(entry.data) == data_before
+
+
+async def test_reconfigure_with_a_verification_code_finishes_as_reconfigure(hass):
+    """A sign-in that needs a code finishes as a Reconfigure, not a reauth."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reconfigure_flow(hass, entry)
+    flow_id = result["flow_id"]
+    hub = _hub_factory(two_fa=True)
+
+    result, _ = await _submit_sign_in(hass, flow_id, hub)
+    assert result["step_id"] == "phone_list"
+    with _patches(hub):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={"phones": "0_555-1234"}
+        )
+    assert result["step_id"] == "otp_challenge"
+    with (
+        _patches(hub),
+        patch.object(
+            hass.config_entries, "async_reload", new_callable=AsyncMock
+        ) as mock_reload,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_reconfigure_onto_an_account_without_the_installation_is_refused(
+    hass,
+):
+    """Another account that cannot see the entry's installation is refused."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    data_before = dict(home.data)
+    result = await _start_reconfigure_flow(hass, home)
+
+    result, _ = await _submit_sign_in(
+        hass,
+        result["flow_id"],
+        _reauth_hub_seeing("333"),
+        username="other@example.com",
+    )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "installation_not_on_account"
+    assert dict(home.data) == data_before
+
+
+async def test_reconfigure_onto_an_account_that_cannot_list_asks_again(hass):
+    """Another account whose installations cannot be listed shows the form again."""
+    home = await _load_home_entry(hass, _two_installation_hub())
+    result = await _start_reconfigure_flow(hass, home)
+    hub = _hub_factory()
+    hub.client.list_installations = AsyncMock(side_effect=VerisureOwaError("offline"))
+
+    result, _ = await _submit_sign_in(
+        hass, result["flow_id"], hub, username="other@example.com"
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+@pytest.mark.parametrize(
+    ("start", "step_id"),
+    [
+        (_start_reconfigure_flow, "reconfigure"),
+        (_start_reauth_flow, "reauth_confirm"),
+    ],
+)
+async def test_a_failed_code_request_asks_again_on_the_sign_in_form(
+    hass, start, step_id
+):
+    """The new-setup form would carry on as a new entry, not this one."""
+    entry = _make_reauth_entry(hass)
+    result = await start(hass, entry)
+    hub = _hub_factory(two_fa=True)
+    hub.validate_device = AsyncMock(side_effect=VerisureOwaError("offline"))
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], hub)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == step_id
+    assert result["errors"] == {"base": "cannot_connect"}
+
+
+async def test_reconfigure_moves_every_installation_on_the_account_to_the_fresh_login(
+    hass,
+):
+    """Installations on one account share its running session, which setup
+    reuses, so Reconfigure replaces that session with its own sign-in and
+    reloads all of them onto it; the old session saves nothing more."""
+    shared_hub = _two_installation_hub()
+    home = await _load_home_entry(hass, shared_hub)
+    office = _add_office_entry(hass)
+    assert await hass.config_entries.async_setup(office.entry_id)
+    await hass.async_block_till_done()
+    assert hass.data[DOMAIN][office.entry_id]["hub"] is shared_hub
+    shared_hub.hass = hass
+    shared_hub.client.username = "test@example.com"
+    shared_hub._persist_refresh_token = MethodType(
+        VerisureHub._persist_refresh_token, shared_hub
+    )
+    result = await _start_reconfigure_flow(hass, home)
+    hub = _reauth_hub_seeing("111", "222")
+    hub.get_refresh_token = MagicMock(return_value="fresh-login")
+
+    with _patches(hub):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.async_block_till_done()
+    # A renewal of the old login finishing after the switch.
+    shared_hub._persist_refresh_token("old-login-rotated")
+
+    assert result["reason"] == "reconfigure_successful"
+    assert hass.data[DOMAIN]["sessions"]["test@example.com"]["hub"] is hub
+    for entry in (home, office):
+        assert entry.state is ConfigEntryState.LOADED
+        assert hass.data[DOMAIN][entry.entry_id]["hub"] is hub
+        assert entry.data[CONF_REFRESH_TOKEN] == "fresh-login"
+    shared_hub.adopt_refresh_token.assert_not_called()
+
+
+@pytest.mark.parametrize("start", [_start_reconfigure_flow, _start_reauth_flow])
+async def test_a_sign_in_drops_the_saved_password_from_every_installation_on_the_account(
+    hass, start
+):
+    """Another installation on the account may still hold a password saved
+    before refresh tokens; the fresh login it receives replaces it."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    assert office.data[CONF_PASSWORD] == "old-password"
+    result = await start(hass, home)
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["type"] == FlowResultType.ABORT
+    for entry in (home, office):
+        assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+        assert CONF_PASSWORD not in entry.data
+
+
+def _fresh_login_hub():
+    """A Reconfigure dialog's hub on the account, with device ids of its own."""
+    hub = _reauth_hub_seeing("111", "222")
+    hub.get_refresh_token = MagicMock(return_value="fresh-login")
+    hub.config = {
+        **make_config_entry_data(),
+        CONF_DEVICE_ID: "fresh-device-id",
+        CONF_UNIQUE_ID: "fresh-uuid",
+        CONF_DEVICE_INDIGITALL: "fresh-indigitall",
+    }
+    return hub
+
+
+async def test_a_setup_dialog_open_through_a_reconfigure_saves_the_fresh_login(hass):
+    """A dialog adding another installation on the account borrowed the
+    session Reconfigure then replaced; the entry it creates must store the
+    login of the session it joins, not the replaced one's."""
+    shared_hub = _two_installation_hub()
+    shared_hub.get_refresh_token = MagicMock(return_value="old-login")
+    home = await _load_home_entry(hass, shared_hub)
+    adding = await _start_user_flow(hass, shared_hub)
+    # Office is the only installation left to add.
+    assert adding["step_id"] == "options"
+    result = await _start_reconfigure_flow(hass, home)
+    hub = _fresh_login_hub()
+    with _patches(hub):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.async_block_till_done()
+    assert result["reason"] == "reconfigure_successful"
+
+    result = await _finish_from_options(hass, adding)
+    await hass.async_block_till_done()
+
+    office = result["result"]
+    assert office.data[CONF_REFRESH_TOKEN] == "fresh-login"
+    assert hass.data[DOMAIN][office.entry_id]["hub"] is hub
+    assert office.data[CONF_DEVICE_ID] == "fresh-device-id"
+    assert office.data[CONF_UNIQUE_ID] == "fresh-uuid"
+    assert office.data[CONF_DEVICE_INDIGITALL] == "fresh-indigitall"
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {
+        home.entry_id,
+        office.entry_id,
+    }
+
+
+async def _reconfigure_under_a_setup_dialog(hass, *, disable_home=None):
+    """Open a dialog adding Office, then reconfigure Home onto a fresh login,
+    disabling Home ``"before"`` or ``"after"`` the sign-in if asked."""
+    old = _two_installation_hub()
+    old.get_refresh_token = MagicMock(return_value="old-login")
+    home = await _load_home_entry(hass, old)
+    adding = await _start_user_flow(hass, old)
+    assert adding["step_id"] == "options"
+    flow = await _start_reconfigure_flow(hass, home)
+    if disable_home == "before":
+        await _disable(hass, home)
+    fresh = _fresh_login_hub()
+    with _patches(fresh):
+        result = await hass.config_entries.flow.async_configure(
+            flow["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+    assert result["reason"] == "reconfigure_successful"
+    if disable_home == "after":
+        await _disable(hass, home)
+    return old, fresh, adding
+
+
+@pytest.mark.parametrize("disable_home", ["before", "after"])
+async def test_a_setup_dialog_keeps_the_fresh_login_when_the_reconfigured_entry_is_disabled(
+    hass, disable_home
+):
+    """With the only entry on the account disabled, the setup dialog is left
+    as the only user of the session Reconfigure registered; that session
+    must outlive the Reconfigure dialog, and the entry the setup dialog
+    creates must join it and store its login and device ids."""
+    old, fresh, adding = await _reconfigure_under_a_setup_dialog(
+        hass, disable_home=disable_home
+    )
+
+    with patch(
+        "custom_components.securitas._login_ipv4_first", AsyncMock(return_value=old)
+    ):
+        result = await _finish_from_options(hass, adding)
+    await hass.async_block_till_done()
+
+    office = result["result"]
+    assert office.state is ConfigEntryState.LOADED
+    assert hass.data[DOMAIN][office.entry_id]["hub"] is fresh
+    assert office.data[CONF_REFRESH_TOKEN] == "fresh-login"
+    assert office.data[CONF_DEVICE_ID] == "fresh-device-id"
+    assert office.data[CONF_UNIQUE_ID] == "fresh-uuid"
+    assert office.data[CONF_DEVICE_INDIGITALL] == "fresh-indigitall"
+    assert _flow_sessions(hass)["test@example.com"]["holders"] == {office.entry_id}
+
+
+async def test_closing_a_setup_dialog_after_a_reconfigure_lets_the_session_go(hass):
+    """The setup dialog's hold moves to the session Reconfigure registered,
+    so closing the dialog lets that session go once nothing else holds it."""
+    await _reconfigure_under_a_setup_dialog(hass, disable_home="after")
+    [adding] = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+    hass.config_entries.flow.async_abort(adding["flow_id"])
+    await hass.async_block_till_done()
+
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+async def _reconfigure_while_a_renewal_is_in_flight(hass, api, entry, session_entry):
+    """Finish the Reconfigure dialog for ``entry`` with the fresh login while
+    the account's running session, which saves its tokens to
+    ``session_entry``, is renewing the old login; the renewal finishes
+    after the dialog has saved."""
+    shared_hub = _saving_tokens_to(
+        hass, _hub_factory(), session_entry, "test@example.com"
+    )
+    shared_hub.client = api
+    api._on_refresh_token_changed = shared_hub._persist_refresh_token
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "test@example.com": {"hub": shared_hub, "holders": {session_entry.entry_id}}
+    }
+    api.authentication_token = FAKE_JWT
+    api.authentication_token_exp = datetime.min
+    api.refresh_token_value = "old-login"
+    renewal_started = asyncio.Event()
+    release_renewal = asyncio.Event()
+
+    async def _slow_refresh() -> bool:
+        renewal_started.set()
+        await release_renewal.wait()
+        api._update_refresh_token("old-login-rotated")
+        api.authentication_token_exp = datetime.now() + timedelta(minutes=15)
+        return True
+
+    api.refresh_token = _slow_refresh
+    renewal = asyncio.create_task(api._check_authentication_token())
+    await renewal_started.wait()
+    result = await _start_reconfigure_flow(hass, entry)
+    hub = _hub_factory()
+    hub.get_refresh_token = MagicMock(return_value="fresh-login")
+
+    with (
+        _patches(hub),
+        patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+    release_renewal.set()
+    await asyncio.wait_for(renewal, 3)
+    return result
+
+
+async def test_a_renewal_in_flight_cannot_overwrite_the_saved_fresh_login(hass, api):
+    """A renewal of the old login, still running when the dialog saves the
+    fresh one, must not then save its rotated token over it."""
+    entry = _make_reauth_entry(hass)
+
+    result = await _reconfigure_while_a_renewal_is_in_flight(hass, api, entry, entry)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "fresh-login"
+
+
+async def test_a_renewal_in_flight_cannot_leave_the_old_login_on_the_sessions_entry(
+    hass, api
+):
+    """When the running session saves its tokens to another installation on
+    the account, the old login's renewal would land there; that entry must
+    hold the fresh login too, or a restart starts it from the old one."""
+    entry = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+
+    result = await _reconfigure_while_a_renewal_is_in_flight(hass, api, entry, office)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "fresh-login"
+    assert office.data[CONF_REFRESH_TOKEN] == "fresh-login"
+
+
+async def test_reconfigure_with_no_running_session_reloads_on_its_own_sign_in(hass):
+    """The dialog's signed-in hub becomes the account's session before the
+    reload, under the account lock, so the reload, and any other entry on the
+    account setting up meanwhile, joins the fresh login rather than signing
+    in again with an older saved one."""
+    home = await _home_crashed_once_then_rejected(hass)
+    assert "test@example.com" not in hass.data[DOMAIN].get("sessions", {})
+    result = await _start_reconfigure_flow(hass, home)
+    hub = _reauth_hub_seeing("111")
+    setup_login = AsyncMock(return_value=_two_installation_hub())
+
+    with (
+        _patches(hub),
+        patch("custom_components.securitas._login_ipv4_first", setup_login),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert home.state is ConfigEntryState.LOADED
+    setup_login.assert_not_awaited()
+    assert hass.data[DOMAIN]["sessions"]["test@example.com"]["hub"] is hub
+
+
+def _hub_issuing(token):
+    hub = _hub_factory()
+    hub.get_refresh_token = MagicMock(return_value=token)
+    return hub
+
+
+def _flow_in_progress(hass, flow_id) -> bool:
+    return any(
+        flow["flow_id"] == flow_id
+        for flow in hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    )
+
+
+async def _sign_in_on(hass, flow_id, token):
+    with _patches(_hub_issuing(token)):
+        return await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+
+
+async def test_a_sign_in_again_dialog_submitted_during_reconfigure_is_refused(hass):
+    """A sign-in-again dialog submitted while Reconfigure's reload runs is
+    closed or refused as already_in_progress, and Reconfigure's login is saved."""
+    entry = _make_reauth_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+    during_reload = {}
+
+    async def _reload(_entry_id):
+        try:
+            during_reload["result"] = await _sign_in_on(hass, reauth_id, "reauth-token")
+        except UnknownFlow:
+            during_reload["result"] = None
+
+    with patch.object(hass.config_entries, "async_reload", side_effect=_reload):
+        result = await _sign_in_on(hass, reconfigure_id, "reconfigure-token")
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reconfigure-token"
+    assert during_reload["result"] is None or (
+        during_reload["result"]["reason"] == "already_in_progress"
+    )
+
+
+async def test_a_reconfigure_back_at_its_form_does_not_block_sign_in_again(hass):
+    """A Reconfigure to another account whose installation check failed is
+    idle at its form again, so a sign-in-again beside it goes ahead."""
+    entry = _make_reauth_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+    other_hub = _hub_issuing("other-account-token")
+    other_hub.client.list_installations = AsyncMock(
+        side_effect=VerisureOwaError("offline")
+    )
+    with _patches(other_hub):
+        result = await hass.config_entries.flow.async_configure(
+            reconfigure_id,
+            user_input={CONF_USERNAME: "other@example.com", CONF_PASSWORD: "pw"},
+        )
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "cannot_connect"}
+
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        result = await _sign_in_on(hass, reauth_id, "reauth-token")
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reauth-token"
+
+
+async def test_reconfigure_closes_the_entrys_sign_in_again_dialog(hass):
+    """Home Assistant before 2025.5 leaves it open through the reload, and
+    submitted later it would replace the sign-in just made."""
+    entry = _make_reauth_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        result = await _sign_in_on(hass, reconfigure_id, "reconfigure-token")
+
+    assert result["reason"] == "reconfigure_successful"
+    assert not _flow_in_progress(hass, reauth_id)
+
+
+@pytest.mark.parametrize("running_session", [False, True])
+async def test_a_sign_in_again_still_signing_in_cannot_overwrite_reconfigure(
+    hass, running_session
+):
+    """Closing the entry's other sign-in dialogs stops later submissions, but
+    one already waiting on its login when Reconfigure finishes must not then
+    save, register or reload the sign-in it started before that save."""
+    entry = _make_reauth_entry(hass)
+    shared_hub = _hub_factory()
+    if running_session:
+        hass.data.setdefault(DOMAIN, {})["sessions"] = {
+            "test@example.com": {"hub": shared_hub, "holders": {"office-entry-id"}}
+        }
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+    login_started, release_login = asyncio.Event(), asyncio.Event()
+    stale_hub = _hub_issuing("stale-reauth-token")
+
+    async def _slow_login():
+        login_started.set()
+        await release_login.wait()
+
+    stale_hub.login = _slow_login
+
+    session_tokens_at_reload: list = []
+
+    async def _reload(_entry_id):
+        session = hass.data[DOMAIN]["sessions"]["test@example.com"]
+        session_tokens_at_reload.append(session["hub"].get_refresh_token())
+
+    with patch.object(
+        hass.config_entries, "async_reload", side_effect=_reload
+    ) as mock_reload:
+        with _patches(stale_hub):
+            stale = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    reauth_id,
+                    user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+                )
+            )
+            await asyncio.wait_for(login_started.wait(), 3)
+        result = await _sign_in_on(hass, reconfigure_id, "reconfigure-token")
+        release_login.set()
+        (outcome,) = await asyncio.wait_for(
+            asyncio.gather(stale, return_exceptions=True), 3
+        )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reconfigure-token"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+    # Home Assistant 2025.2 raises UnknownFlow for any result of a flow
+    # removed during its step.
+    assert isinstance(outcome, UnknownFlow) or (
+        outcome["reason"] == "signed_in_again_elsewhere"
+    )
+    assert session_tokens_at_reload == ["reconfigure-token"]
+    assert "test@example.com" not in hass.data.get(DOMAIN, {}).get("sessions", {})
+    if running_session:
+        shared_hub.adopt_refresh_token.assert_not_called()
+
+
+async def _reauth_signing_in_slowly(hass, entry):
+    """Submit the entry's reauth dialog with a login that waits to be released."""
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    login_started, release_login = asyncio.Event(), asyncio.Event()
+    stale_hub = _hub_issuing("stale-reauth-token")
+
+    async def _slow_login():
+        login_started.set()
+        await release_login.wait()
+
+    stale_hub.login = _slow_login
+    with _patches(stale_hub):
+        stale = asyncio.create_task(
+            hass.config_entries.flow.async_configure(
+                reauth_id,
+                user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+            )
+        )
+        await asyncio.wait_for(login_started.wait(), 3)
+    return reauth_id, stale, release_login
+
+
+async def _reconfigure_then_release(hass, entry, stale, release_login):
+    """Finish a Reconfigure, then let the waiting reauth submission carry on."""
+    with patch.object(
+        hass.config_entries, "async_reload", new_callable=AsyncMock
+    ) as mock_reload:
+        reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+        result = await _sign_in_on(hass, reconfigure_id, "reconfigure-token")
+        release_login.set()
+        await asyncio.wait_for(asyncio.gather(stale, return_exceptions=True), 3)
+    return result, mock_reload
+
+
+async def test_a_reauth_closed_by_home_assistant_mid_sign_in_cannot_overwrite_reconfigure(
+    hass,
+):
+    """Home Assistant 2025.5 and later close an entry's reauth dialogs when
+    the entry reloads or is disabled, but a submission already running
+    carries on."""
+    entry = _make_reauth_entry(hass)
+    # Keeps the integration in use, so its shared data is not cleaned up.
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "other@example.com": {"hub": _hub_factory(), "holders": {"other-entry"}}
+    }
+    reauth_id, stale, release_login = await _reauth_signing_in_slowly(hass, entry)
+    hass.config_entries.flow.async_abort(reauth_id)
+    await hass.async_block_till_done()
+
+    result, mock_reload = await _reconfigure_then_release(
+        hass, entry, stale, release_login
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reconfigure-token"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_a_reauth_still_signing_in_through_the_clean_up_cannot_overwrite_reconfigure(
+    hass,
+):
+    """The entry is not loaded while it reloads or is disabled, and a waiting
+    reauth dialog does not count as using the integration, so its shared
+    data can be cleaned up while the submission waits on Verisure."""
+    entry = _make_reauth_entry(hass)
+    _reauth_id, stale, release_login = await _reauth_signing_in_slowly(hass, entry)
+    await _async_teardown_domain_if_unused(hass)
+    assert DOMAIN not in hass.data
+
+    result, mock_reload = await _reconfigure_then_release(
+        hass, entry, stale, release_login
+    )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reconfigure-token"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_a_reconfigure_waiting_for_its_code_still_finishes_after_a_reauth_saves(
+    hass,
+):
+    """Only a submission running when another dialog saves is refused; the
+    user then typing a valid code is a new decision to sign in."""
+    entry = _make_reauth_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+    hub = _hub_factory(two_fa=True)
+    with _patches(hub):
+        await hass.config_entries.flow.async_configure(
+            reconfigure_id,
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        result = await hass.config_entries.flow.async_configure(
+            reconfigure_id, user_input={"phones": "0_555-1234"}
+        )
+    assert result["step_id"] == "otp_challenge"
+
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        reauth = await _sign_in_on(hass, reauth_id, "reauth-token")
+        with _patches(hub):
+            result = await hass.config_entries.flow.async_configure(
+                reconfigure_id, user_input={CONF_CODE: "123456"}
+            )
+
+    assert reauth["reason"] == "reauth_successful"
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+
+
+async def test_a_reconfigure_finishing_during_anothers_reload_leaves_no_hold_behind(
+    hass,
+):
+    """The second dialog's session takes over the hold the first dialog keeps
+    through its reloads; the first must still let go of it when they end."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    first_id = (await _start_reconfigure_flow(hass, office))["flow_id"]
+    second_id = (await _start_reconfigure_flow(hass, home))["flow_id"]
+    second_hub = _hub_factory(two_fa=True)
+    with _patches(second_hub):
+        await hass.config_entries.flow.async_configure(
+            second_id,
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.config_entries.flow.async_configure(
+            second_id, user_input={"phones": "0_555-1234"}
+        )
+    second = {}
+
+    async def finish_second_during_first_reload(_entry_id):
+        if second:
+            return
+        second["result"] = None
+        with _patches(second_hub):
+            second["result"] = await hass.config_entries.flow.async_configure(
+                second_id, user_input={CONF_CODE: "123456"}
+            )
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        AsyncMock(side_effect=finish_second_during_first_reload),
+    ):
+        first = await _sign_in_on(hass, first_id, "first-token")
+
+    assert first["reason"] == "reconfigure_successful"
+    assert second["result"]["reason"] == "reconfigure_successful"
+    assert "test@example.com" not in _flow_sessions(hass)
+
+
+@pytest.mark.parametrize(
+    "start",
+    [_start_reauth_flow, _start_reconfigure_flow],
+    ids=["reauth", "reconfigure"],
+)
+@pytest.mark.parametrize(
+    "failing",
+    [
+        "custom_components.securitas.config_flow.FlowHandler._overtake_sign_ins_in_flight",
+        "custom_components.securitas.config_flow._clear_sign_in_issues",
+    ],
+    ids=["under-the-account-lock", "after-the-account-lock"],
+)
+async def test_a_sign_in_again_failing_before_the_reloads_leaves_no_hold_behind(
+    hass, start, failing
+):
+    """The dialog's hold is taken before the new login is saved; the dialog
+    closing releases nothing, so a failure between the two must let go of it."""
+    entry = _make_reauth_entry(hass)
+    flow_id = (await start(hass, entry))["flow_id"]
+
+    with (
+        patch(failing, side_effect=RuntimeError("boom")),
+        patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await _sign_in_on(hass, flow_id, "fresh-token")
+
+    session = _flow_sessions(hass).get("test@example.com", {"holders": set()})
+    assert f"config_flow:{flow_id}" not in session["holders"]
+
+
+async def test_a_reconfigure_code_still_being_checked_cannot_overwrite_a_reauth(hass):
+    """The code step signs in too, so it is refused like a password
+    submission when another dialog saves while it runs."""
+    entry = _make_reauth_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+    hub = _hub_factory(two_fa=True)
+    with _patches(hub):
+        await hass.config_entries.flow.async_configure(
+            reconfigure_id,
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        await hass.config_entries.flow.async_configure(
+            reconfigure_id, user_input={"phones": "0_555-1234"}
+        )
+    code_sent, release_code = asyncio.Event(), asyncio.Event()
+
+    async def _slow_code(*_args):
+        code_sent.set()
+        await release_code.wait()
+        return (None, None)
+
+    hub.send_sms_code = AsyncMock(side_effect=_slow_code)
+
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        with _patches(hub):
+            code = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    reconfigure_id, user_input={CONF_CODE: "123456"}
+                )
+            )
+            await asyncio.wait_for(code_sent.wait(), 3)
+        reauth = await _sign_in_on(hass, reauth_id, "reauth-token")
+        release_code.set()
+        result = await asyncio.wait_for(code, 3)
+
+    assert reauth["reason"] == "reauth_successful"
+    assert result["reason"] == "signed_in_again_elsewhere"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reauth-token"
+
+
+_OVERTAKEN_BY_A_SAVE = pytest.mark.parametrize(
+    ("same_entry", "reason"),
+    [
+        (True, "signed_in_again_elsewhere"),
+        (False, "account_signed_in_again_elsewhere"),
+    ],
+    ids=["same-entry", "another-installation"],
+)
+
+
+async def _overtaken_reconfigure(hass, same_entry, submit):
+    """Hold a Reconfigure submission while a reauth dialog saves a sign-in for
+    the same entry, or for another installation on the account, then let it
+    carry on.
+
+    ``submit`` starts the submission and returns the event it sets once it
+    is waiting and the event that releases it.
+    """
+    home = _make_reauth_entry(hass)
+    target = home if same_entry else _make_reauth_office_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, home))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, target))["flow_id"]
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        stale, started, release = await submit(reconfigure_id)
+        await asyncio.wait_for(started.wait(), 3)
+        reauth = await _sign_in_on(hass, reauth_id, "reauth-token")
+        release.set()
+        result = await asyncio.wait_for(stale, 3)
+    return reauth, result, home, target
+
+
+@_OVERTAKEN_BY_A_SAVE
+async def test_an_overtaken_password_submission_does_not_go_on_to_ask_for_a_code(
+    hass, same_entry, reason
+):
+    """A login still running when another dialog saves must stop, not show
+    the code forms: the code submission would then finish the sign-in it
+    started before that save and replace the newer one."""
+    hub = _hub_factory()
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _slow_login():
+        started.set()
+        await release.wait()
+        raise TwoFactorRequiredError("2FA required")
+
+    hub.login = _slow_login
+
+    async def submit(flow_id):
+        with _patches(hub):
+            stale = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    flow_id,
+                    user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+                )
+            )
+            await asyncio.wait_for(started.wait(), 3)
+        return stale, started, release
+
+    reauth, result, home, target = await _overtaken_reconfigure(
+        hass, same_entry, submit
+    )
+
+    assert reauth["reason"] == "reauth_successful"
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == reason
+    assert home.data[CONF_REFRESH_TOKEN] == "reauth-token"
+    assert target.data[CONF_REFRESH_TOKEN] == "reauth-token"
+
+
+def _expired_code_error():
+    err = VerisureOwaError("OTP expired")
+    err.response_body = {"errors": [{"data": {"auth-code": "10002"}}]}
+    return err
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        _expired_code_error,
+        lambda: VerisureOwaError("wrong code"),
+        lambda: RuntimeError("unexpected"),
+        lambda: ("reissued-otp-hash", MOCK_PHONES),
+    ],
+    ids=["expired", "rejected", "unexpected-error", "challenge-reissued"],
+)
+@_OVERTAKEN_BY_A_SAVE
+async def test_an_overtaken_code_submission_does_not_ask_for_another_code(
+    hass, same_entry, reason, refusal
+):
+    """A refused code sends the dialog back for another code or a new one,
+    which would finish the sign-in that started before another dialog saved
+    while the code was being checked."""
+    hub = _hub_factory(two_fa=True)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _refused_code(*_args):
+        started.set()
+        await release.wait()
+        outcome = refusal()
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    async def submit(flow_id):
+        with _patches(hub):
+            await hass.config_entries.flow.async_configure(
+                flow_id,
+                user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+            )
+            await hass.config_entries.flow.async_configure(
+                flow_id, user_input={"phones": "0_555-1234"}
+            )
+            hub.send_sms_code = AsyncMock(side_effect=_refused_code)
+            stale = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    flow_id, user_input={CONF_CODE: "123456"}
+                )
+            )
+            await asyncio.wait_for(started.wait(), 3)
+        return stale, started, release
+
+    reauth, result, home, target = await _overtaken_reconfigure(
+        hass, same_entry, submit
+    )
+
+    assert reauth["reason"] == "reauth_successful"
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == reason
+    assert home.data[CONF_REFRESH_TOKEN] == "reauth-token"
+    assert target.data[CONF_REFRESH_TOKEN] == "reauth-token"
+
+
+async def test_a_sign_in_again_to_another_account_cannot_overwrite_reconfigure(hass):
+    """A sign-in to another account still signing in when Reconfigure saves
+    must not then save over it, nor replace that account's running session
+    or change what its entry stores."""
+    entry = _make_reauth_entry(hass)
+    other_entry = _add_other_account_entry(hass)
+    hass.config_entries.async_update_entry(
+        other_entry, data={**other_entry.data, CONF_REFRESH_TOKEN: "other-old-token"}
+    )
+    other_session_hub = _saving_tokens_to(
+        hass, _hub_factory(), other_entry, "other@example.com"
+    )
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "other@example.com": {
+            "hub": other_session_hub,
+            "holders": {other_entry.entry_id},
+        }
+    }
+    reauth_id = (await _start_reauth_flow(hass, entry))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+    login_started, release_login = asyncio.Event(), asyncio.Event()
+    stale_hub = _hub_issuing("other-account-token")
+
+    async def _slow_login():
+        login_started.set()
+        await release_login.wait()
+
+    stale_hub.login = _slow_login
+
+    with patch.object(
+        hass.config_entries, "async_reload", new_callable=AsyncMock
+    ) as mock_reload:
+        with _patches(stale_hub):
+            other = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    reauth_id,
+                    user_input={
+                        CONF_USERNAME: "other@example.com",
+                        CONF_PASSWORD: "pw",
+                    },
+                )
+            )
+            await asyncio.wait_for(login_started.wait(), 3)
+        result = await _sign_in_on(hass, reconfigure_id, "reconfigure-token")
+        release_login.set()
+        (outcome,) = await asyncio.wait_for(
+            asyncio.gather(other, return_exceptions=True), 3
+        )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_USERNAME] == "test@example.com"
+    assert entry.data[CONF_REFRESH_TOKEN] == "reconfigure-token"
+    mock_reload.assert_awaited_once_with(entry.entry_id)
+    assert isinstance(outcome, UnknownFlow) or (
+        outcome["reason"] == "signed_in_again_elsewhere"
+    )
+    other_session = hass.data[DOMAIN]["sessions"]["other@example.com"]
+    assert other_session["hub"] is other_session_hub
+    assert other_session_hub.config_entry is other_entry
+    assert other_entry.data[CONF_REFRESH_TOKEN] == "other-old-token"
+
+
+def _saving_tokens_to(hass, hub, entry, username):
+    """Give a mock session hub for ``username``'s account the real token
+    saving, into ``entry``."""
+    hub.hass = hass
+    hub.config_entry = entry
+    hub.client.username = username
+    for method in (
+        "get_refresh_token",
+        "persist_current_refresh_token",
+        "_persist_refresh_token",
+    ):
+        setattr(hub, method, MethodType(getattr(VerisureHub, method), hub))
+    return hub
+
+
+async def test_an_overtaken_sign_in_again_cannot_save_into_an_entry_moved_to_another_account(
+    hass, api
+):
+    """A reauth still signing in to the entry's first account is overtaken by
+    a Reconfigure moving the entry to another account; the entry must keep
+    the other account's login, and the first account's session, which still
+    saves to the entry until the reload lets go of it, must not store its
+    own login there."""
+    source = _two_installation_hub()
+    entry = await _load_home_entry(hass, source)
+    source.client = api
+    api.refresh_token_value = "source-old"
+    _saving_tokens_to(hass, source, entry, "test@example.com")
+    other_entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="other@example.com_222",
+        data={
+            **entry.data,
+            CONF_USERNAME: "other@example.com",
+            CONF_INSTALLATION: "222",
+            CONF_REFRESH_TOKEN: "other-old",
+        },
+        version=FlowHandler.VERSION,
+    )
+    other_entry.add_to_hass(hass)
+    running = _saving_tokens_to(
+        hass, _two_installation_hub(), other_entry, "other@example.com"
+    )
+    running.client.refresh_token_value = "other-old"
+    with patch(
+        "custom_components.securitas._login_ipv4_first", AsyncMock(return_value=running)
+    ):
+        assert await hass.config_entries.async_setup(other_entry.entry_id)
+        await hass.async_block_till_done()
+    _reauth_id, stale, release_login = await _reauth_signing_in_slowly(hass, entry)
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+
+    async def _reload(entry_id):
+        # A renewal of the first account's login finishing mid-reload.
+        source._persist_refresh_token("source-rotated")
+        return await real_reload(entry_id)
+
+    real_reload = hass.config_entries.async_reload
+    with (
+        _patches(_reauth_hub_seeing("111")) as hub_cls,
+        patch.object(hass.config_entries, "async_reload", _reload),
+    ):
+        hub_cls.return_value.get_refresh_token = MagicMock(
+            return_value="fresh-other-login"
+        )
+        result = await hass.config_entries.flow.async_configure(
+            reconfigure_id,
+            user_input={CONF_USERNAME: "other@example.com", CONF_PASSWORD: "pw"},
+        )
+        release_login.set()
+        (outcome,) = await asyncio.wait_for(
+            asyncio.gather(stale, return_exceptions=True), 3
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert isinstance(outcome, UnknownFlow) or (
+        outcome["reason"] == "signed_in_again_elsewhere"
+    )
+    assert entry.state is ConfigEntryState.LOADED
+    session = hass.data[DOMAIN]["sessions"]["other@example.com"]
+    assert session["hub"] is hub_cls.return_value
+    assert hass.data[DOMAIN][entry.entry_id]["hub"] is hub_cls.return_value
+    assert entry.data[CONF_USERNAME] == "other@example.com"
+    assert entry.data[CONF_REFRESH_TOKEN] == "fresh-other-login"
+    assert other_entry.data[CONF_REFRESH_TOKEN] == "fresh-other-login"
+
+
+async def test_a_sign_in_again_for_another_installation_cannot_replace_a_newer_login(
+    hass, api
+):
+    """Installations on one account share its session, so a sign-in still
+    running for one installation when another installation's dialog saves a
+    login to the same account must not then make the login it started
+    before that save the account's session, or save it."""
+    home = _make_reauth_entry(hass)
+    office = _add_office_entry(hass)
+    shared_hub = _saving_tokens_to(hass, _hub_factory(), home, "test@example.com")
+    shared_hub.client = api
+    api.refresh_token_value = "old-login"
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "test@example.com": {
+            "hub": shared_hub,
+            "holders": {home.entry_id, office.entry_id},
+        }
+    }
+    session_tokens_at_reload: list = []
+
+    async def _reload(_entry_id):
+        session = hass.data[DOMAIN]["sessions"]["test@example.com"]
+        session_tokens_at_reload.append(session["hub"].get_refresh_token())
+
+    home_reauth_id = (await _start_reauth_flow(hass, home))["flow_id"]
+    office_reconfigure_id = (await _start_reconfigure_flow(hass, office))["flow_id"]
+    login_started, release_login = asyncio.Event(), asyncio.Event()
+    stale_hub = _hub_issuing("older-login")
+
+    async def _slow_login():
+        login_started.set()
+        await release_login.wait()
+
+    stale_hub.login = _slow_login
+
+    with patch.object(
+        hass.config_entries, "async_reload", side_effect=_reload
+    ) as mock_reload:
+        with _patches(stale_hub):
+            stale = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    home_reauth_id,
+                    user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+                )
+            )
+            await asyncio.wait_for(login_started.wait(), 3)
+        result = await _sign_in_on(hass, office_reconfigure_id, "newer-login")
+        release_login.set()
+        outcome = await asyncio.wait_for(stale, 3)
+
+    assert result["reason"] == "reconfigure_successful"
+    assert outcome["reason"] == "account_signed_in_again_elsewhere"
+    assert [call.args for call in mock_reload.await_args_list] == [
+        (office.entry_id,),
+        (home.entry_id,),
+    ]
+    assert session_tokens_at_reload == ["newer-login", "newer-login"]
+    assert office.data[CONF_REFRESH_TOKEN] == "newer-login"
+    assert home.data[CONF_REFRESH_TOKEN] == "newer-login"
+
+
+async def test_the_old_accounts_session_stops_saving_to_an_entry_moved_to_another_account(
+    hass, api
+):
+    """The session the entry saved to keeps running until the reload lets go
+    of it; a renewal of its login finishing after Reconfigure moved the
+    entry to another account must not save that login into the entry."""
+    entry = _make_reauth_entry(hass)
+    old_session = _hub_factory()
+    old_session.client = api
+    _saving_tokens_to(hass, old_session, entry, "test@example.com")
+    api._on_refresh_token_changed = old_session._persist_refresh_token
+    hass.data.setdefault(DOMAIN, {})["sessions"] = {
+        "test@example.com": {"hub": old_session, "holders": {entry.entry_id}}
+    }
+    api.authentication_token = FAKE_JWT
+    api.authentication_token_exp = datetime.min
+    api.refresh_token_value = "old-account-login"
+    renewal_started, release_renewal = asyncio.Event(), asyncio.Event()
+
+    async def _slow_refresh() -> bool:
+        renewal_started.set()
+        await release_renewal.wait()
+        api._update_refresh_token("old-account-rotated")
+        api.authentication_token_exp = datetime.now() + timedelta(minutes=15)
+        return True
+
+    api.refresh_token = _slow_refresh
+    renewal = asyncio.create_task(api._check_authentication_token())
+    await asyncio.wait_for(renewal_started.wait(), 3)
+    reconfigure_id = (await _start_reconfigure_flow(hass, entry))["flow_id"]
+
+    async def _reload(_entry_id):
+        release_renewal.set()
+        await renewal
+
+    with (
+        _patches(_hub_issuing("other-account-login")),
+        patch.object(hass.config_entries, "async_reload", side_effect=_reload),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            reconfigure_id,
+            user_input={CONF_USERNAME: "other@example.com", CONF_PASSWORD: "pw"},
+        )
+
+    assert result["reason"] == "reconfigure_successful"
+    assert api.refresh_token_value == "old-account-rotated"
+    assert entry.data[CONF_USERNAME] == "other@example.com"
+    assert entry.data[CONF_REFRESH_TOKEN] == "other-account-login"
+
+
+@pytest.mark.parametrize("start", [_start_reconfigure_flow, _start_reauth_flow])
+async def test_signing_in_again_checks_the_password_even_with_a_working_saved_login(
+    hass, start
+):
+    """The dialog signs in with what the user typed: renewing the entry's
+    saved login instead would accept any password, and save that login under
+    whatever username was typed."""
+    entry = _make_reauth_entry(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_REFRESH_TOKEN: "saved-login"}
+    )
+    result = await start(hass, entry)
+    renew = AsyncMock(return_value=True)
+
+    with (
+        patch.object(VerisureOwaClient, "refresh_token", renew),
+        patch.object(
+            VerisureOwaClient,
+            "login",
+            AsyncMock(side_effect=AuthenticationError("wrong password")),
+        ),
+        patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "wrong"},
+        )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert entry.data[CONF_REFRESH_TOKEN] == "saved-login"
+    renew.assert_not_awaited()

@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "Service is already configured",
             "reauth_successful": "Reauthentication successful",
+            "reconfigure_successful": "Signed in again",
             "no_refresh_token": "Login succeeded but Verisure did not return a refresh token. The integration cannot persist credentials safely. Please try again later or report this if it persists.",
-            "installation_not_on_account": "This Verisure account can't see installation {number}. Sign in with an account that has access to it."
+            "installation_not_on_account": "This Verisure account can't see installation {number}. Sign in with an account that has access to it.",
+            "signed_in_again_elsewhere": "This entry was signed in again from another dialog while this one was signing in, so this sign-in was not saved.",
+            "account_signed_in_again_elsewhere": "This Verisure account was signed in again from another installation's dialog while this one was signing in, so this sign-in was not saved. If this installation still can't connect, sign in again.",
+            "already_in_progress": "Another setup or sign-in for this installation is already in progress."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Reauthenticate Verisure",
                 "description": "Your session has expired. Please re-enter your password to reconnect.",
+                "data": {
+                    "username": "Username",
+                    "password": "Password"
+                }
+            },
+            "reconfigure": {
+                "title": "Sign in to Verisure again",
+                "description": "Enter your Verisure password to get a new login. Use this when the integration can't connect and hasn't asked you to sign in again.",
                 "data": {
                     "username": "Username",
                     "password": "Password"

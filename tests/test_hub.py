@@ -93,6 +93,7 @@ class TestRefreshTokenPersistence:
         config_entry = MagicMock()
         config_entry.data = entry_data
         hub = make_hub()
+        hub.client.username = "test@example.com"
         hub.config_entry = config_entry
         hub.hass = hass
         return hub, config_entry
@@ -152,6 +153,21 @@ class TestRefreshTokenPersistence:
         new_data = hub.hass.config_entries.async_update_entry.call_args.kwargs["data"]
         assert CONF_PASSWORD not in new_data
         assert new_data[CONF_REFRESH_TOKEN] == "same-token"
+
+    def test_never_writes_into_an_entry_signed_in_to_another_account(self, caplog):
+        """Reconfigure can move the entry this session saves to onto another
+        account before the session lets go of it; this session's login belongs
+        to its own account, so writing it there would break the entry on its
+        next restart."""
+        hub, _ = self._hub_with_entry(
+            {"username": "other@example.com", CONF_REFRESH_TOKEN: "other-login"}
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_HUB_LOGGER):
+            hub._persist_refresh_token("rotated-token")
+
+        hub.hass.config_entries.async_update_entry.assert_not_called()
+        assert "outcome=other-account" in caplog.text
 
     def test_no_config_entry_skips_persistence(self):
         """Without a config entry (config-flow path), rotation must not crash."""
