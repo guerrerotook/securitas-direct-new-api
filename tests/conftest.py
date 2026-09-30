@@ -165,6 +165,33 @@ def refresh_login_crash_error(*, lang: str = "fr") -> VerisureOwaError:
     return err
 
 
+def refresh_token_rejected_response() -> dict:
+    """Build the xSRefreshLogin ``err 4`` / 404 rejection, as returned.
+
+    Seen when Verisure revoked a stored refresh token server-side: every
+    renewal with that token answered this way until a fresh sign-in.
+    """
+    return {
+        "errors": [
+            {
+                "message": "Si è verificato un errore inaspettato",
+                "name": "ApiError",
+                "data": {"res": "ERROR", "err": "4", "status": 404},
+                "path": ["xSRefreshLogin"],
+            }
+        ],
+        "data": {"xSRefreshLogin": None},
+    }
+
+
+def refresh_token_rejected_error() -> VerisureOwaError:
+    """Build the xSRefreshLogin ``err 4`` rejection as refresh_token() raises it."""
+    body = refresh_token_rejected_response()
+    err = VerisureOwaError(body["errors"][0]["message"], http_status=404)
+    err.response_body = body
+    return err
+
+
 def refresh_response(
     *,
     hash_token: str | None = None,

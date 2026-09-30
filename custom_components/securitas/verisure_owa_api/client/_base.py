@@ -28,6 +28,7 @@ from ..exceptions import (
     SessionExpiredError,
     VerisureOwaError,
     _error_code_from_body,
+    dead_refresh_token_signal,
     is_genuine_auth_failure,
     is_refresh_login_crash,
 )
@@ -93,11 +94,11 @@ ALARM_STATUS_SERVICE_ID = "11"
 # UpdateFailed repeat-suppression.
 _AUTH_ESCALATION_THRESHOLD = 3
 _AUTH_ESCALATION_INTERVAL = timedelta(minutes=30)
-# Counted xSRefreshLogin crashes, with no successful renewal in between, after
-# which the stored refresh token is treated as dead and reauth is requested
-# (#568). One crash can be a server wobble; a token that keeps crashing across
-# polls has never been seen to recover. Crashes closer together than the
-# spacing are one renewal window — the coordinators sharing this client each
+# Counted xSRefreshLogin crashes or err 4 rejections (dead_refresh_token_signal),
+# with no successful renewal in between, after which the stored refresh token is
+# treated as dead and reauth is requested (#568). One can be a server wobble; a
+# token that keeps failing this way across polls has never been seen to recover.
+# Failures closer together than the spacing are one renewal window — the coordinators sharing this client each
 # take a turn behind the auth lock seconds apart — and count once.
 _REFRESH_CRASH_REAUTH_THRESHOLD = 3
 _REFRESH_CRASH_MIN_SPACING = timedelta(seconds=60)
@@ -554,14 +555,15 @@ class _ClientBase:
                         # Not recorded as a transient failure: that WARNING says
                         # reauth is being withheld, which this raise contradicts.
                         raise RefreshTokenDeadError(
-                            f"Stored refresh token rejected {self._refresh_crash_streak} "
-                            "times by the Verisure refresh-login crash; "
+                            "Stored refresh token failed "
+                            f"{self._refresh_crash_streak} renewals in a row "
+                            f"(last: {dead_refresh_token_signal(owa_err)}); "
                             "re-authentication required"
                         ) from err
                     else:
                         _LOGGER.warning(
-                            "Refresh token found dead after %d refresh-login "
-                            "crashes, falling back to login",
+                            "Refresh token found dead after %d failed "
+                            "renewals, falling back to login",
                             self._refresh_crash_streak,
                         )
             elif self._refresh_token_dead and not self.password:
@@ -574,10 +576,10 @@ class _ClientBase:
             await self.login()  # type: ignore[attr-defined]
 
     def _note_refresh_crash(self, err: VerisureOwaError) -> bool:
-        """Count a refresh-login crash; True once the stored token is dead.
+        """Count a dead-token signal; True once the stored token is dead.
 
-        Only the crash signature counts, other transient failures neither count
-        nor reset (a successful renewal does, via note_auth_success). Crashes
+        Only a ``dead_refresh_token_signal`` counts, other transient failures
+        neither count nor reset (a successful renewal does, via note_auth_success). Crashes
         within ``_REFRESH_CRASH_MIN_SPACING`` of the last counted one are the
         same renewal window and count once. Reaching
         ``_REFRESH_CRASH_REAUTH_THRESHOLD`` latches ``refresh_token_is_dead``
@@ -586,7 +588,7 @@ class _ClientBase:
         """
         if self._refresh_token_dead:
             return True
-        if not is_refresh_login_crash(err):
+        if dead_refresh_token_signal(err) is None:
             return False
         now = datetime.now()
         last = self._last_counted_refresh_crash

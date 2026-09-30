@@ -22,7 +22,10 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     _error_code_from_body,
     is_genuine_auth_failure,
     is_refresh_login_crash,
+    is_refresh_token_rejected,
 )
+
+from .conftest import refresh_login_crash_error, refresh_token_rejected_error
 
 # ── Subclass checks ───────────────────────────────────────────────────────────
 
@@ -333,6 +336,39 @@ class TestIsRefreshLoginCrash:
         err = VerisureOwaError("boom")
         err.response_body = {"errors": [], "data": {"xSRefreshLogin": None}}
         assert is_refresh_login_crash(err) is False
+
+
+# ── is_refresh_token_rejected ─────────────────────────────────────────────────
+
+
+class TestIsRefreshTokenRejected:
+    """Identifies Verisure refusing the stored refresh token with err 4 / 404."""
+
+    def test_err_4_on_refresh_login_matches(self):
+        assert is_refresh_token_rejected(refresh_token_rejected_error()) is True
+
+    def test_err_4_on_a_different_path_does_not_match(self):
+        err = refresh_token_rejected_error()
+        err.response_body["errors"][0]["path"] = ["xSArmPanel"]
+        assert is_refresh_token_rejected(err) is False
+
+    def test_other_error_code_on_refresh_login_does_not_match(self):
+        err = refresh_token_rejected_error()
+        err.response_body["errors"][0]["data"]["err"] = "60067"
+        assert is_refresh_token_rejected(err) is False
+
+    def test_the_568_crash_does_not_match(self):
+        assert is_refresh_token_rejected(refresh_login_crash_error()) is False
+
+    def test_is_not_mistaken_for_the_568_crash(self):
+        assert is_refresh_login_crash(refresh_token_rejected_error()) is False
+
+    def test_no_response_body_does_not_match(self):
+        assert is_refresh_token_rejected(VerisureOwaError("boom")) is False
+
+    def test_a_single_rejection_stays_transient(self):
+        """Only a streak escalates, as with the #568 crash."""
+        assert is_genuine_auth_failure(refresh_token_rejected_error()) is False
 
 
 # ── _error_code_from_body ─────────────────────────────────────────────────────

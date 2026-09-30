@@ -166,7 +166,7 @@ from .verisure_owa_api import (
     VerisureOwaError,
     generate_uuid,
 )
-from .verisure_owa_api.exceptions import is_refresh_login_crash
+from .verisure_owa_api.exceptions import dead_refresh_token_signal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -581,10 +581,11 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
     return config, need_sign_in
 
 
-# Consecutive setup attempts whose stored refresh token crashed xSRefreshLogin
-# before setup gives up retrying and asks for re-authentication (#568). At
-# setup the token comes straight off disk with no evidence it was ever valid,
-# and every diagnosed crash was a dead token; one retry (HA's first backoff,
+# Consecutive setup attempts whose stored refresh token crashed or was refused
+# by xSRefreshLogin (dead_refresh_token_signal) before setup gives up retrying
+# and asks for re-authentication (#568). At setup the token comes straight off
+# disk with no evidence it was ever valid, and every diagnosed case was a dead
+# token; one retry (HA's first backoff,
 # a few seconds) absorbs a momentary server blip. The count lives in hass.data because
 # each retry builds a fresh hub, and is keyed by username like ``sessions``:
 # co-tenant entries retry the same token and alternate as session creator.
@@ -615,7 +616,7 @@ async def _login_or_raise(
 ) -> None:
     """Log the hub in, mapping failures to HA's setup exceptions.
 
-    A streak of refresh-login crashes (see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD)
+    A streak of dead-token signals (see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD)
     becomes ConfigEntryAuthFailed like a credential rejection; HA's own reauth
     card is the user-facing notice for that path, so unlike the credential
     branches it raises no persistent notification of its own.
@@ -661,14 +662,15 @@ async def _login_or_raise(
             "Unable to connect to Verisure: %s",
             err.log_detail(),
         )
+        signal = dead_refresh_token_signal(err)
         if (
-            is_refresh_login_crash(err)
+            signal is not None
             and _note_setup_refresh_crash(hass, username)
             >= _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD
         ):
             raise ConfigEntryAuthFailed(
-                "Stored refresh token keeps crashing the Verisure "
-                "refresh-login call; re-authentication required"
+                f"Stored refresh token keeps failing to renew (last: {signal}); "
+                "re-authentication required"
             ) from None
         raise ConfigEntryNotReady(
             f"Unable to connect to Verisure: {err.message}"

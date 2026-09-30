@@ -22,6 +22,7 @@ from .conftest import (
     make_jwt,
     refresh_login_crash_error,
     refresh_response,
+    refresh_token_rejected_error,
     validate_device_response,
 )
 
@@ -812,6 +813,58 @@ class TestRefreshCrashEscalation:
         )
 
         for _ in range(3):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        with pytest.raises(RefreshTokenDeadError):
+            await api._check_authentication_token()
+
+
+class TestRefreshTokenRejectedEscalation:
+    """Verisure refusing the stored token with err 4 / 404 escalates like the
+    #568 crash: one refusal is transient, a streak means the token is dead."""
+
+    _expire = TestRefreshCrashEscalation._expire
+    _age_last_crash = staticmethod(TestRefreshCrashEscalation._age_last_crash)
+
+    async def test_two_rejections_stay_transient(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError) as exc_info:
+                await api._check_authentication_token()
+            assert not isinstance(exc_info.value, AuthenticationError)
+            self._age_last_crash(api)
+
+        api.login.assert_not_called()
+
+    async def test_third_consecutive_rejection_raises_refresh_token_dead(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(side_effect=refresh_token_rejected_error())
+
+        for _ in range(2):
+            with pytest.raises(VerisureOwaError):
+                await api._check_authentication_token()
+            self._age_last_crash(api)
+        with pytest.raises(RefreshTokenDeadError) as exc_info:
+            await api._check_authentication_token()
+
+        assert isinstance(exc_info.value.__cause__, VerisureOwaError)
+        assert "crash" not in str(exc_info.value)
+        api.login.assert_not_called()
+
+    async def test_rejections_and_crashes_share_one_streak(self, api):
+        self._expire(api)
+        api.refresh_token = AsyncMock(
+            side_effect=[
+                refresh_token_rejected_error(),
+                refresh_login_crash_error(),
+                refresh_token_rejected_error(),
+            ]
+        )
+
+        for _ in range(2):
             with pytest.raises(VerisureOwaError):
                 await api._check_authentication_token()
             self._age_last_crash(api)

@@ -82,6 +82,7 @@ from tests.conftest import (
     make_installation,
     make_securitas_hub_mock,
     refresh_login_crash_error,
+    refresh_token_rejected_error,
 )
 
 # ---------------------------------------------------------------------------
@@ -3351,6 +3352,17 @@ class TestSetupRefreshCrashEscalation:
 
     async def test_second_consecutive_crash_prompts_reauth(self, hass, mock_hub):
         mock_hub.login = AsyncMock(side_effect=refresh_login_crash_error())
+        entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
+        entry.add_to_hass(hass)
+
+        with pytest.raises(ConfigEntryNotReady):
+            await self._attempt(hass, entry, mock_hub)
+        with pytest.raises(ConfigEntryAuthFailed):
+            await self._attempt(hass, entry, mock_hub)
+
+    async def test_second_consecutive_rejection_prompts_reauth(self, hass, mock_hub):
+        """Verisure refusing the stored token with err 4 / 404 escalates the same way."""
+        mock_hub.login = AsyncMock(side_effect=refresh_token_rejected_error())
         entry = MockConfigEntry(domain=DOMAIN, data=make_config_entry_data())
         entry.add_to_hass(hass)
 

@@ -204,11 +204,11 @@ class VerisureHub:
         waste a round trip.
 
         A transient failure (network, 5xx, 409, WAF block, a single
-        xSRefreshLogin server crash) is *not* a rejected token and must not take
-        that path: it propagates so setup maps it to ConfigEntryNotReady and
-        retries, instead of forcing a needless reauth on a token-only account.
-        This mirrors the transient-vs-genuine split the client and coordinators
-        already use via is_genuine_auth_failure(). A *streak* of crashes is
+        xSRefreshLogin server crash or err 4 rejection) does not take that path:
+        it propagates so setup maps it to ConfigEntryNotReady and retries,
+        instead of forcing a needless reauth on a token-only account. This
+        mirrors the transient-vs-genuine split the client and coordinators
+        already use via is_genuine_auth_failure(). A *streak* of those is
         setup's call: see _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD in __init__.
 
         For an account that still has a stored password, this deliberately means
