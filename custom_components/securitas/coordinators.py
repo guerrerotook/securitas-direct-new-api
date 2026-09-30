@@ -133,8 +133,8 @@ class ActivityData:
 def _raise_fetch_error(err: VerisureOwaError, label: str) -> NoReturn:
     """Map a data-fetch VerisureOwaError to reauth vs. retry.
 
-    A genuinely dead session — bad credentials, account blocked, 2FA, an
-    explicitly invalid/revoked token (err 60067/60052), or a refresh token
+    A genuinely dead session — bad credentials, account blocked (err 60052),
+    2FA, an explicitly invalid/revoked token (err 60067), or a refresh token
     condemned by a dead-token streak (RefreshTokenDeadError) — reaching the
     fetch means the refresh-token chain is broken with no way to recover
     unattended: raise ConfigEntryAuthFailed so HA prompts reauth. Everything

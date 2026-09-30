@@ -4,13 +4,15 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.9.0
 
-The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise and an installation added twice.
+The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise, an installation added twice and an account that needs to sign in again.
 
 ### Added
 
 **The auto-force-arm tick box is now on the Tile card ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  With **"Offer an auto-force-arm tick box in the alarm controls"** turned on, a Tile card with **Alarm modes** and the **Verisure OWA Open Sensors** feature shows the tick box while the alarm is disarmed. Ticking it there or in the More Info dialog ticks it in both. See [Auto-force-arm tick box](https://github.com/guerrerotook/securitas-direct-new-api#auto-force-arm-tick-box).
 
 ### Changed
+
+**A login Verisure refuses is now explained in Settings → Repairs ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)).**  When Verisure turned down the saved login outright, or asked for a verification code, at startup, the integration posted a notification, which for a refused login quoted Verisure's error, such as "Refresh token rejected and no password available; reauth required". It now adds a notice in Settings → Repairs that says, in your language, that the account needs to sign in again and where to do it. A blocked account gets its own notice, telling you to use "Forgot password" on the Verisure website first. The notice goes away by itself once the sign-in succeeds. A saved login that keeps failing to renew gets only Home Assistant's own "sign in again" notice, not one in Repairs ([#629](https://github.com/guerrerotook/securitas-direct-new-api/pull/629)).
 
 **The tick box only force-arms arms you start next to it ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  A ticked box used to force-arm any arm that started while the More Info dialog was open, including one from an automation or the Verisure app. It now acts only on an arm started from its own buttons, in the dialog or on the Tile, so a Tile on a wall tablet can't force every arm in the house.
 
@@ -19,6 +21,8 @@ The headline this release is that alarm commands no longer clash: pressing Disar
 **An installation added twice on the same account is flagged in Settings → Repairs ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)).**  Signing one entry in again to the account another entry already uses for the same installation leaves that installation added twice. The notice asks you to remove one of the two in Settings → Devices & services → Verisure OWA; neither is removed for you. Until you do, only the entry that starts first runs the installation's alarm panels, so the two can't send clashing commands. After you remove one, reload the one you kept, or restart Home Assistant, if its entities are missing.
 
 ### Fixed
+
+**Reopening the sign-in dialog at the code step no longer fails with "500 Internal Server Error" ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)).**  If you closed the sign-in dialog while it was asking you to choose a phone or type the code Verisure texted you, for example because the code never arrived, opening it again showed "Config flow could not be loaded". It now opens at the password form again, and submitting it asks Verisure for a new code.
 
 **The alarm showed an unknown state for up to 20 seconds after a restart or a settings change ([#628](https://github.com/guerrerotook/securitas-direct-new-api/pull/628)).**  The integration sends Verisure one request at a time, and waiting requests weren't served in the order they arrived. After Home Assistant started, or after you saved the integration's options, the alarm's first status check could keep losing its turn to camera thumbnails that had queued after it, so the alarm panels read "unknown" and the auto-force-arm tick box didn't appear until it got through. Requests now take their turn in the order they arrive, with commands you start still going first.
 

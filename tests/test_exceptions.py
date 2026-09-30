@@ -21,6 +21,7 @@ from custom_components.securitas.verisure_owa_api.exceptions import (
     WAFBlockedError,
     _error_code_from_body,
     dead_refresh_token_signal,
+    is_account_blocked,
     is_genuine_auth_failure,
     is_refresh_login_crash,
     is_refresh_token_rejected,
@@ -285,6 +286,32 @@ class TestIsGenuineAuthFailure:
 
     def test_unknown_error_defaults_to_transient(self):
         assert is_genuine_auth_failure(VerisureOwaError("mystery")) is False
+
+
+# ── is_account_blocked ───────────────────────────────────────────────────────
+
+
+class TestIsAccountBlocked:
+    def test_account_blocked_error_is_blocked(self):
+        assert is_account_blocked(AccountBlockedError("blocked")) is True
+
+    def test_err_60052_code_is_blocked(self):
+        err = _with_err_code(VerisureOwaError("blocked"), "60052")
+        assert is_account_blocked(err) is True
+
+    def test_err_60052_sent_as_a_number_is_blocked(self):
+        err = VerisureOwaError("blocked")
+        err.response_body = {"errors": [{"message": "x", "data": {"err": 60052}}]}
+        assert is_account_blocked(err) is True
+
+    def test_err_60067_invalid_session_code_is_not_blocked(self):
+        err = _with_err_code(
+            SessionExpiredError("Invalid Session", http_status=403), "60067"
+        )
+        assert is_account_blocked(err) is False
+
+    def test_error_without_a_body_is_not_blocked(self):
+        assert is_account_blocked(VerisureOwaError("mystery")) is False
 
 
 # ── is_refresh_login_crash ────────────────────────────────────────────────────

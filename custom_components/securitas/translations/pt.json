@@ -275,6 +275,14 @@
         "unknown_alarm_state": {
             "title": "Estado do alarme não reconhecido",
             "description": "A Verisure indica o código de estado do alarme {code} para {installation}, que esta integração ainda não reconhece. Desarmar continua a funcionar, mas armar é recusado até o alarme indicar um estado conhecido. Comunique o código em {url} para que possa ser suportado. Este aviso desaparece quando voltar um estado conhecido."
+        },
+        "sign_in_again": {
+            "title": "Inicie sessão novamente na Verisure",
+            "description": "A Verisure precisa que inicie sessão novamente como {username}; até lá, o Home Assistant não consegue ligar-se ao seu alarme. Abra Definições → Dispositivos e Serviços → Verisure OWA e siga o aviso para iniciar sessão com a sua palavra-passe (e o código que a Verisure lhe envia por SMS, se o pedir). Este aviso desaparece quando o início de sessão for bem-sucedido."
+        },
+        "account_blocked": {
+            "title": "A Verisure bloqueou a sua conta",
+            "description": "A Verisure bloqueou a conta {username}, por isso o Home Assistant não consegue ligar-se ao seu alarme. Use 'Esqueci a palavra-passe' no site da Verisure para redefinir a palavra-passe e desbloquear a conta; depois abra Definições → Dispositivos e Serviços → Verisure OWA e siga o aviso para iniciar sessão com a nova palavra-passe. Este aviso desaparece quando o início de sessão for bem-sucedido."
         }
     },
     "entity": {

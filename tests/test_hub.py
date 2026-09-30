@@ -15,6 +15,7 @@ from custom_components.securitas.const import (
 )
 from custom_components.securitas.hub import VerisureHub
 from custom_components.securitas.verisure_owa_api import (
+    AccountBlockedError,
     APIConnectionError,
     AuthenticationError,
     VerisureOwaError,
@@ -337,6 +338,24 @@ class TestLogin:
         with pytest.raises(AuthenticationError):
             await hub.login()
 
+        hub.client.login.assert_not_awaited()
+
+    async def test_a_blocked_account_rejecting_the_refresh_token_stays_blocked(self):
+        """A token-only account whose refresh Verisure refuses as blocked (err
+        60052) raises AccountBlockedError, not a plain AuthenticationError, so
+        setup's Repairs issue can say to unblock the account first."""
+        hub = make_hub()
+        hub.client.refresh_token_value = "refresh-token"
+        hub.client.password = ""
+        blocked = VerisureOwaError("Account blocked")
+        blocked.response_body = {"errors": [{"data": {"err": "60052"}}]}
+        hub.client.refresh_token = AsyncMock(side_effect=blocked)
+        hub.client.login = AsyncMock()
+
+        with pytest.raises(AccountBlockedError) as raised:
+            await hub.login()
+
+        assert raised.value.__cause__ is blocked
         hub.client.login.assert_not_awaited()
 
     async def test_genuine_raised_refresh_rejection_falls_back_to_password_login(self):

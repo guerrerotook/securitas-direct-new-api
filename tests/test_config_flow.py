@@ -48,6 +48,7 @@ from custom_components.securitas import (
     DOMAIN,
     _get_or_create_session,
     _login_or_raise,
+    _raise_sign_in_issue,
     async_remove_entry,
     async_unload_entry,
 )
@@ -614,6 +615,99 @@ async def test_otp_challenge_advances_to_options(hass):
     # login was called once during async_step_user (raised TwoFactorRequiredError);
     # finish_setup skips login because send_sms_code already set the token
     assert mock_hub.login.await_count == 1
+
+
+# ===================================================================
+# Reopening a dialog left at the phone list or the code step
+# ===================================================================
+
+
+async def _reauth_to_2fa_step(hass, hub, step_id):
+    """Sign an entry in again as far as ``step_id`` of the SMS-code steps."""
+    entry = _make_reauth_entry(hass)
+    result = await _start_reauth_flow(hass, entry)
+    with _patches(hub):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+        )
+        if step_id == "otp_challenge":
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"], user_input={"phones": "0_555-1234"}
+            )
+    assert result["step_id"] == step_id
+    return result["flow_id"]
+
+
+async def _setup_to_2fa_step(hass, hub, step_id):
+    """Run a new setup as far as ``step_id`` of the SMS-code steps."""
+    if step_id == "phone_list":
+        return await _start_2fa_flow(hass, hub)
+    return await _get_to_otp_step(hass, hub)
+
+
+@pytest.mark.parametrize("step_id", ["phone_list", "otp_challenge"])
+@pytest.mark.parametrize("reauth", [True, False], ids=["sign-in-again", "setup"])
+async def test_reopening_a_dialog_at_the_code_steps_starts_the_sign_in_again(
+    hass, reauth, step_id
+):
+    """Closing the dialog leaves the flow at its step, and reopening it asks
+    for that step with no input. The dialog shows its first form again rather
+    than failing, and signing in from there sends a new code and finishes."""
+    reach = _reauth_to_2fa_step if reauth else _setup_to_2fa_step
+    flow_id = await reach(hass, _hub_factory(two_fa=True), step_id)
+    fresh = _hub_factory(two_fa=True)
+    fresh.validate_device.return_value = ("new-challenge", MOCK_PHONES)
+    fresh.get_refresh_token.return_value = "new-refresh-token"
+
+    with (
+        _patches(fresh),
+        patch("custom_components.securitas.async_setup_entry", return_value=True),
+        patch.object(hass.config_entries, "async_reload", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(flow_id)
+
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == ("reauth_confirm" if reauth else "user")
+        assert not result.get("errors")
+
+        credentials = (
+            {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"}
+            if reauth
+            else USER_INPUT_CREDENTIALS
+        )
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input=credentials
+        )
+        assert result["step_id"] == "phone_list"
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={"phones": "0_555-1234"}
+        )
+        assert result["step_id"] == "otp_challenge"
+        fresh.send_opt.assert_awaited_once_with("new-challenge", 0)
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_CODE: "123456"}
+        )
+        fresh.send_sms_code.assert_awaited_once_with("new-challenge", "123456")
+
+        if reauth:
+            assert result["reason"] == "reauth_successful"
+            entry = hass.config_entries.async_entries(DOMAIN)[0]
+        else:
+            assert result["step_id"] == "options"
+            result = await hass.config_entries.flow.async_configure(
+                flow_id, user_input=_fill_optional_sections(result, USER_INPUT_OPTIONS)
+            )
+            assert result["step_id"] == "mappings"
+            result = await hass.config_entries.flow.async_configure(
+                flow_id, user_input=USER_INPUT_MAPPINGS_STD
+            )
+            assert result["type"] == FlowResultType.CREATE_ENTRY
+            entry = result["result"]
+        await hass.async_block_till_done()
+
+    assert entry.data[CONF_REFRESH_TOKEN] == "new-refresh-token"
+    assert CONF_PASSWORD not in entry.data
 
 
 # ===================================================================
@@ -4592,6 +4686,14 @@ def _duplicate_entry_issue_ids(hass) -> list[str]:
     ]
 
 
+def _sign_in_issue_ids(hass) -> list[str]:
+    return [
+        issue_id
+        for domain, issue_id in ir.async_get(hass).issues
+        if domain == DOMAIN and issue_id.startswith("sign_in_again_")
+    ]
+
+
 async def _reauth_disabled_entry(hass, entry, username):
     """Submit the entry's reauth dialog as ``username`` and disable the entry
     while the sign-in is still running. The submitted step still saves the
@@ -4658,6 +4760,18 @@ async def test_a_reauth_moving_a_disabled_entry_onto_a_shared_id_raises_the_repa
     await _reauth_disabled_entry(hass, second, "user@example.com")
 
     assert len(_duplicate_entry_issue_ids(hass)) == 1
+
+
+async def test_signing_a_disabled_entry_in_again_clears_its_sign_in_repair(hass):
+    """The reload sets nothing up for a disabled entry, so the sign-in itself,
+    which proves the new login, must clear the account's Repairs issue."""
+    (entry,) = await _load_installation_111_entries(hass, "user@example.com")
+    _raise_sign_in_issue(hass, "user@example.com")
+    assert len(_sign_in_issue_ids(hass)) == 1
+
+    await _reauth_disabled_entry(hass, entry, "user@example.com")
+
+    assert _sign_in_issue_ids(hass) == []
 
 
 async def test_a_reauth_on_the_same_account_does_not_list_installations(hass):

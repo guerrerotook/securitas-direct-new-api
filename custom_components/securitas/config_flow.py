@@ -63,6 +63,7 @@ from . import (
     _async_teardown_domain_if_unused,
     _async_update_duplicate_entry_issues,
     _clear_setup_refresh_crash,
+    _clear_sign_in_issues,
     _login_ipv4_then_any,
     _new_session_record,
     _publish_flow_capabilities,
@@ -600,8 +601,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Show the list of phones for the OTP challenge."""
+        if user_input is None:
+            return await self._restart_sign_in()
         phone_index: int = -1
-        assert user_input is not None
         selected_phone_key = user_input.get("phones", "")
 
         assert self.otp_challenge is not None
@@ -635,9 +637,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Last step of the OTP challenge."""
+        if user_input is None:
+            return await self._restart_sign_in()
         assert self.hub is not None
         assert self.otp_challenge is not None
-        assert user_input is not None
         try:
             result = await self.hub.send_sms_code(
                 self.otp_challenge[0] or "", user_input[CONF_CODE]
@@ -674,6 +677,19 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is not None:
             return await self._finish_reauth()
         return await self.finish_setup()
+
+    async def _restart_sign_in(self) -> config_entries.ConfigFlowResult:
+        """Show the dialog's first form again.
+
+        Reopening a closed dialog asks for its current step with no input.
+        Starting over lets the user ask for a new code, e.g. one that never
+        arrived.
+        """
+        if self._reauth_entry is not None:
+            return await self.async_step_reauth_confirm()
+        return self.async_show_form(
+            step_id="user", data_schema=self._user_schema(self.config)
+        )
 
     def _user_schema(self, defaults: dict[str, Any] | None = None) -> vol.Schema:
         """Build the credentials form schema with optional defaults."""
@@ -845,8 +861,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         # The reload below runs no setup for a disabled entry.
         _async_update_duplicate_entry_issues(self.hass)
         # This sign-in proves the new token; crashes or err 4 refusals of the
-        # one it replaces must not count against it.
+        # one it replaces must not count against it, and there is nothing left
+        # to sign in again (the reload sets nothing up for a disabled entry).
         _clear_setup_refresh_crash(self.hass, username)
+        _clear_sign_in_issues(self.hass, username)
         await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
         return self.async_abort(reason="reauth_successful")
 
