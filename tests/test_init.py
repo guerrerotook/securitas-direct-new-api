@@ -3357,7 +3357,7 @@ class TestSetupRefreshCrashEscalation:
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(ConfigEntryAuthFailed):
+        with pytest.raises(ConfigEntryAuthFailed, match="refresh-login crash"):
             await self._attempt(hass, entry, mock_hub)
 
     async def test_second_consecutive_rejection_prompts_reauth(self, hass, mock_hub):
@@ -3368,7 +3368,9 @@ class TestSetupRefreshCrashEscalation:
 
         with pytest.raises(ConfigEntryNotReady):
             await self._attempt(hass, entry, mock_hub)
-        with pytest.raises(ConfigEntryAuthFailed):
+        with pytest.raises(
+            ConfigEntryAuthFailed, match=r"refresh-token rejection \(err 4\)"
+        ):
             await self._attempt(hass, entry, mock_hub)
 
     async def test_streak_is_per_account(self, hass, mock_hub):

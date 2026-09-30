@@ -705,6 +705,7 @@ class TestRefreshCrashEscalation:
 
         # Chained to the server crash so the log still shows the real response.
         assert isinstance(exc_info.value.__cause__, VerisureOwaError)
+        assert "refresh-login crash" in str(exc_info.value)
         api.login.assert_not_called()
 
     async def test_escalating_crash_does_not_log_the_not_forcing_reauth_warning(
@@ -820,6 +821,9 @@ class TestRefreshCrashEscalation:
             await api._check_authentication_token()
 
 
+# ── Runtime escalation of the err 4 refresh-token rejection to reauth ──────
+
+
 class TestRefreshTokenRejectedEscalation:
     """Verisure refusing the stored token with err 4 / 404 escalates like the
     #568 crash: one refusal is transient, a streak means the token is dead."""
@@ -851,6 +855,7 @@ class TestRefreshTokenRejectedEscalation:
             await api._check_authentication_token()
 
         assert isinstance(exc_info.value.__cause__, VerisureOwaError)
+        assert "refresh-token rejection (err 4)" in str(exc_info.value)
         assert "crash" not in str(exc_info.value)
         api.login.assert_not_called()
 
