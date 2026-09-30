@@ -2,6 +2,8 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.10.0
+
 ## v5.9.0
 
 The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, a new **Reconfigure** item lets you sign in to Verisure again at any time, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise, an installation added twice and an account that needs to sign in again.
