@@ -4,7 +4,7 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.9.0
 
-The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise and an installation added twice.
+The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise, an installation added twice and an account that needs to sign in again.
 
 ### Added
 
@@ -12,7 +12,7 @@ The headline this release is that alarm commands no longer clash: pressing Disar
 
 ### Changed
 
-**A login Verisure refuses is now explained in Settings → Repairs ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)).**  When Verisure stopped accepting the saved login, or asked for a verification code, at startup, the integration posted a notification quoting Verisure's error, such as "Refresh token rejected and no password available; reauth required". It now adds a notice in Settings → Repairs that says, in your language, that the account needs to sign in again and where to do it. The notice goes away by itself once the sign-in succeeds.
+**A login Verisure refuses is now explained in Settings → Repairs ([#631](https://github.com/guerrerotook/securitas-direct-new-api/pull/631)).**  When Verisure stopped accepting the saved login, or asked for a verification code, at startup, the integration posted a notification, which for a refused login quoted Verisure's error, such as "Refresh token rejected and no password available; reauth required". It now adds a notice in Settings → Repairs that says, in your language, that the account needs to sign in again and where to do it. A blocked account gets its own notice, telling you to use "Forgot password" on the Verisure website first. The notice goes away by itself once the sign-in succeeds.
 
 **The tick box only force-arms arms you start next to it ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  A ticked box used to force-arm any arm that started while the More Info dialog was open, including one from an automation or the Verisure app. It now acts only on an arm started from its own buttons, in the dialog or on the Tile, so a Tile on a wall tablet can't force every arm in the house.
 
