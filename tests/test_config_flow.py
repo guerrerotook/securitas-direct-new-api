@@ -6373,6 +6373,139 @@ async def test_a_reconfigure_code_still_being_checked_cannot_overwrite_a_reauth(
     assert entry.data[CONF_REFRESH_TOKEN] == "reauth-token"
 
 
+_OVERTAKEN_BY_A_SAVE = pytest.mark.parametrize(
+    ("same_entry", "reason"),
+    [
+        (True, "signed_in_again_elsewhere"),
+        (False, "account_signed_in_again_elsewhere"),
+    ],
+    ids=["same-entry", "another-installation"],
+)
+
+
+async def _overtaken_reconfigure(hass, same_entry, submit):
+    """Hold a Reconfigure submission while a reauth dialog saves a sign-in for
+    the same entry, or for another installation on the account, then let it
+    carry on.
+
+    ``submit`` starts the submission and returns the event it sets once it
+    is waiting and the event that releases it.
+    """
+    home = _make_reauth_entry(hass)
+    target = home if same_entry else _make_reauth_office_entry(hass)
+    reauth_id = (await _start_reauth_flow(hass, home))["flow_id"]
+    reconfigure_id = (await _start_reconfigure_flow(hass, target))["flow_id"]
+    with patch.object(hass.config_entries, "async_reload", new_callable=AsyncMock):
+        stale, started, release = await submit(reconfigure_id)
+        await asyncio.wait_for(started.wait(), 3)
+        reauth = await _sign_in_on(hass, reauth_id, "reauth-token")
+        release.set()
+        result = await asyncio.wait_for(stale, 3)
+    return reauth, result, home, target
+
+
+@_OVERTAKEN_BY_A_SAVE
+async def test_an_overtaken_password_submission_does_not_go_on_to_ask_for_a_code(
+    hass, same_entry, reason
+):
+    """A login still running when another dialog saves must stop, not show
+    the code forms: the code submission would then finish the sign-in it
+    started before that save and replace the newer one."""
+    hub = _hub_factory()
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _slow_login():
+        started.set()
+        await release.wait()
+        raise TwoFactorRequiredError("2FA required")
+
+    hub.login = _slow_login
+
+    async def submit(flow_id):
+        with _patches(hub):
+            stale = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    flow_id,
+                    user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+                )
+            )
+            await asyncio.wait_for(started.wait(), 3)
+        return stale, started, release
+
+    reauth, result, home, target = await _overtaken_reconfigure(
+        hass, same_entry, submit
+    )
+
+    assert reauth["reason"] == "reauth_successful"
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == reason
+    assert home.data[CONF_REFRESH_TOKEN] == "reauth-token"
+    assert target.data[CONF_REFRESH_TOKEN] == "reauth-token"
+
+
+def _expired_code_error():
+    err = VerisureOwaError("OTP expired")
+    err.response_body = {"errors": [{"data": {"auth-code": "10002"}}]}
+    return err
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        _expired_code_error,
+        lambda: VerisureOwaError("wrong code"),
+        lambda: RuntimeError("unexpected"),
+        lambda: ("reissued-otp-hash", MOCK_PHONES),
+    ],
+    ids=["expired", "rejected", "unexpected-error", "challenge-reissued"],
+)
+@_OVERTAKEN_BY_A_SAVE
+async def test_an_overtaken_code_submission_does_not_ask_for_another_code(
+    hass, same_entry, reason, refusal
+):
+    """A refused code sends the dialog back for another code or a new one,
+    which would finish the sign-in that started before another dialog saved
+    while the code was being checked."""
+    hub = _hub_factory(two_fa=True)
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _refused_code(*_args):
+        started.set()
+        await release.wait()
+        outcome = refusal()
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    async def submit(flow_id):
+        with _patches(hub):
+            await hass.config_entries.flow.async_configure(
+                flow_id,
+                user_input={CONF_USERNAME: "test@example.com", CONF_PASSWORD: "pw"},
+            )
+            await hass.config_entries.flow.async_configure(
+                flow_id, user_input={"phones": "0_555-1234"}
+            )
+            hub.send_sms_code = AsyncMock(side_effect=_refused_code)
+            stale = asyncio.create_task(
+                hass.config_entries.flow.async_configure(
+                    flow_id, user_input={CONF_CODE: "123456"}
+                )
+            )
+            await asyncio.wait_for(started.wait(), 3)
+        return stale, started, release
+
+    reauth, result, home, target = await _overtaken_reconfigure(
+        hass, same_entry, submit
+    )
+
+    assert reauth["reason"] == "reauth_successful"
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == reason
+    assert home.data[CONF_REFRESH_TOKEN] == "reauth-token"
+    assert target.data[CONF_REFRESH_TOKEN] == "reauth-token"
+
+
 async def test_a_sign_in_again_to_another_account_cannot_overwrite_reconfigure(hass):
     """A sign-in to another account still signing in when Reconfigure saves
     must not then save over it, nor replace that account's running session

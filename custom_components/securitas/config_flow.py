@@ -673,34 +673,33 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             # Check if OTP expired (auth-code 10002) — restart 2FA to get new code
             if self._is_otp_expired(err):
                 return await self._show_2fa_error("otp_expired")
-            return self.async_show_form(
-                step_id="otp_challenge",
-                data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
-                errors={"base": "invalid_otp"},
-            )
+            return self._ask_for_the_code_again()
         except Exception as err:  # pylint: disable=broad-exception-caught
             _LOGGER.error(
                 "send_sms_code raised unexpected %s: %s", type(err).__name__, err
             )
-            return self.async_show_form(
-                step_id="otp_challenge",
-                data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
-                errors={"base": "invalid_otp"},
-            )
+            return self._ask_for_the_code_again()
         # If validate_device returns a challenge hash, the code was wrong —
         # the API re-issued a challenge instead of completing authentication.
         otp_hash, _phones = result
         if otp_hash is not None:
-            return self.async_show_form(
-                step_id="otp_challenge",
-                data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
-                errors={"base": "invalid_otp"},
-            )
+            return self._ask_for_the_code_again()
         # MFA may succeed without returning a token (hash: null).
         # finish_setup() will call login() to obtain it.
         if self._reauth_entry is not None:
             return await self._finish_reauth()
         return await self.finish_setup()
+
+    def _ask_for_the_code_again(self) -> config_entries.ConfigFlowResult:
+        # Another code would finish the sign-in this submission started
+        # before another dialog saved, replacing the newer one.
+        if self.overtaken_reason:
+            return self.async_abort(reason=self.overtaken_reason)
+        return self.async_show_form(
+            step_id="otp_challenge",
+            data_schema=vol.Schema({vol.Required(CONF_CODE): str}),
+            errors={"base": "invalid_otp"},
+        )
 
     async def _restart_sign_in(self) -> config_entries.ConfigFlowResult:
         """Show the dialog's first form again.
@@ -1049,6 +1048,10 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=self._user_schema(self.config),
                 errors={"base": "cannot_connect"},
             )
+        # The code step would finish the sign-in this submission started
+        # before another dialog saved, replacing the newer one.
+        if self.overtaken_reason:
+            return self.async_abort(reason=self.overtaken_reason)
         self.otp_challenge = otp_result
         otp_phones = otp_result[1] or []
         phone_options = [
