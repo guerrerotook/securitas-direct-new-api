@@ -5775,6 +5775,25 @@ async def test_reconfigure_moves_every_installation_on_the_account_to_the_fresh_
     shared_hub.adopt_refresh_token.assert_not_called()
 
 
+@pytest.mark.parametrize("start", [_start_reconfigure_flow, _start_reauth_flow])
+async def test_a_sign_in_drops_the_saved_password_from_every_installation_on_the_account(
+    hass, start
+):
+    """Another installation on the account may still hold a password saved
+    before refresh tokens; the fresh login it receives replaces it."""
+    home = _make_reauth_entry(hass)
+    office = _make_reauth_office_entry(hass)
+    assert office.data[CONF_PASSWORD] == "old-password"
+    result = await start(hass, home)
+
+    result, _ = await _submit_sign_in(hass, result["flow_id"], _hub_factory())
+
+    assert result["type"] == FlowResultType.ABORT
+    for entry in (home, office):
+        assert entry.data[CONF_REFRESH_TOKEN] == FAKE_REFRESH_TOKEN
+        assert CONF_PASSWORD not in entry.data
+
+
 def _fresh_login_hub():
     """A Reconfigure dialog's hub on the account, with device ids of its own."""
     hub = _reauth_hub_seeing("111", "222")

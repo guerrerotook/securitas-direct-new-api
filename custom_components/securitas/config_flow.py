@@ -922,9 +922,9 @@ class FlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     and entry.data.get(CONF_USERNAME) == username
                 ]
                 for entry in account_entries:
-                    self.hass.config_entries.async_update_entry(
-                        entry, data={**entry.data, CONF_REFRESH_TOKEN: refresh_token}
-                    )
+                    new_data = {**entry.data, CONF_REFRESH_TOKEN: refresh_token}
+                    new_data.pop(CONF_PASSWORD, None)
+                    self.hass.config_entries.async_update_entry(entry, data=new_data)
                 self._overtake_sign_ins_in_flight(username)
             # Home Assistant before 2025.5 leaves the entry's reauth dialog open
             # through the reload; submitted later, it would replace this sign-in.
