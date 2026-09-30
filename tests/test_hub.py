@@ -352,9 +352,10 @@ class TestLogin:
         hub.client.refresh_token = AsyncMock(side_effect=blocked)
         hub.client.login = AsyncMock()
 
-        with pytest.raises(AccountBlockedError):
+        with pytest.raises(AccountBlockedError) as raised:
             await hub.login()
 
+        assert raised.value.__cause__ is blocked
         hub.client.login.assert_not_awaited()
 
     async def test_genuine_raised_refresh_rejection_falls_back_to_password_login(self):

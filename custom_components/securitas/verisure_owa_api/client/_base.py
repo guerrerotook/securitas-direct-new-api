@@ -22,6 +22,7 @@ from aiohttp import ClientConnectorError
 from pydantic import BaseModel, ValidationError
 
 from ..exceptions import (
+    _ACCOUNT_BLOCKED_ERROR_CODE,
     APIConnectionError,
     OperationTimeoutError,
     RefreshTokenDeadError,
@@ -426,8 +427,8 @@ class _ClientBase:
 
     @staticmethod
     def _is_account_blocked(result_json: dict[str, Any]) -> bool:
-        """Check if a login response indicates the account is blocked (error 60052)."""
-        return _error_code_from_body(result_json) == "60052"
+        """Check if a login response indicates the account is blocked."""
+        return _error_code_from_body(result_json) == _ACCOUNT_BLOCKED_ERROR_CODE
 
     def _extract_otp_data(self, data: Any) -> tuple[str | None, list[OtpPhone]]:
         """Extract OTP hash and phone list from error data."""

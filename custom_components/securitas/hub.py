@@ -218,7 +218,7 @@ class VerisureHub:
         wobble" trade-off the steady-state client path (_base.py) makes.
         """
         if self.client.refresh_token_value:
-            blocked = False
+            rejection: VerisureOwaError | None = None
             try:
                 if await self.client.refresh_token():
                     return
@@ -226,12 +226,12 @@ class VerisureHub:
                 if not is_genuine_auth_failure(err):
                     raise
                 _LOGGER.warning("Refresh genuinely rejected: %s", err.log_detail())
-                blocked = is_account_blocked(err)
+                rejection = err
             if not self.client.password:
-                if blocked:
+                if rejection is not None and is_account_blocked(rejection):
                     raise AccountBlockedError(
                         "Account blocked by Verisure; reauth required"
-                    )
+                    ) from rejection
                 raise AuthenticationError(
                     "Refresh token rejected and no password available; reauth required"
                 )

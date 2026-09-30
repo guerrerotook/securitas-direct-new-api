@@ -460,11 +460,16 @@ _DUPLICATE_ENTRY_ISSUE = "duplicate_entry_"
 _SIGN_IN_ISSUE = "sign_in_again_"
 
 
+def _hashed_issue_id(prefix: str, key: str) -> str:
+    # Hashed: Home Assistant saves issue IDs, and the email must not be.
+    return prefix + hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
 def _sign_in_issue_id(username: str) -> str:
-    # Hashed: the email must not be part of a saved issue ID.
-    return _SIGN_IN_ISSUE + hashlib.sha256(username.encode()).hexdigest()[:12]
+    return _hashed_issue_id(_SIGN_IN_ISSUE, username)
 
 
+@callback
 def _raise_sign_in_issue(
     hass: HomeAssistant, username: str, *, blocked: bool = False
 ) -> None:
@@ -472,7 +477,8 @@ def _raise_sign_in_issue(
 
     A blocked account must be unblocked first, so it gets its own text.
     Not persistent: after a restart, setup raises it again if the saved login
-    still fails.
+    still fails. It must stay that way, because the ``username`` placeholder is
+    the email and HA saves only a persistent issue's placeholders.
     """
     ir.async_create_issue(
         hass,
@@ -486,6 +492,7 @@ def _raise_sign_in_issue(
     )
 
 
+@callback
 def _clear_sign_in_issues(
     hass: HomeAssistant, username: str | None, removing: ConfigEntry | None = None
 ) -> None:
@@ -495,19 +502,23 @@ def _clear_sign_in_issues(
 
     ``removing`` is the entry being deleted, which no longer counts.
     """
-    in_use = {
-        _sign_in_issue_id(entry.data[CONF_USERNAME])
-        for entry in hass.config_entries.async_entries(DOMAIN)
-        if entry is not removing and entry.data.get(CONF_USERNAME)
-    }
+    raised = [
+        issue_id
+        for domain, issue_id in ir.async_get(hass).issues
+        if domain == DOMAIN and issue_id.startswith(_SIGN_IN_ISSUE)
+    ]
+    if not raised:
+        return
+    in_use: set[str] = set()
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if removing is not None and entry.entry_id == removing.entry_id:
+            continue
+        if entry_username := entry.data.get(CONF_USERNAME):
+            in_use.add(_sign_in_issue_id(entry_username))
     if username is not None:
         in_use.discard(_sign_in_issue_id(username))
-    for domain, issue_id in list(ir.async_get(hass).issues):
-        if (
-            domain == DOMAIN
-            and issue_id.startswith(_SIGN_IN_ISSUE)
-            and issue_id not in in_use
-        ):
+    for issue_id in raised:
+        if issue_id not in in_use:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
@@ -526,10 +537,7 @@ def _async_update_duplicate_entry_issues(
         if (uid := _entry_unique_id(entry.data, entry.unique_id)) is not None:
             by_id.setdefault(uid, []).append(entry)
     wanted = {
-        # Hashed: Home Assistant saves issue IDs, and the email must not be.
-        _DUPLICATE_ENTRY_ISSUE + hashlib.sha256(uid.encode()).hexdigest()[:12]: (
-            entries[0].title
-        )
+        _hashed_issue_id(_DUPLICATE_ENTRY_ISSUE, uid): entries[0].title
         for uid, entries in by_id.items()
         if len(entries) > 1
     }
@@ -642,8 +650,8 @@ def _build_config_dict(entry: ConfigEntry) -> tuple[dict[str, Any], bool]:
 # server blip. The count lives in hass.data because each retry builds a fresh
 # hub, and is keyed by username like ``sessions``: co-tenant entries retry the
 # same token and alternate as session creator.
-# Only handing back a live client resets it — other transient failures in
-# between neither count nor reset.
+# Handing back any session resets it — other transient failures in between
+# neither count nor reset.
 _SETUP_REFRESH_CRASH_REAUTH_THRESHOLD = 2
 
 
@@ -655,8 +663,8 @@ def _note_setup_refresh_crash(hass: HomeAssistant, username: str) -> int:
 
 
 def _clear_setup_refresh_crash(hass: HomeAssistant, username: str) -> None:
-    """Forget the account's setup-time dead-token count: a live session or a
-    successful sign-in proved the token."""
+    """Forget the account's setup-time dead-token count once setup hands
+    back a session."""
     hass.data.get(DOMAIN, {}).get("refresh_crash_streaks", {}).pop(username, None)
 
 
@@ -677,9 +685,9 @@ async def _login_or_raise(
     ``retry_other_family`` marks a first attempt the caller will repeat on
     another address family. A failure to establish the connection is then
     re-raised as-is rather than mapped, so the attempt about to be retried does
-    not notify the user, log an error or count towards the dead-token streak.
-    Every other failure — including a timeout waiting for a reply — takes the
-    mapping path, as it does for every other caller.
+    not log an error or count towards the dead-token streak. Every other
+    failure — including a timeout waiting for a reply — takes the mapping
+    path, as it does for every other caller.
     """
     try:
         await client.login()
@@ -698,7 +706,7 @@ async def _login_or_raise(
     except VerisureOwaError as err:
         # On the first of two family attempts (retry_other_family), re-raise a
         # connection that never opened untouched: the caller is about to repeat
-        # it on another address family, so it must not notify, log, or count
+        # it on another address family, so it must not log an error or count
         # towards the dead-token streak. Every other error — timeouts waiting
         # for a reply included — takes the mapping path below. (The isinstance
         # guard narrows err for pyright; pylint doesn't narrow across `and`, so
@@ -910,6 +918,7 @@ async def _get_or_create_session(
                 _release_shared_session(hass, sessions, previous, entry)
 
     async with _account_lock(hass, username):
+        signed_in = False
         if username in sessions:
             session = sessions[username]
             # Hold it before anything below awaits: a config flow closing in
@@ -938,14 +947,22 @@ async def _get_or_create_session(
             ):
                 client.adopt_refresh_token(stored_token)
                 await _login_or_raise(hass, client, username)
+                signed_in = True
         else:
             client = await _login_ipv4_first(hass, config, entry, username)
             sessions[username] = _new_session_record(client)
             _take_session_hold(sessions[username], entry.entry_id)
+            signed_in = True
 
-    # Either branch hands back a live session, which proves the stored token.
+    # Any session handed back resets the streak, even a reused one whose
+    # adopted token was never tried; a token that keeps crashing is caught by
+    # the runtime renewal streak instead.
     _clear_setup_refresh_crash(hass, username)
-    _clear_sign_in_issues(hass, username)
+    # Only a sign-in made here shows the account can sign in now. A reused
+    # session may hold a token Verisure has just refused: adopting it made the
+    # session's token match this entry's, so this call does not try it again.
+    if signed_in:
+        _clear_sign_in_issues(hass, username)
     return client
 
 

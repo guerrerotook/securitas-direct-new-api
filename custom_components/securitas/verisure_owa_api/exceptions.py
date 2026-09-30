@@ -166,9 +166,14 @@ class UnexpectedStateError(VerisureOwaError):
         super().__init__(f"Unexpected protocol code: {proto_code!r}")
 
 
-# Vendor error codes that genuinely require re-authentication:
-# 60052 = account blocked; 60067 = invalid/expired session on refresh.
-_GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset({"60052", "60067"})
+_ACCOUNT_BLOCKED_ERROR_CODE = "60052"
+
+# Vendor error codes that genuinely require re-authentication: the
+# account-blocked code above, and 60067, an invalid or expired session on
+# refresh.
+_GENUINE_AUTH_ERROR_CODES: frozenset[str] = frozenset(
+    {_ACCOUNT_BLOCKED_ERROR_CODE, "60067"}
+)
 
 
 def _first_error(body: object) -> dict[str, Any] | None:
@@ -213,8 +218,8 @@ def _error_code(err: VerisureOwaError) -> str | None:
 def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
     """True only for failures that genuinely require re-authentication.
 
-    Genuine (-> reauth): credential rejection, account blocked, 2FA required,
-    or an explicitly invalid/revoked token (err 60052 / 60067).
+    Genuine (-> reauth): credential rejection, account blocked (err 60052),
+    2FA required, or an explicitly invalid/revoked token (err 60067).
 
     Everything else -- 5xx, 409, network/timeout, WAF blocks, a bare HTTP 403
     "try again later" session error, and unrecognised null-data GraphQL errors
@@ -230,7 +235,10 @@ def is_genuine_auth_failure(err: VerisureOwaError) -> bool:
 
 def is_account_blocked(err: VerisureOwaError) -> bool:
     """True when Verisure refused the request because the account is blocked."""
-    return isinstance(err, AccountBlockedError) or _error_code(err) == "60052"
+    return (
+        isinstance(err, AccountBlockedError)
+        or _error_code(err) == _ACCOUNT_BLOCKED_ERROR_CODE
+    )
 
 
 def is_refresh_login_crash(err: VerisureOwaError) -> bool:
