@@ -545,15 +545,21 @@ class VerisureHub:
         Also scrubs any legacy CONF_PASSWORD on the first capture. No-op when
         the hub is detached from a config entry (config-flow construction).
 
+        Never writes into an entry that reauth or Reconfigure has moved to
+        another account: this login belongs to the session's own account.
+
         Emits a DEBUG diagnostic for issue #557 recording which branch ran:
         ``persisted`` (write issued), ``already-current`` (disk already holds
-        this token), or ``no-config-entry`` (detached hub). This proves the
-        in-memory rotation reached the config entry — the memory->disk half
-        that the client-side ``rotated_fp`` line cannot by itself confirm.
+        this token), ``no-config-entry`` (detached hub) or ``other-account``.
+        This proves the in-memory rotation reached the config entry — the
+        memory->disk half that the client-side ``rotated_fp`` line cannot by
+        itself confirm.
         """
         fp = _token_fingerprint(value)
         if self.config_entry is None:
             outcome = "no-config-entry"
+        elif self.config_entry.data.get(CONF_USERNAME) != self.client.username:
+            outcome = "other-account"
         else:
             existing = self.config_entry.data
             if (

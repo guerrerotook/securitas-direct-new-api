@@ -859,8 +859,8 @@ def _release_session_hold(
 def _held_session_username(sessions: dict[str, Any], entry: ConfigEntry) -> str | None:
     """The account whose session ``entry`` holds, if any.
 
-    Found by the hold, not the entry's data: reauth may already have written a
-    different account into the entry by the time it lets go.
+    Found by the hold, not the entry's data: reauth or Reconfigure may already
+    have written a different account into the entry by the time it lets go.
     """
     return next(
         (
@@ -876,9 +876,9 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
     """Save the hub's rotated refresh tokens to ``entry``, starting now.
 
     The current token is written at once, since it may have rotated past the
-    one ``entry`` stored. A condemned token is not written: it would replace
-    the entry's own token, which may be a fresh one from reauth that setup
-    still has to try.
+    one ``entry`` stored, unless ``entry`` is signed in to another account. A
+    condemned token is not written: it would replace the entry's own token,
+    which setup may still be able to use.
     """
     hub.config_entry = entry
     if not hub.refresh_token_is_dead:
@@ -887,7 +887,10 @@ def _attach_token_persistence(hub: VerisureHub, entry: ConfigEntry) -> None:
 
 def _account_lock(hass: HomeAssistant, username: str) -> asyncio.Lock:
     """The lock under which an entry or a setup dialog finds the account's
-    session, or signs in and registers one, so they never both sign in."""
+    session, or signs in and registers one, so they never both sign in.
+
+    A reauth or Reconfigure dialog also takes it to register its new sign-in
+    as the account's session, replacing any running one."""
     setup_locks = hass.data.setdefault(DOMAIN, {}).setdefault("setup_locks", {})
     return setup_locks.setdefault(username, asyncio.Lock())
 
@@ -902,9 +905,9 @@ async def _get_or_create_session(
     and WAF rate-limit blocks.  The account lock stops entry setups and setup
     dialogs signing in to the same account at once.
 
-    An entry whose setup failed and that reauth then signed in to another
-    account still holds the first account's session when the reload sets it
-    up again: Home Assistant holds the entry's setup lock across the reload,
+    An entry whose setup failed and that reauth or Reconfigure then signed in
+    to another account still holds the first account's session when the
+    reload sets it up again: Home Assistant holds the entry's setup lock across the reload,
     so ``_async_entry_unloaded`` has not released it yet. That hold is
     released first.
     """
@@ -935,10 +938,9 @@ async def _get_or_create_session(
             if client.config_entry is None:
                 _attach_token_persistence(client, entry)
             # A shared client condemned by a dead-token streak, reached with a
-            # token that is not the one it condemned: the reauth flow wrote a
-            # fresh token into this entry and reloaded it, but the co-tenant
-            # kept the session alive, so the reload lands here instead of on a
-            # fresh hub. Try the new token on the shared client.
+            # stored token that is not the one it condemned: a co-tenant's own
+            # stored token, which may be older or newer than the condemned
+            # one. Try it on the shared client.
             stored_token = config.get(CONF_REFRESH_TOKEN)
             if (
                 client.refresh_token_is_dead
@@ -1776,12 +1778,16 @@ def _token_successor(
 ) -> ConfigEntry | None:
     """Pick the holding entry to save tokens to, a loaded one first.
 
-    Flow keys resolve to no entry and are skipped.
+    Flow keys resolve to no entry and are skipped, and so is an entry that
+    Reconfigure has moved to another account but whose reload has not yet let
+    go of this session: the hub refuses to save into it.
     """
+    account = session["hub"].client.username
     holding = [
         entry
         for holder in session["holders"]
         if (entry := hass.config_entries.async_get_entry(holder)) is not None
+        and entry.data.get(CONF_USERNAME) == account
     ]
     return min(
         holding,
@@ -1816,10 +1822,11 @@ def _integration_in_use(hass: HomeAssistant, exclude: ConfigEntry | None) -> boo
 
     A dialog signing in afresh holds no session until its sign-in finishes.
     Reauth dialogs need not count: their entry does while it waits for them,
-    and closing one runs the clean-up check again. Their steps sign in on a
-    hub of their own and never touch the shared data (the entry's reload sets
-    it up again). Options dialogs live in another manager and read the shared
-    data only through ``get``.
+    and closing one runs the clean-up check again. Once signed in, a reauth or
+    Reconfigure dialog registers and holds its own session until the reloads
+    it starts return, so it counts through ``sessions`` meanwhile.
+    A Reconfigure dialog counts as an open setup dialog. Options dialogs live
+    in another manager and read the shared data only through ``get``.
     """
     if hass.data.get(DOMAIN, {}).get("sessions"):
         return True
@@ -1861,7 +1868,8 @@ async def _async_entry_unloaded(hass: HomeAssistant, entry: ConfigEntry) -> None
 
     HA holds the entry's setup lock across a reload, so waiting for it lets a
     reloaded entry set up again first and keep its session and dead-token
-    count (or, after reauth switched its account, let go of the old one).
+    count (or, after reauth or Reconfigure switched its account, let go of the
+    old one).
     """
     async with entry.setup_lock:
         if entry.state is not ConfigEntryState.NOT_LOADED:

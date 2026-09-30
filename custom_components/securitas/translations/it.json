@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "Il servizio è già configurato",
             "reauth_successful": "Riautenticazione riuscita",
+            "reconfigure_successful": "Nuovo accesso riuscito",
             "no_refresh_token": "Il login è riuscito ma Verisure non ha restituito un token di aggiornamento. L'integrazione non può salvare le credenziali in modo sicuro. Riprova più tardi o segnala il problema se persiste.",
-            "installation_not_on_account": "Questo account Verisure non vede l'installazione {number}. Accedi con un account che vi abbia accesso."
+            "installation_not_on_account": "Questo account Verisure non vede l'installazione {number}. Accedi con un account che vi abbia accesso.",
+            "signed_in_again_elsewhere": "Mentre questa finestra eseguiva l'accesso, per questa voce è stato eseguito di nuovo l'accesso da un'altra finestra, quindi questo accesso non è stato salvato.",
+            "account_signed_in_again_elsewhere": "Mentre questa finestra eseguiva l'accesso, per questo account Verisure è stato eseguito di nuovo l'accesso dalla finestra di un'altra installazione, quindi questo accesso non è stato salvato. Se questa installazione non riesce ancora a connettersi, esegui di nuovo l'accesso.",
+            "already_in_progress": "È già in corso un'altra configurazione o un altro accesso per questa installazione."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Riautenticazione Verisure",
                 "description": "La sessione è scaduta. Inserisci nuovamente la password per riconnetterti.",
+                "data": {
+                    "username": "Nome utente",
+                    "password": "Password"
+                }
+            },
+            "reconfigure": {
+                "title": "Accedi di nuovo a Verisure",
+                "description": "Inserisci la password di Verisure per ottenere un nuovo accesso. Usa questa opzione quando l'integrazione non riesce a connettersi e non ti ha chiesto di accedere di nuovo.",
                 "data": {
                     "username": "Nome utente",
                     "password": "Password"

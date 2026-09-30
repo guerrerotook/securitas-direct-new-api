@@ -373,6 +373,7 @@ def make_securitas_hub_mock(**overrides) -> MagicMock:
     # AttributeError. Tests that exercise the persistence target set it.
     hub.config_entry = None
     hub.client = AsyncMock()
+    hub.client.username = "test@example.com"
     hub.client.get_supported_commands = MagicMock(return_value=frozenset())
     hub.country = "ES"
     hub.lang = "es"

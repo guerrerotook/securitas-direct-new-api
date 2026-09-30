@@ -12,13 +12,25 @@
         "abort": {
             "already_configured": "Le service est déjà configuré",
             "reauth_successful": "Réauthentification réussie",
+            "reconfigure_successful": "Reconnexion réussie",
             "no_refresh_token": "La connexion a réussi mais Verisure n'a pas renvoyé de jeton d'actualisation. L'intégration ne peut pas enregistrer les identifiants en toute sécurité. Veuillez réessayer plus tard ou signaler le problème s'il persiste.",
-            "installation_not_on_account": "Ce compte Verisure ne voit pas l'installation {number}. Connectez-vous avec un compte qui y a accès."
+            "installation_not_on_account": "Ce compte Verisure ne voit pas l'installation {number}. Connectez-vous avec un compte qui y a accès.",
+            "signed_in_again_elsewhere": "Pendant que cette fenêtre se connectait, cette entrée a été reconnectée depuis une autre fenêtre ; cette connexion n'a donc pas été enregistrée.",
+            "account_signed_in_again_elsewhere": "Pendant que cette fenêtre se connectait, ce compte Verisure a été reconnecté depuis la fenêtre d'une autre installation ; cette connexion n'a donc pas été enregistrée. Si cette installation ne se connecte toujours pas, reconnectez-vous.",
+            "already_in_progress": "Une autre configuration ou connexion est déjà en cours pour cette installation."
         },
         "step": {
             "reauth_confirm": {
                 "title": "Réauthentifier Verisure",
                 "description": "Votre session a expiré. Veuillez saisir à nouveau votre mot de passe pour vous reconnecter.",
+                "data": {
+                    "username": "Nom d'utilisateur",
+                    "password": "Mot de passe"
+                }
+            },
+            "reconfigure": {
+                "title": "Se reconnecter à Verisure",
+                "description": "Saisissez votre mot de passe Verisure pour obtenir une nouvelle connexion. Utilisez cette option lorsque l'intégration ne parvient pas à se connecter et ne vous a pas demandé de vous reconnecter.",
                 "data": {
                     "username": "Nom d'utilisateur",
                     "password": "Mot de passe"

@@ -4,11 +4,13 @@ Most recent at the top.  For changes prior to v5, see [the GitHub release notes]
 
 ## v5.9.0
 
-The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise, an installation added twice and an account that needs to sign in again.
+The headline this release is that alarm commands no longer clash: pressing Disarm while the alarm is still arming now disarms it, and commands from any of an installation's alarm panels, or from a lock, now take turns instead of being ignored or sent at the same time. The auto-force-arm tick box comes to the Tile card, a new **Reconfigure** item lets you sign in to Verisure again at any time, the alarm's More Info dialog now works on every page rather than only after a dashboard has been opened, and new notices in Settings → Repairs flag an alarm state the integration doesn't recognise, an installation added twice and an account that needs to sign in again.
 
 ### Added
 
 **The auto-force-arm tick box is now on the Tile card ([#622](https://github.com/guerrerotook/securitas-direct-new-api/pull/622)).**  With **"Offer an auto-force-arm tick box in the alarm controls"** turned on, a Tile card with **Alarm modes** and the **Verisure OWA Open Sensors** feature shows the tick box while the alarm is disarmed. Ticking it there or in the More Info dialog ticks it in both. See [Auto-force-arm tick box](https://github.com/guerrerotook/securitas-direct-new-api#auto-force-arm-tick-box).
+
+**Sign in again at any time with Reconfigure ([#630](https://github.com/guerrerotook/securitas-direct-new-api/pull/630)).**  In **Settings → Devices & services → Verisure OWA**, the entry's three-dot menu now has **Reconfigure**. Enter your Verisure password, and the verification code if Verisure asks for one, and the integration saves a fresh login and reloads. Use it when your Verisure devices are unavailable and nothing has asked you to sign in, instead of deleting and re-adding the integration. Your entities and settings are kept.
 
 ### Changed
 
@@ -49,6 +51,12 @@ The headline this release is that alarm commands no longer clash: pressing Disar
 **Signing in again as a different Verisure account now checks it can see the installation ([#623](https://github.com/guerrerotook/securitas-direct-new-api/pull/623)).**  Switching to an account with no access to the installation used to be accepted, leaving all its entities unavailable. The dialog now refuses with "This Verisure account can't see installation …" and keeps the account you had. Your login is kept exactly as you type it, so the same email with different capitals counts as a different account and gets this check too.
 
 **Home Assistant now asks you to sign in again when Verisure stops accepting your saved login ([#629](https://github.com/guerrerotook/securitas-direct-new-api/pull/629)).**  If Verisure cancelled your saved login on its side, the integration kept retrying it forever: your Verisure devices stayed unavailable, even after a restart, and nothing asked you to sign in again. Now, after a few refusals in a row, Home Assistant shows its "sign in again" notice, as it already did for the refresh-login crash from [#568](https://github.com/guerrerotook/securitas-direct-new-api/issues/568). A single refusal is still retried, so a brief Verisure problem doesn't ask for your password.
+
+**A failed SMS code request while signing in again no longer switches to the new-setup form ([#630](https://github.com/guerrerotook/securitas-direct-new-api/pull/630)).**  If Verisure failed to start the SMS verification step while you were signing in again, the dialog switched to the form for adding a new installation, and carrying on from there could start adding a new entry instead of updating yours. It now shows the sign-in form again with "Unable to connect to Verisure", so you can simply retry.
+
+**Signing in again now takes effect when another installation on the same Verisure account is running ([#630](https://github.com/guerrerotook/securitas-direct-new-api/pull/630)).**  If two installations share one Verisure account and you signed one of them in again, the dialog saved the new login, but the installation reloaded onto the connection the other installation was already using, which still had the old login. It could soon ask you to sign in again. Signing in again now saves the new login for every installation on the account and restarts them all on it.
+
+**Signing in again now checks the password you type ([#630](https://github.com/guerrerotook/securitas-direct-new-api/pull/630)).**  If the saved login still worked, the sign-in dialog simply renewed it and accepted any password. Signing in as a different account that way kept using the old account. The dialog now signs in only with the username and password you type, plus the verification code if Verisure asks for one, and a wrong password shows "Invalid username or password".
 
 ## v5.8.0
 
