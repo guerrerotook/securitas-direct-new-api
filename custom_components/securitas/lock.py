@@ -741,5 +741,5 @@ class VerisureLock(  # type: ignore[override]
             and cfg.features.hold_back_latch_time
             and cfg.features.hold_back_latch_time > 0
         ):
-            return lock.LockEntityFeature.OPEN  # pyright: ignore[reportPrivateImportUsage]
-        return lock.LockEntityFeature(0)  # pyright: ignore[reportPrivateImportUsage]
+            return lock.LockEntityFeature.OPEN  # type: ignore[reportPrivateImportUsage]
+        return lock.LockEntityFeature(0)  # type: ignore[reportPrivateImportUsage]

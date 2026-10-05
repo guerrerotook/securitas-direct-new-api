@@ -3,7 +3,7 @@
 import logging
 
 from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,  # pyright: ignore[reportPrivateImportUsage]
+    BinarySensorDeviceClass,  # type: ignore[reportPrivateImportUsage]
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry

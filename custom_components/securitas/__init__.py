@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     # HA 2026.9+ runs voluptuous as probatio; 2026.10+ types its APIs with probatio's classes.
     import probatio as vol
 else:
+    # At run time: HA before 2026.9, back to our minimum supported HA (2025.2), has no probatio.
     import voluptuous as vol
 from homeassistant.components import (
     frontend,  # noqa: F401 — re-exported so tests can patch
