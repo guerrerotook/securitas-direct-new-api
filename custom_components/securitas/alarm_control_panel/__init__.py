@@ -13,8 +13,14 @@ file is easier to navigate:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import voluptuous as vol
+if TYPE_CHECKING:
+    # HA 2026.9+ runs voluptuous as probatio; 2026.10+ types its APIs with probatio's classes.
+    import probatio as vol
+else:
+    # At run time: HA before 2026.9, back to our minimum supported HA (2025.2), has no probatio.
+    import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CODE
 from homeassistant.core import HomeAssistant

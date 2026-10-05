@@ -741,5 +741,5 @@ class VerisureLock(  # type: ignore[override]
             and cfg.features.hold_back_latch_time
             and cfg.features.hold_back_latch_time > 0
         ):
-            return lock.LockEntityFeature.OPEN
-        return lock.LockEntityFeature(0)
+            return lock.LockEntityFeature.OPEN  # type: ignore[reportPrivateImportUsage]
+        return lock.LockEntityFeature(0)  # type: ignore[reportPrivateImportUsage]
