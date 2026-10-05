@@ -2,6 +2,8 @@
 
 Most recent at the top.  For changes prior to v5, see [the GitHub release notes](https://github.com/guerrerotook/securitas-direct-new-api/releases).
 
+## v5.10.0
+
 ## v5.9.0
 
 ### Added
